@@ -11,11 +11,10 @@ export const Backtest = () => {
     const [symbol, setSymbol] = useState('EURUSD');
     const [searchTerm, setSearchTerm] = useState('');
     const [timeframe, setTimeframe] = useState('60'); // 60 = 1H
-    const [dateRange, setDateRange] = useState({ start: '2025-01-01', end: '2025-01-31' });
+    const [dateRange] = useState({ start: '2025-01-01', end: '2025-01-31' });
     const [isRunning, setIsRunning] = useState(false);
     const [progress, setProgress] = useState(0);
     const [searchResults, setSearchResults] = useState<any[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
 
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
@@ -121,7 +120,7 @@ export const Backtest = () => {
         e.preventDefault();
         if (!searchTerm) return;
 
-        setIsSearching(true);
+        // isSearching removed
         try {
             const res = await api.get(`/tradingview/search`, {
                 params: { q: searchTerm, type: 'forex' } // prioritizing forex for now
@@ -130,7 +129,7 @@ export const Backtest = () => {
         } catch (err) {
             console.error(err);
         } finally {
-            setIsSearching(false);
+            // isSearching removed
         }
     };
 
@@ -198,7 +197,7 @@ export const Backtest = () => {
                                     </div>
                                 )}
                             </div>
-                            <Button size="sm" type="submit" icon={<Search size={14} />} />
+                            <Button type="submit" icon={<Search size={14} />} />
                         </form>
                     </div>
 

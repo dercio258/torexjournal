@@ -62,10 +62,8 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
     useEffect(() => {
         if (selectedCountry) {
             // Check if phone already starts with calling code to avoid double prefix
-            const cleanPhone = phoneNumber.replace(/\D/g, ''); // just digits
-            const prefix = selectedCountry.callingCode.replace('+', '');
-
-            // If user types local number (e.g. 841234567), we prefix it for the value sent to parent
+            // Variables removed because they are never read locally
+            onChange?.(phoneNumber);
             // But we keep display logic simple
             const fullNumber = `${selectedCountry.callingCode}${phoneNumber}`;
             onChange(fullNumber);

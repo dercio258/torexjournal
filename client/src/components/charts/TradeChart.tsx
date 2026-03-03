@@ -19,7 +19,7 @@ interface Candle {
     close: number;
 }
 
-export const TradeChart = ({ symbol, openTime, closeTime, openPrice, closePrice, type }: TradeChartProps) => {
+export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProps) => {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -105,6 +105,7 @@ export const TradeChart = ({ symbol, openTime, closeTime, openPrice, closePrice,
             },
         });
 
+        // @ts-ignore
         const candlestickSeries = chart.addCandlestickSeries({
             upColor: '#10b981', // Emerald 500
             downColor: '#ef4444', // Red 500
@@ -114,6 +115,7 @@ export const TradeChart = ({ symbol, openTime, closeTime, openPrice, closePrice,
         });
 
         chartRef.current = chart;
+        // @ts-ignore
         seriesRef.current = candlestickSeries;
 
         window.addEventListener('resize', handleResize);

@@ -26,17 +26,9 @@ interface Payment {
     method?: string; // Optional mock field
 }
 
-// --- Mock Data (Fallback) ---
-const MOCK_PAYMENTS: Payment[] = [
-    { id: 'tx_123456', dataHora: new Date().toISOString(), status: 'aprovada', produto: 'Plano Pro (Mensal)', amount: 49.90, method: 'Credit Card ••4242' },
-    { id: 'tx_123455', dataHora: new Date(Date.now() - 86400000 * 30).toISOString(), status: 'aprovada', produto: 'Plano Pro (Mensal)', amount: 49.90, method: 'Credit Card ••4242' },
-    { id: 'tx_123454', dataHora: new Date(Date.now() - 86400000 * 60).toISOString(), status: 'falha', produto: 'Plano Pro (Mensal)', amount: 49.90, method: 'Credit Card ••4242' },
-];
-
 export const Payments = () => {
     const [payments, setPayments] = useState<Payment[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         fetchPayments();
@@ -44,7 +36,6 @@ export const Payments = () => {
 
     const fetchPayments = async () => {
         setIsLoading(true);
-        setError(null);
         try {
             // Corrected endpoint from /pagamento/payments to /api/payments
             const res = await api.get('/api/payments');

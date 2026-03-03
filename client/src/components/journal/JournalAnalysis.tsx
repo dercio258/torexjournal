@@ -10,7 +10,7 @@ import {
     BarElement,
     Title
 } from 'chart.js';
-import { TrendingUp, TrendingDown, Target, Activity } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 

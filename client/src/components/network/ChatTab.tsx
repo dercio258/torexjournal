@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Send, User } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
@@ -103,8 +103,8 @@ export const ChatTab = ({ socket }: ChatTabProps) => {
                                 )}
                             </div>
                             <div className={`max-w-[70%] rounded-2xl p-3 ${isMe
-                                    ? 'bg-indigo-600 text-white rounded-tr-none'
-                                    : 'bg-slate-800 text-slate-200 rounded-tl-none'
+                                ? 'bg-indigo-600 text-white rounded-tr-none'
+                                : 'bg-slate-800 text-slate-200 rounded-tl-none'
                                 }`}>
                                 <div className="flex items-center gap-2 mb-1">
                                     {!isMe && <span className="text-xs font-bold text-indigo-400">{msg.user?.username}</span>}

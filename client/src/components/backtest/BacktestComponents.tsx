@@ -2,7 +2,6 @@
 import React from 'react';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
-import { Button } from '../ui/Button';
 import { TrendingUp, Activity, BarChart2, DollarSign, Percent, AlertCircle } from 'lucide-react';
 
 // --- Types ---
@@ -16,7 +15,6 @@ export interface MetricCardProps {
     value: string | number;
     subValue?: string;
     icon?: React.ReactNode;
-    trend?: 'up' | 'down' | 'neutral';
     colorClass?: string;
 }
 
@@ -109,7 +107,7 @@ export const StrategyConfig = ({ config, onChange }: StrategyConfigProps) => {
     );
 };
 
-export const ResultsCard = ({ label, value, subValue, icon, trend, colorClass = 'text-slate-100' }: MetricCardProps) => (
+export const ResultsCard = ({ label, value, subValue, icon, colorClass = 'text-slate-100' }: MetricCardProps) => (
     <div className="bg-slate-800/30 rounded-xl p-4 border border-slate-700/50 flex items-start justify-between">
         <div>
             <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">{label}</p>

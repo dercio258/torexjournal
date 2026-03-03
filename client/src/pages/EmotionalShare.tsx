@@ -6,17 +6,12 @@ import { Button } from '../components/ui/Button';
 export const EmotionalShare = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { image, date, score } = location.state || {}; // Expect base64 image
+    const { image, date } = location.state || {}; // Expect base64 image
 
+    // If no context, redirect back
     if (!image) {
-        return (
-            <div className="flex flex-col items-center justify-center h-screen text-slate-400">
-                <p>Nenhuma imagem encontrada.</p>
-                <Button variant="outline" onClick={() => navigate('/emotional')} className="mt-4">
-                    Voltar
-                </Button>
-            </div>
-        );
+        navigate('/emotional');
+        return null;
     }
 
     const handleDownload = () => {

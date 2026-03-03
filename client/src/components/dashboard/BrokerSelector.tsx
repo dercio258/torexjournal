@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { Search, Monitor, Upload, Cloud } from 'lucide-react';
-import { Input } from '../ui/Input';
-import { Card } from '../ui/Card';
+import { Monitor, Upload, Search } from 'lucide-react';
 
 interface Broker {
     id: string;

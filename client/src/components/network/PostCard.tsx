@@ -1,5 +1,5 @@
 import { Heart, MessageCircle, Share2, MoreHorizontal } from 'lucide-react';
-import api from '../../api';
+
 
 interface Post {
     id: number;

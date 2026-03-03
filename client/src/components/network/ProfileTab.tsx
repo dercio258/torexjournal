@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { User, MapPin, Calendar, Users, Grid } from 'lucide-react';
+import { Calendar, Grid } from 'lucide-react';
 import api from '../../api';
-import { useAuth } from '../../context/AuthContext';
+// AuthContext import removed because unused here
 import { PostCard } from './PostCard';
 
 interface UserProfile {
@@ -19,7 +19,7 @@ interface UserProfile {
 }
 
 export const ProfileTab = () => {
-    const { user } = useAuth();
+    // const { user } = useAuth(); // Ignorando auth para UI mockada
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [posts, setPosts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);

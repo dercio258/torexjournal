@@ -4,14 +4,14 @@ import { BrokerSelector } from '../components/dashboard/BrokerSelector';
 import { AutoSyncForm } from '../components/dashboard/AutoSyncForm';
 import { ManualImportForm } from '../components/dashboard/ManualImportForm';
 import { ImportHistory } from '../components/dashboard/ImportHistory';
-import { Copy, Terminal } from 'lucide-react';
+import { Copy, Terminal, Cloud } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
 export const AddTrades = () => {
     const { user } = useAuth();
     const [step, setStep] = useState<'SELECT' | 'CONNECT_MT5_CLOUD' | 'CONNECT_MT5_OPTIONS' | 'CONNECT_MT5_EA' | 'CONNECT_DERIV' | 'CONNECT_MANUAL'>('SELECT');
-    const [selectedBroker, setSelectedBroker] = useState<any>(null);
+    // selectedBroker state removed as it is no longer used for rendering info
     const [appToken, setAppToken] = useState<string | null>(null);
 
     useEffect(() => {
@@ -27,7 +27,7 @@ export const AddTrades = () => {
     }, [user]);
 
     const handleSelectBroker = (broker: any) => {
-        setSelectedBroker(broker);
+        // No longer storing selectedBroker since we only care about step routing
         if (broker.id === 'deriv') {
             setStep('CONNECT_DERIV');
         } else if (broker.id === 'mt5') {
@@ -38,8 +38,6 @@ export const AddTrades = () => {
     };
 
     const handleBack = () => {
-        setStep('SELECT');
-        setSelectedBroker(null);
     };
 
     const copyToken = () => {

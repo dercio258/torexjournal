@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Upload, FileText, Download, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
 import api from '../../api';
 
 interface ManualImportFormProps {
@@ -100,8 +100,8 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
 
                     {status && (
                         <div className={`p-4 rounded-lg flex items-center gap-3 text-sm ${status.type === 'success'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                             }`}>
                             {status.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
                             {status.message}

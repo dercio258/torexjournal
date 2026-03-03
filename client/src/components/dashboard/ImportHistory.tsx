@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { History, CheckCircle2, XCircle, FileText, Server, Trash2 } from 'lucide-react';
+import { History, FileText, Server, Trash2 } from 'lucide-react';
 import api from '../../api';
 
 interface ImportLog {

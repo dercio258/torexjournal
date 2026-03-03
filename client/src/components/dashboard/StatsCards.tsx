@@ -22,7 +22,7 @@ export const StatsCards = ({ stats, isLoading }: StatsCardsProps) => {
         );
     }
 
-    const { totalPnL, winRate, totalTrades, totalWins, totalLosses } = stats;
+    const { totalPnL, winRate, totalWins, totalLosses } = stats;
 
     // Win/Loss Chart Data
     const winLossData = {
@@ -78,16 +78,16 @@ export const StatsCards = ({ stats, isLoading }: StatsCardsProps) => {
                         <div className="flex items-center justify-between mb-2 relative z-10">
                             <div className="flex items-center gap-2">
                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stats.accountHealth.marginLevel < 100 ? 'bg-rose-500/10 text-rose-400' :
-                                        stats.accountHealth.marginLevel < 500 ? 'bg-yellow-500/10 text-yellow-400' :
-                                            'bg-emerald-500/10 text-emerald-400'
+                                    stats.accountHealth.marginLevel < 500 ? 'bg-yellow-500/10 text-yellow-400' :
+                                        'bg-emerald-500/10 text-emerald-400'
                                     }`}>
                                     <Activity className="w-5 h-5" />
                                 </div>
                                 <div>
                                     <div className="text-xs text-slate-400 font-medium">Saúde da Conta</div>
                                     <div className={`text-lg font-bold ${stats.accountHealth.marginLevel < 100 ? 'text-rose-400' :
-                                            stats.accountHealth.marginLevel < 500 ? 'text-yellow-400' :
-                                                'text-emerald-400'
+                                        stats.accountHealth.marginLevel < 500 ? 'text-yellow-400' :
+                                            'text-emerald-400'
                                         }`}>
                                         {stats.accountHealth.marginLevel.toFixed(0)}%
                                     </div>
@@ -100,8 +100,8 @@ export const StatsCards = ({ stats, isLoading }: StatsCardsProps) => {
                             <div className="w-full bg-slate-700/50 rounded-full h-1.5 mb-2">
                                 <div
                                     className={`h-1.5 rounded-full transition-all duration-500 ${stats.accountHealth.marginLevel < 100 ? 'bg-rose-500' :
-                                            stats.accountHealth.marginLevel < 500 ? 'bg-yellow-500' :
-                                                'bg-emerald-500'
+                                        stats.accountHealth.marginLevel < 500 ? 'bg-yellow-500' :
+                                            'bg-emerald-500'
                                         }`}
                                     style={{ width: `${Math.min(stats.accountHealth.marginLevel / 10, 100)}%` }}
                                 ></div>
