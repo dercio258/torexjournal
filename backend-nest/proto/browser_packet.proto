@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package browser;
+
+enum PacketType {
+  PING = 0;
+  AUTH = 1;
+  ACCOUNT_UPDATE = 2;
+  HISTORY_UPDATE = 3;
+  CONNECTION_STATUS = 4;
+  PONG = 5;
+}
+
+message BrowserPacket {
+  PacketType type = 1;
+
+  // Payloads (only one should be set based on type)
+  Auth auth = 2;
+  AccountUpdate account_update = 3;
+  HistoryUpdate history_update = 4;
+  ConnectionStatus connection_status = 5;
+}
+
+message Auth {
+  string token = 1;
+}
+
+message AccountUpdate {
+  double balance = 1;
+  double equity = 2;
+  double margin = 3;
+  double margin_free = 4;
+  double margin_level = 5;
+  repeated Position positions = 6;
+}
+
+message Position {
+  int64 ticket = 1;
+  string symbol = 2;
+  string type = 3;  // "BUY" or "SELL"
+  double volume = 4;
+  double open_price = 5;
+  double current_price = 6;
+  double profit = 7;
+  double sl = 8;
+  double tp = 9;
+  int64 open_time = 10;
+}
+
+message HistoryUpdate {
+  int32 count = 1;
+  repeated Trade trades = 2;
+}
+
+message Trade {
+  int64 ticket = 1;
+  string symbol = 2;
+  string type = 3;
+  double volume = 4;
+  double open_price = 5;
+  double close_price = 6;
+  int64 open_time = 7;
+  int64 close_time = 8;
+  double profit = 9;
+  double commission = 10;
+  double swap = 11;
+  string comment = 12;
+}
+
+message ConnectionStatus {
+  bool is_connected = 1;
+}

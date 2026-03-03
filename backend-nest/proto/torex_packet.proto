@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package torex;
+
+// Define o tipo da mensagem para o servidor saber como processar
+enum PacketType {
+  PING = 0;         // Heartbeat (apenas para manter conexão)
+  AUTH = 1;         // Primeira mensagem enviada (Login)
+  ACCOUNT_DATA = 2; // Dados em tempo real
+  HISTORY_DEAL = 3; // NOVO: Trade Fechado
+  TICK_DATA = 4;    // NOVO: Updates de Preço (High Frequency)
+  SERVER_COMMAND = 5; // Comandos do Servidor para o EA
+  AUTH_CHALLENGE = 6; // Server -> EA (Nonce)
+  AUTH_RESPONSE = 7;  // EA -> Server (Signature)
+  AUTH_OK = 8;        // Server -> EA (Success)
+}
+
+// Mensagem Principal (Root Message)
+message TorexPacket {
+  // --- Cabeçalho ---
+  // Field 1: Tipo do pacote (Int32 no MQL5)
+  PacketType type = 1;
+
+  // --- Payload de Autenticação ---
+  // Field 6: Token (Mudei para 6 para não colidir com o ID da conta)
+  string auth_token = 6;
+  string nonce = 10;      // NOVO: Challenge Nonce
+  string signature = 11;  // NOVO: Response Signature
+
+  // --- Payload de Dados da Conta ---
+  // Field 2: Login do MT5 (Int32/64)
+  int32 mt5_id = 2;
+
+  // Field 3: Saldo
+  double balance = 3;
+
+  // Field 4: Patrimônio Líquido
+  double equity = 4;
+
+  // Field 5: Lista de Posições (Strings formatadas "SYMBOL:VOL")
+  // Em uma versão V2, podemos criar uma mensagem 'Position' aninhada.
+  repeated Position positions = 5;
+
+  // NOVO: Sub-mensagem para histórico (usado se type == HISTORY_DEAL)
+  TradeDeal deal = 7;
+
+  // NOVO: Sub-mensagem para Ticks (usado se type == TICK_DATA)
+  TickData tick = 8;
+  
+  // NOVO: Sub-mensagem para Comandos (usado se type == SERVER_COMMAND)
+  ServerCommand command = 9;
+}
+
+message Position {
+  int64 ticket = 1;
+  string symbol = 2;
+  string type = 3;  // "BUY" or "SELL"
+  double volume = 4;
+  double open_price = 5;
+  double current_price = 6;
+  double profit = 7;
+  double sl = 8;
+  double tp = 9;
+  int64 open_time = 10;
+}
+
+message TradeDeal {
+  int64 ticket = 1;
+  string symbol = 2;
+  string type = 3; // "BUY" ou "SELL"
+  double volume = 4;
+  double open_price = 5;
+  double close_price = 6;
+  double profit = 7;
+  int64 open_time = 8;
+  int64 close_time = 9;
+}
+
+message TickData {
+  string symbol = 1;
+  double bid = 2;
+  double ask = 3;
+  double last = 4;
+  double volume = 5;
+  int64 time = 6; // Unix Timestamp (ms)
+}
+
+enum CommandType {
+  CMD_NONE = 0;
+  CMD_CLOSE_ALL = 1;
+  CMD_UPDATE_CONFIG = 2;
+  CMD_PAUSE = 3;
+}
+
+message ServerCommand {
+   CommandType command = 1;
+   string payload = 2; // JSON params or empty
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Novo Login Detectado - Torex Journal</title>
+</head>
+
+<body style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 20px;">
+    <div
+        style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+
+        {{> header}}
+
+        <div style="padding: 30px; color: #333333;">
+            <h2 style="color: #1e293b; margin-top: 0;">Olá, {{name}} 👋</h2>
+            <p>Detectamos um novo login na sua conta <strong>Torex Journal</strong>.</p>
+
+            <div
+                style="background-color: #fff1f2; border-left: 4px solid #f43f5e; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 5px 0;"><strong>🕒 Data:</strong> {{time}}</p>
+                <p style="margin: 5px 0;"><strong>💻 Dispositivo:</strong> {{device}}</p>
+                <p style="margin: 5px 0;"><strong>🌐 IP:</strong> {{ip}}</p>
+            </div>
+
+            <p>Se foi você, não precisa fazer nada.</p>
+            <p style="color: #dc2626;"><strong>Não foi você?</strong> Por favor, altere sua senha imediatamente.</p>
+        </div>
+
+        {{> footer}}
+
+    </div>
+</body>
+
+</html>
