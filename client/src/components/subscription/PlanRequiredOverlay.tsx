@@ -30,7 +30,7 @@ export const PlanRequiredOverlay = () => {
                         </Button>
 
                         <Button
-                            variant="outline"
+                            variant="secondary"
                             className="w-full py-6 border-slate-700 text-slate-300 hover:bg-slate-800"
                             onClick={() => navigate('/pricing')}
                         >

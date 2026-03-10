@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { User, Send, Image as ImageIcon, Video, X, Smile } from 'lucide-react';
+// @ts-expect-error - emoji-picker-react might have resolution issues in some environments
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { useAuth } from '../../context/AuthContext';
 import { PostCard } from './PostCard';
@@ -214,8 +215,8 @@ export const FeedTab = ({
                                         <button
                                             disabled={isRestricted}
                                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${isRestricted
-                                                    ? 'bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed'
-                                                    : 'bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white border-indigo-500/30'
+                                                ? 'bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed'
+                                                : 'bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white border-indigo-500/30'
                                                 }`}
                                         >
                                             Seguir

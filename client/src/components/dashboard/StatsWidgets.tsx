@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, ShieldAlert, ShieldInfo } from 'lucide-react';
+import { ShieldCheck, ShieldAlert } from 'lucide-react';
 
 
 // --- Gauge de Proporção Profit vs Loss ---
