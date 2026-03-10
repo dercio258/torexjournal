@@ -9,6 +9,8 @@ import { TechnicalJournal } from '../dashboard/technical-journal.entity';
 import { AccountEntity } from '../account/account.entity';
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
+import { UserEntity } from '../users/user.entity';
+import { Subscription, SubscriptionStatus } from '../payment/subscription.entity';
 
 @Injectable()
 export class NotificationsCronService {
@@ -21,6 +23,10 @@ export class NotificationsCronService {
         private journalRepo: Repository<TechnicalJournal>,
         @InjectRepository(AccountEntity)
         private accountRepo: Repository<AccountEntity>,
+        @InjectRepository(UserEntity)
+        private userRepo: Repository<UserEntity>,
+        @InjectRepository(Subscription)
+        private subscriptionRepo: Repository<Subscription>,
         private alertsService: AlertsService,
         private notificationsService: NotificationsService
     ) { }
@@ -145,6 +151,58 @@ export class NotificationsCronService {
             }
         } catch (error) {
             this.logger.error('Failed to run checkBehavioralPatterns cron', error);
+        }
+    }
+
+    // Runs every day at 10:00 AM server time
+    @Cron('0 10 * * *')
+    async checkMarketingForInactiveUsers() {
+        this.logger.log('Starting daily check for marketing to inactive users...');
+
+        try {
+            // Check for users created exactly 3 days ago
+            await this.sendMarketingAlertsForDaysAgo(3, 'Comece a Operar como um Profissional 🚀', 'Já se passaram alguns dias desde que você se registrou. Aproveite nossas ferramentas escolhendo o plano Traders Básico para análise de diário ou o Analista Premium para inteligência em tempo real.');
+
+            // Check for users created exactly 7 days ago
+            await this.sendMarketingAlertsForDaysAgo(7, 'Eleve seu Trading ao Próximo Nível 📈', 'Uma semana e você ainda não aproveitou todo o nosso potencial. Desbloqueie o Analista Premium agora para ter relatórios automáticos e insights precisos do seu histórico MT5.');
+
+        } catch (error) {
+            this.logger.error('Failed to run checkMarketingForInactiveUsers cron', error);
+        }
+    }
+
+    private async sendMarketingAlertsForDaysAgo(daysAgo: number, title: string, description: string) {
+        const targetDateStart = new Date();
+        targetDateStart.setDate(targetDateStart.getDate() - daysAgo);
+        targetDateStart.setHours(0, 0, 0, 0);
+
+        const targetDateEnd = new Date(targetDateStart);
+        targetDateEnd.setHours(23, 59, 59, 999);
+
+        const usersToNotify = await this.userRepo.find({
+            where: {
+                createdAt: Between(targetDateStart, targetDateEnd)
+            }
+        });
+
+        for (const user of usersToNotify) {
+            const activeSub = await this.subscriptionRepo.findOne({
+                where: {
+                    userId: user.id,
+                    status: SubscriptionStatus.ACTIVE
+                }
+            });
+
+            // If user has no active subscription, send marketing alert
+            if (!activeSub) {
+                await this.alertsService.create(user.id, {
+                    type: AlertType.MARKETING,
+                    severity: AlertSeverity.INFO,
+                    title: title,
+                    description: description,
+                    metadata: { marketingCampaign: `inactive_${daysAgo}_days` }
+                });
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Mt5Service } from './mt5.service';
 import { Mt5DataDto } from './dto/mt5-data.dto';
 import { Mt5InstanceService } from './mt5-instance.service';
+import { PlanGuard, RequirePlan } from '../common/guards/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 import { Mt5TcpServer } from '../mt5-tcp.server';
 
@@ -69,6 +71,8 @@ export class Mt5Controller {
     }
 
     @Post('journal/:ticket') // Using POST for simplicity or PATCH
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async updateJournal(@Body() data: any, @Param('ticket') ticket: string) {
         return this.mt5Service.updateJournal(ticket, data);
     }
@@ -89,13 +93,15 @@ export class Mt5Controller {
     }
 
     @Post('cloud/connect')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async connectCloud(@Body() body: { login: string, pass: string, server: string }, @Req() req) {
         return this.mt5InstanceService.startInstance(req.user.id, body.login, body.pass, body.server);
     }
 
     @Post('cloud/disconnect')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async disconnectCloud(@Body() body: { login: string }, @Req() req) {
         return this.mt5InstanceService.stopInstance(req.user.id, body.login);
     }

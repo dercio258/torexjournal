@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { TrendingUp, Users, MessageSquare, UserCheck } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
 import { ChatTab } from '../components/network/ChatTab';
 import { CommunityTab } from '../components/network/CommunityTab';
 import { ProfileTab } from '../components/network/ProfileTab';
@@ -41,6 +42,8 @@ interface SuggestedUser {
 }
 
 export const Network = () => {
+    const { user } = useAuth();
+    const isBasic = user?.tier === 'BASIC';
     const [activeTab, setActiveTab] = useState<'feed' | 'messages' | 'community' | 'profile'>('feed');
     const [socket, setSocket] = useState<Socket | null>(null);
 
@@ -176,13 +179,14 @@ export const Network = () => {
             suggestions={suggestions}
             handleCreatePost={handleCreatePost}
             handleLike={handleLike}
+            isRestricted={isBasic}
         />
     );
 
     return (
         <div className="h-[calc(100vh-7rem)] flex flex-col">
             {/* Tabs Header */}
-            <div className="flex gap-1 mb-6 p-1 bg-slate-900/50 rounded-xl w-fit border border-slate-800">
+            <div className="flex gap-1 mb-6 p-1 bg-slate-900/50 rounded-xl w-full md:w-fit border border-slate-800 overflow-x-auto no-scrollbar">
                 {[
                     { id: 'feed', label: 'Feed', icon: <TrendingUp size={16} /> },
                     { id: 'messages', label: 'Mensagens', icon: <MessageSquare size={16} /> },
@@ -193,7 +197,7 @@ export const Network = () => {
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
                         className={`
-                            px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all
+                            whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all
                             ${activeTab === tab.id
                                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20'
                                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -216,7 +220,9 @@ export const Network = () => {
                 </div>
 
                 {/* Shared Right Sidebar */}
-                <RightSidebar trending={trending} suggestions={suggestions} />
+                <div className="hidden lg:block">
+                    <RightSidebar trending={trending} suggestions={suggestions} />
+                </div>
             </div>
         </div>
     );

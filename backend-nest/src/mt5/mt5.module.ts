@@ -28,6 +28,7 @@ import { ImportLog } from './import-log.entity';
 import { AiModule } from '../ai/ai.module';
 import { NormalizationModule } from '../import/normalization/normalization.module';
 import { AlertsModule } from '../alerts/alerts.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
@@ -36,6 +37,7 @@ import { AlertsModule } from '../alerts/alerts.module';
         AiModule,
         NormalizationModule,
         AlertsModule,
+        PaymentModule,
         BullModule.registerQueue({
             name: 'mt5-data',
         }),

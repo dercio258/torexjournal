@@ -4,6 +4,8 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { NetworkService } from './network.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PlanGuard, RequirePlan } from '../common/guards/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('network')
 export class NetworkController {
@@ -31,19 +33,22 @@ export class NetworkController {
     }
 
     @Post('post')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async createPost(@Req() req, @Body() body: any) {
         return this.networkService.createPost(req.user.id, body.content, body.type, body.tradeData, body.visibility, body.imageUrl);
     }
 
     @Post('post/:id/like')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async toggleLike(@Req() req, @Param('id') postId: number) {
         return this.networkService.toggleLike(req.user.id, postId);
     }
 
     @Post('post/:id/comment')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async addComment(@Req() req, @Param('id') postId: number, @Body() body: { content: string }) {
         return this.networkService.addComment(req.user.id, postId, body.content);
     }
@@ -67,13 +72,15 @@ export class NetworkController {
     }
 
     @Post('follow/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async followUser(@Req() req, @Param('id') id: string) {
         return this.networkService.followUser(req.user.id, id);
     }
 
     @Delete('follow/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
     async unfollowUser(@Req() req, @Param('id') id: string) {
         return this.networkService.unfollowUser(req.user.id, id);
     }

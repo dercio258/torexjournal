@@ -14,6 +14,7 @@ interface AuthContextType {
         name?: string;
         avatarUrl?: string;
         is_connected?: boolean;
+        tier?: 'FREE' | 'BASIC' | 'PREMIUM';
     } | null;
     updateUser: (data: Partial<{ avatarUrl: string; name: string }>) => void;
 }

@@ -42,12 +42,6 @@ export class SubscriptionPlanConfig {
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
     trialPrice: number;
 
-    @Column({ nullable: true })
-    paypalMonthlyPlanId: string;
-
-    @Column({ nullable: true })
-    paypalYearlyPlanId: string;
-
     @Column({ default: true })
     isActive: boolean;
 

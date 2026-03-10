@@ -19,6 +19,7 @@ interface FeedTabProps {
     suggestions: SuggestedUser[];
     handleCreatePost: (content: string, options?: { imageUrl?: string, type?: string }) => Promise<void>;
     handleLike: (postId: number) => Promise<void>;
+    isRestricted?: boolean;
 }
 
 export const FeedTab = ({
@@ -27,7 +28,8 @@ export const FeedTab = ({
     error,
     suggestions,
     handleCreatePost,
-    handleLike
+    handleLike,
+    isRestricted = false
 }: FeedTabProps) => {
     const { user } = useAuth();
     const [newPostContent, setNewPostContent] = useState('');
@@ -105,67 +107,79 @@ export const FeedTab = ({
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-6">
 
             {/* Create Post Card */}
-            <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-lg">
-                <div className="flex gap-4">
-                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold shrink-0">
-                        {user?.username?.[0]?.toUpperCase() || <User size={20} />}
-                    </div>
-                    <div className="flex-1">
-                        <textarea
-                            value={newPostContent}
-                            onChange={e => setNewPostContent(e.target.value)}
-                            placeholder="Compartilhe um trade, uma ideia ou uma dúvida..."
-                            className="w-full bg-slate-950/30 border border-slate-800 rounded-xl p-3 text-slate-300 focus:outline-none focus:border-indigo-500/50 min-h-[80px] resize-none transition-colors"
-                        />
-                        {mediaPreview && (
-                            <div className="relative mt-3 inline-block">
-                                {mediaType === 'video' ? (
-                                    <video src={mediaPreview} className="max-h-48 rounded-lg border border-slate-700" controls />
-                                ) : (
-                                    <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg border border-slate-700 object-contain" />
-                                )}
-                                <button onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-800 hover:bg-rose-500 text-white p-1 rounded-full transition-colors shadow-lg">
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        )}
-                        <div className="flex justify-between items-center mt-3">
-                            <div className="flex gap-2 text-slate-500 relative">
-                                <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Foto/Vídeo">
-                                    <ImageIcon size={18} /> <Video size={18} />
-                                </button>
-                                <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-slate-800 hover:text-yellow-500 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Emoji">
-                                    <Smile size={18} />
-                                </button>
+            {!isRestricted && (
+                <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-lg">
+                    <div className="flex gap-4">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold shrink-0">
+                            {user?.username?.[0]?.toUpperCase() || <User size={20} />}
+                        </div>
+                        <div className="flex-1">
+                            <textarea
+                                value={newPostContent}
+                                onChange={e => setNewPostContent(e.target.value)}
+                                placeholder="Compartilhe um trade, uma ideia ou uma dúvida..."
+                                className="w-full bg-slate-950/30 border border-slate-800 rounded-xl p-3 text-slate-300 focus:outline-none focus:border-indigo-500/50 min-h-[80px] resize-none transition-colors"
+                            />
+                            {mediaPreview && (
+                                <div className="relative mt-3 inline-block">
+                                    {mediaType === 'video' ? (
+                                        <video src={mediaPreview} className="max-h-48 rounded-lg border border-slate-700" controls />
+                                    ) : (
+                                        <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg border border-slate-700 object-contain" />
+                                    )}
+                                    <button onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-800 hover:bg-rose-500 text-white p-1 rounded-full transition-colors shadow-lg">
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+                            <div className="flex justify-between items-center mt-3">
+                                <div className="flex gap-2 text-slate-500 relative">
+                                    <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Foto/Vídeo">
+                                        <ImageIcon size={18} /> <Video size={18} />
+                                    </button>
+                                    <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-slate-800 hover:text-yellow-500 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Emoji">
+                                        <Smile size={18} />
+                                    </button>
 
-                                {showEmojiPicker && (
-                                    <div ref={emojiPickerRef} className="absolute top-12 left-0 z-50 shadow-2xl">
-                                        <EmojiPicker
-                                            onEmojiClick={onEmojiClick}
-                                            theme={Theme.DARK}
-                                            lazyLoadEmojis={true}
-                                        />
-                                    </div>
-                                )}
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    className="hidden"
-                                    accept="image/*,video/*"
-                                    onChange={handleFileSelect}
-                                />
+                                    {showEmojiPicker && (
+                                        <div ref={emojiPickerRef} className="absolute top-12 left-0 z-50 shadow-2xl">
+                                            <EmojiPicker
+                                                onEmojiClick={onEmojiClick}
+                                                theme={Theme.DARK}
+                                                lazyLoadEmojis={true}
+                                            />
+                                        </div>
+                                    )}
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        className="hidden"
+                                        accept="image/*,video/*"
+                                        onChange={handleFileSelect}
+                                    />
+                                </div>
+                                <button
+                                    onClick={onSubmit}
+                                    disabled={(!newPostContent.trim() && !mediaFile) || isPosting}
+                                    className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
+                                >
+                                    {isPosting ? <span className="animate-pulse">Publicando...</span> : <><Send size={16} /> Publicar</>}
+                                </button>
                             </div>
-                            <button
-                                onClick={onSubmit}
-                                disabled={(!newPostContent.trim() && !mediaFile) || isPosting}
-                                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
-                            >
-                                {isPosting ? <span className="animate-pulse">Publicando...</span> : <><Send size={16} /> Publicar</>}
-                            </button>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Restricted Message for Basic Users */}
+            {isRestricted && (
+                <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-4 flex items-center gap-3 text-sm text-indigo-300/80">
+                    <div className="p-2 bg-indigo-500/10 rounded-lg">
+                        <User size={16} />
+                    </div>
+                    <span>Você está no plano <strong>Básico</strong>. Para participar das discussões e postar conteúdo, faça o upgrade para o plano <strong>Premium</strong>.</span>
+                </div>
+            )}
 
             {/* Error Message */}
             {error && (
@@ -197,7 +211,13 @@ export const FeedTab = ({
                                             <h4 className="font-bold text-slate-200 truncate">{s.name || s.username}</h4>
                                             <p className="text-xs text-slate-500 truncate">@{s.username}</p>
                                         </div>
-                                        <button className="px-3 py-1.5 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-bold transition-all border border-indigo-500/30">
+                                        <button
+                                            disabled={isRestricted}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${isRestricted
+                                                    ? 'bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed'
+                                                    : 'bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white border-indigo-500/30'
+                                                }`}
+                                        >
                                             Seguir
                                         </button>
                                     </div>
@@ -207,7 +227,7 @@ export const FeedTab = ({
                     )}
                 </div>
             ) : posts.map(post => (
-                <PostCard key={post.id} post={post} onLike={handleLike} />
+                <PostCard key={post.id} post={post} onLike={handleLike} isRestricted={isRestricted} />
             ))}
         </div>
     );

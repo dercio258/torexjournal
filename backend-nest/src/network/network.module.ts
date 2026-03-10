@@ -12,10 +12,12 @@ import { ChatMessage } from './chat-message.entity';
 import { Follow } from './follow.entity';
 import { ChatRoom, ChatMember } from './chat-entities';
 import { UserEntity } from '../users/user.entity';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([Post, Comment, Like, ChatMessage, Follow, ChatRoom, ChatMember, UserEntity]),
+        PaymentModule,
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({

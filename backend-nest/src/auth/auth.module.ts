@@ -10,6 +10,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccountEntity } from '../account/account.entity';
 import { EmailModule } from '../email/email.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
@@ -26,6 +27,7 @@ import { EmailModule } from '../email/email.module';
             inject: [ConfigService],
         }),
         EmailModule, // Added EmailModule for queue injection
+        PaymentModule,
     ],
     providers: [AuthService, JwtStrategy],
     controllers: [AuthController],

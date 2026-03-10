@@ -37,7 +37,7 @@ export class NotificationsService {
             accountId: account.id,
             title: data.title,
             message: data.message,
-            type: data.type || NotificationType.INFO
+            type: data.type || NotificationType.SYSTEM
         });
 
         const saved = await this.notificationRepo.save(notification);

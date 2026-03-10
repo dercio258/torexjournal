@@ -1,60 +1,71 @@
-import { Controller, Post, Get, Body, Param, Headers, BadRequestException, Logger } from '@nestjs/common';
-import { PaypalSubscriptionsService } from './paypal-subscription.service';
+import { Controller, Post, Get, Body, Param, Headers, BadRequestException, Logger, UseGuards, Request } from '@nestjs/common';
+import { SubscriptionService } from './subscription.service';
 import { SubscriptionCycle } from './subscription.entity';
-// import { TradingTier } from './subscription-plan.entity';
 import { ConfigService } from '@nestjs/config';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('subscription')
-export class SubscriptionController { // Ensure naming is unique if needed
+export class SubscriptionController {
     private readonly logger = new Logger(SubscriptionController.name);
 
     constructor(
-        private readonly subscriptionService: PaypalSubscriptionsService,
+        private readonly subscriptionService: SubscriptionService,
         private readonly configService: ConfigService
     ) { }
-
-    // --- Admin Endpoints ---
-    @Post('plans')
-    async syncPlans() {
-        return this.subscriptionService.syncPlans();
-    }
 
     @Get('plans')
     async getActivePlans() {
         return this.subscriptionService.getActivePlans();
     }
 
-    // --- Client Endpoints ---
-    @Post('subscribe')
-    async createSubscription(@Body() body: { userId: string, tier: string, cycle: string, returnUrl: string, cancelUrl: string }) {
-        // Validation (basic)
-        // In real app, get userId from AuthGuard
-        return this.subscriptionService.createSubscription(
-            body.userId,
+    @UseGuards(AuthGuard('jwt'))
+    @Get('status')
+    async getStatus(@Request() req) {
+        return this.subscriptionService.getSubscriptionStatus(req.user.id);
+    }
+
+    @UseGuards(AuthGuard('jwt'))
+    @Post('subscribe/mobile')
+    async subscribeMobile(@Request() req, @Body() body: { tier: string, cycle: string, paymentMethod: 'mpesa' | 'emola', phoneNumber: string, savePreference?: boolean }) {
+        return this.subscriptionService.createMobileSubscription(
+            req.user.id,
             body.tier as any,
             body.cycle as any,
-            body.returnUrl,
-            body.cancelUrl
+            body.paymentMethod,
+            body.phoneNumber,
+            body.savePreference
         );
     }
 
-    // --- Webhook ---
-    @Post('webhook')
-    async handleWebhook(@Headers() headers, @Body() body) {
-        const webhookId = this.configService.get<string>('PAYPAL_WEBHOOK_ID');
-        if (webhookId) {
-            const isValid = await this.subscriptionService.verifyWebhookSignature(headers, body, webhookId);
-            if (!isValid) {
-                this.logger.warn('Invalid Webhook Signature');
-                throw new BadRequestException('Invalid Signature');
-            }
-        } else {
-            this.logger.warn('PAYPAL_WEBHOOK_ID not set, skipping signature verification');
-        }
+    @UseGuards(AuthGuard('jwt'))
+    @Post('subscribe/card')
+    async subscribeCard(@Request() req, @Body() body: { tier: string, cycle: string, returnUrl: string, cancelUrl: string, phoneNumber?: string }) {
+        return this.subscriptionService.createCardSubscription(
+            req.user.id,
+            body.tier as any,
+            body.cycle as any,
+            body.returnUrl,
+            body.cancelUrl,
+            body.phoneNumber
+        );
+    }
 
-        // Process event asynchronously to avoid timeouts?
-        // For now, await it
-        await this.subscriptionService.handleWebhookEvent(body);
-        return { status: 'received' };
+    @UseGuards(AuthGuard('jwt'))
+    @Post('renew')
+    async renewAuto(@Request() req) {
+        return this.subscriptionService.renewActiveSubscription(req.user.id);
+    }
+
+    // --- Debito Status Sync (Manual or via simple status check) ---
+    @Post('check-status/:reference')
+    async checkStatus(@Param('reference') reference: string) {
+        await this.subscriptionService.handleDebitoStatusUpdate(reference);
+        return { status: 'checked' };
+    }
+
+    @Post('debito-webhook')
+    async debitoWebhook(@Body() body: any) {
+        await this.subscriptionService.processDebitoWebhook(body);
+        return { success: true };
     }
 }

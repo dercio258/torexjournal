@@ -27,9 +27,10 @@ interface Post {
 interface PostCardProps {
     post: Post;
     onLike: (postId: number) => void;
+    isRestricted?: boolean;
 }
 
-export const PostCard = ({ post, onLike }: PostCardProps) => {
+export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) => {
     return (
         <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-lg hover:border-slate-700 transition-all group">
             <div className="flex justify-between items-start mb-4">
@@ -119,17 +120,30 @@ export const PostCard = ({ post, onLike }: PostCardProps) => {
             {/* Interactions */}
             <div className="flex items-center gap-6 pt-4 border-t border-slate-800/50 ml-[3.75rem]">
                 <button
-                    onClick={() => onLike(post.id)}
-                    className={`flex items-center gap-2 text-sm font-bold transition-all ${post.isLiked ? 'text-rose-500' : 'text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 px-2 py-1 -ml-2 rounded-lg'}`}
+                    onClick={() => !isRestricted && onLike(post.id)}
+                    disabled={isRestricted}
+                    className={`flex items-center gap-2 text-sm font-bold transition-all ${post.isLiked ? 'text-rose-500' : 'text-slate-500'
+                        } ${isRestricted
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:text-rose-400 hover:bg-rose-500/10 px-2 py-1 -ml-2 rounded-lg'
+                        }`}
                 >
                     <Heart size={18} fill={post.isLiked ? "currentColor" : "none"} className={post.isLiked ? "animate-bounce" : ""} />
                     {post.likesCount || 0}
                 </button>
-                <button className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 px-2 py-1 rounded-lg transition-all">
+                <button
+                    disabled={isRestricted}
+                    className={`flex items-center gap-2 text-sm font-bold text-slate-500 transition-all ${isRestricted
+                            ? 'opacity-50 cursor-not-allowed'
+                            : 'hover:text-indigo-400 hover:bg-indigo-500/10 px-2 py-1 rounded-lg'
+                        }`}
+                >
                     <MessageCircle size={18} />
                     {post.commentsCount || 0}
                 </button>
-                <button className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg transition-all ml-auto">
+                <button
+                    className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg transition-all ml-auto"
+                >
                     <Share2 size={18} />
                 </button>
             </div>

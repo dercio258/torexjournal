@@ -11,6 +11,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { PlanPermissionService } from '../payment/plan-permission.service';
 
 @Injectable()
 export class AuthService {
@@ -21,6 +22,7 @@ export class AuthService {
         private accountRepository: Repository<AccountEntity>,
         @InjectQueue('email-queue') private emailQueue: Queue,
         @Inject(CACHE_MANAGER) private cacheManager: any,
+        private planPermissionService: PlanPermissionService,
     ) { }
 
     async validateUser(email: string, pass: string): Promise<any> {
@@ -61,6 +63,8 @@ export class AuthService {
             time: new Date().toLocaleString('pt-BR', { timeZone: 'Africa/Maputo' })
         }, { removeOnComplete: true });
 
+        const planTier = await this.planPermissionService.getUserPlan(user.id);
+
         return {
             success: true,
             message: 'Login successful',
@@ -69,7 +73,8 @@ export class AuthService {
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                api_token: user.apiToken
+                api_token: user.apiToken,
+                tier: planTier
             }
         };
     }
@@ -129,6 +134,8 @@ export class AuthService {
         }, { removeOnComplete: true });
 
         const payload = { email: newUser.email, id: newUser.id };
+        const planTier = await this.planPermissionService.getUserPlan(newUser.id);
+
         return {
             success: true,
             message: 'User registered successfully',
@@ -137,7 +144,8 @@ export class AuthService {
                 id: newUser.id,
                 name: newUser.name,
                 email: newUser.email,
-                api_token: newUser.apiToken
+                api_token: newUser.apiToken,
+                tier: planTier
             }
         };
     }

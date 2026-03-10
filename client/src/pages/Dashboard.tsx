@@ -93,6 +93,28 @@ export const Dashboard = () => {
         sessions: [] as { name: string, percent: number, active: boolean, pnl: number }[]
     });
 
+    const [subStatus, setSubStatus] = useState<any>(null);
+    const [isRenewing, setIsRenewing] = useState(false);
+
+    useEffect(() => {
+        api.get('/subscription/status')
+            .then(res => setSubStatus(res.data))
+            .catch(err => console.error("Error fetching sub status", err));
+    }, []);
+
+    const handleRenew = async () => {
+        setIsRenewing(true);
+        try {
+            await api.post('/subscription/renew');
+            alert("Pedido de renovação lançado! Confirme no seu telemóvel.");
+        } catch (error: any) {
+            console.error("Renewal error", error);
+            alert(error.response?.data?.message || "Erro ao renovar. Verifique se tem um contacto salvo.");
+        } finally {
+            setIsRenewing(false);
+        }
+    };
+
     // Date Filter State
     const [dateRange, setDateRange] = useState({ label: 'Hoje', value: 'today', start: '', end: '' });
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -302,6 +324,35 @@ export const Dashboard = () => {
 
     return (
         <div className="p-6 space-y-6">
+            {/* Renewal Alert */}
+            {subStatus?.hasActive && subStatus?.daysLeft <= 5 && (
+                <div className="bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/20 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-amber-500/20 rounded-xl text-amber-500">
+                            <RefreshCw className={`w-6 h-6 ${isRenewing ? 'animate-spin' : ''}`} />
+                        </div>
+                        <div>
+                            <h3 className="text-white font-bold">Sua assinatura expira em {subStatus.daysLeft} dias!</h3>
+                            <p className="text-slate-400 text-sm">Não perca o acesso às suas métricas. Renove agora com um clique.</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleRenew}
+                        disabled={isRenewing}
+                        className="w-full md:w-auto px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                    >
+                        {isRenewing ? (
+                            <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Processando...
+                            </>
+                        ) : (
+                            'Renovar Agora'
+                        )}
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -311,8 +362,8 @@ export const Dashboard = () => {
                         {isLoading ? 'Sincronizando...' : 'Dados atualizados em tempo real'}
                     </p>
                 </div>
-                <div className="flex gap-3">
-                    <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto no-scrollbar max-w-full">
                         {[
                             { label: 'Hoje', val: 'today' },
                             { label: 'Ontem', val: 'yesterday' },
@@ -393,14 +444,16 @@ export const Dashboard = () => {
                     trend={stats.totalPnL >= 0 ? "up" : "down"}
                     trendValue={stats.totalPnL >= 0 ? "+ Profit" : "- Loss"}
                 />
-                <StatCard
-                    title="Taxa de Acerto"
-                    value={`${stats.winRate.toFixed(1)}%`}
-                    subtext={`${stats.totalTrades} trades totais`}
-                    icon={Activity} // Using Activity as Target might be shadowed
-                    trend={stats.winRate > 50 ? "up" : "down"}
-                    trendValue={stats.winRate > 50 ? "Positive" : "Negative"}
-                />
+                {/* Winrate Gauge Card (Replaces generic StatCard) */}
+                <div className="bg-[#0b0e14] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10">
+                        <Activity size={100} className="text-emerald-500" />
+                    </div>
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 z-10 w-full text-left">Winrate Geral</h3>
+                    <div className="z-10 scale-90 origin-top">
+                        <WinrateGauge winrate={stats.winRate} trades={stats.totalTrades} />
+                    </div>
+                </div>
                 <StatCard
                     title="Profit Factor"
                     value={stats.profitFactor.toFixed(2)}
@@ -433,16 +486,6 @@ export const Dashboard = () => {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {/* Winrate Gauge Card */}
-                    <div className="bg-[#0b0e14] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                            <Activity size={100} className="text-emerald-500" />
-                        </div>
-                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4 z-10">Winrate Geral</h3>
-                        <div className="z-10">
-                            <WinrateGauge winrate={stats.winRate} trades={stats.totalTrades} />
-                        </div>
-                    </div>
 
                     {/* Instruments Card */}
                     <div className="bg-[#0b0e14] border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">

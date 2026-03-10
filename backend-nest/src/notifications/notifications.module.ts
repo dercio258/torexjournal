@@ -13,10 +13,13 @@ import { TradeEntity } from '../mt5/trade.entity';
 import { TechnicalJournal } from '../dashboard/technical-journal.entity';
 import { UserEntity } from '../users/user.entity';
 import { TelegramService } from './telegram.service';
+import { AlertsModule } from '../alerts/alerts.module';
+import { Subscription } from '../payment/subscription.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([NotificationEntity, AccountEntity, UserEntity, TradeEntity, TechnicalJournal]), // Added UserEntity, TradeEntity, TechnicalJournal
+        TypeOrmModule.forFeature([NotificationEntity, AccountEntity, UserEntity, TradeEntity, TechnicalJournal, Subscription]),
+        AlertsModule,
         TelegrafModule.forRootAsync({
             imports: [ConfigModule],
             useFactory: (configService: ConfigService) => ({

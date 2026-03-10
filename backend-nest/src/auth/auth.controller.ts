@@ -4,13 +4,15 @@ import { UsersService } from '../users/users.service';
 import { AccountService } from '../account/account.service';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
+import { PlanPermissionService } from '../payment/plan-permission.service';
 
 @Controller('auth')
 export class AuthController {
     constructor(
         private authService: AuthService,
         private usersService: UsersService,
-        private accountService: AccountService
+        private accountService: AccountService,
+        private planPermissionService: PlanPermissionService
     ) { }
 
     @Post('login')
@@ -79,25 +81,41 @@ export class AuthController {
     @UseGuards(AuthGuard('jwt'))
     @Get('profile')
     async getProfile(@Request() req) {
-        const user = await this.usersService.findOneById(req.user.id);
-        if (!user) return null;
-
-        // Fetch account status
-        let isConnected = false;
         try {
-            const account = await this.accountService.findOneByUserId(user.id);
-            isConnected = account.isConnected;
-        } catch (e) {
-            // Account might not exist yet or error
-            isConnected = false;
-        }
+            const user = await this.usersService.findOneById(req.user.id);
+            if (!user) return null;
 
-        // Map backend apiToken to frontend token expectation
-        return {
-            ...user,
-            token: user.apiToken,
-            is_connected: isConnected
-        };
+            // Fetch account status
+            let isConnected = false;
+            try {
+                const account = await this.accountService.findOneByUserId(user.id);
+                isConnected = account.isConnected;
+            } catch (e) {
+                // Account might not exist yet or error
+                isConnected = false;
+            }
+
+            const planTier = await this.planPermissionService.getUserPlan(user.id);
+            const subscription = await this.planPermissionService.getFullUserSubscription(user.id);
+
+            // Map backend apiToken to frontend token expectation
+            return {
+                ...user,
+                token: user.apiToken,
+                is_connected: isConnected,
+                tier: planTier,
+                subscription: subscription ? {
+                    id: subscription.id,
+                    status: subscription.status,
+                    expiresAt: subscription.currentPeriodEnd,
+                    createdAt: subscription.createdAt,
+                    planTier: planTier
+                } : null
+            };
+        } catch (error) {
+            console.error('Error in /api/auth/profile:', error);
+            throw error;
+        }
     }
 
     @UseGuards(AuthGuard('jwt'))

@@ -2,7 +2,7 @@ import { Controller, Post, Get, Body, UnauthorizedException, Logger, UseGuards, 
 import { ConfigService } from '@nestjs/config';
 import * as moment from 'moment';
 import { UsersService } from '../users/users.service';
-import { PaypalSubscriptionsService } from '../payment/paypal-subscription.service';
+import { SubscriptionService } from '../payment/subscription.service';
 
 @Controller('admin')
 export class AdminController {
@@ -11,7 +11,7 @@ export class AdminController {
     constructor(
         private configService: ConfigService,
         private usersService: UsersService,
-        private paypalService: PaypalSubscriptionsService
+        private subscriptionService: SubscriptionService
     ) { }
 
     // --- Auth ---
@@ -48,18 +48,13 @@ export class AdminController {
     // --- Plans ---
     @Get('plans')
     async getPlans() {
-        return this.paypalService.getActivePlans();
-    }
-
-    @Post('plans/sync')
-    async syncPlans() {
-        return this.paypalService.syncPlans();
+        return this.subscriptionService.getActivePlans();
     }
 
     @Post('plans')
     async createPlan(@Body() body: any) {
         // body should contain tier, monthlyPrice, etc.
-        return this.paypalService.createPlanConfig(body);
+        return this.subscriptionService.createPlanConfig(body);
     }
 
     // --- Finance / Stats ---

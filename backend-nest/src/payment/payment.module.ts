@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PaymentService } from './payment.service';
-import { PaypalSubscriptionsService } from './paypal-subscription.service';
+import { SubscriptionService } from './subscription.service';
 import { PaymentController } from './payment.controller';
 import { SubscriptionController } from './subscription.controller';
 import { PaymentEntity } from './payment.entity';
@@ -10,15 +10,23 @@ import { SubscriptionPlanConfig } from './subscription-plan.entity';
 import { UsersModule } from '../users/users.module';
 import { AccountEntity } from '../account/account.entity';
 import { ConfigModule } from '@nestjs/config';
+import { AlertsModule } from '../alerts/alerts.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { UserEntity } from '../users/user.entity';
+
+import { PlanPermissionService } from './plan-permission.service';
+import { DebitoService } from './debito.service';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([PaymentEntity, AccountEntity, Subscription, SubscriptionPlanConfig]),
+        TypeOrmModule.forFeature([PaymentEntity, AccountEntity, Subscription, SubscriptionPlanConfig, UserEntity]),
         UsersModule,
-        ConfigModule
+        ConfigModule,
+        AlertsModule,
+        NotificationsModule
     ],
-    providers: [PaymentService, PaypalSubscriptionsService],
+    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService],
     controllers: [PaymentController, SubscriptionController],
-    exports: [PaypalSubscriptionsService],
+    exports: [SubscriptionService, PlanPermissionService, DebitoService],
 })
 export class PaymentModule { }

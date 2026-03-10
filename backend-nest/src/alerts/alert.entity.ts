@@ -8,7 +8,9 @@ export enum AlertType {
     PSYCHOLOGY = 'PSYCHOLOGY',
     PERFORMANCE = 'PERFORMANCE',
     DATA = 'DATA',
-    COACHING = 'COACHING'
+    COACHING = 'COACHING',
+    SYSTEM = 'SYSTEM',
+    MARKETING = 'MARKETING'
 }
 
 export enum AlertSeverity {

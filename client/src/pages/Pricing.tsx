@@ -31,33 +31,61 @@ export const Pricing = () => {
         }
     }, [token]);
 
+
+    const [pricingConfig, setPricingConfig] = useState<any>(null);
+
     useEffect(() => {
-        fetchPlans();
+        const fetchPricing = async () => {
+            try {
+                const { data } = await api.get('/payment/pricing-config');
+                setPricingConfig(data);
+            } catch (error) {
+                console.error("Failed to load pricing config", error);
+            }
+        };
+        fetchPricing();
     }, []);
 
-    const fetchPlans = async () => {
-        try {
-            const res = await api.get('/api/subscription/plans');
-            if (Array.isArray(res.data) && res.data.length > 0) {
-                setPlans(res.data);
-            } else {
-                // Fallback / Default if no plans synced yet
-                setPlans([
-                    { id: '1', tier: 'BASIC', monthlyPrice: 0, annualDiscountPercent: 0, trialEnabled: false, trialDays: 0 },
-                    { id: '2', tier: 'PRO', monthlyPrice: 49.90, annualDiscountPercent: 20, trialEnabled: true, trialDays: 7 }
-                ]);
-            }
-        } catch (err) {
-            console.error('Failed to fetch plans', err);
-            // Fallback
+    useEffect(() => {
+        if (pricingConfig) {
             setPlans([
-                { id: '1', tier: 'BASIC', monthlyPrice: 0, annualDiscountPercent: 0, trialEnabled: false, trialDays: 0 },
-                { id: '2', tier: 'PRO', monthlyPrice: 49.90, annualDiscountPercent: 20, trialEnabled: true, trialDays: 7 }
+                {
+                    id: '1',
+                    tier: 'BASIC',
+                    monthlyPrice: Number(pricingConfig.basicoPrice) || 0,
+                    annualDiscountPercent: 20,
+                    trialEnabled: false,
+                    trialDays: 0,
+                    features: [
+                        'Painel de Performance',
+                        'Diário (Apenas Calendário)',
+                        'Importação Manual (CSV)',
+                        'Acesso à Network (Apenas Leitura)',
+                        'Gestão Emocional',
+                        'Configuração Telegram'
+                    ]
+                },
+                {
+                    id: '2',
+                    tier: 'PRO',
+                    monthlyPrice: Number(pricingConfig.premiumPrice) || 0,
+                    annualDiscountPercent: 20,
+                    trialEnabled: true,
+                    trialDays: 7,
+                    features: [
+                        'Tudo do Plano Básico',
+                        'Auto-Sync (MT4, MT5, Deriv)',
+                        'Backtest Ilimitado',
+                        'Relatórios Avançados',
+                        'Calendário Econômico',
+                        'IA Torex Analyst Pro',
+                        'Interação na Network (Postar/Comentar)'
+                    ]
+                }
             ]);
-        } finally {
             setIsLoading(false);
         }
-    };
+    }, [pricingConfig]);
 
     const handleSubscribe = (plan: PlanConfig) => {
         if (!user) {
@@ -69,7 +97,8 @@ export const Pricing = () => {
         navigate('/checkout', {
             state: {
                 plan,
-                billingCycle
+                billingCycle,
+                pricingConfig
             }
         });
     };
@@ -124,10 +153,15 @@ export const Pricing = () => {
                             <div className="text-center mb-6">
                                 <h2 className="text-2xl font-bold text-emerald-400 mb-2">Básico</h2>
                                 <div className="flex items-baseline justify-center gap-1">
-                                    <span className="text-sm text-slate-400 align-top mt-2">R$</span>
+                                    <span className="text-sm text-slate-400 align-top mt-2">MT</span>
                                     <span className="text-5xl font-bold text-white">{getPrice(basicPlan).toFixed(2)}</span>
                                     <span className="text-sm text-slate-500 self-end mb-2">/mês</span>
                                 </div>
+                                {pricingConfig && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        ~ ${(getPrice(basicPlan) / pricingConfig.exchangeRate).toFixed(2)} USD
+                                    </p>
+                                )}
                                 <p className="text-sm text-slate-500 mt-2">Para quem está começando</p>
                             </div>
                             <p className="text-sm text-slate-500 mt-2">{basicPlan.description}</p>
@@ -160,12 +194,17 @@ export const Pricing = () => {
                                 RECOMENDADO
                             </div>
                             <div className="text-center mb-6">
-                                <h2 className="text-2xl font-bold text-indigo-400 mb-2">Profissional</h2>
+                                <h2 className="text-2xl font-bold text-indigo-400 mb-2">Premium</h2>
                                 <div className="flex items-baseline justify-center gap-1">
-                                    <span className="text-sm text-slate-400 align-top mt-2">R$</span>
+                                    <span className="text-sm text-slate-400 align-top mt-2">MT</span>
                                     <span className="text-5xl font-bold text-white">{getPrice(proPlan).toFixed(2)}</span>
                                     <span className="text-sm text-slate-500 self-end mb-2">/mês</span>
                                 </div>
+                                {pricingConfig && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        ~ ${(getPrice(proPlan) / pricingConfig.exchangeRate).toFixed(2)} USD
+                                    </p>
+                                )}
                                 {billingCycle === 'YEARLY' && (
                                     <p className="text-xs text-emerald-400 mt-2 font-bold">Economize 20% no plano anual</p>
                                 )}
@@ -186,7 +225,7 @@ export const Pricing = () => {
                                 className="w-full py-4 rounded-xl"
                                 onClick={() => handleSubscribe(proPlan)}
                             >
-                                Assinar Pro
+                                Assinar Premium
                             </Button>
                         </Card>
                     )}

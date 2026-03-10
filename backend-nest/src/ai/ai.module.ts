@@ -5,13 +5,15 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiInsightEntity } from './ai-insight.entity';
 import { AccountEntity } from '../account/account.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PaymentModule } from '../payment/payment.module';
 import { HttpModule } from '@nestjs/axios';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([AiInsightEntity, AccountEntity]),
         HttpModule,
-        NotificationsModule
+        NotificationsModule,
+        PaymentModule
     ],
     controllers: [AiController],
     providers: [AiService],

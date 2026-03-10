@@ -45,4 +45,13 @@ export class UserEntity {
 
     @Column({ type: 'jsonb', nullable: true, default: {} })
     notificationPreferences: Record<string, boolean>;
+
+    @Column({ nullable: true })
+    preferredMpesa: string;
+
+    @Column({ nullable: true })
+    preferredEmola: string;
+
+    @Column({ nullable: true })
+    lastPaymentMethod: string;
 }

@@ -2,13 +2,12 @@ import { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { RefreshCw, Edit, Check, Plus } from 'lucide-react';
+import { Edit, Check, Plus } from 'lucide-react';
 import api from '../../api';
 
 export const AdminPlans = () => {
     const [plans, setPlans] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [isSyncing, setIsSyncing] = useState(false);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -18,7 +17,7 @@ export const AdminPlans = () => {
         features: '', // comma separated string for input
         monthlyPrice: '',
         annualDiscountPercent: '20',
-        trialDays: '7'
+        trialDays: '0'
     });
     const [isCreating, setIsCreating] = useState(false);
 
@@ -37,20 +36,6 @@ export const AdminPlans = () => {
         }
     };
 
-    const handleSync = async () => {
-        setIsSyncing(true);
-        try {
-            await api.post('/subscription/plans'); // Or /api/admin/plans/sync
-            alert('Planos sincronizados com PayPal!');
-            fetchPlans();
-        } catch (error) {
-            console.error(error);
-            alert('Erro ao sincronizar.');
-        } finally {
-            setIsSyncing(false);
-        }
-    };
-
     const handleCreatePlan = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsCreating(true);
@@ -65,9 +50,9 @@ export const AdminPlans = () => {
                 trialDays: parseInt(newPlan.trialDays),
                 isActive: true
             });
-            alert('Plano criado com sucesso! Lembre-se de Sincronizar.');
+            alert('Plano criado com sucesso!');
             setIsModalOpen(false);
-            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '7' });
+            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0' });
             fetchPlans();
         } catch (error) {
             console.error(error);
@@ -83,14 +68,6 @@ export const AdminPlans = () => {
         <div>
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-3xl font-bold text-white">Planos de Assinatura</h1>
-                <Button
-                    variant="primary"
-                    onClick={handleSync}
-                    isLoading={isSyncing}
-                >
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Sincronizar com PayPal
-                </Button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -123,7 +100,7 @@ export const AdminPlans = () => {
 
                             <div className="flex justify-between text-sm pt-2 border-t border-slate-800">
                                 <span className="text-slate-400">Preço Mensal</span>
-                                <span className="text-white font-medium">R$ {plan.monthlyPrice}</span>
+                                <span className="text-white font-medium">MT {plan.monthlyPrice}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-400">Desconto Anual</span>
@@ -132,14 +109,6 @@ export const AdminPlans = () => {
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-400">Dias de Teste</span>
                                 <span className="text-white font-medium">{plan.trialDays} dias</span>
-                            </div>
-                            <div className="pt-2 border-t border-slate-800">
-                                <p className="text-xs text-slate-500 truncate" title={plan.paypalMonthlyPlanId}>
-                                    PayPal Monthly: {plan.paypalMonthlyPlanId || 'N/A'}
-                                </p>
-                                <p className="text-xs text-slate-500 truncate" title={plan.paypalYearlyPlanId}>
-                                    PayPal Yearly: {plan.paypalYearlyPlanId || 'N/A'}
-                                </p>
                             </div>
                         </div>
 
@@ -178,7 +147,7 @@ export const AdminPlans = () => {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Preço Mensal (R$)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Descrição</label>
                         <input
                             type="text"
                             value={newPlan.description}
@@ -197,13 +166,13 @@ export const AdminPlans = () => {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Preço Mensal (R$)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Preço Mensal (MT)</label>
                         <input
                             type="number"
                             value={newPlan.monthlyPrice}
                             onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })}
                             className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                            placeholder="49.90"
+                            placeholder="2000"
                             required
                         />
                     </div>
@@ -225,7 +194,7 @@ export const AdminPlans = () => {
                                 value={newPlan.trialDays}
                                 onChange={(e) => setNewPlan({ ...newPlan, trialDays: e.target.value })}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                                placeholder="7"
+                                placeholder="0"
                             />
                         </div>
                     </div>

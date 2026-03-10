@@ -43,8 +43,8 @@ export class Subscription {
     @Column()
     planConfigId: string;
 
-    @Column()
-    paypalSubscriptionId: string;
+    @Column({ nullable: true })
+    paymentReference: string;
 
     @Column({
         type: 'enum',

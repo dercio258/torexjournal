@@ -41,7 +41,7 @@ export const Privacy = () => {
                         <h2 className="text-xl font-bold text-slate-100 mb-3">3.4 Compartilhamento de Dados</h2>
                         <p className="mb-2">Não vendemos dados de usuários. O compartilhamento ocorre apenas com:</p>
                         <ul className="list-disc pl-5 space-y-1">
-                            <li>Processadores de pagamento (Stripe/PayPal) para faturamento.</li>
+                            <li>Processadores de pagamento (Debito.co.mz) para faturamento.</li>
                             <li>Serviços de infraestrutura em nuvem (AWS/Google Cloud).</li>
                             <li>Autoridades legais, quando exigido por ordem judicial.</li>
                         </ul>

@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReportParserService } from './report-parser.service';
 import { Mt5Service } from '../mt5/mt5.service';
 import { ImportMethod } from '../mt5/import-log.entity';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 @Controller('import')
 export class ImportController {
@@ -11,7 +12,8 @@ export class ImportController {
 
     constructor(
         private readonly reportParser: ReportParserService,
-        private readonly mt5Service: Mt5Service
+        private readonly mt5Service: Mt5Service,
+        private readonly planPermissionService: PlanPermissionService
     ) { }
 
     @Post('report')
@@ -27,8 +29,12 @@ export class ImportController {
 
         try {
             const content = file.buffer.toString('utf-8'); // Assuming text-based (HTML/CSV)
+            const userPlan = await this.planPermissionService.getUserPlan(userId);
 
             if (file.mimetype.includes('html') || file.originalname.endsWith('.html') || file.originalname.endsWith('.htm')) {
+                if (userPlan !== PlanTier.PREMIUM) {
+                    throw new BadRequestException('Importação via HTML restrita ao plano PREMIUM. Plano BÁSICO suporta apenas CSV.');
+                }
                 trades = this.reportParser.parseHtml(content);
             } else if (file.mimetype.includes('csv') || file.originalname.endsWith('.csv')) {
                 trades = this.reportParser.parseCsv(content);

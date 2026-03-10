@@ -4,8 +4,10 @@ import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiInsightEntity } from './ai-insight.entity';
-import { SYSTEM_PROMPT, buildUserPrompt } from './prompts';
+import { PREMIUM_SYSTEM_PROMPT, BASIC_SYSTEM_PROMPT, buildUserPrompt } from './prompts';
+import { PlanTier } from '../payment/plan-permission.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PlanPermissionService } from '../payment/plan-permission.service';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
@@ -17,7 +19,8 @@ export class AiService {
         private httpService: HttpService,
         @InjectRepository(AiInsightEntity)
         private aiInsightRepo: Repository<AiInsightEntity>,
-        private notificationsService: NotificationsService
+        private notificationsService: NotificationsService,
+        private planPermissionService: PlanPermissionService
     ) { }
 
     async generateInsights(accountId: string, userId: string, metrics: any, logId?: number) {
@@ -26,17 +29,19 @@ export class AiService {
         const port = this.configService.get<string>('LLAMA_SERVER_PORT') || '8080';
         const url = `http://${host}:${port}/v1/chat/completions`; // Standard llama-server OpenAI compatible endpoint
 
-        const userPrompt = buildUserPrompt(JSON.stringify(metrics, null, 2));
+        const userPlan = await this.planPermissionService.getUserPlan(userId);
+        const systemPrompt = userPlan === PlanTier.PREMIUM ? PREMIUM_SYSTEM_PROMPT : BASIC_SYSTEM_PROMPT;
+        const userPrompt = buildUserPrompt(JSON.stringify({ metrics, tier: userPlan }, null, 2));
 
         const body = {
-            model: "mistral", // Name may not strictly matter for single-model llama.cpp instances
+            model: "mistral",
             messages: [
-                { role: "system", content: SYSTEM_PROMPT },
+                { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ],
             temperature: 0.3,
-            n_predict: 600, // Limit generation
-            response_format: { type: "json_object" } // Force JSON output if the build supports it
+            n_predict: 600,
+            response_format: { type: "json_object" }
         };
 
         try {
@@ -72,10 +77,15 @@ export class AiService {
 
             // Send Notification if requested by the AI
             if (result.notify) {
+                const title = userPlan === PlanTier.PREMIUM ? '⚠️ Alerta de IA Torex' : 'ℹ️ Alerta do Sistema Torex';
+                const message = userPlan === PlanTier.PREMIUM
+                    ? `O assistente identificou avisos de alto risco: ${result.headline}`
+                    : `Novo resumo de performance disponível: ${result.headline}`;
+
                 this.notificationsService.create(userId, {
-                    title: '⚠️ Alerta do Assistente de IA',
-                    message: `O assistente identificou avisos de alto risco: ${result.headline}`,
-                    type: 'WARNING' as any
+                    title,
+                    message,
+                    type: (result.notify === true ? 'WARNING' : 'INFO') as any
                 }).catch(e => this.logger.warn(`Failed to notify AI alert: ${e.message}`));
             }
 
