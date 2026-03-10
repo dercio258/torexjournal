@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { User, Send, Image as ImageIcon, Video, X, Smile } from 'lucide-react';
-// @ts-expect-error - emoji-picker-react might have resolution issues in some environments
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { useAuth } from '../../context/AuthContext';
 import { PostCard } from './PostCard';
