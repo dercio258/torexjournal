@@ -96,7 +96,7 @@ export class SubscriptionService implements OnModuleInit {
             this.configService.get<number>('PLANO_BASICO_PRICE') :
             this.configService.get<number>('PLANO_PREMIUN_PRICE');
 
-        const monthlyPrice = envPrice || config.monthlyPrice;
+        const monthlyPrice = Number(envPrice || config.monthlyPrice);
         const total = cycle === SubscriptionCycle.MONTHLY ? monthlyPrice : (monthlyPrice * 12 * (1 - config.annualDiscountPercent / 100));
         return Number(total.toFixed(2));
     }
