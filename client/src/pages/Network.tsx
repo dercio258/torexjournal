@@ -48,7 +48,6 @@ export const Network = () => {
     const [posts, setPosts] = useState<Post[]>([]);
     const [trending, setTrending] = useState<Post[]>([]);
     const [suggestions, setSuggestions] = useState<SuggestedUser[]>([]);
-    const [newPostContent, setNewPostContent] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -134,13 +133,16 @@ export const Network = () => {
         }
     };
 
-    const handleCreatePost = async () => {
-        if (!newPostContent.trim()) return;
+    const handleCreatePost = async (content: string, options?: { imageUrl?: string, type?: string }) => {
+        if (!content.trim() && !options?.imageUrl) return;
         try {
-            await api.post('/network/post', { content: newPostContent });
+            await api.post('/network/post', {
+                content,
+                imageUrl: options?.imageUrl,
+                type: options?.type || 'text'
+            });
             // Socket will handle update, but good for optimistic UI or fallback
             // setPosts([res.data, ...posts]); 
-            setNewPostContent('');
         } catch (e) {
             console.error(e);
         }

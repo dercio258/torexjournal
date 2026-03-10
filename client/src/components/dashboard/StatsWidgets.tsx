@@ -1,4 +1,5 @@
 import React from 'react';
+import { ShieldCheck, ShieldAlert, ShieldInfo } from 'lucide-react';
 
 
 // --- Gauge de Proporção Profit vs Loss ---
@@ -104,3 +105,73 @@ export const StatsContainer = ({ children }: { children: React.ReactNode }) => (
         {children}
     </div>
 );
+
+export const TraderHealthWidget = ({ score = 100, details = {} as any }) => {
+    const getScoreColor = (s: number) => {
+        if (s >= 80) return 'text-emerald-500';
+        if (s >= 50) return 'text-amber-500';
+        return 'text-rose-500';
+    };
+
+    const getScoreBg = (s: number) => {
+        if (s >= 80) return 'bg-emerald-500/10 border-emerald-500/20';
+        if (s >= 50) return 'bg-amber-500/10 border-amber-500/20';
+        return 'bg-rose-500/10 border-rose-500/20';
+    };
+
+    const titles = {
+        high: "Excelente Disciplina",
+        med: "Atenção Necessária",
+        low: "Risco Elevado"
+    };
+
+    const title = score >= 80 ? titles.high : score >= 50 ? titles.med : titles.low;
+
+    return (
+        <div className="flex flex-col gap-4 py-2 relative group mt-4">
+            <div className={`p-4 rounded-xl border flex flex-col gap-3 transition-all duration-500 ${getScoreBg(score)}`}>
+                <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        {score >= 80 ? <ShieldCheck size={18} className="text-emerald-500" /> : <ShieldAlert size={18} className={getScoreColor(score)} />}
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-100">{title}</span>
+                    </div>
+                    <span className={`text-2xl font-black font-mono tracking-tighter ${getScoreColor(score)}`}>{score}</span>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                        <span>Status de Saúde</span>
+                        <span>{score}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-900/50 rounded-full overflow-hidden">
+                        <div
+                            className={`h-full transition-all duration-1000 ease-out ${score >= 80 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : score >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                            style={{ width: `${score}%` }}
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                    <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
+                        <span className="block text-[8px] text-slate-500 uppercase font-black tracking-tighter">Alertas Ativos</span>
+                        <span className="text-xs font-bold text-white">{details.totalAlerts || 0}</span>
+                    </div>
+                    <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800/50">
+                        <span className="block text-[8px] text-slate-500 uppercase font-black tracking-tighter">Severidade</span>
+                        <span className={`text-xs font-bold ${details.penalties?.critical > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                            {details.penalties?.critical > 0 ? 'Crítica' : 'Estável'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <button
+                onClick={() => window.location.href = '/notifications?filter=alerts'}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-[10px] font-bold uppercase tracking-widest rounded-xl border border-slate-800 transition-all flex items-center justify-center gap-2"
+            >
+                Ver Alertas Detalhados
+            </button>
+        </div>
+    );
+};
+

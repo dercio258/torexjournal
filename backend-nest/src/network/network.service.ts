@@ -84,7 +84,7 @@ export class NetworkService {
             createdAt: msg.createdAt,
             user: {
                 id: user.id,
-                username: user.username,
+                username: user.username || user.name || 'Desconhecido',
                 avatarUrl: user.avatarUrl
             }
         };
@@ -97,6 +97,10 @@ export class NetworkService {
         const skip = (safePage - 1) * take;
 
         const [posts, total] = await this.postRepo.findAndCount({
+            where: [
+                { visibility: 'public' },
+                { userId } // User can always see their own posts
+            ],
             order: { createdAt: 'DESC' },
             take,
             skip,
@@ -112,7 +116,7 @@ export class NetworkService {
                 isLiked: !!isLiked,
                 user: {
                     id: p.user?.id || 'deleted',
-                    username: p.user?.username || 'Deleted User',
+                    username: p.user?.username || p.user?.name || 'Desconhecido',
                     avatarUrl: p.user?.avatarUrl
                 }
             };
@@ -124,7 +128,7 @@ export class NetworkService {
         };
     }
 
-    async createPost(userId: string, content: string, type: string = 'text', tradeData?: any) {
+    async createPost(userId: string, content: string, type: string = 'text', tradeData?: any, visibility: string = 'public', imageUrl?: string) {
         const user = await this.userRepo.findOne({ where: { id: userId } });
         if (!user) throw new Error('User not found');
 
@@ -133,7 +137,9 @@ export class NetworkService {
             userId,
             content,
             type,
-            tradeData
+            tradeData,
+            visibility,
+            imageUrl
         });
 
         const savedPost = await this.postRepo.save(post);
@@ -146,7 +152,7 @@ export class NetworkService {
 
         this.networkGateway.broadcastNewPost({
             ...fullPost,
-            user: { username: user.username, avatarUrl: user.avatarUrl },
+            user: { username: user.username || user.name || 'Desconhecido', avatarUrl: user.avatarUrl },
             isLiked: false
         });
 
@@ -200,13 +206,13 @@ export class NetworkService {
             commentsCount: post.commentsCount,
             comment: {
                 ...savedComment,
-                user: { username: user.username, avatarUrl: user.avatarUrl }
+                user: { username: user.username || user.name || 'Desconhecido', avatarUrl: user.avatarUrl }
             }
         });
 
         return {
             ...savedComment,
-            user: { username: user.username, avatarUrl: user.avatarUrl }
+            user: { username: user.username || user.name || 'Desconhecido', avatarUrl: user.avatarUrl }
         };
     }
 
@@ -280,8 +286,13 @@ export class NetworkService {
     }
 
     async getUserPosts(userId: string, currentUserId: string) {
+        // Build query condition
+        const whereCondition = userId === currentUserId
+            ? { userId } // Own profile, see everything
+            : { userId, visibility: 'public' }; // Other profile, see only public
+
         const posts = await this.postRepo.find({
-            where: { userId },
+            where: whereCondition,
             order: { createdAt: 'DESC' },
             relations: ['user', 'comments']
         });
@@ -293,7 +304,7 @@ export class NetworkService {
                 isLiked: !!isLiked,
                 user: {
                     id: p.user?.id || 'deleted',
-                    username: p.user?.username || 'Deleted User',
+                    username: p.user?.username || p.user?.name || 'Desconhecido',
                     avatarUrl: p.user?.avatarUrl
                 }
             };

@@ -18,12 +18,18 @@ interface TechnicalJournal {
     strategyUsed: string;
     mistakes: string;
     lessons: string;
+    rulesBroken: string;
+    actionPlan: string;
     rating: number;
-    notes: string;
+    notes?: string;
     entryPrecision: string;
     riskManagement: string;
     tradeExit: string;
     emotionalState: string;
+    setupQuality: string;
+    executionSpeed: string;
+    marketContext: string;
+    preMarketPrep: string;
 }
 
 export const Journal = () => {
@@ -45,12 +51,18 @@ export const Journal = () => {
         strategyUsed: '',
         mistakes: '',
         lessons: '',
+        rulesBroken: '',
+        actionPlan: '',
         rating: 0,
         notes: '',
         entryPrecision: '',
         riskManagement: '',
         tradeExit: '',
-        emotionalState: ''
+        emotionalState: '',
+        setupQuality: '',
+        executionSpeed: '',
+        marketContext: '',
+        preMarketPrep: ''
     });
     const [savingJournal, setSavingJournal] = useState(false);
 
@@ -105,18 +117,24 @@ export const Journal = () => {
                         strategyUsed: data.strategyUsed || '',
                         mistakes: data.mistakes || '',
                         lessons: data.lessons || '',
+                        rulesBroken: data.rulesBroken || '',
+                        actionPlan: data.actionPlan || '',
                         rating: data.rating || 0,
                         notes: data.notes || '',
                         entryPrecision: data.entryPrecision || '',
                         riskManagement: data.riskManagement || '',
                         tradeExit: data.tradeExit || '',
-                        emotionalState: data.emotionalState || ''
+                        emotionalState: data.emotionalState || '',
+                        setupQuality: data.setupQuality || '',
+                        executionSpeed: data.executionSpeed || '',
+                        marketContext: data.marketContext || '',
+                        preMarketPrep: data.preMarketPrep || ''
                     });
                 } else {
                     setTechForm({
-                        marketTrend: '', vol: '', session: '', strategyUsed: '', mistakes: '', lessons: '', rating: 0, notes: '',
-                        entryPrecision: '', riskManagement: '', tradeExit: '', emotionalState: ''
-                    } as any);
+                        marketTrend: '', volatility: '', session: '', strategyUsed: '', mistakes: '', lessons: '', rulesBroken: '', actionPlan: '', rating: 0, notes: '',
+                        entryPrecision: '', riskManagement: '', tradeExit: '', emotionalState: '', setupQuality: '', executionSpeed: '', marketContext: '', preMarketPrep: ''
+                    });
                 }
             }
         } catch (error) {
@@ -206,7 +224,7 @@ export const Journal = () => {
                     </div>
                     <div className="flex-1 overflow-hidden rounded-xl border border-slate-700">
                         <JournalEditor
-                            value={techForm.notes}
+                            value={techForm.notes || ''}
                             onEditorChange={(content) => setTechForm({ ...techForm, notes: content })}
                             placeholder="Escreva livremente sobre o dia aqui..."
                             height={600} // Taller height for focus mode
@@ -216,11 +234,13 @@ export const Journal = () => {
             ) : (
                 <div className="flex flex-col gap-6">
 
-                    {/* Top Row: Calendar & Trade List Inline */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Top Row: Calendar Full Width */}
+                    <div className="grid grid-cols-1 gap-6 items-stretch">
 
                         {/* Calendar Widget */}
-                        <div>
+                        <div className="relative">
+                            {/* Subtle Glow Behind Calendar */}
+                            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-3xl blur-xl -z-10"></div>
                             <CalendarWidget
                                 currentDate={currentDate}
                                 selectedDate={selectedDate}
@@ -231,22 +251,20 @@ export const Journal = () => {
                         </div>
 
                         {/* Trade List for Selected Day */}
-                        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 flex flex-col shadow-xl min-h-[400px]">
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                                    <Clock className="text-emerald-400" size={16} />
-                                    {selectedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                                </h2>
-                                <span className="text-xs font-mono text-slate-500 bg-slate-800/50 px-2 py-1 rounded">
-                                    {filteredTrades.length} Trades
-                                </span>
-                            </div>
+                        {filteredTrades.length > 0 && (
+                            <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 flex flex-col shadow-xl min-h-[450px]">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                                        <Clock className="text-emerald-400" size={16} />
+                                        {selectedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                    </h2>
+                                    <span className="text-xs font-mono text-slate-500 bg-slate-800/50 px-2 py-1 rounded">
+                                        {filteredTrades.length} Trades
+                                    </span>
+                                </div>
 
-                            <div className="flex-1 overflow-auto custom-scrollbar space-y-2">
-                                {filteredTrades.length === 0 ? (
-                                    <div className="text-center text-slate-500 text-xs py-10">Sem trades hoje.</div>
-                                ) : (
-                                    filteredTrades.map(t => (
+                                <div className="flex-1 overflow-auto custom-scrollbar space-y-2 pr-2">
+                                    {filteredTrades.map(t => (
                                         <div
                                             key={t.ticket}
                                             onClick={() => setSelectedTrade(t)}
@@ -264,10 +282,10 @@ export const Journal = () => {
                                                 <span>{new Date(t.close_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                             </div>
                                         </div>
-                                    ))
-                                )}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
 
                     {/* Bottom Row: Technical Journal Form */}
@@ -363,10 +381,9 @@ export const Journal = () => {
                                 </div>
                             </div>
 
-                            {/* Text Areas (Full Width) */}
-                            {/* Fundamental Questions Section */}
-                            <div className="space-y-6">
-                                <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700">
+                            {/* Text Areas and Objective Evaluation - Side by Side */}
+                            <div className="col-span-1 md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700 h-fit">
                                     <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-6 flex items-center gap-2">
                                         <BookOpen size={14} /> Avaliação Objetiva
                                     </h4>
@@ -375,12 +392,12 @@ export const Journal = () => {
                                         {/* Q1: Entry */}
                                         <div>
                                             <p className="text-sm text-slate-300 mb-2 font-medium">1. Precisão na Entrada</p>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                                {['Perfeita (No Setup)', 'Antecipada (Ansiedade)', 'Tardia (Hesitação)', 'Impulso (Sem Setup)'].map(opt => (
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['Perfeita (No Setup)', 'Antecipada', 'Tardia', 'Impulso'].map(opt => (
                                                     <button
                                                         key={opt}
                                                         onClick={() => setTechForm({ ...techForm, entryPrecision: opt })}
-                                                        className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${techForm.entryPrecision === opt
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.entryPrecision === opt
                                                             ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
                                                             : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                                                     >
@@ -393,12 +410,12 @@ export const Journal = () => {
                                         {/* Q2: Risk */}
                                         <div>
                                             <p className="text-sm text-slate-300 mb-2 font-medium">2. Gestão de Risco</p>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                                {['Segui o Plano', 'Lote Excessivo', 'Movi o Stop', 'Sem Stop'].map(opt => (
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['Segui o Plano', 'Lote Alto', 'Movi Stop', 'Sem Stop'].map(opt => (
                                                     <button
                                                         key={opt}
                                                         onClick={() => setTechForm({ ...techForm, riskManagement: opt })}
-                                                        className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${techForm.riskManagement === opt
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.riskManagement === opt
                                                             ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
                                                             : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                                                     >
@@ -411,12 +428,12 @@ export const Journal = () => {
                                         {/* Q3: Exit */}
                                         <div>
                                             <p className="text-sm text-slate-300 mb-2 font-medium">3. Execução da Saída</p>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                                {['No Alvo (TP)', 'Stop Técnico', 'Saída Antecipada (Medo)', 'Segurei Demais (Ganância)'].map(opt => (
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['No Alvo', 'Stop Técnico', 'Saída Medo', 'Ganância'].map(opt => (
                                                     <button
                                                         key={opt}
                                                         onClick={() => setTechForm({ ...techForm, tradeExit: opt })}
-                                                        className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${techForm.tradeExit === opt
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.tradeExit === opt
                                                             ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
                                                             : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                                                     >
@@ -429,12 +446,84 @@ export const Journal = () => {
                                         {/* Q4: Mood */}
                                         <div>
                                             <p className="text-sm text-slate-300 mb-2 font-medium">4. Estado Emocional</p>
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                                {['Focado / Calmo', 'Ansioso / Impaciente', 'Irritado / Vingativo', 'Excesso de Confiança'].map(opt => (
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['Focado', 'Ansioso', 'Irritado', 'Super Confiança'].map(opt => (
                                                     <button
                                                         key={opt}
                                                         onClick={() => setTechForm({ ...techForm, emotionalState: opt })}
-                                                        className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${techForm.emotionalState === opt
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.emotionalState === opt
+                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Q5: Setup Quality */}
+                                        <div>
+                                            <p className="text-sm text-slate-300 mb-2 font-medium">5. Qualidade do Setup</p>
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['A+ (Perfeito)', 'A (Bom)', 'B (Médio)', 'C (Forçado)'].map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setTechForm({ ...techForm, setupQuality: opt })}
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.setupQuality === opt
+                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Q6: Execution Speed */}
+                                        <div>
+                                            <p className="text-sm text-slate-300 mb-2 font-medium">6. Velocidade de Execução</p>
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['Imediata', 'Um pouco Atrasada', 'Hesitei muito', 'Precipitado'].map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setTechForm({ ...techForm, executionSpeed: opt })}
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.executionSpeed === opt
+                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Q7: Market Context */}
+                                        <div>
+                                            <p className="text-sm text-slate-300 mb-2 font-medium">7. Contexto de Mercado</p>
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['A Favor da Tendência', 'Contra-Tendência', 'Lateral / Consolidação', 'Notícias / Volátil'].map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setTechForm({ ...techForm, marketContext: opt })}
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.marketContext === opt
+                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Q8: Pre-Market Prep */}
+                                        <div>
+                                            <p className="text-sm text-slate-300 mb-2 font-medium">8. Preparação Pré-Mercado</p>
+                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                                {['Excelente (Plano Claro)', 'Razoável (Revisão Rápida)', 'Fraca (Sem Plano)', 'Nenhuma (Impulso)'].map(opt => (
+                                                    <button
+                                                        key={opt}
+                                                        onClick={() => setTechForm({ ...techForm, preMarketPrep: opt })}
+                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.preMarketPrep === opt
                                                             ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
                                                             : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
                                                     >
@@ -454,8 +543,19 @@ export const Journal = () => {
                                         <JournalEditor
                                             value={techForm.mistakes}
                                             onEditorChange={(content) => setTechForm({ ...techForm, mistakes: content })}
-                                            placeholder="Responda com base nas perguntas acima: Onde você deviou do plano?"
-                                            height={200}
+                                            placeholder="Onde você desviou do plano?"
+                                            height={160}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-rose-500">
+                                            Regras Quebradas
+                                        </label>
+                                        <JournalEditor
+                                            value={techForm.rulesBroken}
+                                            onEditorChange={(content) => setTechForm({ ...techForm, rulesBroken: content })}
+                                            placeholder="Quais regras você desrespeitou hoje e por quê?"
+                                            height={160}
                                         />
                                     </div>
                                     <div>
@@ -466,7 +566,18 @@ export const Journal = () => {
                                             value={techForm.lessons}
                                             onEditorChange={(content) => setTechForm({ ...techForm, lessons: content })}
                                             placeholder="O que você fez bem e deve repetir amanhã?"
-                                            height={200}
+                                            height={160}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-indigo-400">
+                                            Plano de Ação (Próximo Dia)
+                                        </label>
+                                        <JournalEditor
+                                            value={techForm.actionPlan}
+                                            onEditorChange={(content) => setTechForm({ ...techForm, actionPlan: content })}
+                                            placeholder="Qual o foco principal para correção de erros amanhã?"
+                                            height={160}
                                         />
                                     </div>
                                 </div>

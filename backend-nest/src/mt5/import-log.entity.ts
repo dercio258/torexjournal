@@ -4,7 +4,9 @@ import { UserEntity } from '../users/user.entity';
 export enum ImportMethod {
     EA = 'EA',
     FILE = 'FILE',
-    AUTO_SYNC = 'AUTO_SYNC'
+    AUTO_SYNC = 'AUTO_SYNC',
+    MANUAL = 'MANUAL',
+    DERIV = 'DERIV'
 }
 
 export enum ImportStatus {

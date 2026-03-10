@@ -83,7 +83,8 @@ export class OandaService {
             this.logger.error(`Failed to fetch candles from OANDA for ${oandaSymbol}: ${axiosError.message}`, axiosError.response?.data);
 
             if (axiosError.response?.status === 401) {
-                throw new HttpException('OANDA API Unauthorized. Check API Key.', HttpStatus.UNAUTHORIZED);
+                // Return 502 Bad Gateway so the frontend doesn't confuse this with a JWT 401 and log the user out
+                throw new HttpException('OANDA API Unauthorized. Check API Key.', HttpStatus.BAD_GATEWAY);
             }
             if (axiosError.response?.status === 400) {
                 throw new HttpException(`OANDA API Bad Request: ${JSON.stringify(axiosError.response.data)}`, HttpStatus.BAD_REQUEST);

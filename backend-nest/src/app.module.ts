@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -23,9 +24,13 @@ import { TradingViewModule } from './tradingview/tradingview.module';
 import { FinnhubModule } from './finnhub/finnhub.module';
 import { MarketDataModule } from './market-data/market-data.module';
 import { DerivModule } from './deriv/deriv.module';
+import { AiModule } from './ai/ai.module';
+
+import { AlertsModule } from './alerts/alerts.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
 
     ConfigModule.forRoot({
       isGlobal: true,
@@ -97,6 +102,8 @@ import { DerivModule } from './deriv/deriv.module';
     TradingViewModule,
     MarketDataModule,
     DerivModule,
+    AiModule,
+    AlertsModule,
   ],
 
   controllers: [],

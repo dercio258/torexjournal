@@ -60,17 +60,20 @@ E então inicie: `pm2 start ecosystem.config.js --env production`
 3. **Salvar o processo para iniciar com o servidor (Startup script):**
 ```bash
 pm2 startup
-# (Execute o comando que o pm2 imprimir no terminal, começará com "sudo env PATH...")
+# (Execute a instrução gerada por esse comando que começa com "sudo env PATH...")
 pm2 save
 ```
+
+> **Dica sobre a porta (PORT)**: O PM2 (e o NestJS) leem automaticamente o arquivo `.env` na pasta `backend-nest`. Então se você tiver `PORT=3000` no seu `.env`, o NodeJS rodará na porta correta automaticamente. O campo `env_production` do pm2 config apenas garante ou subscreve variáveis padrão.
 
 ---
 
 ## 3. Configurar o NGINX
 
 O Nginx vai servir dois papéis essenciais:
-1. **Servidor de Ficheiros Estáticos:** Servir o Frontend (`client/dist`).
-2. **Reverse Proxy & WebSockets:** Redirecionar as chamadas à API (`/api`) e o tráfego do WebSocket (`socket.io` do NestJS e Gateways MT5) para o backend rodando na porta `3000` (ou a porta configurada no seu `.env`).
+2. **Reverse Proxy & WebSockets:** Redirecionar as chamadas à API (`/api`) e o tráfego do WebSocket (`socket.io` do NestJS e Gateways MT5) para o backend que está rodando internamente.
+
+> **Atenção à Porta do NGINX vs `.env`:** O Nginx *NÃO* lê arquivos `.env`. Por isso, nas linhas abaixo preste atenção onde está escrito `proxy_pass http://localhost:3000`. Se no seu `.env` o seu backend carrega na `PORT=8080`, você **deve vir aqui no arquivo do Nginx** e trocar todos os `localhost:3000` para `localhost:8080` manualmente.
 
 **Aviso:** Substitua `SEU_DOMINIO.com` pelo seu domínio real e `/caminho/absoluto/do/projeto/` pelo local real do seu projeto no Linux (ex: `/var/www/trading-cossa/`).
 

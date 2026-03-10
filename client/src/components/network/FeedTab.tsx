@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { User, Send } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { User, Send, Image as ImageIcon, Video, X, Smile } from 'lucide-react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { useAuth } from '../../context/AuthContext';
 import { PostCard } from './PostCard';
+import api from '../../api';
 
 interface SuggestedUser {
     id: string;
@@ -15,7 +17,7 @@ interface FeedTabProps {
     loading: boolean;
     error: string | null;
     suggestions: SuggestedUser[];
-    handleCreatePost: (content: string) => Promise<void>;
+    handleCreatePost: (content: string, options?: { imageUrl?: string, type?: string }) => Promise<void>;
     handleLike: (postId: number) => Promise<void>;
 }
 
@@ -29,11 +31,74 @@ export const FeedTab = ({
 }: FeedTabProps) => {
     const { user } = useAuth();
     const [newPostContent, setNewPostContent] = useState('');
+    const [mediaFile, setMediaFile] = useState<File | null>(null);
+    const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+    const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
+    const [isPosting, setIsPosting] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const emojiPickerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+                setShowEmojiPicker(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const onEmojiClick = (emojiObject: any) => {
+        setNewPostContent(prev => prev + emojiObject.emoji);
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const isVideo = file.type.startsWith('video/');
+        setMediaType(isVideo ? 'video' : 'image');
+        setMediaFile(file);
+
+        const previewUrl = URL.createObjectURL(file);
+        setMediaPreview(previewUrl);
+    };
+
+    const removeMedia = () => {
+        setMediaFile(null);
+        setMediaPreview(null);
+        setMediaType(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
 
     const onSubmit = async () => {
-        if (!newPostContent.trim()) return;
-        await handleCreatePost(newPostContent);
-        setNewPostContent('');
+        if (!newPostContent.trim() && !mediaFile) return;
+        setIsPosting(true);
+
+        try {
+            let uploadedImageUrl = undefined;
+            if (mediaFile) {
+                const formData = new FormData();
+                formData.append('file', mediaFile);
+                const uploadRes = await api.post('/network/upload', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                uploadedImageUrl = uploadRes.data.imageUrl;
+            }
+
+            await handleCreatePost(newPostContent, {
+                imageUrl: uploadedImageUrl,
+                type: mediaType || 'text'
+            });
+
+            setNewPostContent('');
+            removeMedia();
+        } catch (e) {
+            console.error("Failed to post:", e);
+        } finally {
+            setIsPosting(false);
+        }
     };
 
     return (
@@ -52,16 +117,50 @@ export const FeedTab = ({
                             placeholder="Compartilhe um trade, uma ideia ou uma dúvida..."
                             className="w-full bg-slate-950/30 border border-slate-800 rounded-xl p-3 text-slate-300 focus:outline-none focus:border-indigo-500/50 min-h-[80px] resize-none transition-colors"
                         />
+                        {mediaPreview && (
+                            <div className="relative mt-3 inline-block">
+                                {mediaType === 'video' ? (
+                                    <video src={mediaPreview} className="max-h-48 rounded-lg border border-slate-700" controls />
+                                ) : (
+                                    <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg border border-slate-700 object-contain" />
+                                )}
+                                <button onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-800 hover:bg-rose-500 text-white p-1 rounded-full transition-colors shadow-lg">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        )}
                         <div className="flex justify-between items-center mt-3">
-                            <div className="flex gap-2 text-slate-500">
-                                {/* Attachments buttons could go here */}
+                            <div className="flex gap-2 text-slate-500 relative">
+                                <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-800 hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Foto/Vídeo">
+                                    <ImageIcon size={18} /> <Video size={18} />
+                                </button>
+                                <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-slate-800 hover:text-yellow-500 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Emoji">
+                                    <Smile size={18} />
+                                </button>
+
+                                {showEmojiPicker && (
+                                    <div ref={emojiPickerRef} className="absolute top-12 left-0 z-50 shadow-2xl">
+                                        <EmojiPicker
+                                            onEmojiClick={onEmojiClick}
+                                            theme={Theme.DARK}
+                                            lazyLoadEmojis={true}
+                                        />
+                                    </div>
+                                )}
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    className="hidden"
+                                    accept="image/*,video/*"
+                                    onChange={handleFileSelect}
+                                />
                             </div>
                             <button
                                 onClick={onSubmit}
-                                disabled={!newPostContent.trim()}
+                                disabled={(!newPostContent.trim() && !mediaFile) || isPosting}
                                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
                             >
-                                <Send size={16} /> Publicar
+                                {isPosting ? <span className="animate-pulse">Publicando...</span> : <><Send size={16} /> Publicar</>}
                             </button>
                         </div>
                     </div>

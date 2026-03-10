@@ -17,7 +17,7 @@ import {
 } from 'chart.js';
 import { PerformanceRadar } from '../components/dashboard/charts/PerformanceRadar';
 import { DailyPnLChart } from '../components/dashboard/charts/DailyPnLChart';
-import { WinrateGauge, InstrumentRow, SessionRow } from '../components/dashboard/StatsWidgets';
+import { WinrateGauge, InstrumentRow, SessionRow, TraderHealthWidget } from '../components/dashboard/StatsWidgets';
 import api from '../api';
 
 // Register ChartJS
@@ -42,6 +42,7 @@ interface DashboardStats {
     };
     dailyPnL: { date: string; value: number }[]; // Mapped from backend {date, pnl}
     distribution: { wins: number; losses: number; breakeven: number }; // We might need to calc this or get from backend
+    healthScore?: { score: number; details: any };
 }
 
 
@@ -177,7 +178,10 @@ export const Dashboard = () => {
         try {
             // Fetch Performance with Filters
             const params = { startDate: start, endDate: end };
-            const perfRes = await api.get('/performance', { params });
+            const [perfRes, scoreRes] = await Promise.all([
+                api.get('/performance', { params }),
+                api.get('/alerts/score')
+            ]);
 
             if (perfRes.data) {
                 // Map backend response to our state structure
@@ -203,7 +207,8 @@ export const Dashboard = () => {
                         value: Number(t.value) || 0,
                         ticket: t.ticket
                     })).reverse() : mappedDaily, // Use trade PnL if available, otherwise daily
-                    distribution: { wins, losses, breakeven: 0 }
+                    distribution: { wins, losses, breakeven: 0 },
+                    healthScore: scoreRes.data
                 });
 
                 // Update sessions from performance data
@@ -427,7 +432,7 @@ export const Dashboard = () => {
                     Detalhamento Operacional
                 </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     {/* Winrate Gauge Card */}
                     <div className="bg-[#0b0e14] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-0 right-0 p-4 opacity-10">
@@ -465,12 +470,21 @@ export const Dashboard = () => {
                             ))}
                         </div>
                     </div>
+
+                    {/* Trader Health Card (New) */}
+                    <div className="bg-[#0b0e14] border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-center">
+                        <div className="absolute top-0 right-0 p-3 opacity-10">
+                            <Activity size={80} className="text-blue-500" />
+                        </div>
+                        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-1 relative z-10 text-center">Saúde & Disciplina</h3>
+                        <TraderHealthWidget
+                            score={stats.healthScore?.score}
+                            details={stats.healthScore?.details}
+                        />
+                    </div>
                 </div>
             </div>
-
-
-
-        </div >
+        </div>
     );
 };
 

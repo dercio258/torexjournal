@@ -7,12 +7,16 @@ import { NotificationEntity } from './notification.entity';
 import { AccountEntity } from '../account/account.entity';
 import { TelegrafModule } from 'nestjs-telegraf';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TelegramService } from './telegram.service';
+import { EmailService } from './email.service';
+import { NotificationsCronService } from './notifications.cron';
+import { TradeEntity } from '../mt5/trade.entity';
+import { TechnicalJournal } from '../dashboard/technical-journal.entity';
 import { UserEntity } from '../users/user.entity';
+import { TelegramService } from './telegram.service';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([NotificationEntity, AccountEntity, UserEntity]), // Added UserEntity
+        TypeOrmModule.forFeature([NotificationEntity, AccountEntity, UserEntity, TradeEntity, TechnicalJournal]), // Added UserEntity, TradeEntity, TechnicalJournal
         TelegrafModule.forRootAsync({
             imports: [ConfigModule],
             useFactory: (configService: ConfigService) => ({
@@ -23,7 +27,7 @@ import { UserEntity } from '../users/user.entity';
         }),
     ],
     controllers: [NotificationsController],
-    providers: [NotificationsService, TelegramService],
-    exports: [NotificationsService, TelegramService]
+    providers: [NotificationsService, TelegramService, EmailService, NotificationsCronService],
+    exports: [NotificationsService, TelegramService, EmailService]
 })
 export class NotificationsModule { }

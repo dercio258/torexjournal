@@ -6,6 +6,7 @@ import { NotificationEntity, NotificationType } from './notification.entity';
 import { AccountEntity } from '../account/account.entity';
 import { UserEntity } from '../users/user.entity';
 import { TelegramService } from './telegram.service';
+import { EmailService } from './email.service';
 
 @Injectable()
 export class NotificationsService {
@@ -17,6 +18,7 @@ export class NotificationsService {
         @InjectRepository(UserEntity)
         private userRepo: Repository<UserEntity>,
         private telegramService: TelegramService,
+        private emailService: EmailService,
     ) { }
 
     async findAll(userId: string) {
@@ -42,11 +44,34 @@ export class NotificationsService {
 
         // Send to Telegram if user has it enabled and linked
         const user = await this.userRepo.findOne({ where: { id: userId } });
-        // Check if user exists and has telegramChatId, and if a hypothetical global 'telegramEnabled' pref exists
-        // For now, checks if telegramChatId is present.
-        // We can also check notificationPreferences if implemented.
-        if (user && user.telegramChatId) {
-            await this.telegramService.sendNotification(userId, `[${saved.type}] ${saved.title}\n${saved.message}`);
+
+        if (user) {
+            // Check preferences (Assuming true if undefined for these major alerts)
+            const prefs = user.notificationPreferences || {};
+            const isAlertEnabled = prefs[saved.type] !== false;
+
+            if (isAlertEnabled) {
+                // Telegram Dispatch
+                if (user.telegramChatId) {
+                    await this.telegramService.sendNotification(userId, `[${saved.type}] ${saved.title}\n${saved.message}`);
+                }
+
+                // Email Dispatch
+                if (user.email) {
+                    await this.emailService.sendEmail(
+                        user.email,
+                        `Torex Notice: ${saved.title}`,
+                        saved.message,
+                        `<div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f5; color: #18181b;">
+                            <h2 style="color: #10b981;">Torex Journal</h2>
+                            <h3>${saved.title}</h3>
+                            <p style="font-size: 16px;">${saved.message}</p>
+                            <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 20px 0;" />
+                            <p style="font-size: 12px; color: #71717a;">Log in to your dashboard to review this alert.</p>
+                        </div>`
+                    );
+                }
+            }
         }
 
         return saved;
@@ -60,6 +85,15 @@ export class NotificationsService {
 
         notification.isRead = true;
         return this.notificationRepo.save(notification);
+    }
+
+    async remove(id: string, userId: string) {
+        const account = await this.getAccount(userId);
+        const notification = await this.notificationRepo.findOne({ where: { id, accountId: account.id } });
+
+        if (!notification) throw new NotFoundException('Notification not found');
+
+        return this.notificationRepo.remove(notification);
     }
 
     async updateSettings(userId: string, settings: { telegramChatId?: string; notificationsEnabled?: boolean; telegramEnabled?: boolean; notificationPreferences?: any }) {

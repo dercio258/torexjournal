@@ -14,11 +14,14 @@ export class Post {
     @Column({ nullable: true })
     imageUrl: string;
 
-    @Column({ default: 'text' }) // text, trade_share, milestone
+    @Column({ default: 'text' }) // text, trade_share, image, milestone
     type: string;
 
     @Column({ type: 'jsonb', nullable: true })
     tradeData: any; // Snapshot of the trade if shared
+
+    @Column({ default: 'public' }) // public, private
+    visibility: string;
 
     @ManyToOne(() => UserEntity, user => user.posts)
     @JoinColumn({ name: 'userId' })

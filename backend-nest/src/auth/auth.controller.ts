@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request, Get } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Request, Get, Put } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { AccountService } from '../account/account.service';
@@ -98,6 +98,15 @@ export class AuthController {
             token: user.apiToken,
             is_connected: isConnected
         };
+    }
+
+    @UseGuards(AuthGuard('jwt'))
+    @Put('profile')
+    async updateProfile(@Request() req, @Body() body: { name?: string; avatarUrl?: string }) {
+        return this.usersService.updateProfile(req.user.id, {
+            name: body.name,
+            avatarUrl: body.avatarUrl
+        });
     }
 
     @UseGuards(AuthGuard('jwt'))

@@ -165,4 +165,37 @@ export class EmailProcessor {
             this.logger.warn(`⚠️ Email Send Failed: ${error.message}`);
         }
     }
+
+    @Process('trade-imported')
+    async handleTradeImported(job: Job) {
+        const { email, name, count, method } = job.data;
+        const transporter = this.createTransporter();
+        const from = this.configService.get('EMAIL_FROM_DEFAULT');
+
+        const dataImportacao = new Date().toLocaleDateString('pt-BR');
+        const horaImportacao = new Date().toLocaleTimeString('pt-BR');
+
+        try {
+            await transporter.sendMail({
+                from,
+                to: email,
+                subject: '📥 Novos Trades Importados - Torex Journal',
+                html: `
+                    <h1>Importação Concluída com Sucesso</h1>
+                    <p>Olá <b>${name || 'Trader'}</b>,</p>
+                    <p>Sua conta sincronizou novos trades com as seguintes informações:</p>
+                    <ul>
+                        <li><b>Método de Importação:</b> ${method}</li>
+                        <li><b>Quantidade de Trades:</b> ${count}</li>
+                        <li><b>Data:</b> ${dataImportacao}</li>
+                        <li><b>Hora:</b> ${horaImportacao}</li>
+                    </ul>
+                    <p>Acesse o seu painel <a href="https://torex-journal.com">Torex Journal</a> para visualizar seus novos resultados e atualizar seu diário de operações.</p>
+                `
+            });
+            this.logger.log(`✅ Trade Imported Email sent to ${email}`);
+        } catch (error) {
+            this.logger.warn(`⚠️ Email Send Failed: ${error.message}`);
+        }
+    }
 }

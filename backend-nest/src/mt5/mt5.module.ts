@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { BullModule } from '@nestjs/bull';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Mt5Controller } from './mt5.controller';
 import { Mt5Service } from './mt5.service';
 import { Mt5Processor } from './mt5.processor';
+import { BehavioralProcessor } from './behavioral.processor';
 import { AccountEntity } from '../account/account.entity';
 import { PositionEntity } from './position.entity';
 import { TradeEntity } from './trade.entity';
@@ -23,15 +25,25 @@ import { ImportController } from '../import/import.controller';
 
 import { ReportParserService } from '../import/report-parser.service';
 import { ImportLog } from './import-log.entity';
+import { AiModule } from '../ai/ai.module';
+import { NormalizationModule } from '../import/normalization/normalization.module';
+import { AlertsModule } from '../alerts/alerts.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([AccountEntity, PositionEntity, TradeEntity, TradeHistoryEntity, MarketTickEntity, CloudInstanceEntity, ImportLog]),
+        NotificationsModule,
+        AiModule,
+        NormalizationModule,
+        AlertsModule,
         BullModule.registerQueue({
             name: 'mt5-data',
         }),
         BullModule.registerQueue({
             name: 'email-queue',
+        }),
+        BullModule.registerQueue({
+            name: 'behavioral-analysis',
         }),
         JwtModule.registerAsync({
             imports: [ConfigModule],
@@ -43,7 +55,7 @@ import { ImportLog } from './import-log.entity';
         }),
     ],
     controllers: [Mt5Controller, ImportController],
-    providers: [Mt5Service, Mt5Gateway, Mt5Processor, Mt5TcpServer, Mt5RedisSubscriber, Mt5InstanceService, ReportParserService],
+    providers: [Mt5Service, Mt5Gateway, Mt5Processor, BehavioralProcessor, Mt5TcpServer, Mt5RedisSubscriber, Mt5InstanceService, ReportParserService],
     exports: [Mt5Service, Mt5InstanceService]
 })
 export class Mt5Module { }

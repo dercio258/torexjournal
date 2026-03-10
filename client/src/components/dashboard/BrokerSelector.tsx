@@ -32,6 +32,13 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             description: 'Conectar via EA local ou Nuvem'
         },
         {
+            id: 'mt4',
+            name: 'Connect MetaTrader 4',
+            type: 'AUTO_SYNC',
+            icon: <Monitor className="w-10 h-10 text-cyan-500" />,
+            description: 'Conectar via EA local ou Nuvem'
+        },
+        {
             id: 'manual_csv',
             name: 'Upload Manual CSV',
             type: 'MANUAL',

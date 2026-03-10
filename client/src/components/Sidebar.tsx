@@ -17,8 +17,8 @@ export const Sidebar = () => {
         { to: '/journal', icon: <BookOpen size={18} />, label: 'Diário' },
         { to: '/network', icon: <Users size={18} />, label: 'Network' },
         { to: '/emotional', icon: <BrainCircuit size={18} />, label: 'Gestão Emocional' },
-        { to: '/backtest', icon: <FlaskConical size={18} />, label: 'Backtest' },
         { to: '/notifications', icon: <Bell size={18} />, label: 'Notificações' },
+        { to: '/backtest', icon: <FlaskConical size={18} />, label: 'Backtest' },
         { to: '/reports', icon: <TrendingUp size={18} />, label: 'Relatórios' },
         { to: '/calendar', icon: <CalendarDays size={18} />, label: 'Calendário Econ.' },
     ];

@@ -49,6 +49,24 @@ export class TechnicalJournal {
     @Column({ nullable: true })
     emotionalState: string; // 'Focused', 'Anxious', 'Confident', 'Frustrated'
 
+    @Column({ nullable: true })
+    setupQuality: string; // 'A+', 'A', 'B', 'C'
+
+    @Column({ nullable: true })
+    executionSpeed: string; // 'Immediate', 'Delayed', 'Rushed'
+
+    @Column({ nullable: true })
+    marketContext: string; // 'Aligned', 'Counter-trend', 'Ranging'
+
+    @Column({ nullable: true })
+    preMarketPrep: string; // 'Excellent', 'Good', 'Poor', 'None'
+
+    @Column({ type: 'text', nullable: true })
+    rulesBroken: string;
+
+    @Column({ type: 'text', nullable: true })
+    actionPlan: string;
+
     @ManyToOne(() => AccountEntity)
     @JoinColumn({ name: 'account_id' })
     account: AccountEntity;

@@ -11,9 +11,11 @@ interface AuthContextType {
         id: string;
         email: string;
         username: string;
+        name?: string;
         avatarUrl?: string;
         is_connected?: boolean;
     } | null;
+    updateUser: (data: Partial<{ avatarUrl: string; name: string }>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -42,10 +44,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
         } catch (e) {
             console.error("Failed to fetch profile", e);
-            // Optional: logout if profile fetch fails with 401
-            // But api.ts interceptor handles 401
+            // api.ts interceptor handles 401 and emits auth:unauthorized
         }
     };
+
+    useEffect(() => {
+        const handleUnauthorized = () => {
+            console.log("Unauthorized event received, logging out...");
+            logout();
+        };
+
+        window.addEventListener('auth:unauthorized', handleUnauthorized);
+        return () => {
+            window.removeEventListener('auth:unauthorized', handleUnauthorized);
+        };
+    }, []);
 
     const login = (newToken: string, email?: string) => {
         localStorage.setItem('token', newToken);
@@ -65,6 +78,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
     };
 
+    const updateUser = (data: Partial<{ avatarUrl: string; name: string }>) => {
+        setUser(prev => prev ? { ...prev, ...data } : null);
+    };
+
     return (
         <AuthContext.Provider value={{
             token,
@@ -72,7 +89,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             login,
             logout,
             userEmail,
-            user
+            user,
+            updateUser
         }}>
             {children}
         </AuthContext.Provider>

@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req, Delete, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards, Req, Delete, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { NetworkService } from './network.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -12,10 +15,25 @@ export class NetworkController {
         return this.networkService.getFeed(req.user.id, page);
     }
 
+    @Post('upload')
+    @UseGuards(JwtAuthGuard)
+    @UseInterceptors(FileInterceptor('file', {
+        storage: diskStorage({
+            destination: './uploads',
+            filename: (req, file, cb) => {
+                const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
+                return cb(null, `${randomName}${extname(file.originalname)}`);
+            }
+        })
+    }))
+    async uploadImage(@UploadedFile() file) {
+        return { imageUrl: `/uploads/${file.filename}` };
+    }
+
     @Post('post')
     @UseGuards(JwtAuthGuard)
     async createPost(@Req() req, @Body() body: any) {
-        return this.networkService.createPost(req.user.id, body.content, body.type, body.tradeData);
+        return this.networkService.createPost(req.user.id, body.content, body.type, body.tradeData, body.visibility, body.imageUrl);
     }
 
     @Post('post/:id/like')

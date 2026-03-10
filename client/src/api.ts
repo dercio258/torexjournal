@@ -19,6 +19,7 @@ api.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401 || error.response?.status === 403) {
+            console.error(`API Auth Error (${error.response.status}) on URL:`, error.config?.url);
             localStorage.removeItem('token');
             // Redirect will be handled by AuthContext or Router mostly, 
             // but this is a failsafe

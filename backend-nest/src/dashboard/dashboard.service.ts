@@ -407,6 +407,20 @@ export class DashboardService {
         if (data.rating !== undefined) journal.rating = data.rating;
         if (data.notes !== undefined) journal.notes = data.notes;
 
+        // Objective Evaluation Fields
+        if (data.entryPrecision !== undefined) journal.entryPrecision = data.entryPrecision;
+        if (data.riskManagement !== undefined) journal.riskManagement = data.riskManagement;
+        if (data.tradeExit !== undefined) journal.tradeExit = data.tradeExit;
+        if (data.emotionalState !== undefined) journal.emotionalState = data.emotionalState;
+        if (data.setupQuality !== undefined) journal.setupQuality = data.setupQuality;
+        if (data.executionSpeed !== undefined) journal.executionSpeed = data.executionSpeed;
+        if (data.marketContext !== undefined) journal.marketContext = data.marketContext;
+        if (data.preMarketPrep !== undefined) journal.preMarketPrep = data.preMarketPrep;
+
+        // Subjective Evaluation Fields
+        if (data.rulesBroken !== undefined) journal.rulesBroken = data.rulesBroken;
+        if (data.actionPlan !== undefined) journal.actionPlan = data.actionPlan;
+
         return this.techJournalRepo.save(journal);
     }
 
@@ -414,9 +428,15 @@ export class DashboardService {
         const account = await this.accountRepo.findOne({ where: { userId } });
         if (!account) throw new Error('Account not found');
 
-        const trade = await this.tradeRepo.findOne({
-            where: { id: id, accountId: account.id }
-        });
+        let trade;
+        try {
+            trade = await this.tradeRepo.findOne({
+                where: { id: id, accountId: account.id }
+            });
+        } catch (e) {
+            console.warn(`Invalid trade ID format for fetch: ${id}`);
+            return null;
+        }
 
         if (!trade) {
             return null;

@@ -1,5 +1,5 @@
 
-import { Controller, Get, Post, Patch, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { TelegramService } from './telegram.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -20,6 +20,11 @@ export class NotificationsController {
     @Patch(':id/read')
     async markAsRead(@Param('id') id: string, @Req() req) {
         return this.notificationsService.markAsRead(id, req.user.id);
+    }
+
+    @Delete(':id')
+    async remove(@Param('id') id: string, @Req() req) {
+        return this.notificationsService.remove(id, req.user.id);
     }
 
     @Post('settings')

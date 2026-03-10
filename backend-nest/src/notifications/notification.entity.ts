@@ -3,10 +3,11 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { AccountEntity } from '../account/account.entity';
 
 export enum NotificationType {
-    INFO = 'INFO',
-    SUCCESS = 'SUCCESS',
-    WARNING = 'WARNING',
-    ERROR = 'ERROR'
+    TRADE_SUCCESS = 'trade_success',
+    RISK_ALERT = 'risk_alert',
+    MENTAL_INSIGHT = 'mental_insight',
+    SYSTEM = 'system',
+    TRADE_NEUTRAL = 'trade_neutral'
 }
 
 @Entity('notifications')
@@ -24,7 +25,7 @@ export class NotificationEntity {
     @Column({
         type: 'enum',
         enum: NotificationType,
-        default: NotificationType.INFO
+        default: NotificationType.SYSTEM
     })
     type: NotificationType;
 

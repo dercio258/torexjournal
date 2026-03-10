@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Calendar, Grid } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Calendar, Grid, Camera } from 'lucide-react';
 import api from '../../api';
-// AuthContext import removed because unused here
+import { useAuth } from '../../context/AuthContext';
 import { PostCard } from './PostCard';
 
 interface UserProfile {
@@ -19,10 +19,12 @@ interface UserProfile {
 }
 
 export const ProfileTab = () => {
-    // const { user } = useAuth(); // Ignorando auth para UI mockada
+    const { user, updateUser } = useAuth();
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [posts, setPosts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         fetchProfile();
@@ -71,6 +73,35 @@ export const ProfileTab = () => {
     if (loading) return <div className="text-center text-slate-500 py-10">Carregando perfil...</div>;
     if (!profile) return <div className="text-center text-slate-500 py-10">Perfil não encontrado.</div>;
 
+    const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const uploadRes = await api.post('/network/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            const newAvatarUrl = uploadRes.data.imageUrl;
+
+            await api.put('/auth/profile', { avatarUrl: newAvatarUrl });
+
+            setProfile({ ...profile, avatarUrl: newAvatarUrl });
+            updateUser({ avatarUrl: newAvatarUrl });
+        } catch (error) {
+            console.error('Failed to upload avatar', error);
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const isOwnProfile = user?.id === profile.id;
+
     return (
         <div className="h-full flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
             {/* Profile Header */}
@@ -80,13 +111,33 @@ export const ProfileTab = () => {
 
                 <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-b-3xl p-6 shadow-lg -mt-1 pt-12 relative">
                     <div className="absolute -top-10 left-6">
-                        <div className="w-24 h-24 rounded-full bg-slate-900 flex items-center justify-center text-slate-300 font-bold border-4 border-slate-900 overflow-hidden shadow-xl">
+                        <div
+                            className={`w-24 h-24 rounded-full bg-slate-900 flex items-center justify-center text-slate-300 font-bold border-4 border-slate-900 overflow-hidden shadow-xl relative group ${isOwnProfile ? 'cursor-pointer' : ''}`}
+                            onClick={() => isOwnProfile && fileInputRef.current?.click()}
+                        >
+                            {isUploading ? (
+                                <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                </div>
+                            ) : null}
                             {profile.avatarUrl ? (
                                 <img src={profile.avatarUrl} alt={profile.username} className="w-full h-full object-cover" />
                             ) : (
                                 <span className="text-3xl">{profile.username?.[0]?.toUpperCase()}</span>
                             )}
+                            {isOwnProfile && !isUploading && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Camera size={24} className="text-white" />
+                                </div>
+                            )}
                         </div>
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            style={{ display: 'none' }}
+                            accept="image/*"
+                            onChange={handleAvatarUpload}
+                        />
                     </div>
 
                     <div className="flex justify-between items-start pl-24 ml-2">

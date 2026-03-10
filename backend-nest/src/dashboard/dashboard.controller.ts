@@ -33,6 +33,14 @@ export class DashboardController {
         return this.dashboardService.getTrades(req.user.id);
     }
 
+    @Get('trades/recent')
+    @UseGuards(JwtAuthGuard)
+    async getRecentTrades(@Req() req, @Query('limit') limitStr?: string) {
+        const limit = limitStr ? parseInt(limitStr, 10) : 5;
+        const trades = await this.dashboardService.getTrades(req.user.id);
+        return trades.slice(0, limit);
+    }
+
     @Get('trades/:id')
     @UseGuards(JwtAuthGuard)
     async getTradeDetails(@Req() req, @Param('id') id: string) {
@@ -83,22 +91,8 @@ export class DashboardController {
     @Post('technical-journal')
     @UseGuards(JwtAuthGuard)
     async createTechnicalJournal(@Req() req, @Body() body: any) {
-        const { date, marketTrend, volatility, session, strategyUsed, mistakes, lessons, rating, notes, entryPrecision, riskManagement, tradeExit, emotionalState } = body;
-        return this.dashboardService.createTechnicalJournal(
-            req.user.userId,
-            date,
-            marketTrend,
-            volatility,
-            session,
-            strategyUsed,
-            mistakes,
-            lessons,
-            rating,
-            notes,
-            entryPrecision,
-            riskManagement,
-            tradeExit,
-            emotionalState
-        );
+        const userId = req.user.id || req.user.userId;
+        const date = body.date;
+        return this.dashboardService.saveTechnicalJournal(userId, date, body);
     }
 }

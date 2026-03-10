@@ -23,6 +23,11 @@ export class UsersService {
         return this.usersRepository.save(user);
     }
 
+    async updateProfile(userId: string, data: { name?: string; avatarUrl?: string }): Promise<UserEntity> {
+        await this.usersRepository.update(userId, data);
+        return this.findOneById(userId);
+    }
+
     async update(user: UserEntity): Promise<UserEntity> {
         return this.usersRepository.save(user);
     }

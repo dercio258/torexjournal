@@ -39,6 +39,12 @@ export class TradeEntity {
     @Column('decimal', { precision: 10, scale: 2 })
     profit: number;
 
+    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    sl: number;
+
+    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    tp: number;
+
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
     commission: number;
 

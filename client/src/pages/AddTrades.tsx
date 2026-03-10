@@ -4,13 +4,14 @@ import { BrokerSelector } from '../components/dashboard/BrokerSelector';
 import { AutoSyncForm } from '../components/dashboard/AutoSyncForm';
 import { ManualImportForm } from '../components/dashboard/ManualImportForm';
 import { ImportHistory } from '../components/dashboard/ImportHistory';
-import { Copy, Terminal, Cloud } from 'lucide-react';
+import { Copy, Terminal, Cloud, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 
 export const AddTrades = () => {
     const { user } = useAuth();
-    const [step, setStep] = useState<'SELECT' | 'CONNECT_MT5_CLOUD' | 'CONNECT_MT5_OPTIONS' | 'CONNECT_MT5_EA' | 'CONNECT_DERIV' | 'CONNECT_MANUAL'>('SELECT');
+    const [step, setStep] = useState<'SELECT' | 'CONNECT_MT_CLOUD' | 'CONNECT_MT_OPTIONS' | 'CONNECT_MT_EA' | 'CONNECT_DERIV' | 'CONNECT_MANUAL' | 'CONNECT_MANUAL_MT'>('SELECT');
+    const [mtVersion, setMtVersion] = useState<'4' | '5'>('5');
     // selectedBroker state removed as it is no longer used for rendering info
     const [appToken, setAppToken] = useState<string | null>(null);
 
@@ -31,13 +32,18 @@ export const AddTrades = () => {
         if (broker.id === 'deriv') {
             setStep('CONNECT_DERIV');
         } else if (broker.id === 'mt5') {
-            setStep('CONNECT_MT5_OPTIONS');
+            setMtVersion('5');
+            setStep('CONNECT_MT_OPTIONS');
+        } else if (broker.id === 'mt4') {
+            setMtVersion('4');
+            setStep('CONNECT_MT_OPTIONS');
         } else {
             setStep('CONNECT_MANUAL');
         }
     };
 
     const handleBack = () => {
+        setStep('SELECT');
     };
 
     const copyToken = () => {
@@ -62,33 +68,40 @@ export const AddTrades = () => {
                         </div>
                     )}
 
-                    {step === 'CONNECT_MT5_OPTIONS' && (
+                    {step === 'CONNECT_MT_OPTIONS' && (
                         <div className="animate-in fade-in slide-in-from-right-4">
                             <button onClick={handleBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
                                 Voltar
                             </button>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <Card className="p-8 cursor-pointer hover:border-indigo-500/50 transition-all group" onClick={() => setStep('CONNECT_MT5_EA')}>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <Card className="p-8 cursor-pointer hover:border-indigo-500/50 transition-all group" onClick={() => setStep('CONNECT_MT_EA')}>
                                     <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Terminal size={32} />
                                     </div>
                                     <h3 className="text-xl font-bold text-slate-100 mb-2">Usar Expert Advisor (EA)</h3>
-                                    <p className="text-slate-400 text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader 5 rodando no seu computador ou VPS.</p>
+                                    <p className="text-slate-400 text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader {mtVersion} rodando no seu computador ou VPS.</p>
                                 </Card>
-                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group" onClick={() => setStep('CONNECT_MT5_CLOUD')}>
+                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group" onClick={() => setStep('CONNECT_MT_CLOUD')}>
                                     <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Cloud size={32} />
                                     </div>
                                     <h3 className="text-xl font-bold text-slate-100 mb-2">Sincronização em Nuvem</h3>
-                                    <p className="text-slate-400 text-sm">Insira seus dados de leitura (Senha de Investidor) e nosso servidor fará a conexão com a corretora automaticamente.</p>
+                                    <p className="text-slate-400 text-sm">Insira seus dados de leitura (Senha de Investidor) e nosso servidor fará a conexão com a corretora automaticamente para o MT{mtVersion}.</p>
+                                </Card>
+                                <Card className="p-8 cursor-pointer hover:border-amber-500/50 transition-all group" onClick={() => setStep('CONNECT_MANUAL_MT')}>
+                                    <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                        <FileText size={32} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Importar Arquivo</h3>
+                                    <p className="text-slate-400 text-sm">Exporte o histórico do seu MT{mtVersion} em formato HTML ou CSV e faça o upload para sincronização das operações.</p>
                                 </Card>
                             </div>
                         </div>
                     )}
 
-                    {step === 'CONNECT_MT5_EA' && (
+                    {step === 'CONNECT_MT_EA' && (
                         <div className="animate-in fade-in slide-in-from-right-4 max-w-xl mx-auto">
-                            <button onClick={() => setStep('CONNECT_MT5_OPTIONS')} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
+                            <button onClick={() => setStep('CONNECT_MT_OPTIONS')} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
                                 Voltar as opções
                             </button>
                             <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-3xl p-8 relative overflow-hidden group shadow-2xl">
@@ -98,7 +111,7 @@ export const AddTrades = () => {
                                 <h3 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
                                     <Terminal className="text-indigo-400" /> Auto-Importação via EA
                                 </h3>
-                                <p className="text-slate-400 mb-8">Use este token para conectar seu Expert Advisor (EA) no MetaTrader 5.</p>
+                                <p className="text-slate-400 mb-8">Use este token para conectar seu Expert Advisor (EA) no MetaTrader {mtVersion}.</p>
 
                                 <div className="bg-slate-950/80 rounded-2xl p-6 border border-indigo-500/20 mb-6 backdrop-blur-md">
                                     <span className="text-sm text-slate-500 font-bold uppercase tracking-wider block mb-2">Seu App Token</span>
@@ -118,8 +131,8 @@ export const AddTrades = () => {
                         </div>
                     )}
 
-                    {step === 'CONNECT_MT5_CLOUD' && (
-                        <AutoSyncForm brokerName="MetaTrader 5" onBack={() => setStep('CONNECT_MT5_OPTIONS')} />
+                    {step === 'CONNECT_MT_CLOUD' && (
+                        <AutoSyncForm brokerName={`MetaTrader ${mtVersion}`} onBack={() => setStep('CONNECT_MT_OPTIONS')} />
                     )}
 
                     {step === 'CONNECT_DERIV' && (
@@ -196,6 +209,10 @@ export const AddTrades = () => {
 
                     {step === 'CONNECT_MANUAL' && (
                         <ManualImportForm onBack={handleBack} />
+                    )}
+
+                    {step === 'CONNECT_MANUAL_MT' && (
+                        <ManualImportForm onBack={() => setStep('CONNECT_MT_OPTIONS')} />
                     )}
                 </div>
 

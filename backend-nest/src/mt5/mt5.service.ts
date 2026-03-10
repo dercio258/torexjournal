@@ -1,8 +1,8 @@
-import { Injectable, Logger, ConflictException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+﻿import { Injectable, Logger, ConflictException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Repository, DataSource, LessThan, In } from 'typeorm';
+import { Repository, DataSource, LessThan, In, Between } from 'typeorm';
 import { Mt5DataDto } from './dto/mt5-data.dto';
 import { AccountEntity } from '../account/account.entity';
 import { PositionEntity } from './position.entity';
@@ -12,6 +12,12 @@ import { MarketTickEntity } from './market-tick.entity';
 import { UserEntity } from '../users/user.entity';
 import { Mt5Gateway } from './mt5.gateway';
 import { ImportLog, ImportMethod, ImportStatus } from './import-log.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/notification.entity';
+import { AiService } from '../ai/ai.service';
+import { NormalizationService } from '../import/normalization/normalization.service';
+import { AlertsService } from '../alerts/alerts.service';
+import { AlertType, AlertSeverity } from '../alerts/alert.entity';
 
 @Injectable()
 export class Mt5Service implements OnModuleInit, OnModuleDestroy {
@@ -33,8 +39,17 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         private importLogRepo: Repository<ImportLog>,
         private dataSource: DataSource,
         private mt5Gateway: Mt5Gateway,
-        @InjectQueue('email-queue') private emailQueue: Queue
+        private notificationsService: NotificationsService,
+        private alertsService: AlertsService,
+        private aiService: AiService,
+        @InjectQueue('email-queue') private emailQueue: Queue,
+        @InjectQueue('behavioral-analysis') private behavioralQueue: Queue,
+        private normalizationService: NormalizationService
     ) { }
+
+    // ... skipping unchanged lines, we will do a multi-replace or careful chunk replace ...
+    // Let's re-eval and do it specifically for constructor and saveHistory
+
 
     onModuleInit() {
         // Run check every 30 seconds
@@ -279,49 +294,51 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
-            for (const t of trades) {
+            // Normalization Step
+            const normalizedTrades = this.normalizationService.normalizeBatch(trades, importMethod);
+
+            for (const t of normalizedTrades) {
                 const ticket = t.ticket.toString();
                 if (existingTickets.has(ticket)) continue;
 
-                const openTime = this.safeDate(t.open_time || t.openTime);
-                const closeTime = this.safeDate(t.close_time || t.closeTime);
-
                 // Skip if we can't get a valid open time
-                if (!openTime) {
+                if (!t.openTime) {
                     this.logger.warn(`Skipping trade ${ticket}: Invalid open time`);
                     continue;
                 }
 
                 const newTrade = this.tradeRepo.create({
                     ticket: ticket,
-                    symbol: t.symbol || 'Unknown',
-                    type: t.type || 'Buy',
-                    volume: parseFloat(t.volume) || 0,
-                    openPrice: parseFloat(t.openPrice) || 0,
-                    closePrice: parseFloat(t.closePrice) || 0,
-                    openTime: openTime,
-                    closeTime: closeTime,
-                    profit: parseFloat(t.profit) || 0,
-                    commission: parseFloat(t.commission) || 0,
-                    swap: parseFloat(t.swap) || 0,
+                    contractId: t.contractId,
+                    symbol: t.symbol,
+                    type: t.type,
+                    volume: t.volume,
+                    openPrice: t.openPrice,
+                    closePrice: t.closePrice,
+                    openTime: t.openTime,
+                    closeTime: t.closeTime,
+                    profit: t.profit,
+                    commission: t.commission || 0,
+                    swap: t.swap || 0,
                     magic: t.magic || 0,
                     comment: t.comment || '',
-                    session: this.calculateSession(openTime),
-                    status: closeTime ? 'CLOSED' : 'OPEN',
-                    accountId: accountId
+                    session: t.session || 'Unknown',
+                    status: t.status,
+                    accountId: accountId,
+                    dataQuality: t.dataQuality || 'ok'
                 });
 
                 if (newTrade.symbol === 'Unknown') {
-                    this.logger.warn(`Trade ${ticket} imported with 'Unknown' symbol. Source data: ${JSON.stringify(t)}`);
+                    this.logger.warn(`Trade ${ticket} imported with 'Unknown' symbol. Source data: ${JSON.stringify(t.raw)}`);
                 }
 
                 tradesToSave.push(newTrade);
             }
 
+            let finalLogId = null;
             if (tradesToSave.length > 0) {
                 // Create Import Log first to get ID
                 const logUserId = tradesToSave[0].accountId ? (await queryRunner.manager.findOne(AccountEntity, { where: { id: tradesToSave[0].accountId } }))?.userId : null;
-                let finalLogId = null;
 
                 if (logUserId) {
                     const log = this.importLogRepo.create({
@@ -370,6 +387,69 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         count: tradesToSave.length,
                         trades: protoTrades
                     });
+
+                    // Send Notifications (Email & Telegram/Bell)
+                    if (userId) {
+                        const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: userId } });
+                        if (user && user.email) {
+                            // Queue Email
+                            this.emailQueue.add('trade-imported', {
+                                email: user.email,
+                                name: user.name,
+                                count: tradesToSave.length,
+                                method: importMethod
+                            }).catch(e => this.logger.warn(`Could not queue email for trade-imported: ${e.message}`));
+
+                            // Queue Generic Sync Notification
+                            this.notificationsService.create(userId, {
+                                title: 'SincronizaÃ§Ã£o de Trades',
+                                message: `${tradesToSave.length} novos trades foram sincronizados via ${importMethod}.`,
+                                type: NotificationType.SYSTEM
+                            }).catch(e => this.logger.warn(`Could not create notification for trade-imported: ${e.message}`));
+
+                            // --- Professional Alerts & Behavioral Analysis ---
+                            if (tradesToSave.length > 0) {
+                                await this.processProfessionalAlerts(userId, accountId, tradesToSave);
+
+                                // Trigger deep behavioral analysis in background
+                                this.behavioralQueue.add('analyze-user-behavior', { userId, accountId }, {
+                                    delay: 2000, // Small delay to ensure DB transaction is committed
+                                    removeOnComplete: true
+                                }).catch(e => this.logger.warn(`Failed to queue behavioral analysis: ${e.message}`));
+                            }
+                        }
+                    }
+
+                    // Trigger AI Insights in Background
+                    if (accountId && userId && tradesToSave.length > 0) {
+                        try {
+                            const totalProfitLoss = tradesToSave.reduce((sum, t) => sum + (t.profit || 0), 0);
+                            const totalCommission = tradesToSave.reduce((sum, t) => sum + (t.commission || 0), 0);
+                            const totalVolume = tradesToSave.reduce((sum, t) => sum + Number(t.volume || 0), 0);
+                            const wins = tradesToSave.filter(t => t.profit > 0).length;
+                            const losses = tradesToSave.filter(t => t.profit <= 0).length;
+                            const winRate = ((wins / tradesToSave.length) * 100).toFixed(2);
+
+                            const metricsSummary = {
+                                tradesCount: tradesToSave.length,
+                                wins,
+                                losses,
+                                winRate: `${winRate}%`,
+                                totalVolume,
+                                totalProfitLoss,
+                                totalCommission,
+                                symbolsTraded: [...new Set(tradesToSave.map(t => t.symbol))]
+                            };
+
+                            // Async fire-and-forget for local generation
+                            this.aiService.generateInsights(accountId, userId, metricsSummary, finalLogId)
+                                .then(() => this.logger.log(`Background AI generation requested for account ${accountId}`))
+                                .catch(e => this.logger.warn(`Background AI generation failed to trigger: ${e.message}`));
+
+                        } catch (e) {
+                            this.logger.error(`Failed to aggregate metrics for AI: ${e.message}`);
+                        }
+                    }
                 }
             } catch (broadcastError) {
                 this.logger.warn(`Failed to broadcast history update: ${broadcastError.message}`);
@@ -404,10 +484,10 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 open_time: deal.openTime || deal.open_time,
                 close_time: deal.closeTime || deal.close_time
             });
-            // console.log(`📜 Histórico salvo: Ticket ${deal.ticket}`);
+            // console.log(`ðŸ“œ HistÃ³rico salvo: Ticket ${deal.ticket}`);
         } catch (e) {
             if (e.code !== '23505') { // Postgres duplicate key error code
-                console.error("Erro ao salvar histórico", e);
+                console.error("Erro ao salvar histÃ³rico", e);
             }
         }
     }
@@ -431,7 +511,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
     async createManualTrade(data: any, userId: string): Promise<TradeEntity> {
         const account = await this.accountRepo.findOne({ where: { userId } });
         if (!account) {
-            throw new Error('Conta de trading não encontrada para este usuário.');
+            throw new Error('Conta de trading nÃ£o encontrada para este usuÃ¡rio.');
         }
 
         const ticket = data.ticket || Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 1000);
@@ -528,5 +608,99 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         this.mt5Gateway.broadcastHistoryUpdate({ count: 0, trades: [] }); // simple trigger
 
         return { success: true, message: 'Import reverted successfully' };
+    }
+
+    private async processProfessionalAlerts(userId: string, accountId: string, newTrades: TradeEntity[]) {
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Fetch account for balance/equity
+            const account = await this.accountRepo.findOne({ where: { id: accountId } });
+            if (!account) return;
+
+            // Fetch all trades from today to check aggregate limits
+            const dailyTrades = await this.tradeRepo.find({
+                where: {
+                    accountId,
+                    closeTime: Between(today, new Date())
+                }
+            });
+
+            // 1. Overtrading Alert
+            if (dailyTrades.length > 20) {
+                await this.alertsService.create(userId, {
+                    type: AlertType.RISK,
+                    severity: AlertSeverity.WARNING,
+                    title: 'Alerta de Overtrading âš ï¸',
+                    description: `VocÃª jÃ¡ executou ${dailyTrades.length} trades hoje. O excesso de operaÃ§Ãµes pode levar Ã  fadiga de decisÃ£o e perdas por indisciplina.`,
+                    metadata: { count: dailyTrades.length, limit: 20 }
+                });
+            }
+
+            // 2. Revenge Trading Detection
+            // Check if multiple losses occurred in a short time, followed by rapid entries
+            const recentLosses = dailyTrades
+                .filter(t => Number(t.profit) < 0)
+                .sort((a, b) => b.closeTime.getTime() - a.closeTime.getTime());
+
+            if (recentLosses.length >= 3) {
+                const latestLoss = recentLosses[0];
+                const prevLoss = recentLosses[1];
+                const diffMs = latestLoss.closeTime.getTime() - prevLoss.closeTime.getTime();
+
+                if (diffMs < 1000 * 60 * 15) { // 3 losses in 45 mins (approx)
+                    await this.alertsService.create(userId, {
+                        type: AlertType.PSYCHOLOGY,
+                        severity: AlertSeverity.CRITICAL,
+                        title: 'DetecÃ§Ã£o de Revenge Trading ðŸ§ ',
+                        description: 'Identificamos uma sequÃªncia rÃ¡pida de perdas. Evite tentar "recuperar" o mercado imediatamente. FaÃ§a uma pausa de 30 minutos.',
+                        metadata: { sequence: 3, interval_mins: 15 }
+                    });
+                }
+            }
+
+            // 3. Risk:Reward Ratio Check
+            const avgWin = dailyTrades.filter(t => Number(t.profit) > 0).reduce((sum, t) => sum + Number(t.profit), 0) / (dailyTrades.filter(t => Number(t.profit) > 0).length || 1);
+            const avgLoss = dailyTrades.filter(t => Number(t.profit) < 0).reduce((sum, t) => sum + Math.abs(Number(t.profit)), 0) / (dailyTrades.filter(t => Number(t.profit) < 0).length || 1);
+
+            if (avgLoss > 0 && (avgWin / avgLoss) < 0.8 && dailyTrades.length > 5) {
+                await this.alertsService.create(userId, {
+                    type: AlertType.PERFORMANCE,
+                    severity: AlertSeverity.WARNING,
+                    title: 'RelaÃ§Ã£o R:R Negativa ðŸ“Š',
+                    description: `Seu Risk:Reward mÃ©dio hoje estÃ¡ em ${(avgWin / avgLoss).toFixed(2)}:1. VocÃª estÃ¡ arriscando muito para ganhar pouco.`,
+                    metadata: { ratio: (avgWin / avgLoss).toFixed(2) }
+                });
+            }
+
+            // 4. Discipline: Stop Loss Movement (if we see SL far from open vs TP)
+            // This is harder with just closed trades, but we can check if SL was moved deep into loss
+            const slMovedTrades = newTrades.filter(t => t.sl && t.openPrice && Math.abs(t.openPrice - t.sl) > 2.0 * Math.abs(t.openPrice - (t.tp || t.openPrice)));
+            if (slMovedTrades.length > 0) {
+                await this.alertsService.create(userId, {
+                    type: AlertType.DISCIPLINE,
+                    severity: AlertSeverity.WARNING,
+                    title: 'Stop Loss Estendido â—',
+                    description: 'Detectamos trades onde o Stop Loss foi posicionado muito alÃ©m do risco inicial projetado. Isso corrÃ³i sua consistÃªncia.',
+                    tradeId: slMovedTrades[0].id
+                });
+            }
+
+            // 5. Journal Quality: Missing Notes
+            const missingNotes = newTrades.filter(t => !t.comment || t.comment.trim() === '');
+            if (missingNotes.length > 0) {
+                await this.alertsService.create(userId, {
+                    type: AlertType.JOURNAL,
+                    severity: AlertSeverity.INFO,
+                    title: 'Registro Incompleto ðŸ“',
+                    description: 'VocÃª sincronizou novos trades mas alguns nÃ£o possuem comentÃ¡rios ou anotaÃ§Ãµes. Enriquecer seu diÃ¡rio agora facilita revisÃµes futuras.',
+                    metadata: { count: missingNotes.length }
+                });
+            }
+
+        } catch (error) {
+            this.logger.error(`Error processing professional alerts: ${error.message}`);
+        }
     }
 }

@@ -72,14 +72,12 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
                 </div>
 
                 {hasTrades && (
-                    <div className="text-right">
-                        <div className="flex justify-end gap-0.5 mb-1 opacity-60">
-                            {dayTrades.slice(0, 5).map((t, i) => (
-                                <div key={i} className={`w-1 h-1 rounded-full ${t.profit >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                            ))}
+                    <div className="text-right flex flex-col items-end">
+                        <div className="text-[10px] text-slate-400 font-medium mb-0.5 leading-none">
+                            {dayTrades.length} trade{dayTrades.length !== 1 ? 's' : ''}
                         </div>
-                        <div className={`text-[10px] font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {pnl >= 0 ? '+' : ''}{pnl.toFixed(0)}
+                        <div className={`text-xs font-bold font-mono tracking-tight ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(0)}
                         </div>
                     </div>
                 )}
@@ -88,33 +86,33 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     }
 
     return (
-        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col h-full">
+        <div className="bg-slate-900/60 backdrop-blur-2xl border-2 border-indigo-500/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-full ring-1 ring-white/5">
             {/* Calendar Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-800">
-                <h3 className="font-bold text-white flex items-center gap-2">
+            <div className="flex items-center justify-between p-5 bg-gradient-to-b from-indigo-500/10 to-transparent border-b border-slate-800/50">
+                <h3 className="font-bold text-white flex items-center gap-2 text-xl">
                     <span className="capitalize">{currentDate.toLocaleString('pt-BR', { month: 'long' })}</span>
-                    <span className="text-slate-500 font-mono text-sm">{currentDate.getFullYear()}</span>
+                    <span className="text-indigo-400 font-mono text-lg">{currentDate.getFullYear()}</span>
                 </h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
                     <button
                         onClick={() => onMonthChange(-1)}
-                        className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                        className="p-2 bg-slate-800/50 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white transition-all shadow-sm"
                     >
-                        <ChevronLeft size={18} />
+                        <ChevronLeft size={20} />
                     </button>
                     <button
                         onClick={() => onMonthChange(1)}
-                        className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
+                        className="p-2 bg-slate-800/50 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white transition-all shadow-sm"
                     >
-                        <ChevronRight size={18} />
+                        <ChevronRight size={20} />
                     </button>
                 </div>
             </div>
 
             {/* Days Header */}
-            <div className="grid grid-cols-7 bg-slate-950/30 border-b border-slate-800 py-2 text-center">
+            <div className="grid grid-cols-7 bg-slate-900 py-3 text-center border-b border-slate-800/50 shadow-inner">
                 {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (
-                    <span key={i} className={`text-[10px] font-bold ${i === 0 || i === 6 ? 'text-rose-500/50' : 'text-slate-500'}`}>
+                    <span key={i} className={`text-xs font-bold tracking-wider ${i === 0 || i === 6 ? 'text-rose-400' : 'text-slate-400'}`}>
                         {d}
                     </span>
                 ))}

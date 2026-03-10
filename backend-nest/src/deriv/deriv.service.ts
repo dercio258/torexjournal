@@ -11,6 +11,7 @@ import { Mt5Service } from '../mt5/mt5.service';
 import { ImportMethod } from '../mt5/import-log.entity';
 import { TradeEntity } from '../mt5/trade.entity';
 import { AccountEntity } from '../account/account.entity';
+import { NormalizationService } from '../import/normalization/normalization.service';
 
 @Injectable()
 export class DerivService implements OnModuleInit, OnModuleDestroy {
@@ -34,6 +35,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         private readonly accountRepo: Repository<AccountEntity>,
         private readonly configService: ConfigService,
         private readonly mt5Service: Mt5Service,
+        private readonly normalizationService: NormalizationService
     ) { }
 
     async onModuleInit() {
@@ -342,139 +344,70 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         const buyTx = transactions.find(tx => tx.action === 'buy');
         const sellTxs = transactions.filter(tx => tx.action === 'sell');
 
-        const flags: any = {};
-        if (sellTxs.length === 0 && contractDetails?.status !== 'closed') flags.missing_sell = true;
+        // We will build a composite payload that closely mimics contractDetails 
+        // to pass to our DerivAdapter
+        let rawPayload = { ...contractDetails };
 
-        let symbol = contractDetails?.display_name || contractDetails?.underlying_symbol || contractDetails?.underlying || buyTx?.raw?.symbol;
-        if (!symbol && (buyTx?.raw?.longcode || contractDetails?.longcode || buyTx?.raw?.shortcode || contractDetails?.shortcode)) {
-            symbol = this.extractSymbol(buyTx?.raw || contractDetails || {});
-        }
-        if (!symbol) flags.missing_symbol = true;
+        // Fallbacks using our internal transaction data if contractDetails is missing fields
+        if (!rawPayload.contract_id) rawPayload.contract_id = contractId;
 
-        const openTime = buyTx?.transactionTime || this.mt5Service.safeDate(contractDetails?.purchase_time);
-        const closeTime = sellTxs[sellTxs.length - 1]?.transactionTime || this.mt5Service.safeDate(contractDetails?.sell_time);
-
-        // Open trades won't have close time, but if it's closed and we don't have it, raise a flag
-        if (!openTime) flags.missing_open_time = true;
-        if (contractDetails?.is_sold === 1 && !closeTime) flags.missing_close_time = true;
-
-        const buyAmount = buyTx ? Math.abs(buyTx.amount) : parseFloat(contractDetails?.buy_price) || 0;
-        const totalPayout = sellTxs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0) || parseFloat(contractDetails?.payout) || parseFloat(contractDetails?.sell_price) || 0;
-
-        let netPnl = 0;
-        const calculatedPnl = (sellTxs.length > 0 || contractDetails?.is_sold === 1) ? totalPayout - buyAmount : 0;
-
-        if (contractDetails && contractDetails.profit !== undefined) {
-            netPnl = parseFloat(contractDetails.profit);
-        } else if (contractDetails?.is_sold === 1 || sellTxs.length > 0) {
-            netPnl = calculatedPnl;
-        } else {
-            // For open trades, we can estimate floating P&L using current bid
-            const currentPrice = parseFloat(contractDetails?.bid_price) || 0;
-            if (currentPrice > 0 && buyAmount > 0) {
-                netPnl = currentPrice - buyAmount;
-            }
+        if (buyTx) {
+            rawPayload.purchase_time = rawPayload.purchase_time || buyTx.transactionTime.getTime() / 1000;
+            if (!rawPayload.buy_price) rawPayload.buy_price = Math.abs(buyTx.amount);
+            if (!rawPayload.transaction_ids) rawPayload.transaction_ids = {};
+            rawPayload.transaction_ids.buy = buyTx.transactionId.replace('buy_', '');
+            rawPayload.currency = rawPayload.currency || buyTx.currency;
+            if (buyTx.raw?.shortcode) rawPayload.shortcode = rawPayload.shortcode || buyTx.raw.shortcode;
+            if (buyTx.raw?.symbol) rawPayload.underlying = rawPayload.underlying || buyTx.raw.symbol;
         }
 
-        if (contractDetails?.is_sold === 1 && Math.abs(calculatedPnl - parseFloat(contractDetails.profit || 0)) > 0.05) {
-            flags.inconsistent_pnl = true;
+        if (sellTxs.length > 0) {
+            const lastSell = sellTxs[sellTxs.length - 1];
+            rawPayload.sell_time = rawPayload.sell_time || lastSell.transactionTime.getTime() / 1000;
+            const totalPayout = sellTxs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+            if (!rawPayload.sell_price) rawPayload.sell_price = totalPayout;
+            if (!rawPayload.transaction_ids) rawPayload.transaction_ids = {};
+            rawPayload.transaction_ids.sell = lastSell.transactionId.replace('sell_', '');
+            rawPayload.status = 'closed';
         }
 
-        if (sellTxs.length > 1) flags.partial_closes = true;
+        // Normalize using DerivAdapter via NormalizationService
+        const normalizedList = this.normalizationService.normalizeBatch([rawPayload], ImportMethod.DERIV);
 
-        // Better fallback logic for entry and exit prices
-        const entryPrice = parseFloat(
-            contractDetails?.entry_spot ||
-            contractDetails?.entry_tick ||
-            buyTx?.raw?.entry_spot ||
-            buyTx?.raw?.entry_tick ||
-            buyTx?.raw?.barrier ||
-            contractDetails?.barrier ||
-            contractDetails?.buy_price ||
-            buyTx?.raw?.buy_price
-        ) || 0;
+        if (normalizedList.length === 0) {
+            this.logger.warn(`Failed to normalize Deriv trade ${contractId} for user ${userId}`);
+            return;
+        }
 
-        const exitPrice = parseFloat(
-            contractDetails?.exit_spot ||
-            contractDetails?.exit_tick ||
-            contractDetails?.sell_spot ||
-            sellTxs[0]?.raw?.exit_tick ||
-            sellTxs[0]?.raw?.exit_spot ||
-            sellTxs[0]?.raw?.sell_spot ||
-            contractDetails?.sell_price ||
-            sellTxs[0]?.raw?.sell_price
-        ) || 0;
-
-        const isClosed = contractDetails?.is_sold === 1 || contractDetails?.status?.toUpperCase() === 'CLOSED' || sellTxs.length > 0;
+        const normalizedTrade = normalizedList[0];
 
         const tradeData: Partial<TradeEntity> = {
-            accountId: accountId, // Use the real AccountEntity.id
-            ticket: contractId,
-            contractId: contractId,
-            symbol: symbol || 'Unknown',
-            type: (contractDetails?.contract_type?.includes('PUT') || buyTx?.raw?.shortcode?.includes('PUT') || contractDetails?.shortcode?.includes('PUT')) ? 'Sell' : 'Buy',
-            volume: buyAmount,
-            openPrice: entryPrice,
-            closePrice: exitPrice,
-            entrySpot: entryPrice,
-            exitSpot: exitPrice,
-            buyPrice: buyAmount,
-            sellPrice: contractDetails?.sell_price ? parseFloat(contractDetails.sell_price) : null,
-            payout: totalPayout,
-            profit: netPnl,
-            grossResult: netPnl,
-            netPnl: netPnl,
-            currency: buyTx?.currency || contractDetails?.currency || 'USD',
-            buyTransactionId: buyTx?.transactionId || (contractDetails ? `buy_${contractDetails.transaction_ids?.buy || contractId}` : null),
-            sellTransactionId: sellTxs.length > 0 ? sellTxs[sellTxs.length - 1].transactionId : (contractDetails?.is_sold ? `sell_${contractDetails.transaction_ids?.sell || contractId}` : null),
-            status: isClosed ? 'CLOSED' : 'OPEN',
-            qualityFlags: flags,
-            comment: contractDetails?.longcode || buyTx?.raw?.longcode || '',
-            openTime: openTime || new Date(),
-            closeTime: closeTime || null,
-            syntheticTxid: !buyTx?.transactionId && !contractDetails?.transaction_ids?.buy
+            accountId: accountId,
+            ticket: normalizedTrade.ticket,
+            contractId: normalizedTrade.contractId,
+            symbol: normalizedTrade.symbol,
+            type: normalizedTrade.type,
+            volume: normalizedTrade.volume,
+            openPrice: normalizedTrade.openPrice,
+            closePrice: normalizedTrade.closePrice,
+            profit: normalizedTrade.profit,
+            grossResult: normalizedTrade.profit,
+            netPnl: normalizedTrade.profit,
+            currency: rawPayload.currency || 'USD',
+            buyTransactionId: normalizedTrade.buyTransactionId,
+            sellTransactionId: normalizedTrade.sellTransactionId,
+            status: normalizedTrade.status,
+            qualityFlags: normalizedTrade.qualityFlags,
+            dataQuality: normalizedTrade.dataQuality,
+            comment: normalizedTrade.comment,
+            openTime: normalizedTrade.openTime,
+            closeTime: normalizedTrade.closeTime,
+            syntheticTxid: !normalizedTrade.buyTransactionId && !normalizedTrade.contractId,
+            session: normalizedTrade.session
         };
 
-        // Determine dataQuality purely based on flags, don't use 0 prices as strictly malformed
-        let quality = 'ok';
-        if (Object.keys(flags).length >= 3) quality = 'broken';
-        else if (Object.keys(flags).length > 0) quality = 'partial';
-        tradeData.dataQuality = quality;
-
         await this.tradeRepo.upsert(tradeData, ['accountId', 'contractId']);
-        this.logger.debug(`Consolidated trade ${contractId} for user ${userId} (Account: ${accountId}). PnL: ${netPnl}`);
-    }
-
-    private extractSymbol(t: any): string {
-        if (t.underlying) return t.underlying.toUpperCase();
-        if (t.underlying_symbol) return t.underlying_symbol.toUpperCase();
-        const shortcode = t.shortcode || '';
-        if (shortcode) {
-            const prefixes = ['CALL_', 'PUT_', 'MULT_', 'VAN_', 'ONETOUCH_', 'NOTOUCH_', 'RANGE_', 'UPORDOWN_', 'EXPIRYRANGE_', 'EXPIRYMISS_'];
-            let cleanCode = shortcode;
-            for (const p of prefixes) {
-                if (cleanCode.startsWith(p)) {
-                    cleanCode = cleanCode.substring(p.length);
-                    break;
-                }
-            }
-            if (cleanCode.startsWith('FRX')) cleanCode = cleanCode.substring(3);
-            const parts = cleanCode.split('_');
-            const symbol = parts[0];
-            if (symbol === 'R' && parts.length > 1 && !isNaN(parseInt(parts[1]))) return `R_${parts[1]}`;
-            if (symbol) return symbol.toUpperCase();
-        }
-
-        if (t.display_name) return t.display_name;
-
-        // Fallback to parsing longcode
-        const longcode = t.longcode || '';
-        if (longcode) {
-            const match = longcode.match(/if (.*?) is/i);
-            if (match && match[1]) return match[1].trim();
-        }
-
-        return 'Unknown';
+        this.logger.debug(`Consolidated and Normalized trade ${contractId} via Adapter. PnL: ${normalizedTrade.profit}`);
     }
 
     private async syncHistory(userId: string, client: DerivClient) {

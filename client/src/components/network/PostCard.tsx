@@ -1,6 +1,6 @@
-import { Heart, MessageCircle, Share2, MoreHorizontal } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
 
-
+const ASSETS_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 interface Post {
     id: number;
     content: string;
@@ -13,6 +13,15 @@ interface Post {
         username: string;
         avatarUrl?: string;
     };
+    type?: string;
+    tradeData?: {
+        imageUrl?: string;
+        ticket?: string;
+        symbol?: string;
+        profit?: number;
+        isWin?: boolean;
+    };
+    imageUrl?: string;
 }
 
 interface PostCardProps {
@@ -46,6 +55,66 @@ export const PostCard = ({ post, onLike }: PostCardProps) => {
             <div className="text-slate-300 text-sm mb-4 whitespace-pre-wrap leading-relaxed pl-[3.75rem]">
                 {post.content}
             </div>
+
+            {/* Generic Image Post */}
+            {post.type === 'image' && post.imageUrl && !post.tradeData?.imageUrl && (
+                <div className="mb-4 pl-[3.75rem]">
+                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50 group/image">
+                        <img
+                            src={`${ASSETS_URL}${post.imageUrl}`}
+                            alt="Post Media"
+                            className="w-full h-auto max-h-[500px] object-contain cursor-pointer transition-transform duration-500 group-hover/image:scale-[1.02]"
+                            loading="lazy"
+                            onClick={() => window.open(`${ASSETS_URL}${post.imageUrl}`, '_blank')}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Generic Video Post */}
+            {post.type === 'video' && post.imageUrl && (
+                <div className="mb-4 pl-[3.75rem]">
+                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50">
+                        <video
+                            src={`${ASSETS_URL}${post.imageUrl}`}
+                            controls
+                            className="w-full h-auto max-h-[500px] object-contain"
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* Trade Analysis/Share Post (Legacy or specialized) */}
+            {post.type === 'image' && post.tradeData?.imageUrl && (
+                <div className="mb-4 pl-[3.75rem]">
+                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50 group/image">
+                        <img
+                            src={`${ASSETS_URL}${post.tradeData?.imageUrl}`}
+                            alt="Trade Review"
+                            className="w-full h-auto max-h-[500px] object-contain cursor-pointer transition-transform duration-500 group-hover/image:scale-[1.02]"
+                            loading="lazy"
+                            onClick={() => window.open(`${ASSETS_URL}${post.tradeData?.imageUrl}`, '_blank')}
+                        />
+                        {post.tradeData?.symbol && (
+                            <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur border border-slate-700 px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
+                                <span className="text-white font-bold text-sm tracking-wide">{post.tradeData?.symbol}</span>
+                                {post.tradeData?.ticket && (
+                                    <span className="text-slate-400 text-xs">#{post.tradeData?.ticket}</span>
+                                )}
+                            </div>
+                        )}
+                        {post.tradeData?.profit !== undefined && post.tradeData?.isWin !== undefined && (
+                            <div className={`absolute bottom-3 right-3 backdrop-blur px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg border text-sm font-bold ${post.tradeData?.isWin
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                }`}>
+                                {post.tradeData?.isWin ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                                {post.tradeData?.isWin ? '+' : ''}{Number(post.tradeData?.profit).toFixed(2)}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Interactions */}
             <div className="flex items-center gap-6 pt-4 border-t border-slate-800/50 ml-[3.75rem]">
