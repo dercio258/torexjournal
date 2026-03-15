@@ -31,6 +31,7 @@ import { NormalizationModule } from '../import/normalization/normalization.modul
 import { AlertsModule } from '../alerts/alerts.module';
 import { PaymentModule } from '../payment/payment.module';
 import { EmailModule } from '../email/email.module';
+import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
     imports: [
@@ -41,6 +42,7 @@ import { EmailModule } from '../email/email.module';
         AlertsModule,
         PaymentModule,
         EmailModule,
+        DashboardModule,
         BullModule.registerQueue({
             name: 'mt5-data',
         }),

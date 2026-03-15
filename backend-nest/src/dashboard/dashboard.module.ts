@@ -15,6 +15,6 @@ import { MentalLog } from './mental-log.entity';
     ],
     controllers: [DashboardController],
     providers: [DashboardService, SessionService],
-    exports: [SessionService]
+    exports: [DashboardService, SessionService]
 })
 export class DashboardModule { }
