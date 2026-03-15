@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { ShieldCheck, CreditCard, Smartphone, Check, Loader2, ChevronRight, Info } from 'lucide-react';
 import { CountryPhoneInput } from '../ui/CountryPhoneInput';
 
@@ -41,7 +40,6 @@ export const PlanSummary = ({ plan, billingCycle, total }: { plan: any; billingC
 );
 
 export const PaymentMethodBadge = ({ 
-    id, 
     label, 
     icon: Icon, 
     img, 
@@ -203,7 +201,7 @@ export const CardPaymentView = ({ onSubmit, processing, onPhoneChange }: { onSub
     </div>
 );
 
-export const PollingOverlay = ({ method, total }: { method: string; total: number }) => (
+export const PollingOverlay = ({ total }: { method: string; total: number }) => (
     <div className="mt-8 pt-8 border-t border-white/5 animate-in zoom-in-95 duration-700">
         <div className="relative group p-10 bg-indigo-500/5 rounded-[32px] border border-indigo-500/20 flex flex-col items-center text-center overflow-hidden">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />

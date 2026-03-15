@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Search, Globe } from 'lucide-react';
-import api from '../../api';
 
 interface Country {
     name: string;
