@@ -18,7 +18,7 @@ export const AdminDashboard = () => {
                 <header className="flex justify-between items-center mb-8">
                     <div>
                         <h1 className="text-3xl font-bold text-white">Painel Administrativo</h1>
-                        <p className="text-slate-400">Trading Cossa - Gestão Interna</p>
+                        <p className="text-slate-400">Torex Journal - Gestão Interna</p>
                     </div>
                     <Button variant="secondary" onClick={handleLogout} className="flex items-center gap-2">
                         <LogOut className="w-4 h-4" /> Sair

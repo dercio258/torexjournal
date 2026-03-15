@@ -286,7 +286,7 @@ const EmotionalManagement = () => {
                 // Better UX: Share the image file itself if possible, but requires fetching blob.
                 // Let's stick to sharing the text/url for now or just generic share.
                 await navigator.share({
-                    title: 'Meu Registro Mental - Trading Cossa',
+                    title: 'Meu Registro Mental - Torex Journal',
                     text: `Confira meu estado mental para operar hoje! Score: ${log.overallScore}`,
                     url: fullUrl
                 });

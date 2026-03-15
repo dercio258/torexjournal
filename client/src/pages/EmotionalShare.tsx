@@ -17,7 +17,7 @@ export const EmotionalShare = () => {
     const handleDownload = () => {
         const link = document.createElement('a');
         link.href = image;
-        link.download = `Cossa_Mental_Log_${date || 'Capture'}.png`;
+        link.download = `Torex_Mental_Log_${date || 'Capture'}.png`;
         link.click();
     };
 
