@@ -76,6 +76,11 @@ export class DashboardService {
                 order: { closeTime: 'ASC' }
             });
 
+            const dailyMap = new Map<string, number>();
+            const moodMap = new Map<string, { count: number; pnl: number }>();
+            const setupMap = new Map<string, { count: number; pnl: number }>();
+            const sessionMap = new Map<string, { count: number; pnl: number }>();
+
             const totalTrades = trades.length;
             if (totalTrades === 0) {
                 // return empty...
@@ -88,16 +93,12 @@ export class DashboardService {
 
             let totalPnL = 0;
             let wins = 0;
+            let losses = 0;
+            let breakevens = 0;
             let grossProfit = 0;
             let grossLoss = 0;
 
-            const dailyMap = new Map<string, number>();
-            const moodMap = new Map<string, { count: number, pnl: number }>();
-            const setupMap = new Map<string, { count: number, pnl: number }>();
-            const sessionMap = new Map<string, { count: number, pnl: number }>();
-
             for (const t of trades) {
-                // Double check it is closed and has a close time
                 if (!t.closeTime) continue;
 
                 const profit = Number(t.profit) || 0;
@@ -106,11 +107,15 @@ export class DashboardService {
                 const pnl = profit + commission + swap;
                 totalPnL += pnl;
 
-                if (pnl > 0) {
+                // Define BE as +/- 0.5 cents/pips to be safe with commissions
+                if (pnl > 0.1) {
                     wins++;
                     grossProfit += pnl;
-                } else {
+                } else if (pnl < -0.1) {
+                    losses++;
                     grossLoss += Math.abs(pnl);
+                } else {
+                    breakevens++;
                 }
 
                 try {
@@ -144,33 +149,22 @@ export class DashboardService {
                 winRate: winRate
             };
 
-            const tradePnL = trades.map(t => {
-                const profit = Number(t.profit) || 0;
-                const commission = Number(t.commission) || 0;
-                const swap = Number(t.swap) || 0;
-                return {
-                    date: t.closeTime.toISOString(), // Keep full ISO for precise timing
-                    value: profit + commission + swap,
-                    ticket: t.ticket
-                };
-            });
-
-            const dailyPnL = Array.from(dailyMap.entries()).map(([date, pnl]) => ({ date, pnl }));
-            const byMood = Array.from(moodMap.entries()).map(([mood, data]) => ({ mood, ...data }));
-            const bySetup = Array.from(setupMap.entries()).map(([setup, data]) => ({ setup, ...data }));
-            const bySession = Array.from(sessionMap.entries()).map(([session, data]) => ({ session, ...data }));
-
             const result = {
                 totalPnL,
                 winRate,
                 totalTrades,
                 profitFactor,
                 radarMetrics,
-                dailyPnL,
-                tradePnL, // New field
-                byMood,
-                bySetup,
-                bySession
+                dailyPnL: Array.from(dailyMap.entries()).map(([date, pnl]) => ({ date, pnl })),
+                tradePnL: trades.map(t => ({
+                    date: t.closeTime.toISOString(),
+                    value: (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0),
+                    ticket: t.ticket
+                })),
+                distribution: { wins, losses, breakeven: breakevens },
+                byMood: Array.from(moodMap.entries()).map(([mood, data]) => ({ mood, ...data })),
+                bySetup: Array.from(setupMap.entries()).map(([setup, data]) => ({ setup, ...data })),
+                bySession: Array.from(sessionMap.entries()).map(([session, data]) => ({ session, ...data }))
             };
 
             await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes (in milliseconds if using cache-manager < 5, seconds if > 5. Assuming NestJS wrapper handles it standardly as Milliseconds or seconds depending on config. NestJS cache-manager 5+ usually uses Milliseconds. Config in AppModule said ttl: 600 (seconds? default is seconds in Module config, but set method might vary). I will use 300000 for 5 mins to be safe or check CacheStore type).
@@ -459,7 +453,20 @@ export class DashboardService {
     }
 
     async invalidateUserCache(userId: string) {
-        // Placeholder for future cache invalidation logic
-        // defaults to TTL for now
+        const patterns = [
+            `dashboard:performance:${userId}:*`
+        ];
+
+        for (const pattern of patterns) {
+            // Depending on the cache store (Redis vs Memory), keys() might work or we need manual tracking.
+            // For now, since most performance metrics use a predictable key, we'll try to delete the most common ones.
+            // If using Redis, we could use DEL with wildcard if supported or iterate.
+            
+            // Simplified: Invalidate the common 'all' period which is the most likely culprit for stale stats
+            await this.cacheManager.del(`dashboard:performance:${userId}:all:all`);
+            
+            // Log it
+            console.log(`[DashboardService] Cache invalidated for user ${userId}`);
+        }
     }
 }

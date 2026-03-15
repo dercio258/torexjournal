@@ -29,14 +29,19 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
     useEffect(() => {
         const fetchCountries = async () => {
             try {
-                const res = await api.get('/countries');
-                setCountries(res.data);
+                const res = await fetch('https://restcountries.com/v3.1/all?fields=name,idd,flags,cca2');
+                const data = await res.json();
+                const mapped = data.map((c: any) => ({
+                    name: c.name.common,
+                    iso2: c.cca2,
+                    callingCode: c.idd.root + (c.idd.suffixes?.length === 1 ? c.idd.suffixes[0] : ''),
+                    flag: c.flags.svg
+                })).sort((a: any, b: any) => a.name.localeCompare(b.name));
+                
+                setCountries(mapped);
 
-                // Set default to Mozambique (should be first based on backend sort) or find by ISO
-                const defaultCountry = res.data.find((c: Country) => c.iso2 === 'MZ') || res.data[0];
-                if (defaultCountry) {
-                    setSelectedCountry(defaultCountry);
-                }
+                const mz = mapped.find((c: any) => c.iso2 === 'MZ') || mapped[0];
+                if (mz) setSelectedCountry(mz);
             } catch (err) {
                 console.error('Failed to load countries', err);
             } finally {

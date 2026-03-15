@@ -30,8 +30,8 @@ export const AddTrades = () => {
     const isBasic = user?.tier === 'BASIC';
 
     const handleSelectBroker = (broker: any) => {
-        if (isBasic && broker.id !== 'manual') {
-            alert('Esta opção de conexão está disponível apenas para o plano PREMIUM. O plano BÁSICO suporta apenas Upload Manual de CSV.');
+        if (isBasic && broker.id !== 'manual_csv') {
+            alert('Esta opção de conexão está disponível apenas para o plano PRO. O plano BÁSICO suporta apenas Upload Manual de CSV.');
             return;
         }
         // No longer storing selectedBroker since we only care about step routing

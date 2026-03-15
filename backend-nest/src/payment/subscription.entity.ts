@@ -46,6 +46,9 @@ export class Subscription {
     @Column({ nullable: true })
     paymentReference: string;
 
+    @Column({ nullable: true })
+    debitoTransactionId: string;
+
     @Column({
         type: 'enum',
         enum: SubscriptionStatus,

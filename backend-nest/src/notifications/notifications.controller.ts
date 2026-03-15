@@ -50,6 +50,16 @@ export class NotificationsController {
         return { connected };
     }
 
+    @Get('whatsapp/status')
+    async getWhatsAppStatus(@Req() req) {
+        return this.notificationsService.getWhatsAppStatus(req.user.id);
+    }
+
+    @Post('whatsapp/code')
+    async generateWhatsAppCode(@Req() req) {
+        return this.notificationsService.generateWhatsAppCode(req.user.id);
+    }
+
     @Post('test')
     async sendTest(@Req() req, @Body() body: { title: string; message: string; type?: string }) {
         return this.notificationsService.create(req.user.id, {

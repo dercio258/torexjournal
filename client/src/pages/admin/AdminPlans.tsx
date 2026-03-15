@@ -11,7 +11,7 @@ export const AdminPlans = () => {
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [newPlan, setNewPlan] = useState({
+    const [newPlan, setNewPlan] = useState<any>({
         tier: '',
         description: '',
         features: '', // comma separated string for input
@@ -19,6 +19,7 @@ export const AdminPlans = () => {
         annualDiscountPercent: '20',
         trialDays: '0'
     });
+    const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
 
     useEffect(() => {
@@ -36,30 +37,52 @@ export const AdminPlans = () => {
         }
     };
 
-    const handleCreatePlan = async (e: React.FormEvent) => {
+    const handleCreateOrUpdatePlan = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsCreating(true);
         try {
-            await api.post('/admin/plans', {
+            const planData = {
                 tier: newPlan.tier.toUpperCase(),
                 description: newPlan.description,
-                features: newPlan.features.split(',').map(f => f.trim()).filter(f => f),
+                features: newPlan.features.split(',').map((f: string) => f.trim()).filter((f: string) => f),
                 monthlyPrice: parseFloat(newPlan.monthlyPrice),
                 annualDiscountPercent: parseInt(newPlan.annualDiscountPercent),
                 trialEnabled: parseInt(newPlan.trialDays) > 0,
                 trialDays: parseInt(newPlan.trialDays),
                 isActive: true
-            });
-            alert('Plano criado com sucesso!');
+            };
+
+            if (editingPlanId) {
+                await api.patch(`/admin/plans/${editingPlanId}`, planData);
+                alert('Plano atualizado com sucesso!');
+            } else {
+                await api.post('/admin/plans', planData);
+                alert('Plano criado com sucesso!');
+            }
+
             setIsModalOpen(false);
+            setEditingPlanId(null);
             setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0' });
             fetchPlans();
         } catch (error) {
             console.error(error);
-            alert('Erro ao criar plano.');
+            alert(`Erro ao ${editingPlanId ? 'atualizar' : 'criar'} plano.`);
         } finally {
             setIsCreating(false);
         }
+    };
+
+    const openEditModal = (plan: any) => {
+        setEditingPlanId(plan.id);
+        setNewPlan({
+            tier: plan.tier,
+            description: plan.description || '',
+            features: plan.features?.join(', ') || '',
+            monthlyPrice: plan.monthlyPrice.toString(),
+            annualDiscountPercent: plan.annualDiscountPercent.toString(),
+            trialDays: plan.trialDays.toString()
+        });
+        setIsModalOpen(true);
     };
 
     if (isLoading) return <div className="text-white">Carregando...</div>;
@@ -112,9 +135,13 @@ export const AdminPlans = () => {
                             </div>
                         </div>
 
-                        <Button variant="secondary" className="w-full" disabled>
+                        <Button 
+                            variant="secondary" 
+                            className="w-full"
+                            onClick={() => openEditModal(plan)}
+                        >
                             <Edit className="w-4 h-4 mr-2" />
-                            Editar (Em Breve)
+                            Editar Plano
                         </Button>
                     </Card>
                 ))}
@@ -131,10 +158,14 @@ export const AdminPlans = () => {
 
             <Modal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                title="Novo Plano de Assinatura"
+                onClose={() => {
+                    setIsModalOpen(false);
+                    setEditingPlanId(null);
+                    setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0' });
+                }}
+                title={editingPlanId ? "Editar Plano" : "Novo Plano de Assinatura"}
             >
-                <form onSubmit={handleCreatePlan} className="space-y-4">
+                <form onSubmit={handleCreateOrUpdatePlan} className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-slate-400 mb-1">Nome do Plano (Tier)</label>
                         <input
@@ -205,7 +236,7 @@ export const AdminPlans = () => {
                         isLoading={isCreating}
                         className="w-full mt-4"
                     >
-                        Criar Plano
+                        {editingPlanId ? "Salvar Alterações" : "Criar Plano"}
                     </Button>
                 </form>
             </Modal>

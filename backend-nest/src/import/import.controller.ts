@@ -56,7 +56,7 @@ export class ImportController {
 
             return {
                 success: true,
-                message: `Imported ${trades.length} trades successfully.`,
+                message: `Importamos ${trades.length} operações! Agora, acesse o Diário para registrar suas anotações e gerenciamento de risco para gerar seu relatório de performance.`,
                 count: trades.length
             };
 

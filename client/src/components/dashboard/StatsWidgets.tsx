@@ -2,14 +2,21 @@ import React from 'react';
 import { ShieldCheck, ShieldAlert } from 'lucide-react';
 
 
-// --- Gauge de Proporção Profit vs Loss ---
-export const WinrateGauge = ({ winrate = 0, trades = 0 }) => {
+// --- Gauge de Proporção Profit vs Loss vs BE ---
+export const WinrateGauge = ({ wins = 0, losses = 0, breakeven = 0, trades = 0 }) => {
     const radius = 80;
     const stroke = 14;
     const normalizedRadius = radius - stroke;
     const circumference = normalizedRadius * Math.PI;
 
-    const winStroke = (winrate / 100) * circumference;
+    const totalCalculated = wins + losses + breakeven;
+    const effectiveTotal = totalCalculated || 1; // Avoid div by zero
+
+    const winPercent = (wins / effectiveTotal);
+    const bePercent = (breakeven / effectiveTotal);
+
+    const winStroke = winPercent * circumference;
+    const beStroke = bePercent * circumference;
 
     return (
         <div className="flex flex-col items-center justify-center relative py-4">
@@ -20,13 +27,23 @@ export const WinrateGauge = ({ winrate = 0, trades = 0 }) => {
                         <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
                     </filter>
                 </defs>
-                {/* Base de LOSS (Vermelho) */}
+                {/* Base de LOSS (Vermelho) - Always background */}
                 <path
                     d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
                     fill="none"
                     stroke="#f43f5e"
                     strokeWidth={stroke}
                     strokeLinecap="round"
+                />
+                {/* Camada de BE (Amarelo) */}
+                <path
+                    d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={stroke}
+                    strokeDasharray={`${(winStroke + beStroke)} ${circumference}`}
+                    strokeLinecap="round"
+                    style={{ transition: 'stroke-dasharray 1s ease-in-out' }}
                 />
                 {/* Sobreposição de PROFIT (Verde) */}
                 <path
@@ -43,15 +60,20 @@ export const WinrateGauge = ({ winrate = 0, trades = 0 }) => {
             <div className="absolute top-12 flex flex-col items-center">
                 <span className="text-3xl font-black text-slate-100 font-mono leading-none tracking-tighter">{trades}</span>
                 <span className="text-[9px] text-slate-500 uppercase tracking-[0.2em] font-bold mt-1">Trades</span>
-                <div className="mt-3 flex items-center gap-3">
+                <div className="mt-2 flex items-center gap-2">
                     <div className="text-center">
-                        <span className="text-[10px] text-emerald-500 font-black block leading-none">{winrate.toFixed(1)}%</span>
-                        <span className="text-[7px] text-slate-600 uppercase">Win</span>
+                        <span className="text-[9px] text-emerald-500 font-black block leading-none">{(winPercent * 100).toFixed(0)}%</span>
+                        <span className="text-[6px] text-slate-600 uppercase">Win</span>
                     </div>
-                    <div className="w-px h-4 bg-slate-800" />
+                    <div className="w-px h-3 bg-slate-800" />
                     <div className="text-center">
-                        <span className="text-[10px] text-rose-500 font-black block leading-none">{(100 - winrate).toFixed(1)}%</span>
-                        <span className="text-[7px] text-slate-600 uppercase">Loss</span>
+                        <span className="text-[9px] text-amber-500 font-black block leading-none">{(bePercent * 100).toFixed(0)}%</span>
+                        <span className="text-[6px] text-slate-600 uppercase">BE</span>
+                    </div>
+                    <div className="w-px h-3 bg-slate-800" />
+                    <div className="text-center">
+                        <span className="text-[9px] text-rose-500 font-black block leading-none">{(Math.max(0, 100 - (winPercent * 100) - (bePercent * 100))).toFixed(0)}%</span>
+                        <span className="text-[6px] text-slate-600 uppercase">Loss</span>
                     </div>
                 </div>
             </div>

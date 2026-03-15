@@ -1,4 +1,3 @@
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsController } from './notifications.controller';
@@ -7,7 +6,6 @@ import { NotificationEntity } from './notification.entity';
 import { AccountEntity } from '../account/account.entity';
 import { TelegrafModule } from 'nestjs-telegraf';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { EmailService } from './email.service';
 import { NotificationsCronService } from './notifications.cron';
 import { TradeEntity } from '../mt5/trade.entity';
 import { TechnicalJournal } from '../dashboard/technical-journal.entity';
@@ -15,11 +13,34 @@ import { UserEntity } from '../users/user.entity';
 import { TelegramService } from './telegram.service';
 import { AlertsModule } from '../alerts/alerts.module';
 import { Subscription } from '../payment/subscription.entity';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { BaileysService } from './baileys.service';
+import { WhatsAppBotService } from './whatsapp-bot.service';
+import { WhatsAppBotController } from './whatsapp-bot.controller';
+import { WhatsAppWorkerService } from './whatsapp-worker.service';
+import { WhatsAppProducerService } from './whatsapp-producer.service';
+import { WhatsAppLink } from '../users/whatsapp-link.entity';
+import { WhatsAppVerificationCode } from '../users/whatsapp-verification-code.entity';
+import { BroadcastNotificationEntity } from './broadcast-notification.entity';
+import { BroadcastingService } from './broadcast.service';
+import { SmsService } from './sms.service';
+import { EmailModule } from '../email/email.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([NotificationEntity, AccountEntity, UserEntity, TradeEntity, TechnicalJournal, Subscription]),
+        TypeOrmModule.forFeature([
+            NotificationEntity,
+            BroadcastNotificationEntity,
+            AccountEntity,
+            UserEntity,
+            TradeEntity,
+            TechnicalJournal,
+            Subscription,
+            WhatsAppLink,
+            WhatsAppVerificationCode,
+        ]),
         AlertsModule,
+        EmailModule,
         TelegrafModule.forRootAsync({
             imports: [ConfigModule],
             useFactory: (configService: ConfigService) => ({
@@ -28,9 +49,43 @@ import { Subscription } from '../payment/subscription.entity';
             }),
             inject: [ConfigService],
         }),
+        ClientsModule.registerAsync([
+            {
+                name: 'WHATSAPP_SERVICE',
+                imports: [ConfigModule],
+                useFactory: (configService: ConfigService) => ({
+                    transport: Transport.RMQ,
+                    options: {
+                        urls: [configService.get<string>('RABBITMQ_URL', 'amqp://localhost:5672')],
+                        queue: 'whatsapp_notifications',
+                        queueOptions: {
+                            durable: false,
+                        },
+                    },
+                }),
+                inject: [ConfigService],
+            },
+        ]),
     ],
-    controllers: [NotificationsController],
-    providers: [NotificationsService, TelegramService, EmailService, NotificationsCronService],
-    exports: [NotificationsService, TelegramService, EmailService]
+    controllers: [NotificationsController, WhatsAppBotController],
+    providers: [
+        NotificationsService,
+        BroadcastingService,
+        TelegramService,
+        NotificationsCronService,
+        BaileysService,
+        WhatsAppBotService,
+        WhatsAppWorkerService,
+        WhatsAppProducerService,
+        SmsService,
+    ],
+    exports: [
+        NotificationsService,
+        BroadcastingService,
+        TelegramService,
+        BaileysService,
+        WhatsAppProducerService,
+        SmsService,
+    ],
 })
 export class NotificationsModule { }

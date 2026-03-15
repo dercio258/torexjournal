@@ -16,6 +16,9 @@ import { UserEntity } from '../users/user.entity';
 
 import { PlanPermissionService } from './plan-permission.service';
 import { DebitoService } from './debito.service';
+import { SubscriptionCronService } from './subscription.cron';
+import { WebhookController } from './webhook.controller';
+import { EmailModule } from '../email/email.module';
 
 @Module({
     imports: [
@@ -23,10 +26,11 @@ import { DebitoService } from './debito.service';
         UsersModule,
         ConfigModule,
         AlertsModule,
-        NotificationsModule
+        NotificationsModule,
+        EmailModule
     ],
-    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService],
-    controllers: [PaymentController, SubscriptionController],
+    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionCronService],
+    controllers: [PaymentController, SubscriptionController, WebhookController],
     exports: [SubscriptionService, PlanPermissionService, DebitoService],
 })
 export class PaymentModule { }

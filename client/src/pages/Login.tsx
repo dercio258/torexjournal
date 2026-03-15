@@ -113,13 +113,18 @@ export const Login = () => {
     const { login } = useAuth();
     const navigate = useNavigate();
 
-    // View State: 'login' | 'forgot-password'
-    const [view, setView] = useState<'login' | 'forgot-password'>('login');
+    // View State: 'login' | 'forgot-password' | '2fa'
+    const [view, setView] = useState<'login' | 'forgot-password' | '2fa'>('login');
 
     // Login Form State
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [remember, setRemember] = useState(false);
+
+    // 2FA State
+    const [twoFactorUserId, setTwoFactorUserId] = useState<string | null>(null);
+    const [twoFactorEmail, setTwoFactorEmail] = useState<string | null>(null);
+    const [twoFactorOtp, setTwoFactorOtp] = useState('');
 
     // Forgot Password Form State
     const [fpEmail, setFpEmail] = useState('');
@@ -151,14 +156,50 @@ export const Login = () => {
             const res = await api.post('/auth/login', { email, password });
 
             if (res.data.success) {
-                login(res.data.token);
-                navigate('/dashboard');
+                if (res.data.twoFactorRequired) {
+                    setTwoFactorUserId(res.data.userId);
+                    setTwoFactorEmail(res.data.email);
+                    setView('2fa');
+                } else {
+                    login(res.data.token);
+                    navigate('/dashboard');
+                }
             } else {
                 setError(res.data.message || 'Credenciais inválidas');
             }
         } catch (err: any) {
             console.error(err);
             setError(err.response?.data?.message || 'Erro ao conectar com o servidor');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleVerify2FA = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!twoFactorOtp) {
+            setError('Por favor, insira o código de verificação.');
+            return;
+        }
+
+        setError(null);
+        setIsLoading(true);
+
+        try {
+            const res = await api.post('/auth/verify-2fa', {
+                userId: twoFactorUserId,
+                otp: twoFactorOtp
+            });
+
+            if (res.data.success) {
+                login(res.data.token);
+                navigate('/dashboard');
+            } else {
+                setError(res.data.message || 'Código inválido');
+            }
+        } catch (err: any) {
+            console.error(err);
+            setError(err.response?.data?.message || 'Erro ao verificar código');
         } finally {
             setIsLoading(false);
         }
@@ -235,7 +276,7 @@ export const Login = () => {
     };
 
     // Helper to switch view and reset states
-    const switchView = (newView: 'login' | 'forgot-password') => {
+    const switchView = (newView: 'login' | 'forgot-password' | '2fa') => {
         setView(newView);
         setError(null);
         setSuccessMsg(null);
@@ -243,6 +284,7 @@ export const Login = () => {
         setFpEmail('');
         setFpOtp('');
         setFpNewPassword('');
+        setTwoFactorOtp('');
     };
 
     return (
@@ -310,7 +352,7 @@ export const Login = () => {
                         {/* Glow Effect on Hover */}
                         <div className="absolute -inset-0.5 bg-gradient-to-br from-emerald-500/20 to-slate-800/0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10 blur-sm" />
 
-                        {view === 'login' ? (
+                        {view === 'login' && (
                             <>
                                 <div className="flex flex-col items-center mb-8">
                                     <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20 mb-4">
@@ -386,10 +428,22 @@ export const Login = () => {
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
-                                    <LoginButton variant="outline" className="h-10 text-sm font-medium">
+                                    <LoginButton 
+                                        variant="outline" 
+                                        className="h-10 text-sm font-medium"
+                                        onClick={() => {
+                                            window.location.href = '/api/auth/google';
+                                        }}
+                                    >
                                         <GoogleIcon className="mr-2" /> Google
                                     </LoginButton>
-                                    <LoginButton variant="outline" className="h-10 text-sm font-medium">
+                                    <LoginButton 
+                                        variant="outline" 
+                                        className="h-10 text-sm font-medium"
+                                        onClick={() => {
+                                            window.location.href = '/api/auth/github';
+                                        }}
+                                    >
                                         <Github size={16} className="mr-2" /> GitHub
                                     </LoginButton>
                                 </div>
@@ -403,7 +457,54 @@ export const Login = () => {
                                     </p>
                                 </div>
                             </>
-                        ) : (
+                        )}
+
+                        {view === '2fa' && (
+                            <>
+                                <div className="flex flex-col items-center mb-8">
+                                    <button
+                                        onClick={() => switchView('login')}
+                                        className="self-start mb-4 text-slate-400 hover:text-white flex items-center gap-2 text-sm transition-colors"
+                                    >
+                                        ← Voltar para login
+                                    </button>
+                                    <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-center mb-4">
+                                        <Lock className="text-emerald-400 w-6 h-6" />
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-white">Verificação 2FA</h2>
+                                    <p className="text-slate-400 text-sm mt-2 text-center">
+                                        Sua conta possui autenticação de dois fatores ativa. <br />
+                                        Insira o código enviado para <b>{twoFactorEmail}</b>.
+                                    </p>
+                                </div>
+
+                                <form onSubmit={handleVerify2FA} className="space-y-6">
+                                    <LoginInput
+                                        label="Código de Verificação"
+                                        placeholder="123456"
+                                        type="text"
+                                        icon={<Lock size={18} />}
+                                        value={twoFactorOtp}
+                                        onChange={(e: any) => setTwoFactorOtp(e.target.value)}
+                                        maxLength={6}
+                                        autoComplete="one-time-code"
+                                    />
+
+                                    {error && (
+                                        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-3 text-red-400 text-sm animate-pulse">
+                                            <AlertCircle size={18} />
+                                            {error}
+                                        </div>
+                                    )}
+
+                                    <LoginButton type="submit" isLoading={isLoading}>
+                                        Verificar e Acessar <ArrowRight size={18} className="ml-2 opacity-80" />
+                                    </LoginButton>
+                                </form>
+                            </>
+                        )}
+
+                        {view === 'forgot-password' && (
                             // FORGOT PASSWORD WIZARD
                             <>
                                 <div className="flex flex-col items-center mb-8">

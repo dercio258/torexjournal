@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import api from '../../api';
+import { Modal } from '../../components/ui/Modal';
+import { History, CheckCircle2, Clock, XCircle } from 'lucide-react';
 
 export const AdminUsers = () => {
     const [users, setUsers] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [selectedUser, setSelectedUser] = useState<any | null>(null);
+    const [history, setHistory] = useState<any[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
     useEffect(() => {
         fetchUsers();
@@ -18,6 +23,19 @@ export const AdminUsers = () => {
             console.error(error);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const fetchHistory = async (user: any) => {
+        setIsLoadingHistory(true);
+        setSelectedUser(user);
+        try {
+            const { data } = await api.get(`/admin/users/${user.id}/subscriptions`);
+            setHistory(data);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setIsLoadingHistory(false);
         }
     };
 
@@ -36,7 +54,9 @@ export const AdminUsers = () => {
                                 <th className="px-6 py-4">Whatsapp</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Plano</th>
+                                <th className="px-6 py-4">SMS Uso</th>
                                 <th className="px-6 py-4">Cadastro</th>
+                                <th className="px-6 py-4">Ações</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
@@ -68,7 +88,18 @@ export const AdminUsers = () => {
                                             ) : '-'}
                                         </td>
                                         <td className="px-6 py-4">
+                                            <span className="text-slate-400 font-mono text-xs">{user.smsUsageCount || 0}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
                                             {new Date(user.createdAt).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <button 
+                                                onClick={() => fetchHistory(user)}
+                                                className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 transition-colors"
+                                            >
+                                                <History size={16} /> Historico
+                                            </button>
                                         </td>
                                     </tr>
                                 );
@@ -77,6 +108,55 @@ export const AdminUsers = () => {
                     </table>
                 </div>
             </Card>
+
+            <Modal
+                isOpen={!!selectedUser}
+                onClose={() => setSelectedUser(null)}
+                title={`Histórico: ${selectedUser?.name || selectedUser?.email}`}
+            >
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    {isLoadingHistory ? (
+                        <div className="text-slate-500 text-center py-8">Carregando histórico...</div>
+                    ) : history.length === 0 ? (
+                        <div className="text-slate-500 text-center py-8">Nenhum registro encontrado.</div>
+                    ) : history.map((sub) => (
+                        <div key={sub.id} className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 flex justify-between items-center">
+                            <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-white uppercase">{sub.planConfig?.tier || 'Custom'}</span>
+                                    <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-400">{sub.cycle}</span>
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                    Início: {new Date(sub.createdAt).toLocaleDateString()}
+                                </div>
+                                {sub.status === 'ACTIVE' && (
+                                    <div className="text-xs text-emerald-400 font-medium">
+                                        Expira em: {new Date(sub.currentPeriodEnd).toLocaleDateString()}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="text-right">
+                                {sub.status === 'ACTIVE' ? (
+                                    <span className="flex items-center gap-1 text-emerald-500 text-xs font-bold bg-emerald-500/10 px-2 py-1 rounded-full">
+                                        <CheckCircle2 size={12} /> Ativo
+                                    </span>
+                                ) : sub.status === 'APPROVAL_PENDING' ? (
+                                    <span className="flex items-center gap-1 text-amber-500 text-xs font-bold bg-amber-500/10 px-2 py-1 rounded-full">
+                                        <Clock size={12} /> Pendente
+                                    </span>
+                                ) : (
+                                    <span className="flex items-center gap-1 text-slate-500 text-xs font-bold bg-slate-700 px-2 py-1 rounded-full">
+                                        <XCircle size={12} /> {sub.status}
+                                    </span>
+                                )}
+                                <div className="text-[10px] text-slate-500 mt-1 uppercase">
+                                    Ref: {sub.paymentReference?.slice(0, 10)}...
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </Modal>
         </div>
     );
 };

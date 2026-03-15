@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, ConflictException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, ConflictException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
@@ -18,6 +18,7 @@ import { AiService } from '../ai/ai.service';
 import { NormalizationService } from '../import/normalization/normalization.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
+import { DashboardService } from '../dashboard/dashboard.service';
 
 @Injectable()
 export class Mt5Service implements OnModuleInit, OnModuleDestroy {
@@ -44,7 +45,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         private aiService: AiService,
         @InjectQueue('email-queue') private emailQueue: Queue,
         @InjectQueue('behavioral-analysis') private behavioralQueue: Queue,
-        private normalizationService: NormalizationService
+        @InjectQueue('trade-import') private tradeImportQueue: Queue,
+        private normalizationService: NormalizationService,
+        private dashboardService: DashboardService
     ) { }
 
     // ... skipping unchanged lines, we will do a multi-replace or careful chunk replace ...
@@ -269,6 +272,49 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
     }
 
     async saveHistory(trades: any[], importMethod: ImportMethod = ImportMethod.EA, userId?: string) {
+        try {
+            // 1. Resolve Account ID if userId is provided (Fast DB check)
+            let accountId = null;
+            if (userId) {
+                const account = await this.accountRepo.findOne({ where: { userId } });
+                if (account) {
+                    accountId = account.id;
+                } else {
+                    this.logger.warn(`No account found for user ${userId}. Trade import might fail if account_id is required.`);
+                }
+            }
+
+            // 2. Normalization Step (Fast)
+            const normalizedTrades = this.normalizationService.normalizeBatch(trades, importMethod);
+
+            if (normalizedTrades.length === 0) {
+                return { success: true, count: 0, message: 'No trades to import' };
+            }
+
+            // 3. Queue the heavy processing work
+            await this.tradeImportQueue.add('process-trade-import', {
+                trades: normalizedTrades,
+                importMethod,
+                userId,
+                accountId
+            }, {
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+                removeOnComplete: true
+            });
+
+            this.logger.log(`Queued background import for ${normalizedTrades.length} trades (Method: ${importMethod}, User: ${userId || 'N/A'})`);
+
+            return { success: true, count: normalizedTrades.length, message: 'Background processing started' };
+
+        } catch (err) {
+            this.logger.error(`Failed to queue trade history: ${err.message}`);
+            throw err;
+        }
+    }
+
+    async processTradeImport(data: { trades: any[], importMethod: ImportMethod, userId?: string, accountId?: string }) {
+        const { trades, importMethod, userId, accountId } = data;
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
@@ -277,97 +323,56 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             const tradesToSave = [];
             const tickets = trades.map(t => t.ticket).filter(t => !!t);
 
-            // Fetch existing tickets in batch to avoid N+1 queries
+            // Fetch existing tickets in batch
             const existingTrades = tickets.length > 0
                 ? await queryRunner.manager.find(TradeEntity, { where: { ticket: In(tickets) } })
                 : [];
             const existingTickets = new Set(existingTrades.map(t => t.ticket.toString()));
 
-            // Resolve Account ID if userId is provided
-            let accountId = null;
-            if (userId) {
-                const account = await queryRunner.manager.findOne(AccountEntity, { where: { userId } });
-                if (account) {
-                    accountId = account.id;
-                } else {
-                    this.logger.warn(`No account found for user ${userId}. Trade import might fail if account_id is required.`);
-                }
-            }
-
-            // Normalization Step
-            const normalizedTrades = this.normalizationService.normalizeBatch(trades, importMethod);
-
-            for (const t of normalizedTrades) {
+            for (const t of trades) {
                 const ticket = t.ticket.toString();
                 if (existingTickets.has(ticket)) continue;
 
-                // Skip if we can't get a valid open time
-                if (!t.openTime) {
-                    this.logger.warn(`Skipping trade ${ticket}: Invalid open time`);
-                    continue;
-                }
+                if (!t.openTime) continue;
 
                 const newTrade = this.tradeRepo.create({
+                    ...t,
                     ticket: ticket,
-                    contractId: t.contractId,
-                    symbol: t.symbol,
-                    type: t.type,
-                    volume: t.volume,
-                    openPrice: t.openPrice,
-                    closePrice: t.closePrice,
-                    openTime: t.openTime,
-                    closeTime: t.closeTime,
-                    profit: t.profit,
-                    commission: t.commission || 0,
-                    swap: t.swap || 0,
-                    magic: t.magic || 0,
-                    comment: t.comment || '',
-                    session: t.session || 'Unknown',
-                    status: t.status,
                     accountId: accountId,
                     dataQuality: t.dataQuality || 'ok'
                 });
-
-                if (newTrade.symbol === 'Unknown') {
-                    this.logger.warn(`Trade ${ticket} imported with 'Unknown' symbol. Source data: ${JSON.stringify(t.raw)}`);
-                }
 
                 tradesToSave.push(newTrade);
             }
 
             let finalLogId = null;
             if (tradesToSave.length > 0) {
-                // Create Import Log first to get ID
-                const logUserId = tradesToSave[0].accountId ? (await queryRunner.manager.findOne(AccountEntity, { where: { id: tradesToSave[0].accountId } }))?.userId : null;
-
-                if (logUserId) {
+                if (userId) {
                     const log = this.importLogRepo.create({
-                        userId: logUserId,
+                        userId,
                         method: importMethod,
                         status: ImportStatus.SUCCESS,
                         tradesCount: tradesToSave.length,
-                        details: `Imported ${tradesToSave.length} trades via ${importMethod}`
+                        details: `Imported ${tradesToSave.length} trades via ${importMethod} (BG)`
                     });
                     const savedLog = await queryRunner.manager.save(log);
                     finalLogId = savedLog.id;
                 }
 
-                // Attach importLogId to all trades before saving
                 if (finalLogId) {
                     for (const trade of tradesToSave) {
                         trade.importLogId = finalLogId;
                     }
                 }
 
-                // Save Trades
                 await queryRunner.manager.save(tradesToSave);
             }
 
             await queryRunner.commitTransaction();
 
-            // Broadcast History Update
-            try {
-                if (tradesToSave.length > 0) {
+            if (tradesToSave.length > 0) {
+                // Broadcast updates
+                try {
                     const protoTrades = tradesToSave.map(t => ({
                         ticket: t.ticket,
                         symbol: t.symbol,
@@ -375,8 +380,8 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         volume: t.volume,
                         openPrice: t.openPrice,
                         closePrice: t.closePrice,
-                        openTime: t.openTime.getTime(),
-                        closeTime: t.closeTime ? t.closeTime.getTime() : 0,
+                        openTime: new Date(t.openTime).getTime(),
+                        closeTime: t.closeTime ? new Date(t.closeTime).getTime() : 0,
                         profit: t.profit,
                         commission: t.commission,
                         swap: t.swap,
@@ -387,72 +392,56 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         count: tradesToSave.length,
                         trades: protoTrades
                     });
+                } catch (e) {
+                    this.logger.warn(`Broadcast failed: ${e.message}`);
+                }
 
-                    // Send Notifications (Email & Telegram/Bell)
-                    if (userId) {
-                        const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: userId } });
-                        if (user && user.email) {
-                            // Queue Email
-                            this.emailQueue.add('trade-imported', {
-                                email: user.email,
-                                name: user.name,
-                                count: tradesToSave.length,
-                                method: importMethod
-                            }).catch(e => this.logger.warn(`Could not queue email for trade-imported: ${e.message}`));
+                // Notifications
+                if (userId) {
+                    const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: userId } });
+                    if (user && user.email) {
+                        this.emailQueue.add('trade-imported', {
+                            email: user.email,
+                            name: user.name,
+                            count: tradesToSave.length,
+                            method: importMethod
+                        }).catch(e => this.logger.warn(`Could not queue email: ${e.message}`));
 
-                            // Queue Generic Sync Notification
-                            this.notificationsService.create(userId, {
-                                title: 'SincronizaÃ§Ã£o de Trades',
-                                message: `${tradesToSave.length} novos trades foram sincronizados via ${importMethod}.`,
-                                type: NotificationType.SYSTEM
-                            }).catch(e => this.logger.warn(`Could not create notification for trade-imported: ${e.message}`));
+                        this.notificationsService.create(userId, {
+                            title: 'SincronizaÃ§Ã£o de Trades',
+                            message: `${tradesToSave.length} novos trades foram sincronizados via ${importMethod}.`,
+                            type: NotificationType.SYSTEM
+                        }).catch(e => this.logger.warn(`Could not create notification: ${e.message}`));
 
-                            // --- Professional Alerts & Behavioral Analysis ---
-                            if (tradesToSave.length > 0) {
-                                await this.processProfessionalAlerts(userId, accountId, tradesToSave);
+                        // Invalidate Dashboard Cache
+                        await this.dashboardService.invalidateUserCache(userId);
 
-                                // Trigger deep behavioral analysis in background
-                                this.behavioralQueue.add('analyze-user-behavior', { userId, accountId }, {
-                                    delay: 2000, // Small delay to ensure DB transaction is committed
-                                    removeOnComplete: true
-                                }).catch(e => this.logger.warn(`Failed to queue behavioral analysis: ${e.message}`));
-                            }
-                        }
-                    }
-
-                    // Trigger AI Insights in Background
-                    if (accountId && userId && tradesToSave.length > 0) {
-                        try {
-                            const totalProfitLoss = tradesToSave.reduce((sum, t) => sum + (t.profit || 0), 0);
-                            const totalCommission = tradesToSave.reduce((sum, t) => sum + (t.commission || 0), 0);
-                            const totalVolume = tradesToSave.reduce((sum, t) => sum + Number(t.volume || 0), 0);
-                            const wins = tradesToSave.filter(t => t.profit > 0).length;
-                            const losses = tradesToSave.filter(t => t.profit <= 0).length;
-                            const winRate = ((wins / tradesToSave.length) * 100).toFixed(2);
-
-                            const metricsSummary = {
-                                tradesCount: tradesToSave.length,
-                                wins,
-                                losses,
-                                winRate: `${winRate}%`,
-                                totalVolume,
-                                totalProfitLoss,
-                                totalCommission,
-                                symbolsTraded: [...new Set(tradesToSave.map(t => t.symbol))]
-                            };
-
-                            // Async fire-and-forget for local generation
-                            this.aiService.generateInsights(accountId, userId, metricsSummary, finalLogId)
-                                .then(() => this.logger.log(`Background AI generation requested for account ${accountId}`))
-                                .catch(e => this.logger.warn(`Background AI generation failed to trigger: ${e.message}`));
-
-                        } catch (e) {
-                            this.logger.error(`Failed to aggregate metrics for AI: ${e.message}`);
-                        }
+                        // Professional Alerts
+                        await this.processProfessionalAlerts(userId, accountId!, tradesToSave);
+                        
+                        this.behavioralQueue.add('analyze-user-behavior', { userId, accountId }, {
+                            delay: 2000,
+                            removeOnComplete: true
+                        }).catch(e => this.logger.warn(`Failed to queue behavioral analysis: ${e.message}`));
                     }
                 }
-            } catch (broadcastError) {
-                this.logger.warn(`Failed to broadcast history update: ${broadcastError.message}`);
+
+                // AI Insights
+                if (accountId && userId) {
+                    try {
+                        const totalProfitLoss = tradesToSave.reduce((sum, t) => sum + (t.profit || 0), 0);
+                        const metricsSummary = {
+                            tradesCount: tradesToSave.length,
+                            totalProfitLoss,
+                            symbolsTraded: [...new Set(tradesToSave.map(t => t.symbol))]
+                        };
+
+                        this.aiService.generateInsights(accountId, userId, metricsSummary, finalLogId)
+                            .catch(e => this.logger.warn(`AI generation trigger failed: ${e.message}`));
+                    } catch (e) {
+                        this.logger.error(`AI metric aggregation failed: ${e.message}`);
+                    }
+                }
             }
 
             return { success: true, count: tradesToSave.length };
@@ -461,7 +450,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             if (queryRunner.isTransactionActive) {
                 await queryRunner.rollbackTransaction();
             }
-            this.logger.error(`Save history failed: ${err.message}`);
+            this.logger.error(`Background trade import failed: ${err.message}`, err.stack);
             throw err;
         } finally {
             await queryRunner.release();
@@ -536,6 +525,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         });
 
         const saved = await this.tradeRepo.save(newTrade);
+
+        // Invalidate Dashboard Cache
+        await this.dashboardService.invalidateUserCache(userId);
 
         // Broadcast manual trade as history update
         this.mt5Gateway.broadcastHistoryUpdate({

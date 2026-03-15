@@ -1,8 +1,9 @@
-import { Controller, Post, Get, Body, UnauthorizedException, Logger, UseGuards, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Body, UnauthorizedException, Logger, UseGuards, Headers, Patch, Param } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as moment from 'moment';
 import { UsersService } from '../users/users.service';
 import { SubscriptionService } from '../payment/subscription.service';
+import { BroadcastingService } from '../notifications/broadcast.service';
 
 @Controller('admin')
 export class AdminController {
@@ -11,7 +12,8 @@ export class AdminController {
     constructor(
         private configService: ConfigService,
         private usersService: UsersService,
-        private subscriptionService: SubscriptionService
+        private subscriptionService: SubscriptionService,
+        private broadcastingService: BroadcastingService
     ) { }
 
     // --- Auth ---
@@ -45,18 +47,6 @@ export class AdminController {
         return this.usersService.findAll();
     }
 
-    // --- Plans ---
-    @Get('plans')
-    async getPlans() {
-        return this.subscriptionService.getActivePlans();
-    }
-
-    @Post('plans')
-    async createPlan(@Body() body: any) {
-        // body should contain tier, monthlyPrice, etc.
-        return this.subscriptionService.createPlanConfig(body);
-    }
-
     // --- Finance / Stats ---
     @Get('stats')
     async getStats() {
@@ -74,5 +64,44 @@ export class AdminController {
             activeSubscribers: activeSubs,
             estimatedMonthlyRevenue
         };
+    }
+
+    // --- Broadcast Notifications ---
+    @Get('broadcasts')
+    async getBroadcasts() {
+        return this.broadcastingService.findAll();
+    }
+
+    @Post('broadcasts')
+    async createBroadcast(@Body() body: any) {
+        return this.broadcastingService.createBroadcast(body);
+    }
+
+    @Post('broadcasts/:id/execute')
+    async executeBroadcast(@Headers('id') id: string) {
+        // Fallback to param id if header not present (standardizing with other routes)
+        return this.broadcastingService.executeBroadcast(id);
+    }
+
+    // --- Subscription Plan Management ---
+    @Get('plans')
+    async getPlans() {
+        return this.subscriptionService.getAllPlans();
+    }
+
+    @Patch('plans/:id')
+    async updatePlan(@Param('id') id: string, @Body() body: any) {
+        return this.subscriptionService.updatePlanConfig(id, body);
+    }
+
+    @Post('plans')
+    async createPlan(@Body() body: any) {
+        return this.subscriptionService.createPlanConfig(body);
+    }
+
+    // --- User Subscription History ---
+    @Get('users/:id/subscriptions')
+    async getUserSubscriptions(@Param('id') id: string) {
+        return this.subscriptionService.getUserSubscriptionHistory(id);
     }
 }

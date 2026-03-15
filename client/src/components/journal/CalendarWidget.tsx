@@ -29,7 +29,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
     // Empty slots for previous month
     for (let i = 0; i < firstDay; i++) {
-        days.push(<div key={`empty-${i}`} className="min-h-[80px] bg-slate-900/20 border-r border-b border-slate-700/50" />);
+        days.push(<div key={`empty-${i}`} className="aspect-square bg-slate-900/10 border-r border-b border-slate-700/30" />);
     }
 
     // Days of the month
@@ -62,7 +62,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             <div
                 key={day}
                 onClick={() => onDateSelect(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
-                className={`relative p-2 min-h-[80px] cursor-pointer transition-all flex flex-col justify-between group ${bgClass} ${borderClass}`}
+                className={`relative p-2.5 aspect-square cursor-pointer transition-all duration-300 flex flex-col justify-between group ${bgClass} ${borderClass}`}
             >
                 <div className="flex justify-between items-start">
                     <span className={`text-sm font-bold ${isSelected || isToday ? 'text-white' : 'text-slate-400'}`}>
@@ -72,11 +72,11 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
                 </div>
 
                 {hasTrades && (
-                    <div className="text-right flex flex-col items-end">
-                        <div className="text-[10px] text-slate-400 font-medium mb-0.5 leading-none">
-                            {dayTrades.length} trade{dayTrades.length !== 1 ? 's' : ''}
+                    <div className="text-right flex flex-col items-end transform group-hover:scale-105 transition-transform">
+                        <div className="text-[9px] text-slate-400 font-bold mb-0.5 leading-none opacity-80 uppercase tracking-tighter">
+                            {dayTrades.length} TX
                         </div>
-                        <div className={`text-xs font-bold font-mono tracking-tight ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <div className={`text-[11px] font-black font-mono tracking-tighter ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(0)}
                         </div>
                     </div>
@@ -86,7 +86,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     }
 
     return (
-        <div className="bg-slate-900/60 backdrop-blur-2xl border-2 border-indigo-500/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-full ring-1 ring-white/5">
+        <div className="bg-slate-900/60 backdrop-blur-2xl border-2 border-indigo-500/20 rounded-3xl overflow-hidden shadow-2xl flex flex-col ring-1 ring-white/5">
             {/* Calendar Header */}
             <div className="flex items-center justify-between p-5 bg-gradient-to-b from-indigo-500/10 to-transparent border-b border-slate-800/50">
                 <h3 className="font-bold text-white flex items-center gap-2 text-xl">
@@ -119,7 +119,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             </div>
 
             {/* Calendar Grid */}
-            <div className="grid grid-cols-7 flex-1 overflow-y-auto content-start bg-slate-950/20">
+            <div className="grid grid-cols-7 flex-1 content-start bg-slate-950/20">
                 {days}
             </div>
         </div>

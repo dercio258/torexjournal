@@ -7,6 +7,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Mt5Controller } from './mt5.controller';
 import { Mt5Service } from './mt5.service';
 import { Mt5Processor } from './mt5.processor';
+import { TradeImportProcessor } from './trade-import.processor';
 import { BehavioralProcessor } from './behavioral.processor';
 import { AccountEntity } from '../account/account.entity';
 import { PositionEntity } from './position.entity';
@@ -29,6 +30,7 @@ import { AiModule } from '../ai/ai.module';
 import { NormalizationModule } from '../import/normalization/normalization.module';
 import { AlertsModule } from '../alerts/alerts.module';
 import { PaymentModule } from '../payment/payment.module';
+import { EmailModule } from '../email/email.module';
 
 @Module({
     imports: [
@@ -38,14 +40,15 @@ import { PaymentModule } from '../payment/payment.module';
         NormalizationModule,
         AlertsModule,
         PaymentModule,
+        EmailModule,
         BullModule.registerQueue({
             name: 'mt5-data',
         }),
         BullModule.registerQueue({
-            name: 'email-queue',
+            name: 'behavioral-analysis',
         }),
         BullModule.registerQueue({
-            name: 'behavioral-analysis',
+            name: 'trade-import',
         }),
         JwtModule.registerAsync({
             imports: [ConfigModule],
@@ -57,7 +60,7 @@ import { PaymentModule } from '../payment/payment.module';
         }),
     ],
     controllers: [Mt5Controller, ImportController],
-    providers: [Mt5Service, Mt5Gateway, Mt5Processor, BehavioralProcessor, Mt5TcpServer, Mt5RedisSubscriber, Mt5InstanceService, ReportParserService],
+    providers: [Mt5Service, Mt5Gateway, Mt5Processor, TradeImportProcessor, BehavioralProcessor, Mt5TcpServer, Mt5RedisSubscriber, Mt5InstanceService, ReportParserService],
     exports: [Mt5Service, Mt5InstanceService]
 })
 export class Mt5Module { }

@@ -9,6 +9,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import * as redisStore from 'cache-manager-redis-store';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
 
 import { Mt5Module } from './mt5/mt5.module';
@@ -31,6 +32,7 @@ import { AlertsModule } from './alerts/alerts.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
 
     ConfigModule.forRoot({
       isGlobal: true,

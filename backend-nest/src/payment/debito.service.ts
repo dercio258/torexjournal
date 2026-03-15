@@ -38,8 +38,10 @@ export class DebitoService {
         switch (type) {
             case 'mpesa': return this.configService.get<string>('DEBITO_WALLET_ID_MPESA', '');
             case 'emola': return this.configService.get<string>('DEBITO_WALLET_ID_EMOLA', '');
-            case 'card': return this.configService.get<string>('DEBITO_WALLET_ID_CARD', '');
-            default: throw new Error(`Invalid wallet type: ${type}`);
+            case 'card':
+                return this.configService.get<string>('DEBITO_WALLET_ID_CARD') ||
+                    this.configService.get<string>('DEBITO_WALLET_ID_BANK', '');
+            default: throw new Error(`Tipo de carteira inválido: ${type}`);
         }
     }
 
@@ -62,10 +64,18 @@ export class DebitoService {
         try {
             const url = `${this.baseUrl}/wallets/${walletId}/c2b/mpesa`;
             const response = await axios.post(url, data, { headers: this.getHeaders() });
+            this.logger.log(`M-Pesa payment initiated: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error: any) {
-            this.logger.error('M-Pesa payment failed', error.response?.data || error.message);
-            throw new Error(error.response?.data?.message || 'Falha ao processar M-Pesa');
+            const apiError = error.response?.data?.message || error.response?.data?.error || error.message;
+            this.logger.error(`M-Pesa payment failed: ${apiError}`, error.response?.data);
+            
+            // Map common provider errors to user friendly messages
+            let userMessage = `Falha ao processar M-Pesa: ${apiError}`;
+            if (apiError.includes('INSUFFICIENT_FUNDS')) userMessage = 'Saldo insuficiente para completar a transação.';
+            if (apiError.includes('TIMEOUT')) userMessage = 'O pedido expirou. Por favor, tente novamente.';
+            
+            throw new Error(userMessage);
         }
     }
 
@@ -79,28 +89,36 @@ export class DebitoService {
         try {
             const url = `${this.baseUrl}/wallets/${walletId}/c2b/emola`;
             const response = await axios.post(url, data, { headers: this.getHeaders() });
+            this.logger.log(`e-Mola payment initiated: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error: any) {
-            this.logger.error('e-Mola payment failed', error.response?.data || error.message);
-            throw new Error(error.response?.data?.message || 'Falha ao processar e-Mola');
+            const apiError = error.response?.data?.message || error.response?.data?.error || error.message;
+            this.logger.error(`e-Mola payment failed: ${apiError}`, error.response?.data);
+            
+            let userMessage = `Falha ao processar e-Mola: ${apiError}`;
+            if (apiError.includes('INSUFFICIENT_FUNDS')) userMessage = 'Saldo insuficiente na sua conta e-Mola.';
+            
+            throw new Error(userMessage);
         }
     }
 
     async initiateCardPayment(data: DebitoCardPaymentDto) {
         const walletId = this.getWalletId('card');
         if (!walletId) {
-            this.logger.error('DEBITO_WALLET_ID_CARD is not configured');
-            throw new Error('Configuração de pagamento Cartão incompleta');
+            this.logger.error('DEBITO_WALLET_ID_CARD or BANK is not configured');
+            throw new Error('Configuração de pagamento Cartão incompleta. Por favor, configure DEBITO_WALLET_ID_CARD ou DEBITO_WALLET_ID_BANK.');
         }
 
         try {
             const url = `${this.baseUrl}/wallets/${walletId}/card-payment`;
             const response = await axios.post(url, data, { headers: this.getHeaders() });
-            return response.data; // Usually returns checkoutUrl
+            this.logger.log(`Card payment initiated: ${JSON.stringify(response.data)}`);
+            return response.data; // Usually returns checkoutUrl and possibly transaction id
         } catch (error: any) {
-            this.logger.error('Card payment failed', error.response?.data || error.message);
+            const apiError = error.response?.data?.message || error.response?.data?.error || error.message;
+            this.logger.error(`Card payment failed: ${apiError}`, error.response?.data);
             throw new HttpException(
-                error.response?.data?.message || 'Falha ao processar Cartão',
+                `Falha ao processar Cartão: ${apiError}`,
                 error.response?.status || HttpStatus.BAD_REQUEST
             );
         }
@@ -108,11 +126,14 @@ export class DebitoService {
 
     async checkTransactionStatus(reference: string) {
         try {
+            this.logger.log(`Checking transaction status for reference: ${reference}`);
             const url = `${this.baseUrl}/transactions/${reference}/status`;
             const response = await axios.get(url, { headers: this.getHeaders() });
+            this.logger.log(`Status response for ${reference}: ${JSON.stringify(response.data)}`);
             return response.data;
         } catch (error: any) {
-            this.logger.error(`Status check failed for ${reference}: ${error.message}`);
+            const apiError = error.response?.data?.message || error.response?.data?.error || error.message;
+            this.logger.error(`Status check failed for ${reference}: ${apiError} (Status: ${error.response?.status})`);
             return null;
         }
     }

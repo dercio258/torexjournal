@@ -11,6 +11,13 @@ import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
 import { UserEntity } from '../users/user.entity';
 import { Subscription, SubscriptionStatus } from '../payment/subscription.entity';
+import { BroadcastingService } from './broadcast.service';
+import { BroadcastNotificationEntity, BroadcastStatus } from './broadcast-notification.entity';
+import { LessThanOrEqual } from 'typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { SmsService } from './sms.service';
+import { SmsTemplates } from './sms-templates';
 
 @Injectable()
 export class NotificationsCronService {
@@ -27,8 +34,13 @@ export class NotificationsCronService {
         private userRepo: Repository<UserEntity>,
         @InjectRepository(Subscription)
         private subscriptionRepo: Repository<Subscription>,
+        @InjectRepository(BroadcastNotificationEntity)
+        private broadcastRepo: Repository<BroadcastNotificationEntity>,
         private alertsService: AlertsService,
-        private notificationsService: NotificationsService
+        private notificationsService: NotificationsService,
+        private broadcastingService: BroadcastingService,
+        @InjectQueue('email-queue') private emailQueue: Queue,
+        private smsService: SmsService,
     ) { }
 
     // Runs every day at 08:00 AM server time
@@ -203,6 +215,87 @@ export class NotificationsCronService {
                     metadata: { marketingCampaign: `inactive_${daysAgo}_days` }
                 });
             }
+        }
+    }
+
+    // Runs every minute to check for scheduled broadcasts
+    @Cron(CronExpression.EVERY_MINUTE)
+    async processScheduledBroadcasts() {
+        // this.logger.log('Checking for scheduled broadcasts...');
+        const now = new Date();
+        
+        const pendingBroadcasts = await this.broadcastRepo.find({
+            where: {
+                status: BroadcastStatus.SCHEDULED,
+                nextRunAt: LessThanOrEqual(now)
+            }
+        });
+
+        for (const broadcast of pendingBroadcasts) {
+            try {
+                await this.broadcastingService.executeBroadcast(broadcast.id);
+            } catch (error) {
+                this.logger.error(`Failed to execute broadcast ${broadcast.id}`, error);
+            }
+        }
+    }
+
+    // Runs every day at 09:00 AM
+    @Cron(CronExpression.EVERY_DAY_AT_9AM)
+    async checkSubscriptionExpirations() {
+        this.logger.log('Checking for subscriptions expiring in 5 days...');
+        
+        const fiveDaysFromNowStart = new Date();
+        fiveDaysFromNowStart.setDate(fiveDaysFromNowStart.getDate() + 5);
+        fiveDaysFromNowStart.setHours(0, 0, 0, 0);
+
+        const fiveDaysFromNowEnd = new Date(fiveDaysFromNowStart);
+        fiveDaysFromNowEnd.setHours(23, 59, 59, 999);
+
+        try {
+            const expiringSubs = await this.subscriptionRepo.find({
+                where: {
+                    status: SubscriptionStatus.ACTIVE,
+                    currentPeriodEnd: Between(fiveDaysFromNowStart, fiveDaysFromNowEnd)
+                },
+                relations: ['user', 'planConfig']
+            });
+
+            for (const sub of expiringSubs) {
+                if (sub.user) {
+                    await this.alertsService.create(sub.userId, {
+                        type: AlertType.SYSTEM,
+                        severity: AlertSeverity.WARNING,
+                        title: 'Sua assinatura expira em 5 dias! ⏳',
+                        description: `Sua assinatura do plano ${sub.planConfig?.tier || 'atual'} está chegando ao fim. Renove agora para não perder o acesso às suas métricas e ferramentas.`,
+                        metadata: { expiryDate: sub.currentPeriodEnd, subId: sub.id }
+                    });
+
+                    // Send Professional Email
+                    await this.emailQueue.add('general-notification', {
+                        email: sub.user.email,
+                        userName: sub.user.name,
+                        title: 'Acção Necessária: Sua Assinatura Expira em Breve',
+                        subtitle: 'RENOVAÇÃO DE PLANO',
+                        message: `Sua assinatura do plano ${sub.planConfig?.tier || 'atual'} termina em apenas 5 dias (${new Date(sub.currentPeriodEnd).toLocaleDateString()}).\n\nGaranta a continuidade do seu diário de trading e não perca o acesso aos seus dados históricos e relatórios avançados.`,
+                        buttonUrl: `${process.env.BASE_URL || ''}/pricing`,
+                        buttonLabel: 'Renovar Assinatura Agora'
+                    }, { removeOnComplete: true });
+
+                    // Send Professional SMS (Systemic)
+                    if (sub.user.whatsapp) {
+                        await this.smsService.sendSms(
+                            sub.user.id,
+                            sub.user.whatsapp,
+                            SmsTemplates.EXPIRATION_REMINDER(sub.user.name, 5),
+                            true // isSystemic
+                        );
+                    }
+                }
+            }
+            this.logger.log(`Expiration check complete. Notified ${expiringSubs.length} users.`);
+        } catch (error) {
+            this.logger.error('Failed to run checkSubscriptionExpirations cron', error);
         }
     }
 }

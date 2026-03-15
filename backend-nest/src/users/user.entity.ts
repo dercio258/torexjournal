@@ -19,6 +19,12 @@ export class UserEntity {
     @Column({ unique: true, nullable: true })
     email: string;
 
+    @Column({ name: 'google_id', unique: true, nullable: true })
+    googleId: string;
+
+    @Column({ name: 'github_id', unique: true, nullable: true })
+    githubId: string;
+
     @Column({ name: 'password_hash', nullable: true })
     passwordHash: string;
 
@@ -54,4 +60,28 @@ export class UserEntity {
 
     @Column({ nullable: true })
     lastPaymentMethod: string;
+
+    @Column({ name: 'two_factor_enabled', default: false })
+    twoFactorEnabled: boolean;
+
+    @Column({ name: 'onboarding_completed', default: false })
+    onboardingCompleted: boolean;
+
+    @Column({ type: 'jsonb', nullable: true, name: 'survey_answers' })
+    surveyAnswers: any;
+
+    @Column({ name: 'sms_usage_count', default: 0 })
+    smsUsageCount: number;
+
+    @Column({ name: 'last_sms_reset', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+    lastSmsReset: Date;
+
+    @Column({ name: 'refresh_token', nullable: true })
+    refreshToken: string;
+
+    @Column({ name: 'two_factor_secret', nullable: true })
+    twoFactorSecret: string;
+
+    @Column({ name: 'is_two_factor_confirmed', default: false })
+    isTwoFactorConfirmed: boolean;
 }

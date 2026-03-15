@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { TrendingUp } from 'lucide-react';
 
 interface PnLChartProps {
-    data: { date: string; value: number; ticket?: number }[];
+    data: { date: string; value: number; ticket?: number | string }[];
 }
 
 export const DailyPnLChart = ({ data }: PnLChartProps) => {

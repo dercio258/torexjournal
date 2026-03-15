@@ -30,7 +30,7 @@ export class TelegramService implements OnModuleInit {
                 dropPendingUpdates: true,
             });
             this.logger.log('Telegram Bot launched successfully');
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`Failed to launch Telegram Bot: ${error.message}`);
         }
     }
@@ -95,7 +95,7 @@ export class TelegramService implements OnModuleInit {
         if (user && user.telegramChatId) {
             try {
                 await this.bot.telegram.sendMessage(user.telegramChatId, message);
-            } catch (error) {
+            } catch (error: any) {
                 this.logger.error(`Failed to send Telegram message to user ${userId}: ${error.message}`);
             }
         }

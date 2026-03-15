@@ -4,6 +4,7 @@ import api from '../api';
 interface AuthContextType {
     token: string | null;
     isAuthenticated: boolean;
+    isLoading: boolean;
     login: (token: string, email?: string) => void;
     logout: () => void;
     userEmail: string | null;
@@ -15,8 +16,9 @@ interface AuthContextType {
         avatarUrl?: string;
         is_connected?: boolean;
         tier?: 'FREE' | 'BASIC' | 'PREMIUM';
+        onboardingCompleted?: boolean;
     } | null;
-    updateUser: (data: Partial<{ avatarUrl: string; name: string }>) => void;
+    updateUser: (data: Partial<{ avatarUrl: string; name: string; onboardingCompleted: boolean }>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,10 +27,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [token, setTokenObj] = useState<string | null>(localStorage.getItem('token'));
     const [userEmail, setUserEmail] = useState<string | null>(localStorage.getItem('userEmail'));
     const [user, setUser] = useState<AuthContextType['user']>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         if (token) {
             fetchProfile();
+        } else {
+            setIsLoading(false);
         }
     }, [token]);
 
@@ -46,6 +51,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } catch (e) {
             console.error("Failed to fetch profile", e);
             // api.ts interceptor handles 401 and emits auth:unauthorized
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -79,7 +86,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
     };
 
-    const updateUser = (data: Partial<{ avatarUrl: string; name: string }>) => {
+    const updateUser = (data: Partial<{ avatarUrl: string; name: string; onboardingCompleted: boolean }>) => {
         setUser(prev => prev ? { ...prev, ...data } : null);
     };
 
@@ -91,6 +98,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             logout,
             userEmail,
             user,
+            isLoading,
             updateUser
         }}>
             {children}
