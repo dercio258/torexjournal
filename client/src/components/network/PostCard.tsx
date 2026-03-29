@@ -1,6 +1,6 @@
 import { Heart, MessageCircle, Share2, MoreHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
 
-const ASSETS_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const ASSETS_URL = import.meta.env.VITE_API_URL || window.location.origin;
 interface Post {
     id: number;
     content: string;

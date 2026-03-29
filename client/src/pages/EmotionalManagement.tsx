@@ -152,7 +152,7 @@ const EmotionalManagement = () => {
 
     const fetchUserProfile = async () => {
         try {
-            const res = await fetch(`http://localhost:3000/api/auth/profile`, {
+            const res = await fetch(`${window.location.origin}/api/auth/profile`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -167,7 +167,7 @@ const EmotionalManagement = () => {
     const fetchLog = async () => {
         try {
             setLoading(true);
-            const res = await fetch(`http://localhost:3000/api/mental-log/today?session=${currentSession}`, {
+            const res = await fetch(`${window.location.origin}/api/mental-log/today?session=${currentSession}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -176,7 +176,7 @@ const EmotionalManagement = () => {
             }
 
             // Fetch History
-            const historyRes = await fetch(`http://localhost:3000/api/mental-log/history`, {
+            const historyRes = await fetch(`${window.location.origin}/api/mental-log/history`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (historyRes.ok) {
@@ -196,9 +196,9 @@ const EmotionalManagement = () => {
     const handleSave = async () => {
         try {
             setSaving(true);
-
+ 
             // 1. Save Text Data
-            const res = await fetch(`http://localhost:3000/api/mental-log`, {
+            const res = await fetch(`${window.location.origin}/api/mental-log`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -229,8 +229,8 @@ const EmotionalManagement = () => {
                             const formData = new FormData();
                             formData.append('file', blob, `log-${Date.now()}.png`);
                             formData.append('session', currentSession);
-
-                            await fetch(`http://localhost:3000/api/mental-log/image`, {
+ 
+                            await fetch(`${window.location.origin}/api/mental-log/image`, {
                                 method: 'POST',
                                 headers: { 'Authorization': `Bearer ${token}` },
                                 body: formData
@@ -278,7 +278,7 @@ const EmotionalManagement = () => {
     };
 
     const handleShare = async (imageUrl: string) => {
-        const fullUrl = `http://localhost:3000${imageUrl}`;
+        const fullUrl = `${window.location.origin}${imageUrl}`;
         if (navigator.share) {
             try {
                 // Fetch image blob to share file directly if supported, otherwise share link
@@ -513,7 +513,7 @@ const EmotionalManagement = () => {
                                             {h.imageUrl ? (
                                                 <>
                                                     <a
-                                                        href={`http://localhost:3000${h.imageUrl}`}
+                                                        href={`${window.location.origin}${h.imageUrl}`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                         className="inline-flex items-center gap-2 p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-bold uppercase tracking-wider border border-slate-700"

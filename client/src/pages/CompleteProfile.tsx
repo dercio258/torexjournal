@@ -21,7 +21,7 @@ export const CompleteProfile = () => {
         setError('');
 
         try {
-            const backendUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+            const backendUrl = process.env.REACT_APP_API_URL || window.location.origin;
             await axios.put(`${backendUrl}/api/auth/contact`, { whatsapp }, {
                 headers: { Authorization: `Bearer ${token}` }
             });

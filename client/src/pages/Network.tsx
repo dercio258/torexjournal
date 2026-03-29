@@ -65,7 +65,8 @@ export const Network = () => {
         const token = localStorage.getItem('token');
         if (!token) return;
 
-        const newSocket = io('http://localhost:3000/network', {
+        const socketUrl = `${window.location.origin}/network`;
+        const newSocket = io(socketUrl, {
             auth: { token },
             transports: ['websocket']
         });

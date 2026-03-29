@@ -62,7 +62,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             <div
                 key={day}
                 onClick={() => onDateSelect(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
-                className={`relative p-2.5 aspect-square cursor-pointer transition-all duration-300 flex flex-col justify-between group ${bgClass} ${borderClass}`}
+                className={`relative p-1.5 aspect-square cursor-pointer transition-all duration-300 flex flex-col justify-between group ${bgClass} ${borderClass}`}
             >
                 <div className="flex justify-between items-start">
                     <span className={`text-sm font-bold ${isSelected || isToday ? 'text-white' : 'text-slate-400'}`}>

@@ -46,7 +46,8 @@ export const ChatWidget = () => {
 
         // Initialize Socket
         // Using namespace /network
-        const socket = io('http://localhost:3000/network', {
+        const socketUrl = `${window.location.origin}/network`;
+        const socket = io(socketUrl, {
             auth: { token },
             transports: ['websocket']
         });

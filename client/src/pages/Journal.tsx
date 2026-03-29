@@ -240,9 +240,9 @@ export const Journal = () => {
             ) : (
                 <div className="flex flex-col gap-6">
 
-                    {/* Top Row: Calendar Full Width */}
-                    <div className="grid grid-cols-1 gap-6 items-stretch">
-                        <div className="relative">
+                    {/* Top Row: Calendar - Restricted Width for better balance */}
+                    <div className="flex justify-center w-full">
+                        <div className="relative w-full max-w-4xl">
                             <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-3xl blur-xl -z-10"></div>
                             <CalendarWidget
                                 currentDate={currentDate}

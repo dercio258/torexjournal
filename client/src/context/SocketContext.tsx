@@ -27,8 +27,8 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
         }
 
         // Connect to Backend WebSocket
-        // Adjust URL as needed (e.g. env var)
-        const wsUrl = 'ws://localhost:3000';
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}`;
         const newSocket = new WebSocket(wsUrl);
         newSocket.binaryType = 'arraybuffer';
 

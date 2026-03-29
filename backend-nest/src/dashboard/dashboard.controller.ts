@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Assuming this exists f
 
 import { SessionService } from './session.service';
 
-@Controller() // Prefix handled by global setGlobalPrefix('api')
+@Controller('dashboard') // Prefix handled by global setGlobalPrefix('api')
 export class DashboardController {
     constructor(
         private readonly dashboardService: DashboardService,
