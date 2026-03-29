@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Upload, Download, CheckCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../api';
 
 interface ManualImportFormProps {
@@ -9,9 +10,10 @@ interface ManualImportFormProps {
 }
 
 export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
+    const navigate = useNavigate();
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+    const [status, setStatus] = useState<{ type: 'success' | 'error', message: string, count?: number } | null>(null);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -29,10 +31,14 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
         formData.append('file', selectedFile);
 
         try {
-            await api.post('/import/report', formData, {
+            const res = await api.post('/import/report', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
-            setStatus({ type: 'success', message: 'Report imported successfully! History updated.' });
+            setStatus({ 
+                type: 'success', 
+                message: res.data.message || 'Report imported successfully! History updated.',
+                count: res.data.count
+            });
             setSelectedFile(null); // Clear after success
         } catch (e: any) {
             setStatus({ type: 'error', message: e.response?.data?.message || e.message || 'Import failed' });
@@ -104,7 +110,17 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                             : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                             }`}>
                             {status.type === 'success' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
-                            {status.message}
+                            <div className="flex-1">
+                                <p>{status.message}</p>
+                                {status.type === 'success' && (
+                                    <button 
+                                        onClick={() => navigate('/journal')}
+                                        className="mt-3 flex items-center gap-2 px-4 py-2 bg-emerald-500 text-slate-950 rounded-lg font-bold text-xs hover:bg-white transition-all shadow-lg"
+                                    >
+                                        Ir para o Diário e Preencher Dados <ArrowRight size={14} />
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     )}
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, Calendar, Brain, AlertTriangle, TrendingUp, TrendingDown, Target, Zap, Activity, Award, Share2, Globe, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Clock, Calendar, Brain, AlertTriangle, TrendingUp, TrendingDown, Target, Zap, Activity, Award, Share2, Globe, CheckCircle, Edit3, Save } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -20,7 +20,11 @@ interface TradeDetail {
         commission: number;
         swap: number;
         comment: string;
-        status?: string; // e.g. 'CLOSED'
+        status?: string;
+        setup?: string;
+        mood?: string;
+        rating?: number;
+        lesson?: string;
     };
     technicalJournal?: {
         marketTrend: string;
@@ -81,6 +85,16 @@ export const TradeDetails = () => {
     const [publishCaption, setPublishCaption] = useState('');
     const [publishVisibility, setPublishVisibility] = useState('public');
     const [isPublishing, setIsPublishing] = useState(false);
+    
+    // Edit Mode State
+    const [isEditing, setIsEditing] = useState(false);
+    const [editForm, setEditForm] = useState({
+        setup: '',
+        mood: '',
+        rating: 0,
+        lesson: ''
+    });
+    const [isSaving, setIsSaving] = useState(false);
 
     const printRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +112,36 @@ export const TradeDetails = () => {
 
         if (id) fetchDetails();
     }, [id]);
+
+    useEffect(() => {
+        if (data?.trade) {
+            setEditForm({
+                setup: data.trade.setup || '',
+                mood: data.trade.mood || '',
+                rating: data.trade.rating || 0,
+                lesson: data.trade.lesson || ''
+            });
+        }
+    }, [data]);
+
+    const handleUpdateTrade = async () => {
+        try {
+            setIsSaving(true);
+            await api.patch(`/dashboard/trades/${id}`, editForm);
+            
+            // Refresh local data
+            setData(prev => prev ? {
+                ...prev,
+                trade: { ...prev.trade, ...editForm }
+            } : null);
+            
+            setIsEditing(false);
+        } catch (err) {
+            console.error('Failed to update trade', err);
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     const handleShare = async () => {
         if (!printRef.current || !data?.trade) return;
@@ -249,6 +293,14 @@ export const TradeDetails = () => {
                         <Share2 size={18} />
                         {isPrinting ? 'Gerando...' : 'Compartilhar'}
                     </button>
+
+                    <button
+                        onClick={() => setIsEditing(!isEditing)}
+                        className={`p-2 px-4 rounded-xl transition-all flex items-center gap-2 font-bold text-sm ${isEditing ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-200'}`}
+                    >
+                        <Edit3 size={18} />
+                        {isEditing ? 'Cancelar' : 'Editar'}
+                    </button>
                 </div>
             </div>
 
@@ -323,6 +375,73 @@ export const TradeDetails = () => {
                         </span>
                     </div>
                 </div>
+
+                {isEditing && (
+                    <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-6 animate-in zoom-in-95">
+                        <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+                            <Zap className="text-indigo-400" /> Editar Metadados do Trade
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                            <div>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup</label>
+                                <input 
+                                    className="w-full bg-slate-900 border-slate-800 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                    value={editForm.setup}
+                                    onChange={e => setEditForm({...editForm, setup: e.target.value})}
+                                    placeholder="Ex: Breakout H1"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Humor</label>
+                                <select 
+                                    className="w-full bg-slate-900 border-slate-800 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                    value={editForm.mood}
+                                    onChange={e => setEditForm({...editForm, mood: e.target.value})}
+                                >
+                                    <option value="">Selecione...</option>
+                                    <option value="Focado">Focado</option>
+                                    <option value="Ansioso">Ansioso</option>
+                                    <option value="Calmo">Calmo</option>
+                                    <option value="Impulsivo">Impulsivo</option>
+                                    <option value="Confiante">Confiante</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Avaliação</label>
+                                <div className="flex gap-1">
+                                    {[1,2,3,4,5].map(n => (
+                                        <button 
+                                            key={n}
+                                            onClick={() => setEditForm({...editForm, rating: n})}
+                                            className={`flex-1 h-9 rounded border flex items-center justify-center font-bold text-xs transition-all ${editForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-slate-900 border-slate-800 text-slate-600 hover:border-slate-500'}`}
+                                        >
+                                            {n}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex items-end">
+                                <button 
+                                    onClick={handleUpdateTrade}
+                                    disabled={isSaving}
+                                    className="w-full h-9 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+                                >
+                                    {isSaving ? <Clock className="animate-spin" size={14} /> : <Save size={14} />}
+                                    Salvar
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Lições Aprendidas</label>
+                            <textarea 
+                                className="w-full bg-slate-900 border-slate-800 rounded-lg text-sm p-3 text-white outline-none h-20 resize-none focus:border-indigo-500 transition-colors"
+                                value={editForm.lesson}
+                                onChange={e => setEditForm({...editForm, lesson: e.target.value})}
+                                placeholder="O que você aprendeu com este trade?"
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {/* Trade Replay Chart */}
                 <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 p-6 rounded-2xl">

@@ -17,6 +17,7 @@ import {
 } from 'chart.js';
 import { PerformanceRadar } from '../components/dashboard/charts/PerformanceRadar';
 import { DailyPnLChart } from '../components/dashboard/charts/DailyPnLChart';
+import { HeatmapChart } from '../components/dashboard/charts/HeatmapChart';
 import { WinrateGauge, InstrumentRow, SessionRow, TraderHealthWidget } from '../components/dashboard/StatsWidgets';
 import api from '../api';
 import { useDashboardStats, useSubscriptionStatus, useTradesFallback } from '../hooks/useDashboard';
@@ -386,6 +387,11 @@ export const Dashboard = () => {
                 <div className="lg:col-span-1 h-[450px]">
                     <PerformanceRadar data={currentStats.radarMetrics} />
                 </div>
+            </div>
+
+            {/* Heatmap Section */}
+            <div className="h-[400px]">
+                <HeatmapChart />
             </div>
 
             {/* Detailed Stats Section */}

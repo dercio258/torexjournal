@@ -19,6 +19,7 @@ import { NormalizationService } from '../import/normalization/normalization.serv
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
 import { DashboardService } from '../dashboard/dashboard.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class Mt5Service implements OnModuleInit, OnModuleDestroy {
@@ -47,7 +48,8 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         @InjectQueue('behavioral-analysis') private behavioralQueue: Queue,
         @InjectQueue('trade-import') private tradeImportQueue: Queue,
         private normalizationService: NormalizationService,
-        private dashboardService: DashboardService
+        private dashboardService: DashboardService,
+        private eventEmitter: EventEmitter2
     ) { }
 
     // ... skipping unchanged lines, we will do a multi-replace or careful chunk replace ...

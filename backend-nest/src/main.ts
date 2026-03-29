@@ -19,7 +19,7 @@ async function bootstrap() {
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
-        urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+        urls: [process.env.RABBITMQ_URL || 'amqp://rabbitmq:5672'],
         queue: 'whatsapp_notifications',
         queueOptions: {
           durable: false,
@@ -50,11 +50,17 @@ async function bootstrap() {
     await app.startAllMicroservices();
   }
 
-  // Start on Port 3000 to match frontend proxy
+  // Start on configured port (default 3000 only for dev)
   const port = process.env.PORT || 3000;
-  const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+  const baseUrl = process.env.BASE_URL;
+  
+  if (!baseUrl && process.env.NODE_ENV === 'production') {
+    console.error('❌ BASE_URL is NOT defined in production! This will cause issues with links and callbacks.');
+  }
+
   await app.listen(port);
-  console.log(`🚀 NestJS Backend running on ${baseUrl}`);
-  console.log(`📡 API Base: ${baseUrl}/api`);
+  const actualBaseUrl = baseUrl || `http://localhost:${port}`;
+  console.log(`🚀 NestJS Backend running on ${actualBaseUrl}`);
+  console.log(`📡 API Base: ${actualBaseUrl}/api`);
 }
 bootstrap();

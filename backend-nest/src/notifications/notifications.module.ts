@@ -43,26 +43,35 @@ import { EmailModule } from '../email/email.module';
         EmailModule,
         TelegrafModule.forRootAsync({
             imports: [ConfigModule],
-            useFactory: (configService: ConfigService) => ({
-                token: configService.get<string>('TELEGRAM_BOT_TOKEN') || 'NO_TOKEN_PROVIDED',
-                launchOptions: false,
-            }),
+            useFactory: (configService: ConfigService) => {
+                const token = configService.get<string>('TELEGRAM_BOT_TOKEN');
+                if (!token && process.env.NODE_ENV === 'production') {
+                    throw new Error('TELEGRAM_BOT_TOKEN is missing in production!');
+                }
+                return {
+                    token: token || 'DEV_TOKEN',
+                    launchOptions: false,
+                };
+            },
             inject: [ConfigService],
         }),
         ClientsModule.registerAsync([
             {
                 name: 'WHATSAPP_SERVICE',
                 imports: [ConfigModule],
-                useFactory: (configService: ConfigService) => ({
-                    transport: Transport.RMQ,
-                    options: {
-                        urls: [configService.get<string>('RABBITMQ_URL', 'amqp://localhost:5672')],
-                        queue: 'whatsapp_notifications',
-                        queueOptions: {
-                            durable: false,
+                useFactory: (configService: ConfigService) => {
+                    const rmqUrl = configService.get<string>('RABBITMQ_URL') || 'amqp://rabbitmq:5672';
+                    return {
+                        transport: Transport.RMQ,
+                        options: {
+                            urls: [rmqUrl],
+                            queue: 'whatsapp_notifications',
+                            queueOptions: {
+                                durable: false,
+                            },
                         },
-                    },
-                }),
+                    };
+                },
                 inject: [ConfigService],
             },
         ]),

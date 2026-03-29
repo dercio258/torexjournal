@@ -12,28 +12,31 @@ export interface EmailTemplateData {
     footerText?: string;
 }
 
-const logoUrl = 'https://torexjournal.com/logo.png'; // Update with real URL if available
+const logoUrl = 'https://res.cloudinary.com/dndlqdylc/image/upload/v1773270778/Touro_design_1_1_udrkwi.jpg';
 
 const BASE_LAYOUT = (content: string, footerExtra: string = '') => `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f7f6; }
-        .wrapper { width: 100%; padding: 40px 0; background-color: #f4f7f6; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
-        .header { background-color: #1a1a1a; padding: 30px; text-align: center; }
-        .header img { max-width: 140px; height: auto; }
-        .content { padding: 40px; }
-        .subtitle { color: #007bff; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px; font-size: 13px; margin-bottom: 8px; display: block; }
-        h1 { margin-top: 0; color: #111; font-size: 24px; font-weight: 700; }
-        .divider { height: 1px; background-color: #eee; margin: 25px 0; }
-        p { margin-bottom: 18px; color: #555; font-size: 16px; }
-        .cta-container { text-align: center; margin-top: 30px; }
-        .button { display: inline-block; padding: 14px 30px; background-color: #007bff; color: #ffffff !important; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; transition: background-color 0.3s; }
-        .footer { background-color: #fdfdfd; padding: 25px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #eee; }
-        .footer b { color: #555; }
+        body { font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 0; padding: 0; background-color: #f8fafc; }
+        .wrapper { width: 100%; padding: 40px 0; background-color: #f8fafc; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+        .header { background-color: #0f172a; padding: 40px 30px; text-align: center; background-image: linear-gradient(to bottom right, #0f172a, #1e293b); }
+        .header img { max-width: 180px; height: auto; display: block; margin: 0 auto; }
+        .content { padding: 45px 40px; }
+        .subtitle { color: #10b981; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; margin-bottom: 12px; display: block; }
+        h1 { margin-top: 0; color: #0f172a; font-size: 26px; font-weight: 800; line-height: 1.2; }
+        .divider { height: 1px; background-color: #f1f5f9; margin: 30px 0; }
+        p { margin-bottom: 20px; color: #475569; font-size: 16px; }
+        .cta-container { text-align: center; margin: 40px 0 20px; }
+        .button { display: inline-block; padding: 16px 36px; background-color: #10b981; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2); }
+        .footer { background-color: #f8fafc; padding: 35px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #f1f5f9; }
+        .footer b { color: #334155; font-size: 14px; }
+        .social-links { margin-bottom: 20px; }
+        .social-links a { color: #94a3b8; text-decoration: none; margin: 0 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -46,10 +49,15 @@ const BASE_LAYOUT = (content: string, footerExtra: string = '') => `
                 ${content}
             </div>
             <div class="footer">
+                <div class="social-links">
+                    <a href="#">Dashboard</a>
+                    <a href="#">Suporte</a>
+                    <a href="#">Comunidade</a>
+                </div>
                 <b>Torex Journal Service</b><br>
-                O seu diário de trading profissional.<br>
-                ${footerExtra}
-                <p>&copy; ${new Date().getFullYear()} Torex Journal. Todos os direitos reservados.</p>
+                Elevando o seu trading através de dados e disciplina.<br>
+                ${footerExtra ? `<div style="margin-top: 10px;">${footerExtra}</div>` : ''}
+                <p style="margin-top: 25px; font-size: 11px;">&copy; ${new Date().getFullYear()} Torex Journal. Todos os direitos reservados.</p>
             </div>
         </div>
     </div>
@@ -152,8 +160,8 @@ export const Templates = {
             <h1>Seu Código de Acesso</h1>
             <div class="divider"></div>
             <p>Use o código de verificação abaixo para completar sua acção no Torex Journal:</p>
-            <div style="text-align: center; margin: 30px 0; background-color: #f8f9fa; padding: 30px; border-radius: 10px; border: 2px dashed #007bff;">
-                <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #007bff;">${data.otp}</span>
+            <div style="text-align: center; margin: 30px 0; background-color: #f8f9fa; padding: 30px; border-radius: 10px; border: 2px dashed #10b981;">
+                <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #10b981;">${data.otp}</span>
             </div>
             <p>Este código é válido por <b>10 minutos</b>. Não partilhe este código com ninguém.</p>
         `;
@@ -282,6 +290,50 @@ export const Templates = {
             
             <div class="cta-container">
                 <a href="${process.env.BASE_URL || '#'}/dashboard" class="button" style="background-color: ${accentColor};">Ver Detalhes</a>
+            </div>
+        `;
+        return BASE_LAYOUT(content);
+    },
+
+    WEEKLY_SUMMARY: (data: { userName: string; totalPnL: number; winRate: number; totalTrades: number; topLessons: any[]; period: { start: string; end: string } }) => {
+        const profitColor = data.totalPnL >= 0 ? '#10b981' : '#ef4444';
+        const content = `
+            <span class="subtitle">RELATÓRIO SEMANAL DE PERFORMANCE</span>
+            <h1>Resumo da Semana</h1>
+            <div class="divider"></div>
+            <p>Olá <b>${data.userName}</b>,</p>
+            <p>Aqui está o resumo do seu desempenho de <b>${new Date(data.period.start).toLocaleDateString()}</b> a <b>${new Date(data.period.end).toLocaleDateString()}</b>.</p>
+            
+            <div style="background-color: #f8fafc; border-radius: 12px; padding: 25px; border: 1px solid #e2e8f0; margin: 25px 0;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                        <td style="padding-bottom: 12px; color: #64748b; font-size: 13px; font-weight: bold; text-transform: uppercase;">Resultado Total</td>
+                        <td style="padding-bottom: 12px; text-align: right; color: ${profitColor}; font-weight: 900; font-size: 20px;">${data.totalPnL >= 0 ? '+' : ''}${data.totalPnL.toFixed(2)} MT</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px 0; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 13px; font-weight: bold; text-transform: uppercase;">Win Rate</td>
+                        <td style="padding: 12px 0; border-top: 1px solid #f1f5f9; text-align: right; color: #0f172a; font-weight: bold;">${data.winRate.toFixed(1)}%</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 12px 0; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 13px; font-weight: bold; text-transform: uppercase;">Total de Trades</td>
+                        <td style="padding: 12px 0; border-top: 1px solid #f1f5f9; text-align: right; color: #0f172a; font-weight: bold;">${data.totalTrades}</td>
+                    </tr>
+                </table>
+            </div>
+
+            ${data.topLessons.length > 0 ? `
+                <h3 style="color: #0f172a; font-size: 18px; margin-bottom: 15px;">🔍 Principais Lições Aprendidas</h3>
+                <ul style="padding-left: 20px; color: #475569;">
+                    ${data.topLessons.map(l => `
+                        <li style="margin-bottom: 10px;"><b>${l.count}x:</b> ${l.lesson}</li>
+                    `).join('')}
+                </ul>
+            ` : ''}
+
+            <p style="margin-top: 30px;">Continue refinando sua estratégia e mantendo a disciplina. O sucesso no trading é uma maratona, não um sprint.</p>
+            
+            <div class="cta-container">
+                <a href="${process.env.BASE_URL || '#'}/journal" class="button">Ver Diário Completo</a>
             </div>
         `;
         return BASE_LAYOUT(content);

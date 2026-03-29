@@ -26,7 +26,7 @@ import { AuditLogService } from './audit-log.service';
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({
-                secret: configService.get<string>('JWT_SECRET') || 'default_secret_key',
+                secret: configService.get<string>('JWT_SECRET') || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET missing'); })() : 'dev_secret'),
                 signOptions: { expiresIn: '24h' },
             }),
             inject: [ConfigService],

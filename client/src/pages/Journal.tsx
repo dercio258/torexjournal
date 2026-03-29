@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import {
     Edit3,
     Clock,
+    Zap,
+    X,
+    ArrowRight,
+    Save,
     BookOpen,
-    LayoutGrid,
-    Save
+    LayoutGrid
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { CalendarWidget } from '../components/journal/CalendarWidget';
@@ -33,6 +37,7 @@ interface TechnicalJournal {
 }
 
 export const Journal = () => {
+    const navigate = useNavigate();
     // State
     const { token } = useAuth();
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -83,14 +88,13 @@ export const Journal = () => {
             const res = await api.get('/trades');
             if (Array.isArray(res.data)) {
                 const mapped = res.data.map((t: any) => ({
+                    ...t, // Keep original fields for editing
                     ticket: t.ticket || t.id,
                     close_time: new Date(t.closeTime).getTime(),
                     symbol: t.symbol,
                     type: t.type,
                     volume: t.volume,
                     profit: Number(t.profit) + Number(t.commission) + Number(t.swap),
-                    rating: t.rating,
-                    notes: t.notes,
                 }));
                 setTrades(mapped);
             }
@@ -99,43 +103,52 @@ export const Journal = () => {
         }
     };
 
+    const handleUpdateTrade = async (tradeId: string | number, updates: Partial<any>) => {
+        try {
+            await api.patch(`/dashboard/trades/${tradeId}`, updates);
+            // Refresh list
+            fetchTrades();
+            // Update selected trade if necessary
+            if (selectedTrade?.id === tradeId || selectedTrade?.ticket === tradeId) {
+                setSelectedTrade({ ...selectedTrade, ...updates });
+            }
+        } catch (err) {
+            console.error("Failed to update trade", err);
+        }
+    };
+
     const fetchTechnicalJournal = async () => {
         try {
             const dateStr = selectedDate.toISOString().split('T')[0];
-            const res = await fetch(`http://localhost:3000/api/technical-journal/${dateStr}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const text = await res.text();
-                const data = text ? JSON.parse(text) : null;
+            const res = await api.get(`/technical-journal/${dateStr}`);
+            const data = res.data;
 
-                if (data) {
-                    setTechForm({
-                        marketTrend: data.marketTrend || '',
-                        volatility: data.volatility || '',
-                        session: data.session || '',
-                        strategyUsed: data.strategyUsed || '',
-                        mistakes: data.mistakes || '',
-                        lessons: data.lessons || '',
-                        rulesBroken: data.rulesBroken || '',
-                        actionPlan: data.actionPlan || '',
-                        rating: data.rating || 0,
-                        notes: data.notes || '',
-                        entryPrecision: data.entryPrecision || '',
-                        riskManagement: data.riskManagement || '',
-                        tradeExit: data.tradeExit || '',
-                        emotionalState: data.emotionalState || '',
-                        setupQuality: data.setupQuality || '',
-                        executionSpeed: data.executionSpeed || '',
-                        marketContext: data.marketContext || '',
-                        preMarketPrep: data.preMarketPrep || ''
-                    });
-                } else {
-                    setTechForm({
-                        marketTrend: '', volatility: '', session: '', strategyUsed: '', mistakes: '', lessons: '', rulesBroken: '', actionPlan: '', rating: 0, notes: '',
-                        entryPrecision: '', riskManagement: '', tradeExit: '', emotionalState: '', setupQuality: '', executionSpeed: '', marketContext: '', preMarketPrep: ''
-                    });
-                }
+            if (data) {
+                setTechForm({
+                    marketTrend: data.marketTrend || '',
+                    volatility: data.volatility || '',
+                    session: data.session || '',
+                    strategyUsed: data.strategyUsed || '',
+                    mistakes: data.mistakes || '',
+                    lessons: data.lessons || '',
+                    rulesBroken: data.rulesBroken || '',
+                    actionPlan: data.actionPlan || '',
+                    rating: data.rating || 0,
+                    notes: data.notes || '',
+                    entryPrecision: data.entryPrecision || '',
+                    riskManagement: data.riskManagement || '',
+                    tradeExit: data.tradeExit || '',
+                    emotionalState: data.emotionalState || '',
+                    setupQuality: data.setupQuality || '',
+                    executionSpeed: data.executionSpeed || '',
+                    marketContext: data.marketContext || '',
+                    preMarketPrep: data.preMarketPrep || ''
+                });
+            } else {
+                setTechForm({
+                    marketTrend: '', volatility: '', session: '', strategyUsed: '', mistakes: '', lessons: '', rulesBroken: '', actionPlan: '', rating: 0, notes: '',
+                    entryPrecision: '', riskManagement: '', tradeExit: '', emotionalState: '', setupQuality: '', executionSpeed: '', marketContext: '', preMarketPrep: ''
+                });
             }
         } catch (error) {
             console.error("Failed to fetch journal", error);
@@ -148,14 +161,7 @@ export const Journal = () => {
             const dateStr = selectedDate.toISOString().split('T')[0];
             const payload = { ...techForm, date: dateStr };
 
-            await fetch(`http://localhost:3000/api/technical-journal`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(payload)
-            });
+            await api.post(`/technical-journal`, payload);
         } catch (error) {
             console.error("Failed to save journal", error);
         } finally {
@@ -236,10 +242,7 @@ export const Journal = () => {
 
                     {/* Top Row: Calendar Full Width */}
                     <div className="grid grid-cols-1 gap-6 items-stretch">
-
-                        {/* Calendar Widget */}
                         <div className="relative">
-                            {/* Subtle Glow Behind Calendar */}
                             <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-3xl blur-xl -z-10"></div>
                             <CalendarWidget
                                 currentDate={currentDate}
@@ -249,26 +252,28 @@ export const Journal = () => {
                                 trades={trades}
                             />
                         </div>
+                    </div>
 
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
                         {/* Trade List for Selected Day */}
-                        {filteredTrades.length > 0 && (
-                            <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 flex flex-col shadow-xl min-h-[450px]">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                                        <Clock className="text-emerald-400" size={16} />
-                                        {selectedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-                                    </h2>
-                                    <span className="text-xs font-mono text-slate-500 bg-slate-800/50 px-2 py-1 rounded">
-                                        {filteredTrades.length} Trades
-                                    </span>
-                                </div>
+                        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 flex flex-col shadow-xl min-h-[400px]">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                                    <Clock className="text-emerald-400" size={16} />
+                                    {selectedDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                </h2>
+                                <span className="text-xs font-mono text-slate-500 bg-slate-800/50 px-2 py-1 rounded">
+                                    {filteredTrades.length} Trades
+                                </span>
+                            </div>
 
+                            {filteredTrades.length > 0 ? (
                                 <div className="flex-1 overflow-auto custom-scrollbar space-y-2 pr-2">
-                                    {filteredTrades.map(t => (
+                                    {filteredTrades.map((t: any) => (
                                         <div
                                             key={t.ticket}
                                             onClick={() => setSelectedTrade(t)}
-                                            className={`p-3 rounded-xl border cursor-pointer hover:bg-slate-800/50 transition-colors ${selectedTrade?.ticket === t.ticket ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-950/30 border-slate-800'
+                                            className={`p-3 rounded-xl border cursor-pointer hover:bg-slate-800/50 transition-all ${selectedTrade?.ticket === t.ticket ? 'bg-indigo-500/10 border-indigo-500/30 ring-1 ring-indigo-500/20' : 'bg-slate-950/30 border-slate-800'
                                                 }`}
                                         >
                                             <div className="flex justify-between items-center mb-1">
@@ -284,6 +289,115 @@ export const Journal = () => {
                                         </div>
                                     ))}
                                 </div>
+                            ) : (
+                                <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-600">
+                                    <p className="text-xs italic">Nenhum trade para este dia.</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Per-Trade Editor (appears when selected) */}
+                        {selectedTrade ? (
+                            <div className="bg-slate-900/60 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-6 flex flex-col shadow-xl animate-in slide-in-from-right-4">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <Zap className="text-indigo-400" size={18} /> Trade #{selectedTrade.ticket}
+                                    </h3>
+                                    <button onClick={() => setSelectedTrade(null)} className="text-slate-500 hover:text-white">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup</label>
+                                            <input 
+                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                placeholder="Ex: Breakout H1"
+                                                value={selectedTrade.setup || ''}
+                                                onChange={e => handleUpdateTrade(selectedTrade.id, { setup: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Humor</label>
+                                            <select 
+                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                value={selectedTrade.mood || ''}
+                                                onChange={e => handleUpdateTrade(selectedTrade.id, { mood: e.target.value })}
+                                            >
+                                                <option value="">Humor...</option>
+                                                <option value="Focado">Focado</option>
+                                                <option value="Ansioso">Ansioso</option>
+                                                <option value="Calmo">Calmo</option>
+                                                <option value="Impulsivo">Impulsivo</option>
+                                                <option value="Confiante">Confiante</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup</label>
+                                            <input 
+                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                placeholder="Ex: Breakout"
+                                                value={selectedTrade.setup || ''}
+                                                onChange={e => handleUpdateTrade(selectedTrade.id, { setup: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Humor</label>
+                                            <select 
+                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                value={selectedTrade.mood || ''}
+                                                onChange={e => handleUpdateTrade(selectedTrade.id, { mood: e.target.value })}
+                                            >
+                                                <option value="">Humor...</option>
+                                                <option value="Focado">Focado</option>
+                                                <option value="Ansioso">Ansioso</option>
+                                                <option value="Eufórico">Eufórico</option>
+                                                <option value="Calmo">Calmo</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Avaliação</label>
+                                        <div className="flex gap-1">
+                                            {[1, 2, 3, 4, 5].map((n: number) => (
+                                                <button
+                                                    key={n}
+                                                    onClick={() => handleUpdateTrade(selectedTrade.id, { rating: n })}
+                                                    className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs transition-all ${selectedTrade.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600 hover:border-slate-500'}`}
+                                                >
+                                                    {n}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Lições Aprendidas</label>
+                                        <textarea 
+                                            className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-20 resize-none focus:border-indigo-500 transition-colors"
+                                            placeholder="O que você aprendeu com este trade?"
+                                            value={selectedTrade.lesson || ''}
+                                            onChange={e => handleUpdateTrade(selectedTrade.id, { lesson: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <button 
+                                        onClick={() => navigate(`/trades/${selectedTrade.id}`)}
+                                        className="w-full py-2 bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2"
+                                    >
+                                        Detalhes Completos <ArrowRight size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl p-8 flex flex-col items-center justify-center text-center text-slate-500 min-h-[300px]">
+                                <p className="text-xs">Selecione um trade para editar.</p>
                             </div>
                         )}
                     </div>
@@ -305,18 +419,17 @@ export const Journal = () => {
                                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg font-bold text-xs shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
                                 >
                                     {savingJournal ? <Clock className="animate-spin" size={14} /> : <Save size={14} />}
-                                    Salvar
+                                    Salvar Diário
                                 </button>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* Inputs */}
                             <div className="space-y-4">
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Contexto</label>
                                     <select
-                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none focus:border-indigo-500 transition-colors"
                                         value={techForm.marketTrend}
                                         onChange={e => setTechForm({ ...techForm, marketTrend: e.target.value })}
                                     >
@@ -326,7 +439,6 @@ export const Journal = () => {
                                         <option value="Baixa Forte">Baixa Forte</option>
                                     </select>
                                 </div>
-
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Volatilidade</label>
                                     <div className="flex gap-2">
@@ -334,36 +446,13 @@ export const Journal = () => {
                                             <button
                                                 key={v}
                                                 onClick={() => setTechForm(p => ({ ...p, volatility: v }))}
-                                                className={`flex-1 py-2 text-xs rounded-lg border font-medium transition-all ${techForm.volatility === v ? 'bg-slate-700 text-white border-slate-500' : 'bg-slate-800/50 text-slate-500 border-slate-700'
-                                                    }`}
+                                                className={`flex-1 py-1.5 text-xs rounded-lg border font-medium transition-all ${techForm.volatility === v ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-800 text-slate-500 border-slate-700'}`}
                                             >
                                                 {v}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
-
-                                <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Estratégia</label>
-                                    <input
-                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none"
-                                        placeholder="Ex: Breakout"
-                                        value={techForm.strategyUsed}
-                                        onChange={e => setTechForm({ ...techForm, strategyUsed: e.target.value })}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Checklist</label>
-                                    <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-                                        <p className="text-xs text-slate-400 text-center italic">
-                                            Responda as perguntas ao lado para calcular sua pontuação de disciplina.
-                                        </p>
-                                    </div>
-                                </div>
-
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Nota do Dia</label>
                                     <div className="flex gap-1">
@@ -371,8 +460,7 @@ export const Journal = () => {
                                             <button
                                                 key={n}
                                                 onClick={() => setTechForm(p => ({ ...p, rating: n }))}
-                                                className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs ${techForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-600'
-                                                    }`}
+                                                className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs ${techForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600'}`}
                                             >
                                                 {n}
                                             </button>
@@ -381,208 +469,26 @@ export const Journal = () => {
                                 </div>
                             </div>
 
-                            {/* Text Areas and Objective Evaluation - Side by Side */}
-                            <div className="col-span-1 md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700 h-fit">
-                                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-                                        <BookOpen size={14} /> Avaliação Objetiva
-                                    </h4>
-
-                                    <div className="space-y-6">
-                                        {/* Q1: Entry */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">1. Precisão na Entrada</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['Perfeita (No Setup)', 'Antecipada', 'Tardia', 'Impulso'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, entryPrecision: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.entryPrecision === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q2: Risk */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">2. Gestão de Risco</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['Segui o Plano', 'Lote Alto', 'Movi Stop', 'Sem Stop'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, riskManagement: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.riskManagement === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q3: Exit */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">3. Execução da Saída</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['No Alvo', 'Stop Técnico', 'Saída Medo', 'Ganância'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, tradeExit: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.tradeExit === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q4: Mood */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">4. Estado Emocional</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['Focado', 'Ansioso', 'Irritado', 'Super Confiança'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, emotionalState: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.emotionalState === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q5: Setup Quality */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">5. Qualidade do Setup</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['A+ (Perfeito)', 'A (Bom)', 'B (Médio)', 'C (Forçado)'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, setupQuality: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.setupQuality === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q6: Execution Speed */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">6. Velocidade de Execução</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['Imediata', 'Um pouco Atrasada', 'Hesitei muito', 'Precipitado'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, executionSpeed: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.executionSpeed === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q7: Market Context */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">7. Contexto de Mercado</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['A Favor da Tendência', 'Contra-Tendência', 'Lateral / Consolidação', 'Notícias / Volátil'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, marketContext: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.marketContext === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* Q8: Pre-Market Prep */}
-                                        <div>
-                                            <p className="text-sm text-slate-300 mb-2 font-medium">8. Preparação Pré-Mercado</p>
-                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                                {['Excelente (Plano Claro)', 'Razoável (Revisão Rápida)', 'Fraca (Sem Plano)', 'Nenhuma (Impulso)'].map(opt => (
-                                                    <button
-                                                        key={opt}
-                                                        onClick={() => setTechForm({ ...techForm, preMarketPrep: opt })}
-                                                        className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-all ${techForm.preMarketPrep === opt
-                                                            ? 'bg-indigo-500 text-white border-indigo-400 shadow-md'
-                                                            : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-600'}`}
-                                                    >
-                                                        {opt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Estratégia Principal</label>
+                                    <input
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.strategyUsed}
+                                        onChange={e => setTechForm({ ...techForm, strategyUsed: e.target.value })}
+                                        placeholder="Ex: Breakout H1"
+                                    />
                                 </div>
-
-                                <div className="grid grid-cols-1 gap-6">
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-rose-400">
-                                            Onde eu falhei? (Erros & Hesitações)
-                                        </label>
-                                        <JournalEditor
-                                            value={techForm.mistakes}
-                                            onEditorChange={(content) => setTechForm({ ...techForm, mistakes: content })}
-                                            placeholder="Onde você desviou do plano?"
-                                            height={160}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-rose-500">
-                                            Regras Quebradas
-                                        </label>
-                                        <JournalEditor
-                                            value={techForm.rulesBroken}
-                                            onEditorChange={(content) => setTechForm({ ...techForm, rulesBroken: content })}
-                                            placeholder="Quais regras você desrespeitou hoje e por quê?"
-                                            height={160}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-emerald-400">
-                                            O que funcionou? (Acertos & Padrões)
-                                        </label>
-                                        <JournalEditor
-                                            value={techForm.lessons}
-                                            onEditorChange={(content) => setTechForm({ ...techForm, lessons: content })}
-                                            placeholder="O que você fez bem e deve repetir amanhã?"
-                                            height={160}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block text-indigo-400">
-                                            Plano de Ação (Próximo Dia)
-                                        </label>
-                                        <JournalEditor
-                                            value={techForm.actionPlan}
-                                            onEditorChange={(content) => setTechForm({ ...techForm, actionPlan: content })}
-                                            placeholder="Qual o foco principal para correção de erros amanhã?"
-                                            height={160}
-                                        />
-                                    </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Anotações do Dia</label>
+                                    <textarea
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-24 resize-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.notes || ''}
+                                        onChange={e => setTechForm({ ...techForm, notes: e.target.value })}
+                                        placeholder="Breve resumo emocional ou do mercado..."
+                                    />
                                 </div>
                             </div>
-
                         </div>
                     </div>
                 </div>

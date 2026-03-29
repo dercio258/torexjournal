@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request, Get, Put, Res } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Request, Get, Put, Res, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 
 @Controller('auth')
 export class AuthController {
+    private readonly logger = new Logger(AuthController.name);
     constructor(
         private readonly authService: AuthService,
         private readonly usersService: UsersService,
@@ -192,8 +193,11 @@ export class AuthController {
     async googleAuthRedirect(@Request() req, @Res() res: Response) {
         const result = await this.authService.validateGoogleUser(req.user);
         
-        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
-        const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+        if (!frontendUrl) {
+            this.logger.error('FRONTEND_URL not configured in .env. Redirection may fail.');
+        }
+        const redirectUrl = new URL(`${frontendUrl || 'http://localhost:3001'}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
         redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());
@@ -212,8 +216,11 @@ export class AuthController {
     async githubAuthRedirect(@Request() req, @Res() res: Response) {
         const result = await this.authService.validateGithubUser(req.user);
 
-        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
-        const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
+        const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+        if (!frontendUrl) {
+            this.logger.error('FRONTEND_URL not configured in .env. Redirection may fail.');
+        }
+        const redirectUrl = new URL(`${frontendUrl || 'http://localhost:3001'}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
         redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());

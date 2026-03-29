@@ -29,7 +29,7 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleInit() {
-        const port = this.configService.get<number>('MT5_TCP_PORT', 3001);
+        const port = this.configService.get<number>('MT5_TCP_PORT') || 3003;
         this.server = net.createServer((socket) => this.handleConnection(socket));
         this.server.listen(port, '0.0.0.0', () => {
             this.logger.log(`🚀 TCP Server V2 (Stable) ouvindo na porta ${port}`);

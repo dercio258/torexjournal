@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThanOrEqual } from 'typeorm';
 import { Subscription, SubscriptionStatus } from './subscription.entity';
 import { SubscriptionService } from './subscription.service';
 
@@ -48,6 +48,39 @@ export class SubscriptionCronService {
             this.logger.log('Background verification complete.');
         } catch (error) {
             this.logger.error('Failed to run checkPendingSubscriptions cron', error);
+        }
+    }
+
+    // Remarketing: Send follow-up email after 2 days of cancellation
+    @Cron(CronExpression.EVERY_DAY_AT_3AM) // Run at 3 AM to avoid peak hours
+    async runRemarketingCron() {
+        this.logger.log('Starting remarketing follow-up scan...');
+        const twoDaysAgo = new Date();
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+        try {
+            const subs = await this.subscriptionRepo.find({
+                where: {
+                    status: SubscriptionStatus.CANCELLED,
+                    followUpSent: false,
+                    createdAt: LessThanOrEqual(twoDaysAgo)
+                }
+            });
+
+            if (subs.length > 0) {
+                this.logger.log(`Processing ${subs.length} subscriptions for remarketing follow-up.`);
+                for (const sub of subs) {
+                    try {
+                        await this.subscriptionService.sendFollowUpEmail(sub.id);
+                    } catch (err) {
+                        this.logger.error(`Failed to send follow-up for sub ${sub.id}: ${err.message}`);
+                    }
+                }
+            } else {
+                this.logger.log('No subscriptions found for remarketing today.');
+            }
+        } catch (error) {
+            this.logger.error('Error in remarketing cron', error);
         }
     }
 }

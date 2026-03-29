@@ -84,4 +84,7 @@ export class UserEntity {
 
     @Column({ name: 'is_two_factor_confirmed', default: false })
     isTwoFactorConfirmed: boolean;
+
+    @Column({ name: 'daily_loss_limit', type: 'decimal', precision: 12, scale: 2, nullable: true })
+    dailyLossLimit: number;
 }

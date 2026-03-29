@@ -452,6 +452,31 @@ export class DashboardService {
         };
     }
 
+    async updateTradeMetadata(userId: string, tradeId: string, data: Partial<TradeEntity>) {
+        const account = await this.accountRepo.findOne({ where: { userId } });
+        if (!account) throw new Error('Account not found');
+
+        const trade = await this.tradeRepo.findOne({
+            where: { id: tradeId, accountId: account.id }
+        });
+
+        if (!trade) throw new Error('Trade not found or unauthorized');
+
+        // Whitelist fields that can be updated
+        if (data.mood !== undefined) trade.mood = data.mood;
+        if (data.setup !== undefined) trade.setup = data.setup;
+        if (data.rating !== undefined) trade.rating = data.rating;
+        if (data.lesson !== undefined) trade.lesson = data.lesson;
+        if (data.tags !== undefined) trade.tags = data.tags;
+
+        const saved = await this.tradeRepo.save(trade);
+        
+        // Invalidate cache since performance metrics might change
+        await this.invalidateUserCache(userId);
+        
+        return saved;
+    }
+
     async invalidateUserCache(userId: string) {
         const patterns = [
             `dashboard:performance:${userId}:*`
@@ -468,5 +493,78 @@ export class DashboardService {
             // Log it
             console.log(`[DashboardService] Cache invalidated for user ${userId}`);
         }
+    }
+
+    async getHeatmapData(userId: string) {
+        const account = await this.accountRepo.findOne({ where: { userId } });
+        if (!account) return { pnl: [], counts: [] };
+
+        const trades = await this.tradeRepo.find({
+            where: { accountId: account.id, status: 'CLOSED' }
+        });
+
+        // Matrix (7 days x 24 hours)
+        const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
+        const counts = Array.from({ length: 7 }, () => Array(24).fill(0));
+
+        for (const t of trades) {
+            if (!t.closeTime) continue;
+            
+            const date = new Date(t.closeTime);
+            const day = date.getDay(); // 0-6 (Sun-Sat)
+            const hour = date.getHours(); // 0-23
+
+            const pnl = (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0);
+            heatmap[day][hour] += pnl;
+            counts[day][hour] += 1;
+        }
+
+        return {
+            pnl: heatmap.map((row, day) => row.map((val, hour) => ({ day, hour, val }))),
+            counts: counts.map((row, day) => row.map((val, hour) => ({ day, hour, val })))
+        };
+    }
+
+    async getWeeklySummary(userId: string) {
+        const account = await this.accountRepo.findOne({ where: { userId } });
+        if (!account) return null;
+
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+        const trades = await this.tradeRepo.find({
+            where: { 
+                accountId: account.id, 
+                status: 'CLOSED',
+                closeTime: MoreThanOrEqual(oneWeekAgo)
+            }
+        });
+
+        const totalPnL = trades.reduce((sum, t) => sum + (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0), 0);
+        const winRate = trades.length > 0 ? (trades.filter(t => (Number(t.profit) || 0) > 0).length / trades.length) * 100 : 0;
+        
+        // Group by lessons (mistakes)
+        const lessonsMap = new Map<string, number>();
+        trades.forEach(t => {
+            if (t.lesson) {
+                lessonsMap.set(t.lesson, (lessonsMap.get(t.lesson) || 0) + 1);
+            }
+        });
+
+        const topLessons = Array.from(lessonsMap.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([lesson, count]) => ({ lesson, count }));
+
+        return {
+            totalPnL,
+            winRate,
+            totalTrades: trades.length,
+            topLessons,
+            period: {
+                start: oneWeekAgo.toISOString(),
+                end: new Date().toISOString()
+            }
+        };
     }
 }

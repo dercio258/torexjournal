@@ -1,10 +1,15 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Post, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { OandaService } from './oanda.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Assuming you have auth
+import { MarketDataParserService } from './market-data-parser.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('market-data')
 export class MarketDataController {
-    constructor(private readonly oandaService: OandaService) { }
+    constructor(
+        private readonly oandaService: OandaService,
+        private readonly marketDataParser: MarketDataParserService
+    ) { }
 
     @UseGuards(JwtAuthGuard)
     @Get('candles')
@@ -21,5 +26,21 @@ export class MarketDataController {
         // For trade replay, we might want some context before and after.
 
         return this.oandaService.getCandles(symbol, fromDate, toDate, granularity);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post('upload-mt5')
+    @UseInterceptors(FileInterceptor('file'))
+    async uploadMt5Csv(@UploadedFile() file: any) {
+        if (!file) throw new BadRequestException('No file uploaded');
+        
+        try {
+            // Buffer to UTF-16LE if needed, but standard UTF-8/ISO might work for MT5
+            // Let's try to detect format or just use toString()
+            const content = file.buffer.toString('utf-8');
+            return this.marketDataParser.parseMt5Csv(content);
+        } catch (e) {
+            throw new BadRequestException(`Failed to parse MT5 CSV: ${e.message}`);
+        }
     }
 }

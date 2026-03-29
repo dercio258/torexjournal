@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { OandaService } from './oanda.service';
 import { MarketDataController } from './market-data.controller';
+import { MarketDataParserService } from './market-data-parser.service';
 
 @Module({
     imports: [
@@ -10,7 +11,7 @@ import { MarketDataController } from './market-data.controller';
         ConfigModule,
     ],
     controllers: [MarketDataController],
-    providers: [OandaService],
-    exports: [OandaService],
+    providers: [OandaService, MarketDataParserService],
+    exports: [OandaService, MarketDataParserService],
 })
 export class MarketDataModule { }

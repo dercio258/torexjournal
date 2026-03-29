@@ -386,12 +386,19 @@ export class SubscriptionService implements OnModuleInit {
 
         if (result && (result.status === 'SUCCESSFULL' || result.status === 'SUCCESSFUL')) {
             await this.activateSubscription(subscription, reference);
-        } else if (result && (result.status === 'FAILED' || result.status === 'CANCELLED')) {
-            this.logger.log(`Status check failed for ${reference}: ${result.status}`);
-            await this.notificationsService.create(subscription.userId, {
-                title: 'Pagamento Falhou ❌',
-                message: `O seu pagamento de referência ${reference} não foi concluído.`,
-            });
+        } else if (result && (result.status === 'FAILED' || result.status === 'CANCELLED' || result.status === 'REJECTED')) {
+            this.logger.log(`Status check failed for ${reference}: ${result.status}. Marking as CANCELLED.`);
+            
+            // Send notification ONLY if not already cancelled (redundancy check)
+            if (subscription.status !== SubscriptionStatus.CANCELLED) {
+                await this.notificationsService.create(subscription.userId, {
+                    title: 'Pagamento Falhou ❌',
+                    message: `O seu pagamento de referência ${reference} não foi concluído (${result.status}).`,
+                });
+                
+                subscription.status = SubscriptionStatus.CANCELLED;
+                await this.subscriptionRepo.save(subscription);
+            }
         }
     }
 
@@ -462,5 +469,25 @@ export class SubscriptionService implements OnModuleInit {
 
     async getAllPlans() {
         return this.planConfigRepo.find();
+    }
+
+    async sendFollowUpEmail(subscriptionId: string) {
+        const sub = await this.subscriptionRepo.findOne({
+            where: { id: subscriptionId },
+            relations: ['user', 'planConfig']
+        });
+
+        if (!sub || !sub.user || !sub.user.email) return;
+
+        this.logger.log(`Sending remarketing follow-up to ${sub.user.email} for subscription ${sub.id}`);
+        
+        await this.emailService.sendTemplatedEmail(sub.user.email, 'SYSTEM_ALERT', {
+            title: 'Sentimos sua falta! 👋',
+            message: `Olá ${sub.user.name}, notamos que sua tentativa de assinatura do plano ${sub.planConfig.tier} não foi concluída. Se precisar de ajuda para finalizar seu pagamento ou tiver alguma dúvida, estamos à disposição!`,
+            type: 'MARKETING'
+        });
+
+        sub.followUpSent = true;
+        await this.subscriptionRepo.save(sub);
     }
 }

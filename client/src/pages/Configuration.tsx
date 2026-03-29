@@ -12,6 +12,7 @@ interface UserProfile {
     is_connected: boolean;
     role?: string;
     twoFactorEnabled: boolean;
+    dailyLossLimit?: number;
 }
 
 export const Configuration = () => {
@@ -154,6 +155,39 @@ export const Configuration = () => {
                                     Editar
                                 </button>
                             </div>
+                        </div>
+
+                        {/* Risk Management */}
+                        <div className="pt-4 border-t border-slate-800">
+                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block">Gerenciamento de Risco</label>
+                            <div className="flex flex-col md:flex-row gap-4 items-end">
+                                <div className="flex-1">
+                                    <p className="text-xs text-slate-400 mb-2">Limite de Perda Diária (MT)</p>
+                                    <input
+                                        type="number"
+                                        placeholder="0.00"
+                                        value={user?.dailyLossLimit || ''}
+                                        onChange={(e) => setUser(prev => prev ? { ...prev, dailyLossLimit: parseFloat(e.target.value) } : null)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                                    />
+                                </div>
+                                <button 
+                                    onClick={async () => {
+                                        try {
+                                            await api.put('/auth/profile', { dailyLossLimit: user?.dailyLossLimit });
+                                            alert('Configurações de risco atualizadas!');
+                                        } catch (e) {
+                                            alert('Erro ao salvar.');
+                                        }
+                                    }}
+                                    className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+                                >
+                                    Gravar Limite
+                                </button>
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-2 italic">
+                                Você receberá um alerta no Telegram/WhatsApp assim que sua perda diária atingir este valor.
+                            </p>
                         </div>
                     </div>
                 </Card>

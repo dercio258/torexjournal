@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
 import { diskStorage } from 'multer';
@@ -94,5 +94,17 @@ export class DashboardController {
         const userId = req.user.id || req.user.userId;
         const date = body.date;
         return this.dashboardService.saveTechnicalJournal(userId, date, body);
+    }
+
+    @Patch('trades/:id')
+    @UseGuards(JwtAuthGuard)
+    async updateTrade(@Req() req, @Param('id') id: string, @Body() body: any) {
+        return this.dashboardService.updateTradeMetadata(req.user.id, id, body);
+    }
+
+    @Get('heatmap')
+    @UseGuards(JwtAuthGuard)
+    async getHeatmap(@Req() req) {
+        return this.dashboardService.getHeatmapData(req.user.id);
     }
 }

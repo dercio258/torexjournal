@@ -65,6 +65,9 @@ export class Subscription {
 
     @Column({ type: 'timestamp', nullable: true })
     currentPeriodEnd: Date;
+    
+    @Column({ default: false })
+    followUpSent: boolean;
 
     @CreateDateColumn()
     createdAt: Date;
