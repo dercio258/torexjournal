@@ -4,7 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -73,6 +73,21 @@ import { AlertsModule } from './alerts/alerts.module';
         synchronize: true,
         logging: false,
       }),
+      inject: [ConfigService],
+    }),
+    ServeStaticModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => {
+        const customPath = configService.get<string>('FRONTEND_BUILD_PATH');
+        const rootPath = customPath 
+          ? (isAbsolute(customPath) ? customPath : join(process.cwd(), customPath))
+          : join(process.cwd(), '..', 'client', 'dist');
+        
+        return [{
+          rootPath,
+          exclude: ['/api/(.*)'],
+        }];
+      },
       inject: [ConfigService],
     }),
     ServeStaticModule.forRoot({
