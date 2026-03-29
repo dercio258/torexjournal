@@ -93,6 +93,7 @@ import { EmailModule } from '../email/email.module';
         BroadcastingService,
         TelegramService,
         BaileysService,
+        WhatsAppBotService,
         WhatsAppProducerService,
         SmsService,
     ],
