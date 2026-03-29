@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Transport, MicroserviceOptions } from '@nestjs/microservices';
 
@@ -50,9 +51,10 @@ async function bootstrap() {
     await app.startAllMicroservices();
   }
 
-  // Start on configured port (default 3000 only for dev)
-  const port = process.env.PORT || 3000;
-  const baseUrl = process.env.BASE_URL;
+  // Use ConfigService to get the Port (Ensures .env is loaded correctly)
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>('PORT');
+  const baseUrl = configService.get<string>('BASE_URL');
   
   if (!baseUrl && process.env.NODE_ENV === 'production') {
     console.error('❌ BASE_URL is NOT defined in production! This will cause issues with links and callbacks.');
@@ -60,7 +62,8 @@ async function bootstrap() {
 
   await app.listen(port);
   const actualBaseUrl = baseUrl || `http://localhost:${port}`;
-  console.log(`🚀 NestJS Backend running on ${actualBaseUrl}`);
+  console.log(`🚀 NestJS Backend running on port ${port}`);
+  console.log(`🌍 Base URL: ${actualBaseUrl}`);
   console.log(`📡 API Base: ${actualBaseUrl}/api`);
 }
 bootstrap();

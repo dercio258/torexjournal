@@ -195,9 +195,10 @@ export class AuthController {
         
         const frontendUrl = this.configService.get<string>('FRONTEND_URL');
         if (!frontendUrl) {
-            this.logger.error('FRONTEND_URL not configured in .env. Redirection may fail.');
+            this.logger.error('FRONTEND_URL not configured in .env! Redirection will likely fail.');
+            return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
-        const redirectUrl = new URL(`${frontendUrl || 'http://localhost:3001'}/auth/callback`);
+        const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
         redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());
@@ -218,9 +219,10 @@ export class AuthController {
 
         const frontendUrl = this.configService.get<string>('FRONTEND_URL');
         if (!frontendUrl) {
-            this.logger.error('FRONTEND_URL not configured in .env. Redirection may fail.');
+            this.logger.error('FRONTEND_URL not configured in .env! Redirection will likely fail.');
+            return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
-        const redirectUrl = new URL(`${frontendUrl || 'http://localhost:3001'}/auth/callback`);
+        const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
         redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());

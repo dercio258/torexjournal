@@ -32,7 +32,7 @@ export class CloudInstanceEntity {
     errorMessage: string;
 
     @Column({ nullable: true })
-    connectionString: string; // e.g., "127.0.0.1:3001"
+    connectionString: string; // e.g., "127.0.0.1:3000"
 
     @CreateDateColumn()
     createdAt: Date;
