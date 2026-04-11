@@ -28,13 +28,20 @@ export class ImportController {
         let trades = [];
 
         try {
-            const content = file.buffer.toString('utf-8'); // Assuming text-based (HTML/CSV)
+            // Detect encoding (UTF-16LE is common for MT5 reports)
+            let content: string;
+            const buffer = file.buffer;
+            
+            if (buffer[0] === 0xFF && buffer[1] === 0xFE) {
+                content = buffer.toString('utf16le');
+                this.logger.log('Detected UTF-16LE encoding');
+            } else {
+                content = buffer.toString('utf-8');
+            }
+
             const userPlan = await this.planPermissionService.getUserPlan(userId);
 
             if (file.mimetype.includes('html') || file.originalname.endsWith('.html') || file.originalname.endsWith('.htm')) {
-                if (userPlan !== PlanTier.PREMIUM) {
-                    throw new BadRequestException('Importação via HTML restrita ao plano PREMIUM. Plano BÁSICO suporta apenas CSV.');
-                }
                 trades = this.reportParser.parseHtml(content);
             } else if (file.mimetype.includes('csv') || file.originalname.endsWith('.csv')) {
                 trades = this.reportParser.parseCsv(content);

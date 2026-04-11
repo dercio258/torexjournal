@@ -8,48 +8,138 @@ export class ReportParserService {
         this.logger.log('Parsing HTML Report...');
         const trades = [];
 
-        // Basic parser for Standard MT4/MT5 HTML Reports
-        // Usually contains a table with headers: Ticket, Open Time, Type, Size, Item, Price, S / L, T / P, Close Time, Price, Commission, Taxes, Swap, Profit
-
-        // Find the table rows
         const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
         let match;
+        let headerMap: Record<string, number> = {};
+        let headerDetected = false;
+        let currentTable = 'POSITIONS'; // default to POSITIONS for MT4 reports which just have one table
+
+        const parseNum = (val: string): number => {
+            if (!val) return 0;
+            // Handle both dot and comma as decimal separators
+            const clean = val.replace(/\s/g, '').replace(',', '.');
+            return parseFloat(clean) || 0;
+        };
+
+        const parseDate = (dateStr: string) => {
+            if (!dateStr || dateStr.trim() === '') return null;
+            return new Date(dateStr.replace(/\./g, '-'));
+        };
 
         while ((match = rowRegex.exec(content)) !== null) {
             const rowContent = match[1];
-
-            const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
+            // Support both td and th tags
+            const cellRegex = /<(td|th)([^>]*)>([\s\S]*?)<\/(td|th)>/g;
             const cells = [];
             let cellMatch;
+
             while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
-                // Strip tags
-                let cellText = cellMatch[1].replace(/<[^>]+>/g, '').trim();
+                const attributes = cellMatch[2];
+                // Skip hidden cells (common in MT5 reports with class="hidden")
+                if (attributes.includes('class="hidden"') || attributes.includes('display: none')) {
+                    continue;
+                }
+
+                // Decode common HTML entities and remove tags
+                let cellText = cellMatch[3]
+                    .replace(/<[^>]+>/g, '')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/\s+/g, ' ')
+                    .trim();
                 cells.push(cellText);
             }
 
-            if (cells.length >= 13) {
-                const ticket = parseInt(cells[0]);
-                if (!isNaN(ticket)) {
-                    const parseDate = (dateStr: string) => {
-                        if (!dateStr) return new Date();
-                        return new Date(dateStr.replace(/\./g, '-'));
-                    };
+            if (cells.length < 5) continue;
 
-                    trades.push({
-                        ticket: ticket,
-                        open_time: parseDate(cells[1]),
-                        type: cells[2],
-                        volume: parseFloat(cells[3]),
-                        symbol: cells[4],
-                        open_price: parseFloat(cells[5]),
-                        close_time: parseDate(cells[8]),
-                        close_price: parseFloat(cells[9]),
-                        commission: parseFloat(cells[10]),
-                        swap: parseFloat(cells[12]),
-                        profit: parseFloat(cells[13]),
-                        comment: 'Imported HTML'
-                    });
+            const normalizedCells = cells.map(c => 
+                c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z/]/g, '')
+            );
+            
+            // Check if this is a header row
+            if (normalizedCells.some(c => ['ticket', 'posicao', 'horario', 'time', 'symbol', 'ativo', 'ordem', 'oferta'].includes(c))) {
+                
+                // Identify which MT5 table we are entering
+                const headerStr = normalizedCells.join(' ');
+                if (headerStr.includes('ordem') && headerStr.includes('estado')) {
+                    currentTable = 'ORDERS';
+                } else if (headerStr.includes('oferta') || headerStr.includes('deal') || headerStr.includes('direcao')) {
+                    currentTable = 'DEALS';
+                } else {
+                    currentTable = 'POSITIONS';
                 }
+
+                // If we are in the positions table, recalc the header map
+                if (currentTable === 'POSITIONS') {
+                    headerMap = {};
+                    let timeCount = 0;
+                    let priceCount = 0;
+                    
+                    cells.forEach((cell, idx) => {
+                        const clean = cell.toLowerCase()
+                            .normalize('NFD')
+                            .replace(/[\u0300-\u036f]/g, '') // remove accents
+                            .replace(/[^a-z/]/g, '');
+                        
+                        if (clean === 'ticket' || clean === 'posicao' || clean === 'position') headerMap['ticket'] = idx;
+                        else if (clean === 'symbol' || clean === 'ativo' || clean === 'item') headerMap['symbol'] = idx;
+                        else if (clean === 'type' || clean === 'tipo') headerMap['type'] = idx;
+                        else if (clean === 'size' || clean === 'volume') headerMap['volume'] = idx;
+                        else if (clean === 'commission' || clean === 'comissao') headerMap['commission'] = idx;
+                        else if (clean === 'swap') headerMap['swap'] = idx;
+                        else if (clean === 'profit' || clean === 'lucro') headerMap['profit'] = idx;
+                        else if (clean === 'horario' || clean === 'time' || clean === 'opentime') {
+                            if (timeCount === 0) headerMap['opentime'] = idx;
+                            else headerMap['closetime'] = idx;
+                            timeCount++;
+                        }
+                        else if (clean === 'preco' || clean === 'price' || clean === 'openprice') {
+                            if (priceCount === 0) headerMap['openprice'] = idx;
+                            else headerMap['closeprice'] = idx;
+                            priceCount++;
+                        }
+                    });
+                    
+                    if (Object.keys(headerMap).length > 3) {
+                        headerDetected = true;
+                        this.logger.log(`Detected HTML POSITIONS headers: ${JSON.stringify(headerMap)}`);
+                    }
+                }
+                
+                // Skip the header row itself
+                continue;
+            }
+
+            // If we are not in the Positions table, ignore the row entirely
+            if (currentTable !== 'POSITIONS' || !headerDetected) continue;
+
+            const ticketVal = cells[headerMap['ticket'] ?? 0];
+            const ticket = parseInt(ticketVal);
+            
+            const isPotentialTicket = !isNaN(ticket) && ticket > 0;
+
+            if (isPotentialTicket) {
+                // Remove uncommon broker suffixes from symbol (.x, .y, _ecn, m, etc.)
+                const rawSymbol = cells[headerMap['symbol'] ?? 4];
+                const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
+                
+                trades.push({
+                    ticket: ticket,
+                    open_time: parseDate(cells[headerMap['opentime'] ?? 1]),
+                    type: cells[headerMap['type'] ?? 2],
+                    volume: parseNum(cells[headerMap['volume'] ?? 3]),
+                    symbol: cleanSymbol,
+                    open_price: parseNum(cells[headerMap['openprice'] ?? 5]),
+                    close_time: parseDate(cells[headerMap['closetime'] ?? 8]),
+                    close_price: parseNum(cells[headerMap['closeprice'] ?? 9]),
+                    commission: parseNum(cells[headerMap['commission'] ?? 10]),
+                    swap: parseNum(cells[headerMap['swap'] ?? 12]),
+                    profit: parseNum(cells[headerMap['profit'] ?? 13]),
+                    comment: 'Imported HTML'
+                });
             }
         }
 
@@ -81,59 +171,86 @@ export class ReportParserService {
             return this.parseHistoryCsv(content);
         }
 
-        // 3. Fallback: Generic MT4/MT5 CSV Report
+        // 3. Robust Parsing Logic
+        const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+        if (lines.length === 0) return [];
+
+        // Delimiter detection: check first 5 lines
+        const sampleLines = lines.slice(0, 5);
+        let commas = 0;
+        let semicolons = 0;
+        sampleLines.forEach(l => {
+            commas += (l.match(/,/g) || []).length;
+            semicolons += (l.match(/;/g) || []).length;
+        });
+        const delimiter = semicolons > commas ? ';' : ',';
+        this.logger.log(`Detected CSV delimiter: "${delimiter}"`);
+
         const trades = [];
-        const lines = content.split('\n');
+        let headerMap: Record<string, number> = {};
 
-        for (const line of lines) {
-            // Remove quotes and carriage returns
-            const cleanLine = line.replace(/"/g, '').replace(/\r/g, '').trim();
-            if (!cleanLine) continue;
+        // Helper to parse localized numbers (handles "10,50" and "10.50")
+        const parseNum = (val: string): number => {
+            if (!val) return 0;
+            const clean = val.replace(/\s/g, '').replace(',', '.');
+            return parseFloat(clean) || 0;
+        };
 
-            const cols = cleanLine.split(/[;,]/).map(c => c.trim());
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].replace(/"/g, '').replace(/\r/g, '');
+            const cols = line.split(delimiter).map(c => c.trim());
 
-            // Skip lines that don't look like data rows
-            if (cols.length < 10) continue;
-
-            const ticket = parseInt(cols[0]);
-
-            if (!isNaN(ticket) && ticket > 0) {
-                const openTime = this.normalizeDate(cols[1]);
-
-                if (!openTime) {
-                    this.logger.warn(`Skipping row due to invalid Open Time: ${line}`);
-                    continue;
-                }
-
-                const closeTime = this.normalizeDate(cols[8]);
-
-                const typeStr = cols[2].toLowerCase();
-                const validTypes = ['buy', 'sell', 'buy limit', 'sell limit', 'buy stop', 'sell stop', 'balance', 'credit', 'correction'];
-
-                if (!validTypes.includes(typeStr)) {
-                    this.logger.warn(`Skipping row due to unknown Type: ${cols[2]}`);
-                    continue;
-                }
-
-                trades.push({
-                    ticket: ticket,
-                    open_time: openTime,
-                    type: typeStr,
-                    volume: parseFloat(cols[3]) || 0,
-                    symbol: cols[4],
-                    open_price: parseFloat(cols[5]) || 0,
-                    close_time: closeTime, // Can be null for open trades
-                    close_price: parseFloat(cols[9]) || 0,
-                    commission: parseFloat(cols[10]) || 0,
-                    swap: parseFloat(cols[12]) || 0,
-                    profit: parseFloat(cols[13]) || 0,
-                    magic: 0,
-                    comment: 'Imported via CSV'
+            // Try to detect header in first 2 lines
+            if (i < 2 && (cols.includes('Ticket') || cols.includes('Symbol') || cols.includes('Login'))) {
+                cols.forEach((col, idx) => {
+                    const normalized = col.toLowerCase().replace(/[^a-z]/g, '');
+                    headerMap[normalized] = idx;
                 });
+                this.logger.log(`Detected CSV header: ${JSON.stringify(headerMap)}`);
+                continue;
             }
+
+            if (cols.length < 5) continue; // Minimum columns to be valid
+
+            const ticket = parseInt(cols[headerMap['ticket'] ?? 0]);
+            if (isNaN(ticket) || ticket <= 0) continue;
+
+            // Date mapping (heuristic or header-based)
+            const openTimeStr = cols[headerMap['opentime'] ?? headerMap['time'] ?? 1];
+            const closeTimeStr = cols[headerMap['closetime'] ?? 8];
+
+            const openTime = this.normalizeDate(openTimeStr);
+            if (!openTime) {
+                if (i > 0) this.logger.warn(`Invalid Open Time at line ${i + 1}: ${openTimeStr}`);
+                continue;
+            }
+
+            const typeStr = (cols[headerMap['type'] ?? 2] || '').toLowerCase();
+            const validTypes = ['buy', 'sell', 'buy limit', 'sell limit', 'buy stop', 'sell stop', 'balance', 'credit', 'correction'];
+            if (!validTypes.some(v => typeStr.includes(v))) continue;
+
+            // Remove uncommon broker suffixes from symbol (.x, .y, _ecn, m, etc.)
+            const rawSymbol = cols[headerMap['symbol'] ?? headerMap['item'] ?? 4];
+            const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
+
+            trades.push({
+                ticket: ticket,
+                open_time: openTime,
+                type: typeStr,
+                volume: parseNum(cols[headerMap['size'] ?? headerMap['volume'] ?? 3]),
+                symbol: cleanSymbol,
+                open_price: parseNum(cols[headerMap['price'] ?? headerMap['openprice'] ?? 5]),
+                close_time: this.normalizeDate(closeTimeStr),
+                close_price: parseNum(cols[headerMap['closeprice'] ?? 9]),
+                commission: parseNum(cols[headerMap['commission'] ?? 10]),
+                swap: parseNum(cols[headerMap['swap'] ?? 12]),
+                profit: parseNum(cols[headerMap['profit'] ?? 13]),
+                magic: 0,
+                comment: 'Imported via CSV'
+            });
         }
 
-        this.logger.log(`Parsed ${trades.length} valid trades from CSV.`);
+        this.logger.log(`Parsed ${trades.length} trades from CSV.`);
         return trades;
     }
 
@@ -151,7 +268,7 @@ export class ReportParserService {
             const ticketId = parseInt(cols[3]);
             if (isNaN(ticketId)) continue;
 
-            const serverTime = this.normalizeDate(cols[1]);
+            const serverTime = this.normalizeDate(cols[0]);
             const message = cols[4];
 
             if (!message) continue;

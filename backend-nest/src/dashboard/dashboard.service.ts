@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { Repository, Between, LessThanOrEqual, MoreThanOrEqual, In } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { TradeEntity } from '../mt5/trade.entity';
@@ -22,12 +22,22 @@ export class DashboardService {
         @Inject(CACHE_MANAGER) private cacheManager: Cache
     ) { }
 
+    private async getPrimaryAccount(userId: string) {
+        const account = await this.accountRepo.findOne({
+            where: { userId },
+            order: { lastSeen: 'DESC' } // Prefer the most recently active
+        });
+        return account;
+    }
+
     async getTrades(userId: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) return [];
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) return [];
+
+        const accountIds = accounts.map(a => a.id);
 
         return this.tradeRepo.find({
-            where: { accountId: account.id, status: 'CLOSED' },
+            where: { accountId: In(accountIds), status: 'CLOSED' },
             order: { closeTime: 'DESC' },
             take: 100
         });
@@ -41,9 +51,8 @@ export class DashboardService {
         }
 
         try {
-            const account = await this.accountRepo.findOne({ where: { userId } });
-            if (!account) {
-                // return empty... (existing logic)
+            const accounts = await this.accountRepo.find({ where: { userId } });
+            if (accounts.length === 0) {
                 return {
                     totalPnL: 0,
                     winRate: 0,
@@ -58,7 +67,8 @@ export class DashboardService {
                 };
             }
 
-            const whereClause: any = { accountId: account.id };
+            const accountIds = accounts.map(a => a.id);
+            const whereClause: any = { accountId: In(accountIds) };
 
             if (startDate && endDate) {
                 whereClause.closeTime = Between(new Date(startDate), new Date(endDate));
@@ -190,7 +200,7 @@ export class DashboardService {
     }
 
     async saveMentalLog(userId: string, data: Partial<MentalLog>) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        const account = await this.getPrimaryAccount(userId);
         if (!account) throw new Error('Account not found');
 
         const dateStr = new Date().toISOString().split('T')[0];
@@ -236,7 +246,7 @@ export class DashboardService {
     }
 
     async saveMentalLogImage(userId: string, imageUrl: string, session?: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        const account = await this.getPrimaryAccount(userId);
         if (!account) throw new Error('Account not found');
 
         const dateStr = new Date().toISOString().split('T')[0];
@@ -261,7 +271,7 @@ export class DashboardService {
     }
 
     async getTodayMentalLog(userId: string, session?: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        const account = await this.getPrimaryAccount(userId);
         if (!account) throw new Error('Account not found');
 
         const dateStr = new Date().toISOString().split('T')[0];
@@ -296,22 +306,22 @@ export class DashboardService {
     }
 
     async getMentalLogHistory(userId: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) throw new Error('Account not found');
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) throw new Error('Account not found');
 
         return this.mentalLogRepo.find({
-            where: { accountId: account.id },
+            where: { accountId: In(accounts.map(a => a.id)) },
             order: { date: 'DESC' },
             take: 50
         });
     }
 
     async getTechnicalJournal(userId: string, date: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) throw new Error('Account not found');
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) throw new Error('Account not found');
 
         return this.techJournalRepo.findOne({
-            where: { accountId: account.id, date }
+            where: { accountId: In(accounts.map(a => a.id)), date }
         });
     }
 
@@ -331,7 +341,7 @@ export class DashboardService {
         tradeExit?: string,
         emotionalState?: string
     ) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        const account = await this.getPrimaryAccount(userId);
         if (!account) throw new Error('Account not found');
 
         let journal = await this.techJournalRepo.findOne({
@@ -377,7 +387,7 @@ export class DashboardService {
     }
 
     async saveTechnicalJournal(userId: string, date: string, data: Partial<TechnicalJournal>) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        const account = await this.getPrimaryAccount(userId);
         if (!account) throw new Error('Account not found');
 
         let journal = await this.techJournalRepo.findOne({
@@ -419,13 +429,13 @@ export class DashboardService {
     }
 
     async getTradeDetails(userId: string, id: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) throw new Error('Account not found');
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) throw new Error('Account not found');
 
         let trade;
         try {
             trade = await this.tradeRepo.findOne({
-                where: { id: id, accountId: account.id }
+                where: { id: id, accountId: In(accounts.map(a => a.id)) }
             });
         } catch (e) {
             console.warn(`Invalid trade ID format for fetch: ${id}`);
@@ -441,8 +451,8 @@ export class DashboardService {
         const dateStr = dateRef.toISOString().split('T')[0];
 
         const [technicalJournal, mentalLog] = await Promise.all([
-            this.techJournalRepo.findOne({ where: { accountId: account.id, date: dateStr } }),
-            this.mentalLogRepo.findOne({ where: { accountId: account.id, date: dateStr } })
+            this.techJournalRepo.findOne({ where: { accountId: trade.accountId, date: dateStr } }),
+            this.mentalLogRepo.findOne({ where: { accountId: trade.accountId, date: dateStr } })
         ]);
 
         return {
@@ -453,11 +463,11 @@ export class DashboardService {
     }
 
     async updateTradeMetadata(userId: string, tradeId: string, data: Partial<TradeEntity>) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) throw new Error('Account not found');
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) throw new Error('Account not found');
 
         const trade = await this.tradeRepo.findOne({
-            where: { id: tradeId, accountId: account.id }
+            where: { id: tradeId, accountId: In(accounts.map(a => a.id)) }
         });
 
         if (!trade) throw new Error('Trade not found or unauthorized');
@@ -496,11 +506,11 @@ export class DashboardService {
     }
 
     async getHeatmapData(userId: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) return { pnl: [], counts: [] };
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) return { pnl: [], counts: [] };
 
         const trades = await this.tradeRepo.find({
-            where: { accountId: account.id, status: 'CLOSED' }
+            where: { accountId: In(accounts.map(a => a.id)), status: 'CLOSED' }
         });
 
         // Matrix (7 days x 24 hours)
@@ -526,15 +536,15 @@ export class DashboardService {
     }
 
     async getWeeklySummary(userId: string) {
-        const account = await this.accountRepo.findOne({ where: { userId } });
-        if (!account) return null;
+        const accounts = await this.accountRepo.find({ where: { userId } });
+        if (accounts.length === 0) return null;
 
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
         const trades = await this.tradeRepo.find({
             where: { 
-                accountId: account.id, 
+                accountId: In(accounts.map(a => a.id)), 
                 status: 'CLOSED',
                 closeTime: MoreThanOrEqual(oneWeekAgo)
             }
