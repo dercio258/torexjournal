@@ -282,7 +282,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 if (account) {
                     accountId = account.id;
                 } else {
-                    this.logger.warn(`No account found for user ${userId}. Trade import might fail if account_id is required.`);
+                    this.logger.warn(`No account found for user ${userId}. Creating a default manual account to store imported trades.`);
+                    const newAcc = this.accountRepo.create({
+                        userId: userId,
+                        mt5Id: 'MANUAL_' + userId.substring(0, 8),
+                        isConnected: false
+                    });
+                    const savedAcc = await this.accountRepo.save(newAcc);
+                    accountId = savedAcc.id;
                 }
             }
 
