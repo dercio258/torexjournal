@@ -27,28 +27,28 @@ export class TradeEntity {
     @Column()
     type: string;
 
-    @Column('decimal', { precision: 10, scale: 2 })
+    @Column('decimal', { precision: 18, scale: 2 })
     volume: number;
 
-    @Column('decimal', { precision: 10, scale: 5, name: 'open_price' })
+    @Column('decimal', { precision: 18, scale: 5, name: 'open_price' })
     openPrice: number;
 
-    @Column('decimal', { precision: 10, scale: 5, name: 'close_price' })
+    @Column('decimal', { precision: 18, scale: 5, name: 'close_price' })
     closePrice: number;
 
-    @Column('decimal', { precision: 10, scale: 2 })
+    @Column('decimal', { precision: 18, scale: 2 })
     profit: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true })
     sl: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true })
     tp: number;
 
-    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0 })
     commission: number;
 
-    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0 })
     swap: number;
 
     @Column('decimal', { precision: 20, scale: 2, nullable: true })
@@ -57,7 +57,7 @@ export class TradeEntity {
     @Column('decimal', { precision: 20, scale: 2, nullable: true })
     netPnl: number;
 
-    @Column('decimal', { precision: 10, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0 })
     fees: number;
 
     @Column({ length: 10, nullable: true })
@@ -99,19 +99,19 @@ export class TradeEntity {
     @Column({ type: 'jsonb', nullable: true })
     qualityFlags: any; // e.g., { missing_sell: true, inconsistent_pnl: true }
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true })
     entrySpot: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true })
     exitSpot: number;
 
-    @Column('decimal', { precision: 10, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true })
     buyPrice: number;
 
-    @Column('decimal', { precision: 10, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true })
     sellPrice: number;
 
-    @Column('decimal', { precision: 10, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true })
     payout: number;
 
     @Column({ type: 'enum', enum: ['ok', 'partial', 'broken'], default: 'ok' })

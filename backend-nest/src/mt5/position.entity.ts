@@ -23,22 +23,22 @@ export class PositionEntity {
     @Column()
     type: string;
 
-    @Column('decimal', { precision: 10, scale: 2, transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 2, transformer: new ColumnNumericTransformer() })
     volume: number;
 
-    @Column('decimal', { precision: 10, scale: 5, name: 'open_price', transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 5, name: 'open_price', transformer: new ColumnNumericTransformer() })
     openPrice: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true, name: 'current_price', transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, name: 'current_price', transformer: new ColumnNumericTransformer() })
     currentPrice: number;
 
-    @Column('decimal', { precision: 10, scale: 2, transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 2, transformer: new ColumnNumericTransformer() })
     profit: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true, transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: new ColumnNumericTransformer() })
     sl: number;
 
-    @Column('decimal', { precision: 10, scale: 5, nullable: true, transformer: new ColumnNumericTransformer() })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: new ColumnNumericTransformer() })
     tp: number;
 
     @Column({ type: 'timestamp', name: 'open_time' })
