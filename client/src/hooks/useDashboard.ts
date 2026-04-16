@@ -36,7 +36,7 @@ export const useDashboardStats = (startDate: string, endDate: string) => {
         queryFn: async () => {
             const params = { startDate, endDate };
             const [perfRes, scoreRes] = await Promise.all([
-                api.get('/performance', { params }),
+                api.get('/dashboard/performance', { params }),
                 api.get('/alerts/score')
             ]);
 
@@ -67,7 +67,7 @@ export const useTradesFallback = () => {
     return useQuery({
         queryKey: ['trades', 'all'],
         queryFn: async () => {
-            const { data } = await api.get('/trades');
+            const { data } = await api.get('/dashboard/trades');
             return data;
         },
     });

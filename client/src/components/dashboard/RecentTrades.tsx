@@ -24,7 +24,7 @@ export const RecentTrades = () => {
 
     const fetchTrades = async () => {
         try {
-            const res = await api.get('/trades/recent?limit=5');
+            const res = await api.get('/dashboard/trades/recent?limit=5');
             setTrades(res.data);
         } catch (err) {
             console.error(err);

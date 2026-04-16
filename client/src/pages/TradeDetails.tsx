@@ -101,7 +101,7 @@ export const TradeDetails = () => {
     useEffect(() => {
         const fetchDetails = async () => {
             try {
-                const res = await api.get(`/trades/${id}`);
+                const res = await api.get(`/dashboard/trades/${id}`);
                 setData(res.data);
             } catch (err) {
                 console.error('Failed to fetch trade details', err);

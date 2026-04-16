@@ -48,6 +48,11 @@ export const Journal = () => {
     const [trades, setTrades] = useState<any[]>([]);
     const [selectedTrade, setSelectedTrade] = useState<any | null>(null);
 
+    // Trade Editor Wizard State
+    const [tradeEditStep, setTradeEditStep] = useState(1);
+    const [tradeEditForm, setTradeEditForm] = useState<any>({});
+    const [isSavingTrade, setIsSavingTrade] = useState(false);
+
     // Tech Journal Form State
     const [techForm, setTechForm] = useState<TechnicalJournal>({
         marketTrend: '',
@@ -85,7 +90,7 @@ export const Journal = () => {
 
     const fetchTrades = async () => {
         try {
-            const res = await api.get('/trades');
+            const res = await api.get('/dashboard/trades');
             if (Array.isArray(res.data)) {
                 const mapped = res.data.map((t: any) => ({
                     ...t, // Keep original fields for editing
@@ -117,10 +122,39 @@ export const Journal = () => {
         }
     };
 
+    useEffect(() => {
+        if (selectedTrade) {
+            setTradeEditStep(1);
+            setTradeEditForm({
+                setup: selectedTrade.setup || '',
+                mood: selectedTrade.mood || '',
+                rating: selectedTrade.rating || 0,
+                lesson: selectedTrade.lesson || '',
+                mistakes: selectedTrade.mistakes || '',
+                tradeExit: selectedTrade.tradeExit || '',
+                executionSpeed: selectedTrade.executionSpeed || '',
+                actionPlan: selectedTrade.actionPlan || '',
+                entryPrecision: selectedTrade.entryPrecision || ''
+            });
+        }
+    }, [selectedTrade]);
+
+    const handleSaveTradeForm = async () => {
+        if (!selectedTrade) return;
+        try {
+            setIsSavingTrade(true);
+            await handleUpdateTrade(selectedTrade.id, tradeEditForm);
+            // Optionally could advance step or show toast. Let's just stay on same step or go to 1.
+            setTradeEditStep(1); 
+        } finally {
+            setIsSavingTrade(false);
+        }
+    };
+
     const fetchTechnicalJournal = async () => {
         try {
             const dateStr = selectedDate.toISOString().split('T')[0];
-            const res = await api.get(`/technical-journal/${dateStr}`);
+            const res = await api.get(`/dashboard/technical-journal/${dateStr}`);
             const data = res.data;
 
             if (data) {
@@ -161,7 +195,7 @@ export const Journal = () => {
             const dateStr = selectedDate.toISOString().split('T')[0];
             const payload = { ...techForm, date: dateStr };
 
-            await api.post(`/technical-journal`, payload);
+            await api.post(`/dashboard/technical-journal`, payload);
         } catch (error) {
             console.error("Failed to save journal", error);
         } finally {
@@ -298,7 +332,7 @@ export const Journal = () => {
 
                         {/* Per-Trade Editor (appears when selected) */}
                         {selectedTrade ? (
-                            <div className="bg-slate-900/60 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-6 flex flex-col shadow-xl animate-in slide-in-from-right-4">
+                            <div className="bg-slate-900/60 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-6 flex flex-col shadow-xl animate-in slide-in-from-right-4 relative">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                                         <Zap className="text-indigo-400" size={18} /> Trade #{selectedTrade.ticket}
@@ -307,91 +341,155 @@ export const Journal = () => {
                                         <X size={20} />
                                     </button>
                                 </div>
+                                
+                                {/* Step Indicators */}
+                                <div className="flex gap-2 mb-6">
+                                    {[1, 2, 3].map(step => (
+                                        <div key={step} className={`h-1 flex-1 rounded-full ${tradeEditStep >= step ? 'bg-indigo-500' : 'bg-slate-800'}`} />
+                                    ))}
+                                </div>
 
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup</label>
-                                            <input 
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
-                                                placeholder="Ex: Breakout H1"
-                                                value={selectedTrade.setup || ''}
-                                                onChange={e => handleUpdateTrade(selectedTrade.id, { setup: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Humor</label>
-                                            <select 
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
-                                                value={selectedTrade.mood || ''}
-                                                onChange={e => handleUpdateTrade(selectedTrade.id, { mood: e.target.value })}
-                                            >
-                                                <option value="">Humor...</option>
-                                                <option value="Focado">Focado</option>
-                                                <option value="Ansioso">Ansioso</option>
-                                                <option value="Calmo">Calmo</option>
-                                                <option value="Impulsivo">Impulsivo</option>
-                                                <option value="Confiante">Confiante</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup</label>
-                                            <input 
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
-                                                placeholder="Ex: Breakout"
-                                                value={selectedTrade.setup || ''}
-                                                onChange={e => handleUpdateTrade(selectedTrade.id, { setup: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Humor</label>
-                                            <select 
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
-                                                value={selectedTrade.mood || ''}
-                                                onChange={e => handleUpdateTrade(selectedTrade.id, { mood: e.target.value })}
-                                            >
-                                                <option value="">Humor...</option>
-                                                <option value="Focado">Focado</option>
-                                                <option value="Ansioso">Ansioso</option>
-                                                <option value="Eufórico">Eufórico</option>
-                                                <option value="Calmo">Calmo</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Avaliação</label>
-                                        <div className="flex gap-1">
-                                            {[1, 2, 3, 4, 5].map((n: number) => (
-                                                <button
-                                                    key={n}
-                                                    onClick={() => handleUpdateTrade(selectedTrade.id, { rating: n })}
-                                                    className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs transition-all ${selectedTrade.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600 hover:border-slate-500'}`}
+                                <div className="space-y-4 flex-1">
+                                    {tradeEditStep === 1 && (
+                                        <div className="space-y-4 animate-in fade-in">
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Setup Principal</label>
+                                                <input 
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                    placeholder="Ex: Breakout H1"
+                                                    value={tradeEditForm.setup || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, setup: e.target.value })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Estado Emocional Inicial</label>
+                                                <select 
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                    value={tradeEditForm.mood || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, mood: e.target.value })}
                                                 >
-                                                    {n}
-                                                </button>
-                                            ))}
+                                                    <option value="">Humor...</option>
+                                                    <option value="Focado">Focado</option>
+                                                    <option value="Ansioso">Ansioso</option>
+                                                    <option value="Eufórico">Eufórico</option>
+                                                    <option value="Calmo">Calmo</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Avaliação do Setup (1-5)</label>
+                                                <div className="flex gap-1">
+                                                    {[1, 2, 3, 4, 5].map((n: number) => (
+                                                        <button
+                                                            key={n}
+                                                            onClick={() => setTradeEditForm({ ...tradeEditForm, rating: n })}
+                                                            className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs transition-all ${tradeEditForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600 hover:border-slate-500'}`}
+                                                        >
+                                                            {n}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
-                                    <div>
-                                        <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Lições Aprendidas</label>
-                                        <textarea 
-                                            className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-20 resize-none focus:border-indigo-500 transition-colors"
-                                            placeholder="O que você aprendeu com este trade?"
-                                            value={selectedTrade.lesson || ''}
-                                            onChange={e => handleUpdateTrade(selectedTrade.id, { lesson: e.target.value })}
-                                        />
-                                    </div>
+                                    {tradeEditStep === 2 && (
+                                        <div className="space-y-4 animate-in fade-in">
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Precisão da Entrada</label>
+                                                <select 
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                    value={tradeEditForm.entryPrecision || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, entryPrecision: e.target.value })}
+                                                >
+                                                    <option value="">Selecione...</option>
+                                                    <option value="Perfeita">Perfeita</option>
+                                                    <option value="Atrasada">Atrasada</option>
+                                                    <option value="Adiantada">Adiantada</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Qualidade da Saída</label>
+                                                <select 
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                                    value={tradeEditForm.tradeExit || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, tradeExit: e.target.value })}
+                                                >
+                                                    <option value="">Selecione...</option>
+                                                    <option value="No Alvo">No Alvo</option>
+                                                    <option value="Prematura">Prematura</option>
+                                                    <option value="Arrastada">Arrastada (Hold)</option>
+                                                    <option value="Stop Loss">Stop Loss</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Erros de Execução</label>
+                                                <textarea 
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-16 resize-none focus:border-indigo-500 transition-colors"
+                                                    placeholder="Cometeu algum erro na execução?"
+                                                    value={tradeEditForm.mistakes || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, mistakes: e.target.value })}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
 
+                                    {tradeEditStep === 3 && (
+                                        <div className="space-y-4 animate-in fade-in">
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-emerald-500 mb-1 block">Lições Aprendidas</label>
+                                                <textarea 
+                                                    className="w-full bg-emerald-500/5 border-emerald-500/20 rounded-lg text-sm p-3 text-emerald-100 outline-none h-16 resize-none focus:border-emerald-500 transition-colors"
+                                                    placeholder="O que você aprendeu com este trade?"
+                                                    value={tradeEditForm.lesson || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, lesson: e.target.value })}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] uppercase font-bold text-blue-500 mb-1 block">Plano de Ação</label>
+                                                <textarea 
+                                                    className="w-full bg-blue-500/5 border-blue-500/20 rounded-lg text-sm p-3 text-blue-100 outline-none h-16 resize-none focus:border-blue-500 transition-colors"
+                                                    placeholder="Como agir de forma diferente?"
+                                                    value={tradeEditForm.actionPlan || ''}
+                                                    onChange={e => setTradeEditForm({ ...tradeEditForm, actionPlan: e.target.value })}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="mt-6 flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                        {tradeEditStep > 1 && (
+                                            <button 
+                                                onClick={() => setTradeEditStep(s => s - 1)}
+                                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition-all"
+                                            >
+                                                Voltar
+                                            </button>
+                                        )}
+                                        {tradeEditStep < 3 ? (
+                                            <button 
+                                                onClick={() => setTradeEditStep(s => s + 1)}
+                                                className="flex-[2] py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2"
+                                            >
+                                                Avançar <ArrowRight size={14} />
+                                            </button>
+                                        ) : (
+                                            <button 
+                                                onClick={handleSaveTradeForm}
+                                                disabled={isSavingTrade}
+                                                className="flex-[2] py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2"
+                                            >
+                                                {isSavingTrade ? <Clock className="animate-spin" size={14} /> : <Save size={14} />}
+                                                Salvar Análise
+                                            </button>
+                                        )}
+                                    </div>
                                     <button 
                                         onClick={() => navigate(`/trades/${selectedTrade.id}`)}
-                                        className="w-full py-2 bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2"
+                                        className="w-full py-2 bg-slate-900/50 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2"
                                     >
-                                        Detalhes Completos <ArrowRight size={14} />
+                                        Ver Detalhes Completos <ArrowRight size={14} />
                                     </button>
                                 </div>
                             </div>
@@ -424,8 +522,8 @@ export const Journal = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-4">
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Contexto</label>
                                     <select
@@ -454,23 +552,6 @@ export const Journal = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Nota do Dia</label>
-                                    <div className="flex gap-1">
-                                        {[1, 2, 3, 4, 5].map(n => (
-                                            <button
-                                                key={n}
-                                                onClick={() => setTechForm(p => ({ ...p, rating: n }))}
-                                                className={`flex-1 h-8 rounded border flex items-center justify-center font-bold text-xs ${techForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600'}`}
-                                            >
-                                                {n}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Estratégia Principal</label>
                                     <input
                                         className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none focus:border-indigo-500 transition-colors"
@@ -480,14 +561,172 @@ export const Journal = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Anotações do Dia</label>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Qualidade do Setup</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.setupQuality}
+                                        onChange={e => setTechForm({ ...techForm, setupQuality: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="A+">Setup A+ (Perfeito)</option>
+                                        <option value="B">Setup B (Bom)</option>
+                                        <option value="C">Setup C (Forçado)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Sessão</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2.5 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.session}
+                                        onChange={e => setTechForm({ ...techForm, session: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="London">London</option>
+                                        <option value="New York">New York</option>
+                                        <option value="Asia">Asia</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Nota do Dia</label>
+                                    <div className="flex gap-1">
+                                        {[1, 2, 3, 4, 5].map(n => (
+                                            <button
+                                                key={n}
+                                                onClick={() => setTechForm(p => ({ ...p, rating: n }))}
+                                                className={`flex-1 h-10 rounded border flex items-center justify-center font-bold text-xs ${techForm.rating >= n ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' : 'bg-slate-800 border-slate-700 text-slate-600'}`}
+                                            >
+                                                {n}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Entrada</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.entryPrecision}
+                                        onChange={e => setTechForm({ ...techForm, entryPrecision: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="Perfeita">Perfeita</option>
+                                        <option value="Atrasada">Atrasada</option>
+                                        <option value="Adiantada">Adiantada</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Saída</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.tradeExit}
+                                        onChange={e => setTechForm({ ...techForm, tradeExit: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="No Alvo">No Alvo</option>
+                                        <option value="Prematura">Prematura</option>
+                                        <option value="Arrasatada">Arrastada (Hold)</option>
+                                        <option value="Stop Loss">Stop Loss</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Gestão de Risco</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.riskManagement}
+                                        onChange={e => setTechForm({ ...techForm, riskManagement: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="Respeitado">Risco Respeitado</option>
+                                        <option value="Excesso">Excesso de Risco</option>
+                                        <option value="Micro Lotes">Micro Lotes (Medo)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Estado Emocional</label>
+                                    <select
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.emotionalState}
+                                        onChange={e => setTechForm({ ...techForm, emotionalState: e.target.value })}
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="Focado">Focado</option>
+                                        <option value="Impulsivo">Impulsivo</option>
+                                        <option value="Ansioso">Ansioso</option>
+                                        <option value="Frustrado">Frustrado</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-rose-500 mb-1 block">Erros Cometidos</label>
                                     <textarea
-                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-24 resize-none focus:border-indigo-500 transition-colors"
-                                        value={techForm.notes || ''}
-                                        onChange={e => setTechForm({ ...techForm, notes: e.target.value })}
-                                        placeholder="Breve resumo emocional ou do mercado..."
+                                        className="w-full bg-rose-500/5 border-rose-500/20 rounded-lg text-sm p-3 text-rose-100 outline-none h-20 resize-none focus:border-rose-500 transition-colors placeholder-rose-900/50"
+                                        value={techForm.mistakes || ''}
+                                        onChange={e => setTechForm({ ...techForm, mistakes: e.target.value })}
+                                        placeholder="Ex: Entrei por FOMO..."
                                     />
                                 </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-rose-500 mb-1 block">Regras Quebradas</label>
+                                    <textarea
+                                        className="w-full bg-rose-500/5 border-rose-500/20 rounded-lg text-sm p-3 text-rose-100 outline-none h-20 resize-none focus:border-rose-500 transition-colors placeholder-rose-900/50"
+                                        value={techForm.rulesBroken || ''}
+                                        onChange={e => setTechForm({ ...techForm, rulesBroken: e.target.value })}
+                                        placeholder="Ex: Não esperei pelo fecho de vela..."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-emerald-500 mb-1 block">Lições Aprendidas</label>
+                                    <textarea
+                                        className="w-full bg-emerald-500/5 border-emerald-500/20 rounded-lg text-sm p-3 text-emerald-100 outline-none h-20 resize-none focus:border-emerald-500 transition-colors placeholder-emerald-900/50"
+                                        value={techForm.lessons || ''}
+                                        onChange={e => setTechForm({ ...techForm, lessons: e.target.value })}
+                                        placeholder="O que levaste desta sessão..."
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-blue-500 mb-1 block">Plano de Ação</label>
+                                    <textarea
+                                        className="w-full bg-blue-500/5 border-blue-500/20 rounded-lg text-sm p-3 text-blue-100 outline-none h-20 resize-none focus:border-blue-500 transition-colors placeholder-blue-900/50"
+                                        value={techForm.actionPlan || ''}
+                                        onChange={e => setTechForm({ ...techForm, actionPlan: e.target.value })}
+                                        placeholder="O que vais fazer melhor da próxima vez..."
+                                    />
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Preparação Pré-Mercado</label>
+                                    <input
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.preMarketPrep}
+                                        onChange={e => setTechForm({ ...techForm, preMarketPrep: e.target.value })}
+                                        placeholder="Como te preparaste?"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Contexto de Mercado (Resumo)</label>
+                                    <input
+                                        className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-2 text-white outline-none focus:border-indigo-500 transition-colors"
+                                        value={techForm.marketContext}
+                                        onChange={e => setTechForm({ ...techForm, marketContext: e.target.value })}
+                                        placeholder="Ex: NFP + CPI no mesmo dia"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Anotações do Dia / Resumo</label>
+                                <textarea
+                                    className="w-full bg-slate-800 border-slate-700 rounded-lg text-sm p-3 text-white outline-none h-20 resize-none focus:border-indigo-500 transition-colors"
+                                    value={techForm.notes || ''}
+                                    onChange={e => setTechForm({ ...techForm, notes: e.target.value })}
+                                    placeholder="Breve comentário..."
+                                />
                             </div>
                         </div>
                     </div>

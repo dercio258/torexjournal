@@ -37,7 +37,7 @@ export const Reports = () => {
 
     const fetchTrades = async () => {
         try {
-            const res = await api.get('/trades');
+            const res = await api.get('/dashboard/trades');
             if (Array.isArray(res.data)) {
                 // Sort by close time asc for curve
                 const sorted = res.data

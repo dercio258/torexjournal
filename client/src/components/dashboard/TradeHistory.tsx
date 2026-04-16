@@ -21,7 +21,7 @@ export const TradeHistory = () => {
             // In dashboard.html line 284, it shows "Histórico de Trades".
             // It seems to be just a placeholder or repeats recent trades?
             // Let's assume we fetch from /api/trades.
-            const res = await api.get('/trades?limit=10');
+            const res = await api.get('/dashboard/trades?limit=10');
             setTrades(res.data);
         } catch (err) {
             console.error(err);

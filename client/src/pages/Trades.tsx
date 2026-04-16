@@ -42,7 +42,7 @@ export const Trades = () => {
     const fetchTrades = async () => {
         setIsLoading(true);
         try {
-            const res = await api.get('/trades');
+            const res = await api.get('/dashboard/trades');
             if (Array.isArray(res.data)) {
                 const mappedTrades = res.data.map((t: any) => ({
                     id: t.id,
