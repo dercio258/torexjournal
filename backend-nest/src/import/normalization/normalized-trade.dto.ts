@@ -20,6 +20,8 @@ export class NormalizedTradeDto {
     magic?: number;
     comment?: string;
     session?: string;
+    sl?: number;
+    tp?: number;
 
     // Additional generic fields for quality tracing
     qualityFlags?: any;

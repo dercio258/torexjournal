@@ -91,6 +91,8 @@ export class ReportParserService {
                         else if (clean === 'commission' || clean === 'comissao') headerMap['commission'] = idx;
                         else if (clean === 'swap') headerMap['swap'] = idx;
                         else if (clean === 'profit' || clean === 'lucro') headerMap['profit'] = idx;
+                        else if (clean === 'sl' || clean === 's/l' || clean === 'stoploss') headerMap['sl'] = idx;
+                        else if (clean === 'tp' || clean === 't/p' || clean === 'takeprofit') headerMap['tp'] = idx;
                         else if (clean === 'horario' || clean === 'time' || clean === 'opentime') {
                             if (timeCount === 0) headerMap['opentime'] = idx;
                             else headerMap['closetime'] = idx;
@@ -138,6 +140,8 @@ export class ReportParserService {
                     commission: parseNum(cells[headerMap['commission'] ?? 10]),
                     swap: parseNum(cells[headerMap['swap'] ?? 12]),
                     profit: parseNum(cells[headerMap['profit'] ?? 13]),
+                    sl: headerMap['sl'] !== undefined ? parseNum(cells[headerMap['sl']]) : 0,
+                    tp: headerMap['tp'] !== undefined ? parseNum(cells[headerMap['tp']]) : 0,
                     comment: 'Imported HTML'
                 });
             }
@@ -233,6 +237,9 @@ export class ReportParserService {
             const rawSymbol = cols[headerMap['symbol'] ?? headerMap['item'] ?? 4];
             const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
 
+            const slCol = headerMap['sl'] ?? headerMap['stoploss'] ?? headerMap['s/l'];
+            const tpCol = headerMap['tp'] ?? headerMap['takeprofit'] ?? headerMap['t/p'];
+
             trades.push({
                 ticket: ticket,
                 open_time: openTime,
@@ -245,6 +252,8 @@ export class ReportParserService {
                 commission: parseNum(cols[headerMap['commission'] ?? 10]),
                 swap: parseNum(cols[headerMap['swap'] ?? 12]),
                 profit: parseNum(cols[headerMap['profit'] ?? 13]),
+                sl: slCol !== undefined ? parseNum(cols[slCol]) : 0,
+                tp: tpCol !== undefined ? parseNum(cols[tpCol]) : 0,
                 magic: 0,
                 comment: 'Imported via CSV'
             });
@@ -345,6 +354,8 @@ export class ReportParserService {
                 symbol: cols[6],
                 open_price: parseFloat(cols[7]),
                 close_price: parseFloat(cols[8]),
+                sl: parseFloat(cols[9]) || 0, // stop_loss is column 9
+                tp: parseFloat(cols[10]) || 0, // take_profit is column 10
                 commission: parseFloat(cols[11]) || 0, // commission_usd
                 swap: parseFloat(cols[12]) || 0, // swap_usd
                 profit: parseFloat(cols[13]) || 0, // profit_usd

@@ -4,9 +4,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Transport, MicroserviceOptions } from '@nestjs/microservices';
+import { GenericExceptionFilter } from './common/filters/generic-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Enable CORS
   app.enableCors({
@@ -42,6 +43,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // Global Generic Exception Filter
+  app.useGlobalFilters(new GenericExceptionFilter());
 
   // Global Prefix
   app.setGlobalPrefix('api');

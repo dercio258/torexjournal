@@ -1,9 +1,13 @@
-import { Controller, Post, Get, Body, UnauthorizedException, Logger, UseGuards, Headers, Patch, Param } from '@nestjs/common';
+import { Controller, Post, Get, Body, UnauthorizedException, Logger, UseGuards, Headers, Patch, Param, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as moment from 'moment';
 import { UsersService } from '../users/users.service';
 import { SubscriptionService } from '../payment/subscription.service';
 import { BroadcastingService } from '../notifications/broadcast.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { JwtService } from '@nestjs/jwt';
+import { AdminAuthGuard } from './admin-auth.guard';
 
 @Controller('admin')
 export class AdminController {
@@ -13,41 +17,80 @@ export class AdminController {
         private configService: ConfigService,
         private usersService: UsersService,
         private subscriptionService: SubscriptionService,
-        private broadcastingService: BroadcastingService
+        private broadcastingService: BroadcastingService,
+        private jwtService: JwtService,
+        @Inject(CACHE_MANAGER) private cacheManager: any,
+        @InjectQueue('email-queue') private emailQueue: Queue
     ) { }
 
     // --- Auth ---
     @Post('auth/login')
-    login(@Body() body: { email: string; pass: string; date: string }) {
+    async login(@Body() body: { email: string; pass: string }) {
         const adminEmail = this.configService.get<string>('ADMIN_EMAIL');
         const adminPass = this.configService.get<string>('ADMIN_PASS');
-        const today = moment().format('DD/MM/YYYY');
 
-        this.logger.log(`Admin Login Attempt: ${body.email} with date ${body.date}`);
+        this.logger.log(`Admin Login Attempt: ${body.email}`);
 
-        if (
-            body.email === adminEmail &&
-            body.pass === adminPass &&
-            body.date === today
-        ) {
-            return {
-                success: true,
-                token: 'admin-session-' + Date.now(),
-                user: { email: adminEmail, role: 'admin' }
-            };
+        if (body.email !== adminEmail || body.pass !== adminPass) {
+            throw new UnauthorizedException('Credenciais de administrador inválidas');
         }
 
-        throw new UnauthorizedException('Invalid credentials or date');
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        await this.cacheManager.set(`admin_otp:${body.email}`, otp, 300000); // 5 mins
+
+        // Send OTP to email
+        await this.emailQueue.add('otp-alert', {
+            email: adminEmail,
+            otp
+        }, { removeOnComplete: true });
+
+        return {
+            success: true,
+            otpRequired: true,
+            message: 'Código de verificação enviado ao e-mail cadastrado.'
+        };
+    }
+
+    @Post('auth/verify')
+    async verifyOtp(@Body() body: { email: string; otp: string }) {
+        const adminEmail = this.configService.get<string>('ADMIN_EMAIL');
+        
+        if (body.email !== adminEmail) {
+            throw new UnauthorizedException('E-mail inválido');
+        }
+
+        const storedOtp = await this.cacheManager.get(`admin_otp:${body.email}`);
+        if (!storedOtp || storedOtp !== body.otp) {
+            throw new UnauthorizedException('Código de verificação inválido ou expirado');
+        }
+
+        // Clear OTP from cache
+        await this.cacheManager.del(`admin_otp:${body.email}`);
+
+        // Generate JWT token
+        const secret = this.configService.get<string>('JWT_SECRET') || 'dev_secret';
+        const token = this.jwtService.sign(
+            { email: adminEmail, role: 'admin', isAdmin: true },
+            { secret, expiresIn: '12h' }
+        );
+
+        return {
+            success: true,
+            token,
+            user: { email: adminEmail, role: 'admin' }
+        };
     }
 
     // --- Users ---
+    @UseGuards(AdminAuthGuard)
     @Get('users')
     async getUsers() {
-        // In real app, verify token here
         return this.usersService.findAll();
     }
 
     // --- Finance / Stats ---
+    @UseGuards(AdminAuthGuard)
     @Get('stats')
     async getStats() {
         const users = await this.usersService.findAll();
@@ -55,8 +98,7 @@ export class AdminController {
             u.subscriptions?.some(s => s.status === 'ACTIVE')
         ).length;
 
-        // Mock revenue for now (or calculate from subscriptions if price is stored in sub, or via plan)
-        // Simple estimation: Active * ~R$49.90
+        // Estimated revenue calculation
         const estimatedMonthlyRevenue = activeSubs * 49.90;
 
         return {
@@ -67,39 +109,45 @@ export class AdminController {
     }
 
     // --- Broadcast Notifications ---
+    @UseGuards(AdminAuthGuard)
     @Get('broadcasts')
     async getBroadcasts() {
         return this.broadcastingService.findAll();
     }
 
+    @UseGuards(AdminAuthGuard)
     @Post('broadcasts')
     async createBroadcast(@Body() body: any) {
         return this.broadcastingService.createBroadcast(body);
     }
 
+    @UseGuards(AdminAuthGuard)
     @Post('broadcasts/:id/execute')
     async executeBroadcast(@Headers('id') id: string) {
-        // Fallback to param id if header not present (standardizing with other routes)
         return this.broadcastingService.executeBroadcast(id);
     }
 
     // --- Subscription Plan Management ---
+    @UseGuards(AdminAuthGuard)
     @Get('plans')
     async getPlans() {
         return this.subscriptionService.getAllPlans();
     }
 
+    @UseGuards(AdminAuthGuard)
     @Patch('plans/:id')
     async updatePlan(@Param('id') id: string, @Body() body: any) {
         return this.subscriptionService.updatePlanConfig(id, body);
     }
 
+    @UseGuards(AdminAuthGuard)
     @Post('plans')
     async createPlan(@Body() body: any) {
         return this.subscriptionService.createPlanConfig(body);
     }
 
     // --- User Subscription History ---
+    @UseGuards(AdminAuthGuard)
     @Get('users/:id/subscriptions')
     async getUserSubscriptions(@Param('id') id: string) {
         return this.subscriptionService.getUserSubscriptionHistory(id);

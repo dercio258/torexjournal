@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bull';
 import { PaymentService } from './payment.service';
 import { SubscriptionService } from './subscription.service';
 import { PaymentController } from './payment.controller';
@@ -16,20 +17,23 @@ import { UserEntity } from '../users/user.entity';
 
 import { PlanPermissionService } from './plan-permission.service';
 import { DebitoService } from './debito.service';
-import { SubscriptionCronService } from './subscription.cron';
+import { SubscriptionProcessor } from './subscription.processor';
 import { WebhookController } from './webhook.controller';
 import { EmailModule } from '../email/email.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([PaymentEntity, AccountEntity, Subscription, SubscriptionPlanConfig, UserEntity]),
+        BullModule.registerQueue({
+            name: 'subscription-queue',
+        }),
         UsersModule,
         ConfigModule,
         AlertsModule,
         NotificationsModule,
         EmailModule
     ],
-    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionCronService],
+    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor],
     controllers: [PaymentController, SubscriptionController, WebhookController],
     exports: [SubscriptionService, PlanPermissionService, DebitoService],
 })

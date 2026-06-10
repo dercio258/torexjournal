@@ -1,152 +1,181 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import makeWASocket, { 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    WAConnectionState
-} from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
-import * as path from 'path';
-import * as fs from 'fs';
-import pino from 'pino';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import axios from 'axios';
 
 @Injectable()
 export class BaileysService implements OnModuleInit {
     private readonly logger = new Logger(BaileysService.name);
-    public sock: any;
-    private state: WAConnectionState = 'close';
+    private state: string = 'close';
     public qrCode: string | null = null;
+    private isPolling = false;
 
-    constructor(private eventEmitter: EventEmitter2) {}
+    private apiUrl: string;
+    private apiKey: string;
+    private instanceName: string;
+    private baseUrl: string;
+
+    constructor(
+        private configService: ConfigService,
+        private eventEmitter: EventEmitter2
+    ) {
+        this.apiUrl = this.configService.get<string>('EVOLUTION_API_URL') || 'https://wa.ratixpay.co.mz';
+        this.apiKey = this.configService.get<string>('EVOLUTION_API_KEY') || 'ratixpay_secret_key_2026';
+        this.instanceName = this.configService.get<string>('EVOLUTION_API_INSTANCE_NAME') || 'torex_journal';
+        this.baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
+    }
 
     async onModuleInit() {
-        // Do not await so it doesn't block app startup if connection or version fetch hangs
-        this.connectToWhatsApp().catch(err => {
-            this.logger.error(`Initial WhatsApp connection failed: ${err.message}`);
+        this.logger.log('Initializing BaileysService with Evolution API');
+        // Do not block startup, poll in background
+        this.isPolling = true;
+        this.startStatusPolling();
+        this.configureWebhook().catch(err => {
+            this.logger.error(`Failed to configure Evolution API Webhook: ${err.message}`);
         });
     }
 
-    async connectToWhatsApp() {
-        const { state, saveCreds } = await useMultiFileAuthState(
-            path.join(process.cwd(), 'wa_auth')
-        );
-
-        const { version, isLatest } = await fetchLatestBaileysVersion();
-        this.logger.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`);
-
-        // Explicitly close existing socket before reconnecting
-        if (this.sock) {
+    private startStatusPolling() {
+        const poll = async () => {
+            if (!this.isPolling) return;
             try {
-                this.sock.ev.removeAllListeners('connection.update');
-                this.sock.ev.removeAllListeners('creds.update');
-                this.sock.ev.removeAllListeners('messages.upsert');
-                this.sock.ws.close();
-            } catch (e) {}
-        }
-
-        this.sock = makeWASocket({
-            version,
-            printQRInTerminal: false, // QR handled via API
-            auth: {
-                creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
-            },
-            logger: pino({ level: 'silent' }),
-            browser: ['Torex.J', 'Chrome', '1.0.0'],
-        });
-
-        this.sock.ev.on('connection.update', (update: any) => {
-            const { connection, lastDisconnect, qr } = update;
-            
-            if (qr) {
-                this.qrCode = qr;
-                this.logger.warn('WhatsApp QR Code generated. Scan it to connect.');
-                this.eventEmitter.emit('whatsapp.qr', qr);
-            }
-
-            if (connection) {
-                this.state = connection;
-                if (connection === 'open') {
-                    this.qrCode = null; // Clear QR on connection
-                    this.logger.log('WhatsApp connection opened successfully');
-                    this.eventEmitter.emit('whatsapp.connected');
-                } else if (connection === 'close') {
-                    const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-                    const errorMessage = (lastDisconnect?.error as Error)?.message || 'Unknown error';
-                    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                    
-                    this.logger.error(`WhatsApp connection closed [Code: ${statusCode}]: ${errorMessage}. Reconnecting: ${shouldReconnect}`);
-                    
-                    if (shouldReconnect) {
-                        setTimeout(() => this.connectToWhatsApp(), 3000); // 3s delay before reconnect
-                    } else {
-                        this.qrCode = null;
-                        this.state = 'close';
+                const response = await axios.get(
+                    `${this.apiUrl}/instance/connectionState/${this.instanceName}`,
+                    { headers: { apikey: this.apiKey }, timeout: 10000 }
+                );
+                
+                const remoteState = response.data?.instance?.state || 'close';
+                
+                // Map status to what controllers expect ('open' | 'close' | 'connecting')
+                if (remoteState === 'open') {
+                    if (this.state !== 'open') {
+                        this.logger.log('WhatsApp instance is open/connected.');
+                        this.eventEmitter.emit('whatsapp.connected');
                     }
+                    this.state = 'open';
+                    this.qrCode = null;
+                } else {
+                    this.state = 'close';
+                    // If not open, fetch QR code to present it on the status dashboard
+                    await this.fetchQrCode();
                 }
+            } catch (error: any) {
+                const status = error.response?.status;
+                if (status === 404) {
+                    this.logger.warn(`WhatsApp instance '${this.instanceName}' not found (404) on Evolution API. Stopping background status checks.`);
+                } else {
+                    this.logger.warn(`Error polling connection status: ${error.message}. Stopping background status checks.`);
+                }
+                this.state = 'close';
+                this.isPolling = false;
+                return;
             }
-        });
 
-        this.sock.ev.on('creds.update', saveCreds);
-
-        this.sock.ev.on('messages.upsert', (m: any) => {
-            this.eventEmitter.emit('whatsapp.messages.upsert', m);
-        });
+            if (this.isPolling) {
+                // Poll every 30 seconds
+                setTimeout(poll, 30000);
+            }
+        };
+        
+        poll();
     }
 
-    async sendMessage(number: string, text: string) {
-        if (this.state !== 'open' || !this.sock) {
-            this.logger.error(`WhatsApp not connected (State: ${this.state}). Cannot send message.`);
-            return false;
+    private async fetchQrCode() {
+        try {
+            const response = await axios.get(
+                `${this.apiUrl}/instance/connect/${this.instanceName}`,
+                { headers: { apikey: this.apiKey }, timeout: 15000 }
+            );
+
+            const code = response.data?.code || response.data?.qrcode?.code || response.data?.pairingCode;
+            if (code && code !== this.qrCode) {
+                this.qrCode = code;
+                this.logger.warn('New WhatsApp QR Code generated by Evolution API.');
+                this.eventEmitter.emit('whatsapp.qr', code);
+            }
+        } catch (error) {
+            // Silence connection failures if instance is already in a weird state
+            this.logger.debug(`Could not fetch QR code: ${error.message}`);
+        }
+    }
+
+    private async configureWebhook() {
+        if (!this.baseUrl || this.baseUrl.includes('localhost')) {
+            this.logger.warn(`Local environment detected (${this.baseUrl}). Webhook auto-configuration skipped.`);
+            return;
         }
 
-        // Handle various JID formats, including LIDs and cleanup
-        let jid = number;
-        if (!jid.includes('@')) {
-            jid = `${number}@s.whatsapp.net`;
-        }
-        
-        // Ensure lid JIDs are handled if they come in malformed
-        if (jid.includes('@lid@s.whatsapp.net')) {
-            jid = jid.replace('@lid@s.whatsapp.net', '@s.whatsapp.net');
-        }
-        
-        this.logger.log(`Sending WhatsApp message to JID: ${jid}`);
         try {
-            await this.sock.sendMessage(jid, { text });
+            const webhookUrl = `${this.baseUrl}/api/whatsapp/webhook`;
+            this.logger.log(`Registering Evolution API webhook to: ${webhookUrl}`);
+            await axios.post(
+                `${this.apiUrl}/webhook/set/${this.instanceName}`,
+                {
+                    enabled: true,
+                    url: webhookUrl,
+                    webhookByEvents: false,
+                    webhookBase64: false,
+                    events: [
+                        'MESSAGES_UPSERT',
+                        'CONNECTION_UPDATE'
+                    ]
+                },
+                { headers: { apikey: this.apiKey }, timeout: 15000 }
+            );
+            this.logger.log('Evolution API webhook registered successfully.');
+        } catch (error) {
+            this.logger.error(`Failed to set webhook: ${error.message}`);
+        }
+    }
+
+    async sendMessage(number: string, text: string): Promise<boolean> {
+        // Remove @s.whatsapp.net if present to pass clean number to Evolution API
+        let formattedNumber = number;
+        if (formattedNumber.includes('@')) {
+            formattedNumber = formattedNumber.split('@')[0];
+        }
+
+        this.logger.log(`Sending message via Evolution API to: ${formattedNumber}`);
+        try {
+            await axios.post(
+                `${this.apiUrl}/message/sendText/${this.instanceName}`,
+                {
+                    number: formattedNumber,
+                    text: text
+                },
+                { headers: { apikey: this.apiKey }, timeout: 15000 }
+            );
             return true;
         } catch (error) {
-            this.logger.error(`Failed to send message to ${jid}: ${error.message}`);
+            this.logger.error(`Failed to send message to ${formattedNumber}: ${error.message}`);
             return false;
         }
     }
 
-    getConnectionStatus() {
+    getConnectionStatus(): string {
+        if (!this.isPolling) {
+            this.logger.log('Resuming WhatsApp status polling...');
+            this.isPolling = true;
+            this.startStatusPolling();
+        }
         return this.state;
     }
 
-    async logout() {
+    async logout(): Promise<boolean> {
+        this.logger.log('Logging out from WhatsApp instance...');
         try {
-            if (this.sock) {
-                await this.sock.logout().catch(() => {});
-            }
-            const authPath = path.join(process.cwd(), 'wa_auth');
-            if (fs.existsSync(authPath)) {
-                fs.rmSync(authPath, { recursive: true, force: true });
-            }
+            await axios.post(
+                `${this.apiUrl}/instance/logout/${this.instanceName}`,
+                {},
+                { headers: { apikey: this.apiKey }, timeout: 15000 }
+            );
             this.state = 'close';
             this.qrCode = null;
-            this.sock = null;
-            
-            // Re-initialize to show fresh QR
-            setTimeout(() => this.connectToWhatsApp(), 2000);
-            
             return true;
         } catch (error) {
-            this.logger.error(`Logout failed: ${error.message}`);
+            this.logger.error(`Failed to logout: ${error.message}`);
             return false;
         }
     }
 }
+

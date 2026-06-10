@@ -17,13 +17,24 @@ export class PlanPermissionService {
     ) { }
 
     async getFullUserSubscription(userId: string): Promise<Subscription | null> {
-        return this.subscriptionRepo.findOne({
+        const sub = await this.subscriptionRepo.findOne({
             where: {
                 userId,
                 status: SubscriptionStatus.ACTIVE,
             },
             relations: ['planConfig'],
         });
+
+        if (!sub) return null;
+
+        const now = new Date();
+        if (sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() < now.getTime()) {
+            sub.status = SubscriptionStatus.EXPIRED;
+            await this.subscriptionRepo.save(sub);
+            return null;
+        }
+
+        return sub;
     }
 
     async getUserPlan(userId: string): Promise<PlanTier> {

@@ -73,8 +73,8 @@ export class Mt5Controller {
     @Post('journal/:ticket') // Using POST for simplicity or PATCH
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PREMIUM)
-    async updateJournal(@Body() data: any, @Param('ticket') ticket: string) {
-        return this.mt5Service.updateJournal(ticket, data);
+    async updateJournal(@Body() data: any, @Param('ticket') ticket: string, @Req() req) {
+        return this.mt5Service.updateJournal(ticket, data, req.user.id);
     }
 
     @Post('manual')

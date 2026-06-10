@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual } from 'typeorm';
@@ -12,6 +12,10 @@ import { EmailService } from '../email/email.service';
 import { UserEntity } from '../users/user.entity';
 import { SmsService } from '../notifications/sms.service';
 import { SmsTemplates } from '../notifications/sms-templates';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 
 @Injectable()
 export class SubscriptionService implements OnModuleInit {
@@ -30,6 +34,8 @@ export class SubscriptionService implements OnModuleInit {
         @InjectRepository(UserEntity)
         private userRepo: Repository<UserEntity>,
         private smsService: SmsService,
+        @Inject(CACHE_MANAGER) private cacheManager: Cache,
+        @InjectQueue('subscription-queue') private subscriptionQueue: Queue,
     ) { }
 
     async onModuleInit() {
@@ -67,10 +73,23 @@ export class SubscriptionService implements OnModuleInit {
                         isActive: true
                     });
                 }
-            } else if (!exists.isActive) {
-                this.logger.log(`Re-activating existing plan tier: ${tier}`);
-                exists.isActive = true;
-                await this.planConfigRepo.save(exists);
+            } else {
+                let updated = false;
+                if (!exists.isActive) {
+                    this.logger.log(`Re-activating existing plan tier: ${tier}`);
+                    exists.isActive = true;
+                    updated = true;
+                }
+                const envPriceKey = tier === 'BASIC' ? 'PLANO_BASICO_PRICE' : 'PLANO_PREMIUN_PRICE';
+                const currentEnvPrice = Number(this.configService.get<number>(envPriceKey, 1));
+                if (Number(exists.monthlyPrice) !== currentEnvPrice) {
+                    this.logger.log(`Updating plan tier price for ${tier}: DB price is ${exists.monthlyPrice}, Env price is ${currentEnvPrice}`);
+                    exists.monthlyPrice = currentEnvPrice;
+                    updated = true;
+                }
+                if (updated) {
+                    await this.planConfigRepo.save(exists);
+                }
             }
         }
     }
@@ -147,7 +166,7 @@ export class SubscriptionService implements OnModuleInit {
             }
 
             // Save subscription as PENDING
-            const debitoId = debitoRes?.debito_reference || debitoRes?.transaction_id || debitoRes?.id;
+            const debitoId = debitoRes?.payment_id || debitoRes?.debito_reference || debitoRes?.transaction_id || debitoRes?.id;
             this.logger.log(`Creating subscription for reference ${reference}. Linked Debito ID: ${debitoId}`);
 
             const sub = this.subscriptionRepo.create({
@@ -161,8 +180,20 @@ export class SubscriptionService implements OnModuleInit {
             sub.planConfig = config; // Attach config to avoid 500 error in activateSubscription
             await this.subscriptionRepo.save(sub);
 
-            // Activation only via Webhook or manual check
-            this.logger.log(`Subscription created for reference ${reference}. Waiting for webhook confirmation.`);
+            // Set active polling state in Redis with 3 minutes TTL (in ms)
+            await this.cacheManager.set(`payment_polling:${reference}`, 'active', 3 * 60 * 1000);
+            if (debitoId) {
+                await this.cacheManager.set(`payment_polling:${debitoId}`, 'active', 3 * 60 * 1000);
+            }
+
+            // Start mobile polling loop for 3 minutes via Bull Queue
+            await this.subscriptionQueue.add('check-pending', {
+                subscriptionId: sub.id,
+                reference: reference,
+                pollType: 'mobile',
+                startTime: Date.now(),
+                timeoutMs: 3 * 60 * 1000
+            }, { delay: 10000 });
 
             // Notification: Initiation
             const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -192,7 +223,16 @@ export class SubscriptionService implements OnModuleInit {
         }
     }
 
-    async createCardSubscription(userId: string, tier: string, cycle: SubscriptionCycle, returnUrl: string, cancelUrl: string, phoneNumber?: string) {
+
+    async createCardSubscription(
+        userId: string, 
+        tier: string, 
+        cycle: SubscriptionCycle, 
+        returnUrl: string, 
+        cancelUrl: string, 
+        phoneNumber?: string,
+        paymentMethod: 'card' | 'payfast' = 'card'
+    ) {
         const config = await this.planConfigRepo.findOne({
             where: { tier: tier.toUpperCase(), isActive: true }
         });
@@ -215,22 +255,35 @@ export class SubscriptionService implements OnModuleInit {
         const lastName = names.slice(1).join(' ') || 'Torex';
 
         try {
-            // Use environment variable if present, otherwise fallback to provided returnUrl
-            const callbackUrl = this.configService.get<string>('CALL_BACK_DEBITO') || returnUrl;
+            // Construct backend return status handler URL
+            const backendBaseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
+            const callbackUrl = `${backendBaseUrl}/api/subscription/payment/status/card?reference=${reference}`;
 
-            const res = await this.debitoService.initiateCardPayment({
-                amount: Math.round(amount),
-                reference_description: reference,
-                first_name: firstName,
-                last_name: lastName,
-                email: user.email || 'user@torexjournal.com',
-                phone: (phoneNumber || user.whatsapp || '840000000').replace(/\+/g, ''),
-                callback_url: callbackUrl
-            });
+            let res;
+            if (paymentMethod === 'payfast') {
+                res = await this.debitoService.initiatePayFastPayment({
+                    amount: amount,
+                    reference_description: reference,
+                    first_name: firstName,
+                    last_name: lastName,
+                    email: user.email || 'user@torexjournal.com',
+                    callback_url: callbackUrl
+                });
+            } else {
+                res = await this.debitoService.initiateCardPayment({
+                    amount: Math.round(amount),
+                    reference_description: reference,
+                    first_name: firstName,
+                    last_name: lastName,
+                    email: user.email || 'user@torexjournal.com',
+                    phone: (phoneNumber || user.whatsapp || '840000000').replace(/\+/g, ''),
+                    callback_url: callbackUrl
+                });
+            }
 
             // Save subscription
-            const debitoId = res?.debito_reference || res?.transaction_id || res?.id;
-            this.logger.log(`Creating card subscription for reference ${reference}. Linked Debito ID: ${debitoId}`);
+            const debitoId = res?.payment_id || res?.debito_reference || res?.transaction_id || res?.id;
+            this.logger.log(`Creating ${paymentMethod} subscription for reference ${reference}. Linked Debito ID: ${debitoId}`);
 
             const sub = this.subscriptionRepo.create({
                 userId,
@@ -243,43 +296,97 @@ export class SubscriptionService implements OnModuleInit {
             sub.planConfig = config; // Attach config to avoid 500 error in activateSubscription
             await this.subscriptionRepo.save(sub);
 
-            // Activation only via Webhook
-            this.logger.log(`Card subscription created for reference ${reference}. Waiting for webhook confirmation.`);
+            // Set active polling state in Redis with 30 minutes TTL (in ms)
+            await this.cacheManager.set(`payment_polling:${reference}`, 'active', 30 * 60 * 1000);
+            if (debitoId) {
+                await this.cacheManager.set(`payment_polling:${debitoId}`, 'active', 30 * 60 * 1000);
+            }
+
+            // Start background polling for up to 30 minutes via Bull Queue
+            await this.subscriptionQueue.add('check-pending', {
+                subscriptionId: sub.id,
+                reference: reference,
+                pollType: 'card',
+                startTime: Date.now(),
+                timeoutMs: 30 * 60 * 1000
+            }, { delay: 60000 });
+
+            this.logger.log(`${paymentMethod} subscription created for reference ${reference}. Waiting for webhook / return confirmation.`);
 
             return res;
         } catch (error) {
-            this.logger.error(`Card subscription failed: ${error.message}`);
+            this.logger.error(`${paymentMethod} subscription failed: ${error.message}`);
             throw error;
         }
     }
 
+
     async processDebitoWebhook(payload: any) {
         this.logger.log(`Receiving Debito Webhook: ${JSON.stringify(payload)}`);
-        const reference = payload.reference_description || payload.reference;
-        const status = payload.status;
+        
+        let reference: string | null = null;
+        let paymentId: string | null = null;
+        let eventStatus: string | null = null;
 
-        if (!reference) {
-            this.logger.error('Webhook received without reference');
+        // Check if it's the new webhook format
+        if (payload.event && payload.data) {
+            eventStatus = payload.event;
+            reference = payload.data.reference;
+            paymentId = payload.data.payment_id;
+        } else {
+            // Old webhook format
+            reference = payload.reference_description || payload.reference;
+            eventStatus = payload.status;
+        }
+
+        if (!reference && !paymentId) {
+            this.logger.error('Webhook received without reference or payment_id');
             return;
         }
 
+        // Find subscription by paymentReference or debitoTransactionId
         const subscription = await this.subscriptionRepo.findOne({
             where: [
-                { paymentReference: reference },
-                { debitoTransactionId: reference }
+                ...(reference ? [{ paymentReference: reference }] : []),
+                ...(reference ? [{ debitoTransactionId: reference }] : []),
+                ...(paymentId ? [{ debitoTransactionId: paymentId }] : [])
             ],
             relations: ['planConfig']
         });
 
         if (!subscription) {
-            this.logger.warn(`Subscription not found for reference: ${reference}`);
+            this.logger.warn(`Subscription not found for reference: ${reference} or paymentId: ${paymentId}`);
             return;
         }
 
-        if (status === 'SUCCESSFULL' || status === 'SUCCESSFUL') {
-            await this.activateSubscription(subscription, reference);
-        } else if (status === 'FAILED' || status === 'CANCELLED' || status === 'REJECTED') {
-            this.logger.log(`Payment failure received for reference ${reference}: ${status}`);
+        const resolvedRef = reference || subscription.paymentReference;
+
+        // Clean active polling state from Redis when webhook resolves
+        await this.cacheManager.del(`payment_polling:${resolvedRef}`);
+        if (paymentId) {
+            await this.cacheManager.del(`payment_polling:${paymentId}`);
+        }
+        if (subscription.paymentReference) {
+            await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
+        }
+        if (subscription.debitoTransactionId) {
+            await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
+        }
+
+        // Standardize status logic
+        const isSuccess = eventStatus === 'payment.completed' || eventStatus === 'SUCCESSFULL' || eventStatus === 'SUCCESSFUL';
+        const isFailure = eventStatus === 'payment.failed' || eventStatus === 'payment.refunded' || eventStatus === 'payment.chargeback' ||
+                          eventStatus === 'FAILED' || eventStatus === 'CANCELLED' || eventStatus === 'REJECTED';
+
+        if (isSuccess) {
+            // Update transaction id if it was not set or changed
+            if (paymentId && subscription.debitoTransactionId !== paymentId) {
+                subscription.debitoTransactionId = paymentId;
+                await this.subscriptionRepo.save(subscription);
+            }
+            await this.activateSubscription(subscription, resolvedRef);
+        } else if (isFailure) {
+            this.logger.log(`Payment failure received for reference ${resolvedRef}: ${eventStatus}`);
             
             // Check if already processed to avoid redundant notifications
             if (subscription.status === SubscriptionStatus.CANCELLED || subscription.status === SubscriptionStatus.EXPIRED) {
@@ -291,19 +398,25 @@ export class SubscriptionService implements OnModuleInit {
             if (user?.email) {
                 await this.emailService.sendTemplatedEmail(user.email, 'PAYMENT_FAILED', {
                     userName: user.name,
-                    reference: reference,
-                    reason: status === 'CANCELLED' ? 'O pagamento foi cancelado.' : 'A transação foi recusada pelo provedor.'
+                    reference: resolvedRef,
+                    reason: (eventStatus === 'CANCELLED' || eventStatus === 'payment.failed') 
+                        ? 'O pagamento foi cancelado ou falhou.' 
+                        : `O pagamento falhou com status: ${eventStatus}`
                 });
             }
 
             await this.notificationsService.create(subscription.userId, {
                 title: 'Pagamento Falhou ❌',
-                message: `O seu pagamento de referência ${reference} foi ${status.toLowerCase()}.`,
+                message: `O seu pagamento de referência ${resolvedRef} falhou ou foi cancelado.`,
             });
             subscription.status = SubscriptionStatus.CANCELLED;
+            if (paymentId) {
+                subscription.debitoTransactionId = paymentId;
+            }
             await this.subscriptionRepo.save(subscription);
+            await this.scheduleRemarketingFollowup(subscription.id);
         } else {
-            this.logger.log(`Unhandled webhook status: ${status} for ${reference}`);
+            this.logger.log(`Unhandled webhook status/event: ${eventStatus} for ${resolvedRef}`);
         }
     }
 
@@ -326,6 +439,24 @@ export class SubscriptionService implements OnModuleInit {
         // Ensure status is updated before saving
         subscription.status = SubscriptionStatus.ACTIVE;
         await this.subscriptionRepo.save(subscription);
+
+        // Schedule warning and renewal jobs in Bull Queue
+        const warningTime = subscription.currentPeriodEnd.getTime() - 5 * 24 * 60 * 60 * 1000;
+        const warningDelay = warningTime - Date.now();
+        if (warningDelay > 0) {
+            await this.subscriptionQueue.add('expiration-warning', {
+                subscriptionId: subscription.id
+            }, { delay: warningDelay });
+            this.logger.log(`Scheduled expiration warning job for subscription ${subscription.id} in ${warningDelay}ms`);
+        }
+
+        const renewalDelay = subscription.currentPeriodEnd.getTime() - Date.now();
+        if (renewalDelay > 0) {
+            await this.subscriptionQueue.add('renewal-charge', {
+                subscriptionId: subscription.id
+            }, { delay: renewalDelay });
+            this.logger.log(`Scheduled renewal charge job for subscription ${subscription.id} in ${renewalDelay}ms`);
+        }
 
         await this.alertsService.create(subscription.userId, {
             type: AlertType.SYSTEM,
@@ -385,6 +516,13 @@ export class SubscriptionService implements OnModuleInit {
         const result = await this.debitoService.checkTransactionStatus(pollingRef);
 
         if (result && (result.status === 'SUCCESSFULL' || result.status === 'SUCCESSFUL')) {
+            await this.cacheManager.del(`payment_polling:${reference}`);
+            if (subscription.paymentReference) {
+                await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
+            }
+            if (subscription.debitoTransactionId) {
+                await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
+            }
             await this.activateSubscription(subscription, reference);
         } else if (result && (result.status === 'FAILED' || result.status === 'CANCELLED' || result.status === 'REJECTED')) {
             this.logger.log(`Status check failed for ${reference}: ${result.status}. Marking as CANCELLED.`);
@@ -398,6 +536,14 @@ export class SubscriptionService implements OnModuleInit {
                 
                 subscription.status = SubscriptionStatus.CANCELLED;
                 await this.subscriptionRepo.save(subscription);
+                await this.scheduleRemarketingFollowup(subscription.id);
+            }
+            await this.cacheManager.del(`payment_polling:${reference}`);
+            if (subscription.paymentReference) {
+                await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
+            }
+            if (subscription.debitoTransactionId) {
+                await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
             }
         }
     }
@@ -409,18 +555,54 @@ export class SubscriptionService implements OnModuleInit {
             order: { currentPeriodEnd: 'DESC' }
         });
 
-        if (!sub) return { hasActive: false };
+        if (sub) {
+            const now = new Date();
+            const diff = sub.currentPeriodEnd.getTime() - now.getTime();
+            const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
-        const now = new Date();
-        const diff = sub.currentPeriodEnd.getTime() - now.getTime();
-        const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
+            if (daysLeft <= 0) {
+                // Update in database to EXPIRED
+                sub.status = SubscriptionStatus.EXPIRED;
+                await this.subscriptionRepo.save(sub);
+                this.logger.log(`Subscription ${sub.id} for user ${userId} has expired.`);
+                await this.scheduleRemarketingFollowup(sub.id).catch(() => {});
+                
+                return {
+                    hasActive: false,
+                    isExpired: true,
+                    tier: sub.planConfig.tier,
+                    id: sub.id
+                };
+            }
+
+            return {
+                hasActive: true,
+                tier: sub.planConfig.tier,
+                daysLeft,
+                expiryDate: sub.currentPeriodEnd,
+                id: sub.id
+            };
+        }
+
+        // If no active, check if the latest one is EXPIRED
+        const expiredSub = await this.subscriptionRepo.findOne({
+            where: { userId, status: SubscriptionStatus.EXPIRED },
+            relations: ['planConfig'],
+            order: { currentPeriodEnd: 'DESC' }
+        });
+
+        if (expiredSub) {
+            return {
+                hasActive: false,
+                isExpired: true,
+                tier: expiredSub.planConfig.tier,
+                id: expiredSub.id
+            };
+        }
 
         return {
-            hasActive: true,
-            tier: sub.planConfig.tier,
-            daysLeft,
-            expiryDate: sub.currentPeriodEnd,
-            id: sub.id
+            hasActive: false,
+            isExpired: false
         };
     }
 
@@ -489,5 +671,12 @@ export class SubscriptionService implements OnModuleInit {
 
         sub.followUpSent = true;
         await this.subscriptionRepo.save(sub);
+    }
+
+    async scheduleRemarketingFollowup(subscriptionId: string) {
+        await this.subscriptionQueue.add('remarketing-followup', {
+            subscriptionId
+        }, { delay: 2 * 24 * 60 * 60 * 1000 });
+        this.logger.log(`Scheduled remarketing follow-up job for subscription ${subscriptionId} in 2 days`);
     }
 }

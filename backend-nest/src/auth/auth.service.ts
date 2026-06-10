@@ -1,4 +1,5 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, HttpException, HttpStatus } from '@nestjs/common';
+import { CryptoUtil } from '../common/utils/crypto.util';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -18,6 +19,7 @@ import { SmsTemplates } from '../notifications/sms-templates';
 import { AuditLogService } from './audit-log.service';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import * as qrcode from 'qrcode';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
@@ -32,26 +34,109 @@ export class AuthService {
         private smsService: SmsService,
         private notificationsService: NotificationsService,
         private auditLogService: AuditLogService,
+        private configService: ConfigService,
     ) { }
 
     async validateUser(email: string, pass: string): Promise<any> {
         const user = await this.usersService.findOneByEmail(email);
-        if (user && (await bcrypt.compare(pass, user.passwordHash))) {
+        if (user && user.passwordHash && (await bcrypt.compare(pass, user.passwordHash))) {
             const { passwordHash, ...result } = user;
             return result;
         }
         return null;
     }
 
+    async authenticateAndLogin(email: string, pass: string, ip?: string, userAgent?: string) {
+        if (!email || !pass) {
+            throw new BadRequestException('E-mail e senha são obrigatórios');
+        }
+
+        const user = await this.usersService.findOneByEmail(email);
+        if (user && user.isBlocked) {
+            throw new HttpException({
+                statusCode: HttpStatus.FORBIDDEN,
+                message: 'Esta conta foi bloqueada devido a 9 tentativas falhas de login. Por favor, utilize o link de recuperação enviado ao seu e-mail para redefinir sua senha.',
+                error: 'Blocked Account'
+            }, HttpStatus.FORBIDDEN);
+        }
+
+        const lockoutKey = `login_lockout:${email}`;
+        const lockoutType = await this.cacheManager.get(lockoutKey);
+        if (lockoutType) {
+            throw new HttpException({
+                statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                message: 'Múltiplas tentativas falhas. Acesso temporariamente bloqueado. Por favor, aguarde.',
+                error: 'Too Many Requests'
+            }, HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        const isPasswordCorrect = user && user.passwordHash && (await bcrypt.compare(pass, user.passwordHash));
+
+        if (!isPasswordCorrect) {
+            const failureKey = `login_failures:${email}`;
+            let failures = (await this.cacheManager.get(failureKey)) || 0;
+            failures += 1;
+            await this.cacheManager.set(failureKey, failures, 86400000);
+
+            if (failures >= 9) {
+                if (user) {
+                    user.isBlocked = true;
+                    await this.usersService.update(user);
+                    
+                    const recoveryCode = Math.floor(100000 + Math.random() * 900000).toString();
+                    const rawPayload = JSON.stringify({ email, code: recoveryCode, timestamp: Date.now() });
+                    const token = CryptoUtil.encrypt(rawPayload, this.configService.get<string>('JWT_SECRET'));
+                    const sig = crypto.createHmac('sha256', this.configService.get<string>('JWT_SECRET')).update(token).digest('hex');
+                    
+                    await this.emailQueue.add('general-notification', {
+                        email: user.email,
+                        userName: user.name || 'Trader',
+                        title: 'Recuperação de Acesso',
+                        subtitle: 'CONTA BLOQUEADA',
+                        message: `Sua conta foi bloqueada devido a 9 tentativas falhas de login. Use o código abaixo para redefinir sua senha e reativar seu acesso:\n\n👉 **${recoveryCode}** 👈`,
+                        buttonUrl: `${this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001'}/login?recover=true&email=${encodeURIComponent(user.email)}&token=${encodeURIComponent(token)}&sig=${sig}`,
+                        buttonLabel: 'Ir para a Página de Login'
+                    }, { removeOnComplete: true });
+                }
+                await this.cacheManager.del(failureKey);
+                throw new HttpException({
+                    statusCode: HttpStatus.FORBIDDEN,
+                    message: 'Sua conta foi bloqueada devido a 9 tentativas falhas de login. Um código de recuperação foi enviado para seu e-mail.',
+                    error: 'Account Blocked'
+                }, HttpStatus.FORBIDDEN);
+            } else if (failures === 6) {
+                await this.cacheManager.set(lockoutKey, '6_attempts', 300000);
+                throw new HttpException({
+                    statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                    message: 'Credenciais inválidas. Cooldown de 5 minutos ativado devido a 6 tentativas falhas.',
+                    error: 'Too Many Requests'
+                }, HttpStatus.TOO_MANY_REQUESTS);
+            } else if (failures === 3) {
+                await this.cacheManager.set(lockoutKey, '3_attempts', 15000);
+                throw new HttpException({
+                    statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                    message: 'Credenciais inválidas. Cooldown de 15 segundos ativado devido a 3 tentativas falhas.',
+                    error: 'Too Many Requests'
+                }, HttpStatus.TOO_MANY_REQUESTS);
+            } else {
+                throw new UnauthorizedException(`Credenciais inválidas. Tentativa ${failures} de 9.`);
+            }
+        }
+
+        await this.cacheManager.del(`login_failures:${email}`);
+        await this.cacheManager.del(lockoutKey);
+
+        const { passwordHash, ...result } = user;
+        return this.login(result, ip, userAgent);
+    }
+
     async login(user: any, ip?: string, userAgent?: string) {
-        // Auto-fix: Ensure user has API Token
         let updated = false;
         if (!user.apiToken) {
             user.apiToken = crypto.randomUUID().toUpperCase();
             updated = true;
         }
 
-        // Check if account exists, create if not (Legacy parity)
         const existingAccount = await this.accountRepository.findOne({ where: { userId: user.id } });
         if (!existingAccount) {
             await this.createDefaultAccount(user.id);
@@ -61,41 +146,75 @@ export class AuthService {
             await this.usersService.update(user);
         }
 
+        const requestLimitKey = `2fa_code_request_limit:${user.id}`;
+
         // --- 2FA INTERCEPTION ---
-        // New: Check for TOTP (Google Authenticator)
         if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
             await this.auditLogService.log(user.id, 'LOGIN_2FA_REQUIRED', { ip, userAgent }, ip, userAgent);
             
-            // Proactively send code via WhatsApp if linked (as backup/convenience)
-            // Note: TOTP code is generated by app, but we can send a parallel OTP to WhatsApp
-            // to fulfill the user's request that "any of the two codes will be valid"
+            const temporaryToken = this.jwtService.sign(
+                { id: user.id, email: user.email, isTwoFactorPending: true },
+                { expiresIn: '5m' }
+            );
+
+            const isLimitActive = await this.cacheManager.get(requestLimitKey);
+            if (isLimitActive) {
+                return {
+                    success: true,
+                    twoFactorRequired: true,
+                    twoFactorType: 'TOTP',
+                    twoFactorToken: temporaryToken,
+                    hasWhatsAppBackup: true,
+                    message: 'Um código de verificação já foi enviado recentemente. Use o código ativo ou aguarde 5 minutos.'
+                };
+            }
+
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             await this.cacheManager.set(`2FA:${user.id}`, otp, 300000); // 5 mins
+            await this.cacheManager.set(requestLimitKey, true, 300000); // 5 mins request cooldown
             
-            // Dispatch WhatsApp 2FA if linked
+            await this.emailQueue.add('otp-alert', {
+                email: user.email,
+                otp
+            }, { removeOnComplete: true });
+
             await this.notificationsService.send2FA(user.id, otp).catch(() => {});
             
             return {
                 success: true,
                 twoFactorRequired: true,
                 twoFactorType: 'TOTP',
-                userId: user.id,
-                email: user.email,
+                twoFactorToken: temporaryToken,
                 hasWhatsAppBackup: true
             };
         }
 
-        // Legacy: Email 2FA (if enabled but TOTP not set/confirmed)
         if (user.twoFactorEnabled) {
+            const temporaryToken = this.jwtService.sign(
+                { id: user.id, email: user.email, isTwoFactorPending: true },
+                { expiresIn: '5m' }
+            );
+
+            const isLimitActive = await this.cacheManager.get(requestLimitKey);
+            if (isLimitActive) {
+                return {
+                    success: true,
+                    twoFactorRequired: true,
+                    twoFactorType: 'EMAIL',
+                    twoFactorToken: temporaryToken,
+                    message: 'Um código de verificação já foi enviado recentemente. Use o código ativo ou aguarde 5 minutos.'
+                };
+            }
+
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             await this.cacheManager.set(`2FA:${user.id}`, otp, 300000);
+            await this.cacheManager.set(requestLimitKey, true, 300000); // 5 mins request cooldown
 
             await this.emailQueue.add('otp-alert', {
                 email: user.email,
                 otp
             }, { removeOnComplete: true });
 
-            // Also try WhatsApp if enabled
             await this.notificationsService.send2FA(user.id, otp).catch(() => {});
 
             await this.auditLogService.log(user.id, 'LOGIN_2FA_REQUIRED_EMAIL', { ip, userAgent }, ip, userAgent);
@@ -103,16 +222,15 @@ export class AuthService {
                 success: true,
                 twoFactorRequired: true,
                 twoFactorType: 'EMAIL',
-                userId: user.id,
-                email: user.email
+                twoFactorToken: temporaryToken
             };
         }
 
-        return this.generateAuthResponse(user, ip, userAgent);
+        return this.generateAuthResponse(user, ip, userAgent, false);
     }
 
-    private async generateAuthResponse(user: any, ip?: string, userAgent?: string) {
-        const payload = { email: user.email, id: user.id };
+    private async generateAuthResponse(user: any, ip?: string, userAgent?: string, isTwoFactorVerified = false) {
+        const payload = { email: user.email, id: user.id, isTwoFactorVerified };
         const accessToken = this.jwtService.sign(payload);
         const refreshToken = crypto.randomUUID();
 
@@ -156,7 +274,7 @@ export class AuthService {
         }
 
         await this.auditLogService.log(user.id, 'REFRESH_TOKEN_SUCCESS', { ip, userAgent }, ip, userAgent);
-        return this.generateAuthResponse(user, ip, userAgent);
+        return this.generateAuthResponse(user, ip, userAgent, user.twoFactorEnabled && user.isTwoFactorConfirmed);
     }
 
     async sendOtp(email: string) {
@@ -174,6 +292,115 @@ export class AuthService {
         }, { removeOnComplete: true });
 
         return { success: true, message: 'OTP sent successfully' };
+    }
+
+    async forgotPassword(email: string) {
+        const user = await this.usersService.findOneByEmail(email);
+        if (!user) {
+            throw new NotFoundException('Usuário não encontrado');
+        }
+
+        const requestLimitKey = `forgot_password_request_limit:${email}`;
+        const isLimited = await this.cacheManager.get(requestLimitKey);
+        if (isLimited) {
+            throw new HttpException(
+                'Um código de verificação já foi enviado recentemente. Por favor, aguarde 5 minutos antes de solicitar um novo.',
+                HttpStatus.TOO_MANY_REQUESTS
+            );
+        }
+
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const rawPayload = JSON.stringify({ email, code, timestamp: Date.now() });
+        const secret = this.configService.get<string>('JWT_SECRET') || 'dev_secret';
+        const token = CryptoUtil.encrypt(rawPayload, secret);
+        const sig = crypto.createHmac('sha256', secret).update(token).digest('hex');
+
+        await this.cacheManager.set(requestLimitKey, true, 300000); // 5 mins
+
+        await this.emailQueue.add('general-notification', {
+            email: user.email,
+            userName: user.name || 'Trader',
+            title: 'Recuperação de Senha',
+            subtitle: 'CÓDIGO DE RECUPERAÇÃO',
+            message: `Você solicitou a redefinição de sua senha. Use o código abaixo para redefinir sua senha:\n\n👉 **${code}** 👈`,
+            buttonUrl: `${this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001'}/login?recover=true&email=${encodeURIComponent(user.email)}&token=${encodeURIComponent(token)}&sig=${sig}`,
+            buttonLabel: 'Ir para a Página de Login'
+        }, { removeOnComplete: true });
+
+        return {
+            success: true,
+            message: 'Código de recuperação enviado com sucesso.',
+            token,
+            sig
+        };
+    }
+
+    async resetPassword(body: any) {
+        const { email, code, token, sig, newPassword } = body;
+        if (!email || !code || !token || !sig || !newPassword) {
+            throw new BadRequestException('Parâmetros de redefinição inválidos');
+        }
+
+        const secret = this.configService.get<string>('JWT_SECRET') || 'dev_secret';
+        const expectedSig = crypto.createHmac('sha256', secret).update(token).digest('hex');
+        if (sig !== expectedSig) {
+            throw new BadRequestException('Assinatura do token inválida');
+        }
+
+        let payload;
+        try {
+            const decrypted = CryptoUtil.decrypt(token, secret);
+            payload = JSON.parse(decrypted);
+        } catch (e) {
+            throw new BadRequestException('Token de recuperação inválido ou corrompido');
+        }
+
+        if (payload.email !== email) {
+            throw new BadRequestException('O e-mail informado não corresponde ao token de redefinição');
+        }
+
+        // 15 minutes expiration
+        if (Date.now() - payload.timestamp > 15 * 60 * 1000) {
+            throw new BadRequestException('Token de recuperação expirado');
+        }
+
+        const attemptKey = `forgot_password_attempts:${email}`;
+        let attempts = (await this.cacheManager.get(attemptKey)) || 0;
+        if (attempts >= 6) {
+            throw new HttpException(
+                'Excedeu o limite de 6 tentativas de verificação. Por favor, solicite um novo código após 5 minutos.',
+                HttpStatus.TOO_MANY_REQUESTS
+            );
+        }
+
+        if (payload.code !== code) {
+            attempts += 1;
+            await this.cacheManager.set(attemptKey, attempts, 300000); // 5 mins
+            if (attempts >= 6) {
+                await this.cacheManager.set(`forgot_password_request_limit:${email}`, true, 300000);
+                throw new HttpException(
+                    'Código incorreto. Limite de 6 tentativas excedido. Você deve aguardar 5 minutos para solicitar um novo código.',
+                    HttpStatus.TOO_MANY_REQUESTS
+                );
+            }
+            throw new BadRequestException(`Código de recuperação inválido. Tentativa ${attempts} de 6.`);
+        }
+
+        const user = await this.usersService.findOneByEmail(email);
+        if (!user) {
+            throw new NotFoundException('Usuário não encontrado');
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        user.passwordHash = await bcrypt.hash(newPassword, salt);
+        user.isBlocked = false; // unlock user if they were locked
+        await this.usersService.update(user);
+
+        await this.cacheManager.del(attemptKey);
+        await this.cacheManager.del(`login_failures:${email}`);
+        await this.cacheManager.del(`forgot_password_request_limit:${email}`);
+
+        return { success: true, message: 'Senha redefinida com sucesso. Sua conta foi desbloqueada.' };
     }
 
     async register(data: any) {
@@ -243,58 +470,7 @@ export class AuthService {
         };
     }
 
-    async forgotPassword(email: string) {
-        const user = await this.usersService.findOneByEmail(email);
-        if (!user) {
-            await this.auditLogService.log(null, 'FORGOT_PASSWORD_FAILED', { email });
-            throw new BadRequestException('Email not found');
-        }
 
-        await this.auditLogService.log(user.id, 'FORGOT_PASSWORD_REQUESTED', { email });
-
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        // 10 minutes
-        await this.cacheManager.set(`OTP:${email}`, otp, 600000);
-
-        // Reuse otp-alert (generic enough: "Seu Código de Verificação")
-        await this.emailQueue.add('otp-alert', {
-            email,
-            otp
-        }, { removeOnComplete: true });
-
-        return { success: true, message: 'OTP sent to your email' };
-    }
-
-    async resetPassword(data: any) {
-        const { email, otp, newPassword } = data;
-
-        if (!email || !otp || !newPassword) {
-            throw new BadRequestException('Missing required fields');
-        }
-
-        const storedOtp = await this.cacheManager.get(`OTP:${email}`);
-        if (!storedOtp || storedOtp !== otp) {
-            throw new BadRequestException('Invalid or expired OTP');
-        }
-
-        const user = await this.usersService.findOneByEmail(email);
-        if (!user) {
-            throw new BadRequestException('User not found');
-        }
-
-        // Delete OTP
-        await this.cacheManager.del(`OTP:${email}`);
-
-        // Update Password
-        const salt = await bcrypt.genSalt(10);
-        user.passwordHash = await bcrypt.hash(newPassword, salt);
-
-        await this.usersService.update(user); 
-
-        await this.auditLogService.log(user.id, 'PASSWORD_RESET_SUCCESS', { email });
-
-        return { success: true, message: 'Password updated successfully' };
-    }
 
     async regenerateToken(userId: string) {
         const user = await this.usersService.findOneById(userId);
@@ -344,6 +520,29 @@ export class AuthService {
             }
         }
 
+        if (user.isBlocked) {
+            throw new HttpException({
+                statusCode: HttpStatus.FORBIDDEN,
+                message: 'Esta conta foi bloqueada devido a tentativas falhas de login. Por favor, redefina sua senha.',
+                error: 'Blocked Account'
+            }, HttpStatus.FORBIDDEN);
+        }
+
+        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
+            const temporaryToken = this.jwtService.sign(
+                { id: user.id, email: user.email, isTwoFactorPending: true },
+                { expiresIn: '5m' }
+            );
+            return {
+                success: true,
+                twoFactorRequired: true,
+                twoFactorToken: temporaryToken,
+                token: null,
+                user: null,
+                requiresContact: false
+            };
+        }
+
         const payload = { email: user.email, id: user.id };
         const token = this.jwtService.sign(payload);
 
@@ -381,6 +580,29 @@ export class AuthService {
                 });
                 await this.createDefaultAccount(user.id);
             }
+        }
+
+        if (user.isBlocked) {
+            throw new HttpException({
+                statusCode: HttpStatus.FORBIDDEN,
+                message: 'Esta conta foi bloqueada devido a tentativas falhas de login. Por favor, redefina sua senha.',
+                error: 'Blocked Account'
+            }, HttpStatus.FORBIDDEN);
+        }
+
+        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
+            const temporaryToken = this.jwtService.sign(
+                { id: user.id, email: user.email, isTwoFactorPending: true },
+                { expiresIn: '5m' }
+            );
+            return {
+                success: true,
+                twoFactorRequired: true,
+                twoFactorToken: temporaryToken,
+                token: null,
+                user: null,
+                requiresContact: false
+            };
         }
 
         const payload = { email: user.email, id: user.id };
@@ -462,33 +684,159 @@ export class AuthService {
         return { success: true };
     }
 
-    async verify2fa(userId: string, otp: string, ip?: string, userAgent?: string) {
+    async verify2fa(twoFactorToken: string, otp: string, ip?: string, userAgent?: string) {
+        if (!twoFactorToken) {
+            throw new BadRequestException('Token de 2FA é obrigatório');
+        }
+
+        let payload: any;
+        try {
+            payload = this.jwtService.verify(twoFactorToken);
+        } catch (e) {
+            throw new UnauthorizedException('Token de verificação 2FA expirado ou inválido');
+        }
+
+        if (!payload || !payload.id || !payload.isTwoFactorPending) {
+            throw new UnauthorizedException('Token de verificação 2FA inválido');
+        }
+
+        const userId = payload.id;
+
+        const lockoutKey = `2fa_lockout:${userId}`;
+        const isLockedOut = await this.cacheManager.get(lockoutKey);
+        if (isLockedOut) {
+            throw new HttpException(
+                'Limite de tentativas de 2FA excedido. Verificação bloqueada temporariamente.',
+                HttpStatus.TOO_MANY_REQUESTS
+            );
+        }
+
         const user = await this.usersService.findOneById(userId);
         if (!user) throw new BadRequestException('Usuário não encontrado');
 
-        // Try Cached OTP first (WhatsApp/Email backup)
-        const storedOtp = await this.cacheManager.get(`2FA:${userId}`);
-        if (storedOtp && storedOtp === otp) {
-            await this.cacheManager.del(`2FA:${userId}`);
-            await this.auditLogService.log(userId, '2FA_VERIFICATION_SUCCESS', { type: 'BACKUP_OTP', ip, userAgent }, ip, userAgent);
-            return this.generateAuthResponse(user, ip, userAgent);
+        if (user.isBlocked) {
+            throw new HttpException({
+                statusCode: HttpStatus.FORBIDDEN,
+                message: 'Acesso bloqueado. Por favor, recupere sua conta.',
+                error: 'Blocked Account'
+            }, HttpStatus.FORBIDDEN);
         }
 
-        // Check for TOTP if backup OTP didn't match or exist
-        if (user.isTwoFactorConfirmed && user.twoFactorSecret) {
-            const isValid = verifySync({
+        // Try Cached OTP first (WhatsApp/Email backup)
+        const storedOtp = await this.cacheManager.get(`2FA:${userId}`);
+        const isCachedOtpValid = storedOtp && storedOtp === otp;
+
+        let isTotpValid = false;
+        if (!isCachedOtpValid && user.isTwoFactorConfirmed && user.twoFactorSecret) {
+            isTotpValid = verifySync({
                 token: otp,
                 secret: user.twoFactorSecret
             }).valid;
-            
-            if (isValid) {
-                await this.auditLogService.log(userId, '2FA_VERIFICATION_SUCCESS', { type: 'TOTP', ip, userAgent }, ip, userAgent);
-                return this.generateAuthResponse(user, ip, userAgent);
-            }
         }
 
-        await this.auditLogService.log(userId, '2FA_VERIFICATION_FAILED', { ip, userAgent }, ip, userAgent);
-        throw new BadRequestException('Código 2FA inválido ou expirado');
+        if (isCachedOtpValid || isTotpValid) {
+            // Success
+            await this.cacheManager.del(`2FA:${userId}`);
+            await this.cacheManager.del(`2fa_failures:${userId}`);
+            await this.cacheManager.del(lockoutKey);
+            await this.cacheManager.del(`2fa_multiplier:${userId}`);
+            await this.cacheManager.del(`2fa_code_request_limit:${userId}`);
+
+            await this.auditLogService.log(
+                userId,
+                '2FA_VERIFICATION_SUCCESS',
+                { type: isCachedOtpValid ? 'BACKUP_OTP' : 'TOTP', ip, userAgent },
+                ip,
+                userAgent
+            );
+            return this.generateAuthResponse(user, ip, userAgent, true);
+        }
+
+        // Fail
+        const failuresKey = `2fa_failures:${userId}`;
+        let failures = (await this.cacheManager.get(failuresKey)) || 0;
+        failures += 1;
+
+        if (failures >= 6) {
+            const multiplierKey = `2fa_multiplier:${userId}`;
+            let m = (await this.cacheManager.get(multiplierKey)) || 1;
+            const lockoutTimeMs = 5 * m * 60 * 1000;
+
+            await this.cacheManager.set(lockoutKey, true, lockoutTimeMs);
+            await this.cacheManager.set(multiplierKey, m * 2, 86400000); // preserve multiplier for 24h
+            await this.cacheManager.del(failuresKey);
+
+            await this.auditLogService.log(userId, '2FA_LOCKOUT_TRIGGERED', { ip, userAgent, multiplier: m }, ip, userAgent);
+            throw new HttpException(
+                `Limite de 6 tentativas de 2FA excedido. Verificação bloqueada por ${5 * m} minutos.`,
+                HttpStatus.TOO_MANY_REQUESTS
+            );
+        } else {
+            await this.cacheManager.set(failuresKey, failures, 300000); // 5 mins TTL
+            await this.auditLogService.log(userId, '2FA_VERIFICATION_FAILED', { ip, userAgent, failures }, ip, userAgent);
+            throw new BadRequestException(`Código 2FA inválido. Tentativa ${failures} de 6.`);
+        }
+    }
+
+    async resend2fa(twoFactorToken: string, ip?: string, userAgent?: string) {
+        if (!twoFactorToken) {
+            throw new BadRequestException('Token de 2FA é obrigatório');
+        }
+
+        let payload: any;
+        try {
+            payload = this.jwtService.verify(twoFactorToken);
+        } catch (e) {
+            throw new UnauthorizedException('Token de verificação 2FA expirado ou inválido');
+        }
+
+        if (!payload || !payload.id || !payload.isTwoFactorPending) {
+            throw new UnauthorizedException('Token de verificação 2FA inválido');
+        }
+
+        const userId = payload.id;
+
+        const user = await this.usersService.findOneById(userId);
+        if (!user) {
+            throw new NotFoundException('Usuário não encontrado');
+        }
+
+        if (user.isBlocked) {
+            throw new HttpException({
+                statusCode: HttpStatus.FORBIDDEN,
+                message: 'Acesso bloqueado. Por favor, recupere sua conta.',
+                error: 'Blocked Account'
+            }, HttpStatus.FORBIDDEN);
+        }
+
+        const requestLimitKey = `2fa_code_request_limit:${user.id}`;
+        const isLimitActive = await this.cacheManager.get(requestLimitKey);
+        if (isLimitActive) {
+            throw new HttpException(
+                'Um código de verificação já foi enviado recentemente. Por favor, aguarde 5 minutos antes de solicitar um novo.',
+                HttpStatus.TOO_MANY_REQUESTS
+            );
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        await this.cacheManager.set(`2FA:${user.id}`, otp, 300000); // 5 mins
+        await this.cacheManager.set(requestLimitKey, true, 300000); // 5 mins request cooldown
+
+        // Always send email OTP
+        await this.emailQueue.add('otp-alert', {
+            email: user.email,
+            otp
+        }, { removeOnComplete: true });
+
+        // Also send WhatsApp if available
+        await this.notificationsService.send2FA(user.id, otp).catch(() => {});
+
+        await this.auditLogService.log(user.id, '2FA_RESEND_REQUESTED', { ip, userAgent }, ip, userAgent);
+
+        return {
+            success: true,
+            message: 'Código de verificação enviado para o seu e-mail.'
+        };
     }
 
     async saveOnboardingSurvey(userId: string, surveyData: any) {

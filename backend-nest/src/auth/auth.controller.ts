@@ -20,18 +20,12 @@ export class AuthController {
     ) { }
 
     @Post('login')
-    @Throttle({ default: { limit: 5, ttl: 60000 } }) // Limit: 5 req/min
+    @Throttle({ default: { limit: 9, ttl: 60000 } })
     async login(@Body() body, @Request() req) {
-        const user = await this.authService.validateUser(body.email, body.password);
-        if (!user) {
-            return { success: false, error: 'Invalid credentials' };
-        }
-
-        // Extract IP and UA
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
         const userAgent = req.headers['user-agent'];
 
-        return this.authService.login(user, ip, userAgent);
+        return this.authService.authenticateAndLogin(body.email, body.password, ip, userAgent);
     }
 
     @Post('refresh')
@@ -158,6 +152,13 @@ export class AuthController {
         return this.authService.verify2fa(body.userId, body.otp, ip, userAgent);
     }
 
+    @Post('resend-2fa')
+    async resend2fa(@Body() body, @Request() req) {
+        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
+        const userAgent = req.headers['user-agent'];
+        return this.authService.resend2fa(body.userId, ip, userAgent);
+    }
+
     @UseGuards(AuthGuard('jwt'))
     @Put('2fa')
     async update2fa(@Request() req, @Body() body: { enabled: boolean }) {
@@ -198,6 +199,11 @@ export class AuthController {
             this.logger.error('FRONTEND_URL not configured in .env! Redirection will likely fail.');
             return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
+
+        if (result.twoFactorRequired) {
+            return res.redirect(`${frontendUrl}/2fa?twoFactorToken=${result.twoFactorToken}`);
+        }
+
         const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
@@ -222,6 +228,11 @@ export class AuthController {
             this.logger.error('FRONTEND_URL not configured in .env! Redirection will likely fail.');
             return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
+
+        if (result.twoFactorRequired) {
+            return res.redirect(`${frontendUrl}/2fa?twoFactorToken=${result.twoFactorToken}`);
+        }
+
         const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
         redirectUrl.searchParams.append('token', result.token);
         redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());

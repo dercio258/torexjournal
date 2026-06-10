@@ -241,7 +241,7 @@ export class NotificationsCronService {
     }
 
     // Runs every day at 09:00 AM
-    @Cron(CronExpression.EVERY_DAY_AT_9AM)
+    // @Cron(CronExpression.EVERY_DAY_AT_9AM)
     async checkSubscriptionExpirations() {
         this.logger.log('Checking for subscriptions expiring in 5 days...');
         

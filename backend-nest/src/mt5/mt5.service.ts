@@ -332,9 +332,11 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             const tradesToSave = [];
             const tickets = trades.map(t => t.ticket).filter(t => !!t);
 
-            // Fetch existing tickets in batch
+            // Fetch existing tickets in batch for this account
             const existingTrades = tickets.length > 0
-                ? await queryRunner.manager.find(TradeEntity, { where: { ticket: In(tickets) } })
+                ? await queryRunner.manager.find(TradeEntity, {
+                    where: accountId ? { ticket: In(tickets), accountId } : { ticket: In(tickets) }
+                  })
                 : [];
             const existingTickets = new Set(existingTrades.map(t => t.ticket.toString()));
 
@@ -348,6 +350,8 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     ...t,
                     ticket: ticket,
                     accountId: accountId,
+                    openTime: t.openTime ? new Date(t.openTime) : null,
+                    closeTime: t.closeTime ? new Date(t.closeTime) : null,
                     dataQuality: t.dataQuality || 'ok'
                 });
 
@@ -490,11 +494,21 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async updateJournal(ticket: string | number, journalData: Partial<TradeEntity>) {
+    async updateJournal(ticket: string | number, journalData: Partial<TradeEntity>, userId?: string) {
         const ticketStr = ticket.toString();
-        const trade = await this.tradeRepo.findOne({ where: { ticket: ticketStr } });
+        let trade: TradeEntity | null = null;
+
+        if (userId) {
+            const account = await this.accountRepo.findOne({ where: { userId } });
+            if (account) {
+                trade = await this.tradeRepo.findOne({ where: { ticket: ticketStr, accountId: account.id } });
+            }
+        } else {
+            trade = await this.tradeRepo.findOne({ where: { ticket: ticketStr } });
+        }
+
         if (!trade) {
-            throw new Error('Trade not found');
+            throw new Error('Trade not found or access denied');
         }
 
         trade.mood = journalData.mood;

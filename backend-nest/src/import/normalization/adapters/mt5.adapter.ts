@@ -13,6 +13,7 @@ export class Mt5Adapter implements ITradeAdapter {
 
         return {
             ticket: rawData.ticket.toString(),
+            contractId: rawData.ticket.toString(),
             symbol: rawData.symbol || 'Unknown',
             type: rawData.type || 'Buy',
             volume: parseFloat(rawData.volume) || 0,
@@ -21,6 +22,8 @@ export class Mt5Adapter implements ITradeAdapter {
             profit: parseFloat(rawData.profit) || 0,
             commission: parseFloat(rawData.commission) || 0,
             swap: parseFloat(rawData.swap) || 0,
+            sl: parseFloat(rawData.sl || rawData.stop_loss) || 0,
+            tp: parseFloat(rawData.tp || rawData.take_profit) || 0,
             openTime: openTime,
             closeTime: closeTime,
             status: closeTime ? 'CLOSED' : 'OPEN',

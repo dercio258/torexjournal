@@ -139,8 +139,16 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         } catch (err) {
             this.logger.error(`Initial authorization failed for user ${auth.userId}: ${err.message}`);
             client.disconnect();
-            if (err.message?.toLowerCase().includes('invalidtoken') || err.message?.toLowerCase().includes('authorization')) {
-                this.logger.warn(`Disabling DerivAuth for user ${auth.userId} due to authorization error.`);
+            const errorMsg = err.message?.toLowerCase() || '';
+            if (
+                errorMsg.includes('invalidtoken') || 
+                errorMsg.includes('authorization') || 
+                errorMsg.includes('disabled') || 
+                errorMsg.includes('disable') ||
+                errorMsg.includes('invalid') ||
+                errorMsg.includes('rejected')
+            ) {
+                this.logger.warn(`Disabling DerivAuth for user ${auth.userId} due to authorization/status error.`);
                 await this.derivAuthRepo.update({ userId: auth.userId, accountId: auth.accountId }, { isActive: false });
             }
             return;
