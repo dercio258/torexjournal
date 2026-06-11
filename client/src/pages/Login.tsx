@@ -125,20 +125,26 @@ export const Login = () => {
     const [twoFactorUserId, setTwoFactorUserId] = useState<string | null>(null);
     const [twoFactorEmail, setTwoFactorEmail] = useState<string | null>(null);
     const [twoFactorOtp, setTwoFactorOtp] = useState('');
+    const [twoFactorCooldownTimer, setTwoFactorCooldownTimer] = useState(0);
 
     // Forgot Password Form State
     const [fpEmail, setFpEmail] = useState('');
     const [fpOtp, setFpOtp] = useState('');
     const [fpNewPassword, setFpNewPassword] = useState('');
+    const [fpToken, setFpToken] = useState('');
+    const [fpSig, setFpSig] = useState('');
     const [otpSent, setOtpSent] = useState(false);
     const [otpTimer, setOtpTimer] = useState(0);
+
+    // Lockout and Cooldown States
+    const [loginCooldownTimer, setLoginCooldownTimer] = useState(0);
 
     // Common State
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-    // Timer Logic
+    // Timer Logic for OTP Code Re-request
     React.useEffect(() => {
         let interval: any;
         if (otpTimer > 0) {
@@ -146,6 +152,47 @@ export const Login = () => {
         }
         return () => clearInterval(interval);
     }, [otpTimer]);
+
+    // Timer Logic for Login Cooldown
+    React.useEffect(() => {
+        let interval: any;
+        if (loginCooldownTimer > 0) {
+            interval = setInterval(() => setLoginCooldownTimer(prev => prev - 1), 1000);
+        }
+        return () => clearInterval(interval);
+    }, [loginCooldownTimer]);
+
+    // Timer Logic for 2FA Cooldown
+    React.useEffect(() => {
+        let interval: any;
+        if (twoFactorCooldownTimer > 0) {
+            interval = setInterval(() => setTwoFactorCooldownTimer(prev => prev - 1), 1000);
+        }
+        return () => clearInterval(interval);
+    }, [twoFactorCooldownTimer]);
+
+    // Handle URL query parameters for social 2FA redirects and email recovery links
+    React.useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const twoFactorRequiredParam = params.get('twoFactorRequired');
+        const userIdParam = params.get('userId');
+        const emailParam = params.get('email');
+        const recoverParam = params.get('recover');
+        const tokenParam = params.get('token');
+        const sigParam = params.get('sig');
+
+        if (twoFactorRequiredParam === 'true' && userIdParam && emailParam) {
+            setTwoFactorUserId(userIdParam);
+            setTwoFactorEmail(emailParam);
+            setView('2fa');
+        } else if (recoverParam === 'true' && emailParam && tokenParam && sigParam) {
+            setFpEmail(emailParam);
+            setFpToken(tokenParam);
+            setFpSig(sigParam);
+            setOtpSent(true);
+            setView('forgot-password');
+        }
+    }, []);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -157,9 +204,7 @@ export const Login = () => {
 
             if (res.data.success) {
                 if (res.data.twoFactorRequired) {
-                    setTwoFactorUserId(res.data.userId);
-                    setTwoFactorEmail(res.data.email);
-                    setView('2fa');
+                    navigate(`/2fa?twoFactorToken=${res.data.twoFactorToken}`);
                 } else {
                     login(res.data.token);
                     navigate('/dashboard');
@@ -169,7 +214,18 @@ export const Login = () => {
             }
         } catch (err: any) {
             console.error(err);
-            setError(err.response?.data?.message || 'Erro ao conectar com o servidor');
+            const errMsg = err.response?.data?.message || 'Erro ao conectar com o servidor';
+            setError(errMsg);
+
+            if (err.response?.status === 429) {
+                if (errMsg.includes('15 segundos')) {
+                    setLoginCooldownTimer(15);
+                } else if (errMsg.includes('5 minutos') || errMsg.includes('5 minutes')) {
+                    setLoginCooldownTimer(300);
+                } else {
+                    setLoginCooldownTimer(60);
+                }
+            }
         } finally {
             setIsLoading(false);
         }
@@ -199,7 +255,17 @@ export const Login = () => {
             }
         } catch (err: any) {
             console.error(err);
-            setError(err.response?.data?.message || 'Erro ao verificar código');
+            const errMsg = err.response?.data?.message || 'Erro ao verificar código';
+            setError(errMsg);
+
+            if (err.response?.status === 429) {
+                const match = errMsg.match(/por (\d+) minutos/);
+                if (match && match[1]) {
+                    setTwoFactorCooldownTimer(parseInt(match[1]) * 60);
+                } else {
+                    setTwoFactorCooldownTimer(300);
+                }
+            }
         } finally {
             setIsLoading(false);
         }
@@ -218,8 +284,10 @@ export const Login = () => {
         try {
             const res = await api.post('/auth/forgot-password', { email: fpEmail });
             if (res.data.success) {
+                setFpToken(res.data.token);
+                setFpSig(res.data.sig);
                 setOtpSent(true);
-                setOtpTimer(60);
+                setOtpTimer(300); // 5 minutes request cooldown
                 setSuccessMsg('Código enviado para o seu e-mail.');
             } else {
                 setError(res.data.message || 'Erro ao enviar código.');
@@ -250,11 +318,13 @@ export const Login = () => {
         try {
             const res = await api.post('/auth/reset-password', {
                 email: fpEmail,
-                otp: fpOtp,
+                code: fpOtp,
+                token: fpToken,
+                sig: fpSig,
                 newPassword: fpNewPassword
             });
 
-            if (res.data.success) {
+            if (res.data.success || res.status === 200 || res.status === 201) {
                 setSuccessMsg('Senha redefinida com sucesso! Redirecionando...');
                 setTimeout(() => {
                     setView('login');
@@ -262,6 +332,8 @@ export const Login = () => {
                     setFpEmail('');
                     setFpOtp('');
                     setFpNewPassword('');
+                    setFpToken('');
+                    setFpSig('');
                     setSuccessMsg(null);
                 }, 2000);
             } else {
@@ -284,7 +356,11 @@ export const Login = () => {
         setFpEmail('');
         setFpOtp('');
         setFpNewPassword('');
+        setFpToken('');
+        setFpSig('');
         setTwoFactorOtp('');
+        setTwoFactorCooldownTimer(0);
+        setLoginCooldownTimer(0);
     };
 
     return (
@@ -413,8 +489,12 @@ export const Login = () => {
                                         onChange={setRemember}
                                     />
 
-                                    <LoginButton type="submit" isLoading={isLoading}>
-                                        Entrar na Plataforma <ArrowRight size={18} className="ml-2 opacity-80" />
+                                    <LoginButton type="submit" isLoading={isLoading} disabled={loginCooldownTimer > 0}>
+                                        {loginCooldownTimer > 0 ? (
+                                            `Aguarde ${loginCooldownTimer}s`
+                                        ) : (
+                                            <>Entrar na Plataforma <ArrowRight size={18} className="ml-2 opacity-80" /></>
+                                        )}
                                     </LoginButton>
                                 </form>
 
@@ -497,8 +577,12 @@ export const Login = () => {
                                         </div>
                                     )}
 
-                                    <LoginButton type="submit" isLoading={isLoading}>
-                                        Verificar e Acessar <ArrowRight size={18} className="ml-2 opacity-80" />
+                                    <LoginButton type="submit" isLoading={isLoading} disabled={twoFactorCooldownTimer > 0}>
+                                        {twoFactorCooldownTimer > 0 ? (
+                                            `Aguarde ${twoFactorCooldownTimer}s`
+                                        ) : (
+                                            <>Verificar e Acessar <ArrowRight size={18} className="ml-2 opacity-80" /></>
+                                        )}
                                     </LoginButton>
                                 </form>
                             </>

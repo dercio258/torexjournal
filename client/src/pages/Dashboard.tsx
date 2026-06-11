@@ -19,8 +19,9 @@ import { PerformanceRadar } from '../components/dashboard/charts/PerformanceRada
 import { DailyPnLChart } from '../components/dashboard/charts/DailyPnLChart';
 import { HeatmapChart } from '../components/dashboard/charts/HeatmapChart';
 import { WinrateGauge, InstrumentRow, SessionRow, TraderHealthWidget } from '../components/dashboard/StatsWidgets';
-import api from '../api';
 import { useDashboardStats, useSubscriptionStatus, useTradesFallback } from '../hooks/useDashboard';
+import { useAuth } from '../context/AuthContext';
+import { PlanModal } from '../components/dashboard/PlanModal';
 
 // Register ChartJS
 ChartJS.register(
@@ -62,24 +63,12 @@ export const Dashboard = () => {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
-    const [isRenewing, setIsRenewing] = useState(false);
+    const [showRenewalModal, setShowRenewalModal] = useState(false);
 
+    const { user } = useAuth();
     const { data: subStatus } = useSubscriptionStatus();
     const { data: stats, isLoading: isStatsLoading, refetch: refetchStats } = useDashboardStats(dateRange.start, dateRange.end);
     const { data: tradesFallback } = useTradesFallback();
-
-    const handleRenew = async () => {
-        setIsRenewing(true);
-        try {
-            await api.post('/subscription/renew');
-            alert("Pedido de renovação lançado! Confirme no seu telemóvel.");
-        } catch (error: any) {
-            console.error("Renewal error", error);
-            alert(error.response?.data?.message || "Erro ao renovar. Verifique se tem um contacto salvo.");
-        } finally {
-            setIsRenewing(false);
-        }
-    };
 
     const handleDateFilter = (range: string) => {
         const now = new Date();
@@ -229,12 +218,28 @@ export const Dashboard = () => {
 
     return (
         <div className="p-6 space-y-6">
+            {/* Account Activation Block overlay */}
+            {subStatus && !subStatus.hasActive && (
+                <PlanModal type="NO_ACTIVE_PLAN" />
+            )}
+
+            {/* Renewal Modal */}
+            {showRenewalModal && (
+                <PlanModal 
+                    type="RENEWAL_CONFIRMATION" 
+                    onClose={() => setShowRenewalModal(false)}
+                    savedPaymentMethod={(user as any)?.lastPaymentMethod}
+                    savedPhoneNumber={(user as any)?.lastPaymentMethod === 'mpesa' ? (user as any)?.preferredMpesa : (user as any)?.preferredEmola}
+                    planTier={subStatus?.tier}
+                />
+            )}
+
             {/* Renewal Alert */}
             {subStatus?.hasActive && subStatus?.daysLeft <= 5 && (
                 <div className="bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/20 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-amber-500/20 rounded-xl text-amber-500">
-                            <RefreshCw className={`w-6 h-6 ${isRenewing ? 'animate-spin' : ''}`} />
+                            <RefreshCw className="w-6 h-6" />
                         </div>
                         <div>
                             <h3 className="text-white font-bold">Sua assinatura expira em {subStatus.daysLeft} dias!</h3>
@@ -242,18 +247,10 @@ export const Dashboard = () => {
                         </div>
                     </div>
                     <button
-                        onClick={handleRenew}
-                        disabled={isRenewing}
-                        className="w-full md:w-auto px-6 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                        onClick={() => setShowRenewalModal(true)}
+                        className="w-full md:w-auto px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
                     >
-                        {isRenewing ? (
-                            <>
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                Processando...
-                            </>
-                        ) : (
-                            'Renovar Agora'
-                        )}
+                        Renovar Agora
                     </button>
                 </div>
             )}

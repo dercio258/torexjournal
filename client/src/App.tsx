@@ -16,6 +16,7 @@ const queryClient = new QueryClient({
 
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { TwoFactorVerify } from './pages/TwoFactorVerify';
 import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
 import { Payments } from './pages/Payments';
@@ -76,6 +77,11 @@ function App() {
                             <Route path="/login" element={
                                 <GuestRoute>
                                     <Login />
+                                </GuestRoute>
+                            } />
+                            <Route path="/2fa" element={
+                                <GuestRoute>
+                                    <TwoFactorVerify />
                                 </GuestRoute>
                             } />
                             <Route path="/register" element={

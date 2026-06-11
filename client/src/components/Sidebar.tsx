@@ -20,10 +20,10 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
         { to: '/network', icon: <Users size={18} />, label: 'Network' },
         { to: '/emotional', icon: <BrainCircuit size={18} />, label: 'Gestão Emocional' },
         { to: '/notifications', icon: <Bell size={18} />, label: 'Notificações' },
-        { to: '/backtest', icon: <FlaskConical size={18} />, label: 'Backtest', hidden: isBasic },
-        { to: '/reports', icon: <TrendingUp size={18} />, label: 'Relatórios', hidden: isBasic },
-        { to: '/calendar', icon: <CalendarDays size={18} />, label: 'Calendário Econ.', hidden: isBasic },
-    ].filter(l => !l.hidden);
+        { to: '/backtest', icon: <FlaskConical size={18} />, label: 'Backtest', requiresPremium: true },
+        { to: '/reports', icon: <TrendingUp size={18} />, label: 'Relatórios', requiresPremium: true },
+        { to: '/calendar', icon: <CalendarDays size={18} />, label: 'Calendário Econ.', requiresPremium: true },
+    ];
 
     const settingsLinks = [
         { to: '/payments', icon: <CreditCard size={18} />, label: 'Pagamentos' },
@@ -31,19 +31,26 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
         { to: '/configuration', icon: <Settings size={18} />, label: 'Configuração' },
     ];
 
-    const NavItem = ({ to, icon, label }: { to: string, icon: React.ReactNode, label: string }) => (
+    const NavItem = ({ to, icon, label, requiresPremium }: { to: string, icon: React.ReactNode, label: string, requiresPremium?: boolean }) => (
         <NavLink
             to={to}
             onClick={onClose}
             className={({ isActive }) => `
-                flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group
+                flex items-center justify-between px-3 py-2.5 rounded-lg transition-all group
                 ${isActive
                     ? 'bg-emerald-500/10 text-emerald-400 border-r-2 border-emerald-500'
                     : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/50'}
             `}
         >
-            <span className="group-hover:text-emerald-400 transition-colors">{icon}</span>
-            <span className="font-medium text-sm">{label}</span>
+            <div className="flex items-center gap-3">
+                <span className="group-hover:text-emerald-400 transition-colors">{icon}</span>
+                <span className="font-medium text-sm">{label}</span>
+            </div>
+            {requiresPremium && isBasic && (
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full border border-indigo-500/30 flex items-center gap-1 font-bold">
+                    PRO
+                </span>
+            )}
         </NavLink>
     );
 

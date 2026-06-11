@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Play, Square, Save, Download, FlaskConical, Calendar as CalendarIcon, Search } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StrategyConfig, BacktestStats } from '../components/backtest/BacktestComponents';
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
+import { PlanModal } from '../components/dashboard/PlanModal';
 
 export const Backtest = () => {
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const isBasic = user?.tier === 'BASIC';
+
     // State
     const [symbol, setSymbol] = useState('EURUSD');
     const [searchTerm, setSearchTerm] = useState('');
@@ -328,6 +335,13 @@ export const Backtest = () => {
                     />
                 </div>
             </div>
+            {isBasic && (
+                <PlanModal 
+                    type="UPGRADE_REQUIRED" 
+                    featureName="Backtest Ilimitado" 
+                    onClose={() => navigate('/dashboard')} 
+                />
+            )}
         </div>
     );
 };

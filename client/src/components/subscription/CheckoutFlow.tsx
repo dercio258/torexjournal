@@ -169,11 +169,25 @@ export const MobileMoneyForm = ({
     );
 };
 
-export const CardPaymentView = ({ onSubmit, processing, onPhoneChange }: { onSubmit: () => void; processing: boolean; onPhoneChange: (v: string) => void }) => (
+export const CardPaymentView = ({ 
+    onSubmit, 
+    processing, 
+    onPhoneChange, 
+    method = 'card' 
+}: { 
+    onSubmit: () => void; 
+    processing: boolean; 
+    onPhoneChange: (v: string) => void; 
+    method?: 'card' | 'payfast';
+}) => (
     <div className="space-y-6 pt-6 animate-in fade-in slide-in-from-top-4 duration-500">
         <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
             <p className="text-sm text-slate-400 mb-6 leading-relaxed">
-                Você será redirecionado para o ambiente seguro do <span className="text-white font-bold">Debito.co.mz</span> para concluir seu pagamento via <span className="text-white font-bold">Visa ou Mastercard</span>.
+                {method === 'payfast' ? (
+                    <>Você será redirecionado para o ambiente seguro do <span className="text-white font-bold">PayFast</span> para concluir seu pagamento em ZAR (África do Sul).</>
+                ) : (
+                    <>Você será redirecionado para o ambiente seguro do <span className="text-white font-bold">Debito.co.mz</span> para concluir seu pagamento via <span className="text-white font-bold">Visa ou Mastercard</span>.</>
+                )}
             </p>
             
             <CountryPhoneInput 
@@ -182,8 +196,14 @@ export const CardPaymentView = ({ onSubmit, processing, onPhoneChange }: { onSub
             />
             
             <div className="mt-4 flex items-center gap-4 py-3 opacity-50 border-t border-white/5">
-                <img src="https://paymentsindustryintelligence.com/wp-content/uploads/2021/11/visa-mastercard-logos.jpg" alt="Visa/MC" className="h-6 rounded" />
-                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Secure Gateway</span>
+                {method === 'payfast' ? (
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">PayFast Gateway</span>
+                ) : (
+                    <>
+                        <img src="https://paymentsindustryintelligence.com/wp-content/uploads/2021/11/visa-mastercard-logos.jpg" alt="Visa/MC" className="h-6 rounded" />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Secure Gateway</span>
+                    </>
+                )}
             </div>
         </div>
 
@@ -195,7 +215,7 @@ export const CardPaymentView = ({ onSubmit, processing, onPhoneChange }: { onSub
             <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-indigo-700 rounded-2xl" />
             <span className="relative z-10 flex items-center justify-center gap-2">
                 {processing ? <Loader2 className="animate-spin" size={20} /> : <CreditCard size={20} />}
-                {processing ? 'Redirecionando...' : 'Pagar com Cartão'}
+                {processing ? 'Redirecionando...' : method === 'payfast' ? 'Pagar com PayFast' : 'Pagar com Cartão'}
             </span>
         </button>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Line } from 'react-chartjs-2';
 import {
     Chart as ChartJS,
@@ -14,6 +15,7 @@ import {
 import { TrendingUp, Calendar, Activity, AlertTriangle } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { PlanModal } from '../components/dashboard/PlanModal';
 
 ChartJS.register(
     CategoryScale,
@@ -27,7 +29,9 @@ ChartJS.register(
 );
 
 export const Reports = () => {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
+    const navigate = useNavigate();
+    const isBasic = user?.tier === 'BASIC';
     const [trades, setTrades] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -212,6 +216,13 @@ export const Reports = () => {
                     </tbody>
                 </table>
             </div>
+            {isBasic && (
+                <PlanModal 
+                    type="UPGRADE_REQUIRED" 
+                    featureName="Relatórios Avançados" 
+                    onClose={() => navigate('/dashboard')} 
+                />
+            )}
         </div>
     );
 };

@@ -1,8 +1,14 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CalendarDays, ArrowRight, RefreshCw } from 'lucide-react';
 import api from '../api';
+import { useAuth } from '../context/AuthContext';
+import { PlanModal } from '../components/dashboard/PlanModal';
 
 const EconomicCalendar = () => {
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const isBasic = user?.tier === 'BASIC';
     const [events, setEvents] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -170,6 +176,13 @@ const EconomicCalendar = () => {
                     </button>
                 </div>
             </div>
+            {isBasic && (
+                <PlanModal 
+                    type="UPGRADE_REQUIRED" 
+                    featureName="Calendário Econômico" 
+                    onClose={() => navigate('/dashboard')} 
+                />
+            )}
         </div>
     );
 };

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { ShieldCheck, CreditCard, ChevronLeft } from 'lucide-react';
+import { ShieldCheck, CreditCard, ChevronLeft, Smartphone, Loader2 } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -24,11 +24,12 @@ export const Checkout = () => {
     }, [token]);
 
     const { plan, billingCycle } = location.state || {};
-    const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'emola' | 'card'>('mpesa');
+    const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'emola' | 'card' | 'payfast'>('mpesa');
     const [phoneNumber, setPhoneNumber] = useState('');
     const [savePreference, setSavePreference] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [showPinPrompt, setShowPinPrompt] = useState(false);
+    const [showModal, setShowModal] = useState(false);
 
     useEffect(() => {
         if (user) {
@@ -61,6 +62,7 @@ export const Checkout = () => {
                 savePreference: savePreference
             });
             setShowPinPrompt(true);
+            setShowModal(true);
         } catch (error) {
             console.error(error);
             alert("Erro ao iniciar pagamento. Verifique o número e tente novamente.");
@@ -69,25 +71,30 @@ export const Checkout = () => {
         }
     };
 
-    const handleCardSubmit = async () => {
+    const handleRedirectSubmit = async () => {
         setProcessing(true);
+        setShowModal(true);
         try {
             const res = await api.post('/subscription/subscribe/card', {
                 tier: plan.tier,
                 cycle: billingCycle,
                 returnUrl: `${window.location.origin}/subscription/success`,
                 cancelUrl: `${window.location.origin}/checkout`,
-                phoneNumber: phoneNumber // Set via CountryPhoneInput callback
+                phoneNumber: phoneNumber, // Set via CountryPhoneInput callback
+                paymentMethod: paymentMethod === 'payfast' ? 'payfast' : 'card'
             });
 
             if (res.data && res.data.checkoutUrl) {
-                window.location.href = res.data.checkoutUrl;
+                setTimeout(() => {
+                    window.location.href = res.data.checkoutUrl;
+                }, 1500);
             } else {
                 throw new Error("No URL returned from gateway");
             }
         } catch (error) {
             console.error(error);
-            alert("Erro ao iniciar pagamento com cartão.");
+            setShowModal(false);
+            alert(`Erro ao iniciar pagamento com ${paymentMethod === 'payfast' ? 'PayFast' : 'cartão'}.`);
         } finally {
             setProcessing(false);
         }
@@ -154,7 +161,7 @@ export const Checkout = () => {
                                 </header>
 
                                 {/* Method Selector */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
                                     <PaymentMethodBadge 
                                         id="mpesa" 
                                         label="M-Pesa" 
@@ -176,6 +183,13 @@ export const Checkout = () => {
                                         active={paymentMethod === 'card'}
                                         onClick={() => { setPaymentMethod('card'); setShowPinPrompt(false); }}
                                     />
+                                    <PaymentMethodBadge 
+                                        id="payfast" 
+                                        label="PayFast" 
+                                        icon={CreditCard}
+                                        active={paymentMethod === 'payfast'}
+                                        onClick={() => { setPaymentMethod('payfast'); setShowPinPrompt(false); }}
+                                    />
                                 </div>
 
                                 {/* Payment Forms */}
@@ -196,11 +210,12 @@ export const Checkout = () => {
                                                 />
                                             )}
 
-                                            {paymentMethod === 'card' && (
+                                            {(paymentMethod === 'card' || paymentMethod === 'payfast') && (
                                                 <CardPaymentView 
-                                                    onSubmit={handleCardSubmit}
+                                                    onSubmit={handleRedirectSubmit}
                                                     processing={processing}
                                                     onPhoneChange={setPhoneNumber}
+                                                    method={paymentMethod}
                                                 />
                                             )}
                                         </>
@@ -222,6 +237,83 @@ export const Checkout = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Payment Processing Modal */}
+            {showModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md bg-black/70 animate-in fade-in duration-300">
+                    <div className="bg-[#0b0c15] border border-white/10 rounded-[32px] p-8 max-w-md w-full text-center relative overflow-hidden shadow-2xl">
+                        {/* Ambient light effect in modal */}
+                        <div className="absolute -top-24 -left-24 w-48 h-48 bg-indigo-500/20 blur-[80px] rounded-full" />
+                        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-cyan-500/20 blur-[80px] rounded-full" />
+
+                        <div className="relative z-10 space-y-6">
+                            {/* Loader / Icon */}
+                            <div className="flex justify-center">
+                                <div className="relative">
+                                    <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center text-indigo-400">
+                                        {['mpesa', 'emola'].includes(paymentMethod) ? (
+                                            <Smartphone size={32} className="animate-bounce" />
+                                        ) : (
+                                            <ShieldCheck size={32} className="text-emerald-400" />
+                                        )}
+                                    </div>
+                                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center">
+                                        <Loader2 className="animate-spin text-white" size={12} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Text Content */}
+                            <div className="space-y-2">
+                                <h3 className="text-xl font-black text-white uppercase tracking-wider">
+                                    {['mpesa', 'emola'].includes(paymentMethod) ? 'Aguardando Confirmação' : 'Redirecionando'}
+                                </h3>
+                                <p className="text-slate-400 text-sm leading-relaxed">
+                                    {['mpesa', 'emola'].includes(paymentMethod) ? (
+                                        <>
+                                            Enviamos um pedido de pagamento de <span className="text-white font-bold">MT {getBillTotalMT()}</span> para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-400 font-bold">PIN</span> para autorizar a transação.
+                                        </>
+                                    ) : (
+                                        <>
+                                            Estamos a preparar a sua ligação segura. Você será redirecionado para a página de pagamento seguro para concluir a transação de <span className="text-white font-bold">MT {getBillTotalMT()}</span>.
+                                        </>
+                                    )}
+                                </p>
+                            </div>
+
+                            {/* Additional status for mobile money */}
+                            {['mpesa', 'emola'].includes(paymentMethod) && (
+                                <div className="bg-white/5 border border-white/5 rounded-2xl p-4 text-xs text-slate-500 space-y-1">
+                                    <div className="flex items-center justify-between text-indigo-300 font-semibold mb-1">
+                                        <span>Status da Transação</span>
+                                        <span className="flex items-center gap-1">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                            Pendente
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-left">
+                                        Não feche esta página após digitar o PIN. Iremos ativar sua conta automaticamente assim que o pagamento for confirmado.
+                                    </p>
+                                </div>
+                            )}
+                            
+                            {/* Cancel button if they want to cancel mobile polling */}
+                            {['mpesa', 'emola'].includes(paymentMethod) && (
+                                <button 
+                                    onClick={() => {
+                                        setShowModal(false);
+                                        setProcessing(false);
+                                        setShowPinPrompt(false);
+                                    }}
+                                    className="text-xs text-slate-600 hover:text-slate-400 transition-colors uppercase font-bold tracking-widest pt-2 block mx-auto"
+                                >
+                                    Cancelar e tentar novamente
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

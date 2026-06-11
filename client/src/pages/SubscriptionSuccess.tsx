@@ -1,24 +1,23 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { CheckCircle, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
 export const SubscriptionSuccess = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
 
     useEffect(() => {
         const subscriptionId = searchParams.get('subscription_id');
-        // Ideally verify with backend, but for now show success as PayPal redirect usually implies approval
-        if (subscriptionId) {
+        // Show success if query param exists OR if navigated with location state
+        if (subscriptionId || location.state?.method || location.state?.success) {
             setStatus('success');
-            // Optional: Call backend to confirm immediately?
-            // Webhook will handle the actual activation.
         } else {
             setStatus('error');
         }
-    }, [searchParams]);
+    }, [searchParams, location]);
 
     return (
         <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">

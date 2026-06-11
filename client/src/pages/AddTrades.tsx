@@ -7,6 +7,7 @@ import { ImportHistory } from '../components/dashboard/ImportHistory';
 import { Copy, Terminal, Cloud, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import { PlanModal } from '../components/dashboard/PlanModal';
 
 export const AddTrades = () => {
     const { user } = useAuth();
@@ -28,10 +29,13 @@ export const AddTrades = () => {
     }, [user]);
 
     const isBasic = user?.tier === 'BASIC';
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+    const [upgradeFeature, setUpgradeFeature] = useState('');
 
     const handleSelectBroker = (broker: any) => {
         if (isBasic && !['manual_csv', 'mt4', 'mt5'].includes(broker.id)) {
-            alert('Esta opção de conexão está disponível apenas para o plano PRO. O plano BÁSICO suporta apenas Upload Manual e conexões MetaTrader.');
+            setUpgradeFeature(`Conexão Auto-Sync ${broker.name || broker.id}`);
+            setShowUpgradeModal(true);
             return;
         }
         // No longer storing selectedBroker since we only care about step routing
@@ -227,6 +231,14 @@ export const AddTrades = () => {
                     <ImportHistory />
                 </div>
             </div>
+
+            {showUpgradeModal && (
+                <PlanModal 
+                    type="UPGRADE_REQUIRED" 
+                    featureName={upgradeFeature} 
+                    onClose={() => setShowUpgradeModal(false)} 
+                />
+            )}
         </div>
     );
 };
