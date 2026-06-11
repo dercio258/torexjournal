@@ -8,7 +8,10 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
+    const isAdminRequest = config.url?.startsWith('/admin') || window.location.pathname.startsWith('/admin');
+    const token = isAdminRequest
+        ? (localStorage.getItem('adminToken') || localStorage.getItem('token'))
+        : (localStorage.getItem('token') || localStorage.getItem('adminToken'));
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
@@ -20,12 +23,17 @@ api.interceptors.response.use(
     (error) => {
         if (error.response?.status === 401 || error.response?.status === 403) {
             console.error(`API Auth Error (${error.response.status}) on URL:`, error.config?.url);
-            localStorage.removeItem('token');
-            // Redirect will be handled by AuthContext or Router mostly, 
-            // but this is a failsafe
-            if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
-                // We dispatch an event so AuthContext can pick it up if needed
-                window.dispatchEvent(new Event('auth:unauthorized'));
+            const isAdminRequest = error.config?.url?.startsWith('/admin') || window.location.pathname.startsWith('/admin');
+            if (isAdminRequest) {
+                localStorage.removeItem('adminToken');
+                if (window.location.pathname !== '/admin') {
+                    window.location.href = '/admin';
+                }
+            } else {
+                localStorage.removeItem('token');
+                if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+                    window.dispatchEvent(new Event('auth:unauthorized'));
+                }
             }
         }
         return Promise.reject(error);
