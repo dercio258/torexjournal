@@ -32,7 +32,7 @@ import { PlanGuard } from './plan.guard';
         UsersModule,
         ConfigModule,
         forwardRef(() => AlertsModule),
-        NotificationsModule,
+        forwardRef(() => NotificationsModule),
         EmailModule
     ],
     providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor, PlanGuard],
