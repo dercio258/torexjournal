@@ -14,12 +14,14 @@ import { EmailModule } from '../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WeeklyReportService } from './weekly-report.service';
 import { RiskManagementService } from './risk-management.service';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([TradeEntity, AccountEntity, MentalLog, TechnicalJournal, UserEntity]),
         EmailModule,
-        NotificationsModule
+        NotificationsModule,
+        PaymentModule
     ],
     controllers: [DashboardController],
     providers: [DashboardService, SessionService, WeeklyReportService, RiskManagementService],

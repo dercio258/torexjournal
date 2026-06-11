@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
     Activity,
     DollarSign,
@@ -22,6 +22,8 @@ import { WinrateGauge, InstrumentRow, SessionRow, TraderHealthWidget } from '../
 import { useDashboardStats, useSubscriptionStatus, useTradesFallback } from '../hooks/useDashboard';
 import { useAuth } from '../context/AuthContext';
 import { PlanModal } from '../components/dashboard/PlanModal';
+import { DateBoundaryBanner } from '../components/dashboard/DateBoundaryBanner';
+import api from '../api';
 
 // Register ChartJS
 ChartJS.register(
@@ -58,8 +60,17 @@ const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue }: any)
 );
 
 export const Dashboard = () => {
-    // Date Filter State
-    const [dateRange, setDateRange] = useState({ label: 'Hoje', value: 'today', start: new Date(new Date().setHours(0,0,0,0)).toISOString(), end: new Date(new Date().setHours(23,59,59,999)).toISOString() });
+    const [includeToday, setIncludeToday] = useState(() => {
+        return localStorage.getItem('trading_cossa_include_today') === 'true';
+    });
+
+    // Date Filter State - Defaults to 30 days
+    const [dateRange, setDateRange] = useState({ 
+        label: 'Últimos 30 Dias', 
+        value: '30days', 
+        start: '', 
+        end: '' 
+    });
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
@@ -67,10 +78,26 @@ export const Dashboard = () => {
 
     const { user } = useAuth();
     const { data: subStatus } = useSubscriptionStatus();
-    const { data: stats, isLoading: isStatsLoading, refetch: refetchStats } = useDashboardStats(dateRange.start, dateRange.end);
-    const { data: tradesFallback } = useTradesFallback();
 
-    const handleDateFilter = (range: string) => {
+    const [showDailyExpirationModal, setShowDailyExpirationModal] = useState(false);
+
+    useEffect(() => {
+        if (subStatus?.showWarning) {
+            setShowDailyExpirationModal(true);
+        }
+    }, [subStatus]);
+
+    const handleCloseExpirationModal = async () => {
+        setShowDailyExpirationModal(false);
+        try {
+            await api.post('/subscription/warned');
+        } catch (error) {
+            console.error("Failed to mark warning as shown on server", error);
+        }
+    };
+
+    // Memoized query start and end date calculation
+    const queryDates = useMemo(() => {
         const now = new Date();
         let start = new Date();
         let end = new Date();
@@ -78,57 +105,104 @@ export const Dashboard = () => {
         start.setHours(0, 0, 0, 0);
         end.setHours(23, 59, 59, 999);
 
-        let label = 'Hoje';
+        if (!includeToday) {
+            end.setDate(now.getDate() - 1);
+            end.setHours(23, 59, 59, 999);
+        }
 
-        switch (range) {
+        switch (dateRange.value) {
             case 'today':
+                if (!includeToday) {
+                    // Show yesterday instead
+                    start.setDate(now.getDate() - 1);
+                    start.setHours(0, 0, 0, 0);
+                } else {
+                    start.setHours(0, 0, 0, 0);
+                }
                 break;
             case 'yesterday':
                 start.setDate(now.getDate() - 1);
+                start.setHours(0, 0, 0, 0);
                 end.setDate(now.getDate() - 1);
                 end.setHours(23, 59, 59, 999);
-                label = 'Ontem';
                 break;
             case '7days':
-                start.setDate(now.getDate() - 7);
-                label = 'Últimos 7 Dias';
+                if (!includeToday) {
+                    start.setDate(now.getDate() - 7);
+                } else {
+                    start.setDate(now.getDate() - 6);
+                }
                 break;
             case '30days':
-                start.setDate(now.getDate() - 30);
-                label = 'Últimos 30 Dias';
+                if (!includeToday) {
+                    start.setDate(now.getDate() - 30);
+                } else {
+                    start.setDate(now.getDate() - 29);
+                }
                 break;
             case 'all':
                 start = new Date('2020-01-01');
-                label = 'Todo Período';
                 break;
             case 'custom':
-                return;
+                if (customStart) {
+                    start = new Date(customStart);
+                    start.setHours(0, 0, 0, 0);
+                }
+                if (customEnd) {
+                    end = new Date(customEnd);
+                    end.setHours(23, 59, 59, 999);
+                }
+                if (!includeToday) {
+                    const yesterdayLimit = new Date();
+                    yesterdayLimit.setDate(now.getDate() - 1);
+                    yesterdayLimit.setHours(23, 59, 59, 999);
+                    if (end > yesterdayLimit) {
+                        end = yesterdayLimit;
+                    }
+                }
+                break;
         }
+
+        return {
+            start: start.toISOString(),
+            end: end.toISOString()
+        };
+    }, [dateRange.value, includeToday, customStart, customEnd]);
+
+    const { data: stats, isLoading: isStatsLoading, refetch: refetchStats } = useDashboardStats(queryDates.start, queryDates.end);
+    const { data: tradesFallback } = useTradesFallback();
+
+    const handleDateFilter = (range: string) => {
+        let label = 'Hoje';
+        if (range === 'yesterday') label = 'Ontem';
+        else if (range === '7days') label = '7D';
+        else if (range === '30days') label = '30D';
+        else if (range === 'all') label = 'Tudo';
 
         setDateRange({ 
             label, 
             value: range, 
-            start: start.toISOString(), 
-            end: end.toISOString() 
+            start: '', 
+            end: '' 
         });
     };
 
     const handleCustomRangeApply = () => {
         if (!customStart) return;
 
-        const start = new Date(customStart);
-        start.setHours(0, 0, 0, 0);
-
-        const end = customEnd ? new Date(customEnd) : new Date(customStart);
-        end.setHours(23, 59, 59, 999);
-
         setDateRange({
-            label: customEnd ? `${new Date(customStart).toLocaleDateString()} - ${new Date(end).toLocaleDateString()}` : new Date(customStart).toLocaleDateString(),
+            label: 'Personalizado',
             value: 'custom',
-            start: start.toISOString(),
-            end: end.toISOString()
+            start: '',
+            end: ''
         });
         setShowDatePicker(false);
+    };
+
+    const handleToggleIncludeToday = () => {
+        const nextVal = !includeToday;
+        setIncludeToday(nextVal);
+        localStorage.setItem('trading_cossa_include_today', String(nextVal));
     };
 
     // --- Memoized Calculations ---
@@ -220,7 +294,16 @@ export const Dashboard = () => {
         <div className="p-6 space-y-6">
             {/* Account Activation Block overlay */}
             {subStatus && !subStatus.hasActive && (
-                <PlanModal type="NO_ACTIVE_PLAN" />
+                <PlanModal type={subStatus.isExpired ? 'PLAN_EXPIRED' : 'NO_ACTIVE_PLAN'} />
+            )}
+
+            {/* Daily Expiration Warning Modal */}
+            {showDailyExpirationModal && (
+                <PlanModal 
+                    type="NEAR_EXPIRATION_WARNING" 
+                    onClose={handleCloseExpirationModal}
+                    daysLeft={subStatus?.daysLeft}
+                />
             )}
 
             {/* Renewal Modal */}
@@ -254,7 +337,6 @@ export const Dashboard = () => {
                     </button>
                 </div>
             )}
-
             {/* Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -284,44 +366,12 @@ export const Dashboard = () => {
 
                         <div className="border-l border-slate-700 mx-1 pl-2 relative">
                             <button
-                                onClick={() => setShowDatePicker(!showDatePicker)}
-                                className={`p-1.5 rounded-lg transition-colors ${showDatePicker || dateRange.value === 'custom' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}
+                                onClick={() => setShowDatePicker(true)}
+                                className={`p-1.5 rounded-lg transition-colors ${dateRange.value === 'custom' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}
                                 title="Selecionar Período Personalizado"
                             >
                                 <Calendar size={16} />
                             </button>
-
-                            {showDatePicker && (
-                                <div className="absolute top-full right-0 mt-2 p-4 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 w-64">
-                                    <h4 className="text-xs font-bold text-white mb-3">Selecionar Período</h4>
-                                    <div className="space-y-3">
-                                        <div>
-                                            <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Início</label>
-                                            <input
-                                                type="date"
-                                                value={customStart}
-                                                onChange={e => setCustomStart(e.target.value)}
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-xs p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Fim (Opcional)</label>
-                                            <input
-                                                type="date"
-                                                value={customEnd}
-                                                onChange={e => setCustomEnd(e.target.value)}
-                                                className="w-full bg-slate-800 border-slate-700 rounded-lg text-xs p-2 text-white focus:ring-1 focus:ring-indigo-500 outline-none"
-                                            />
-                                        </div>
-                                        <button
-                                            onClick={handleCustomRangeApply}
-                                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors"
-                                        >
-                                            Aplicar Filtro
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -333,6 +383,12 @@ export const Dashboard = () => {
                     </button>
                 </div>
             </header>
+
+            {/* Date Boundary Indicator */}
+            <DateBoundaryBanner 
+                includeToday={includeToday} 
+                onToggle={handleToggleIncludeToday} 
+            />
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -388,7 +444,7 @@ export const Dashboard = () => {
 
             {/* Heatmap Section */}
             <div className="h-[400px]">
-                <HeatmapChart />
+                <HeatmapChart endDate={queryDates.end} />
             </div>
 
             {/* Detailed Stats Section */}
@@ -436,6 +492,63 @@ export const Dashboard = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Custom Date Picker Modal */}
+            {showDatePicker && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800/80 rounded-3xl p-6 shadow-2xl max-w-sm w-full space-y-5 relative overflow-hidden animate-in zoom-in-95 duration-200">
+                        {/* Modal Glow */}
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-500/10 to-transparent rounded-full" />
+                        
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
+                                <Calendar size={20} />
+                            </div>
+                            <div>
+                                <h3 className="text-white font-bold text-sm">Filtro Personalizado</h3>
+                                <p className="text-xs text-slate-500">Defina o intervalo de datas operacional</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] uppercase text-slate-400 font-bold tracking-wider block mb-1.5">Data de Início</label>
+                                <input
+                                    type="date"
+                                    value={customStart}
+                                    onChange={e => setCustomStart(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl text-xs p-3 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] uppercase text-slate-400 font-bold tracking-wider block mb-1.5">Data de Fim (Opcional)</label>
+                                <input
+                                    type="date"
+                                    value={customEnd}
+                                    onChange={e => setCustomEnd(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-xl text-xs p-3 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <button
+                                onClick={() => setShowDatePicker(false)}
+                                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors border border-slate-700/50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleCustomRangeApply}
+                                disabled={!customStart}
+                                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/10 active:scale-95"
+                            >
+                                Aplicar Filtro
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

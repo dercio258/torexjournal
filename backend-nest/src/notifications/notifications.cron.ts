@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, LessThanOrEqual } from 'typeorm';
 import { TradeEntity } from '../mt5/trade.entity';
 import { NotificationsService } from './notifications.service';
 import { NotificationType } from './notification.entity';
@@ -13,11 +13,12 @@ import { UserEntity } from '../users/user.entity';
 import { Subscription, SubscriptionStatus } from '../payment/subscription.entity';
 import { BroadcastingService } from './broadcast.service';
 import { BroadcastNotificationEntity, BroadcastStatus } from './broadcast-notification.entity';
-import { LessThanOrEqual } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { SmsService } from './sms.service';
 import { SmsTemplates } from './sms-templates';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 
 @Injectable()
 export class NotificationsCronService {
@@ -41,6 +42,7 @@ export class NotificationsCronService {
         private broadcastingService: BroadcastingService,
         @InjectQueue('email-queue') private emailQueue: Queue,
         private smsService: SmsService,
+        @Inject(CACHE_MANAGER) private cacheManager: Cache,
     ) { }
 
     // Runs every day at 08:00 AM server time
@@ -241,7 +243,7 @@ export class NotificationsCronService {
     }
 
     // Runs every day at 09:00 AM
-    // @Cron(CronExpression.EVERY_DAY_AT_9AM)
+    @Cron(CronExpression.EVERY_DAY_AT_9AM)
     async checkSubscriptionExpirations() {
         this.logger.log('Checking for subscriptions expiring in 5 days...');
         
@@ -296,6 +298,58 @@ export class NotificationsCronService {
             this.logger.log(`Expiration check complete. Notified ${expiringSubs.length} users.`);
         } catch (error) {
             this.logger.error('Failed to run checkSubscriptionExpirations cron', error);
+        }
+    }
+
+    // Runs every 5 minutes to check and expire subscriptions in database and Redis
+    @Cron(CronExpression.EVERY_5_MINUTES)
+    async checkExpiredSubscriptions() {
+        const now = new Date();
+        try {
+            const expiredActiveSubs = await this.subscriptionRepo.find({
+                where: {
+                    status: SubscriptionStatus.ACTIVE,
+                    currentPeriodEnd: LessThanOrEqual(now)
+                },
+                relations: ['user', 'planConfig']
+            });
+
+            if (expiredActiveSubs.length === 0) return;
+
+            this.logger.log(`Found ${expiredActiveSubs.length} subscriptions that have expired. Updating status in background...`);
+
+            for (const sub of expiredActiveSubs) {
+                sub.status = SubscriptionStatus.EXPIRED;
+                await this.subscriptionRepo.save(sub);
+                
+                this.logger.log(`Subscription ${sub.id} for user ${sub.userId} marked as EXPIRED.`);
+                
+                // Invalidate Redis caches
+                await this.cacheManager.del(`user_plan_tier:${sub.userId}`).catch(() => {});
+                await this.cacheManager.del(`user_subscription_status:${sub.userId}`).catch(() => {});
+
+                if (sub.user) {
+                    await this.alertsService.create(sub.userId, {
+                        type: AlertType.SYSTEM,
+                        severity: AlertSeverity.WARNING,
+                        title: 'Assinatura Expirada ❌',
+                        description: `Sua assinatura do plano ${sub.planConfig?.tier || ''} expirou. Por favor, reative para continuar acessando o diário de trading.`,
+                        metadata: { subId: sub.id }
+                    });
+
+                    await this.emailQueue.add('general-notification', {
+                        email: sub.user.email,
+                        userName: sub.user.name,
+                        title: 'Sua Assinatura Torex Journal Expirou',
+                        subtitle: 'RENOVAÇÃO DE PLANO',
+                        message: `Sua assinatura expirou. Reative seu plano Torex Journal para continuar registrando trades e utilizando nossas ferramentas avançadas de análise.`,
+                        buttonUrl: `${process.env.BASE_URL || ''}/pricing`,
+                        buttonLabel: 'Reativar Assinatura'
+                    }, { removeOnComplete: true }).catch(() => {});
+                }
+            }
+        } catch (error) {
+            this.logger.error('Failed to run checkExpiredSubscriptions cron', error);
         }
     }
 }

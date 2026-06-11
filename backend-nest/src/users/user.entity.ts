@@ -90,4 +90,7 @@ export class UserEntity {
 
     @Column({ name: 'daily_loss_limit', type: 'decimal', precision: 12, scale: 2, nullable: true })
     dailyLossLimit: number;
+
+    @Column({ name: 'last_warning_shown', type: 'timestamp', nullable: true })
+    lastWarningShown: Date;
 }

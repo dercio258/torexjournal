@@ -30,14 +30,18 @@ export class DashboardService {
         return account;
     }
 
-    async getTrades(userId: string) {
+    async getTrades(userId: string, endDate?: string) {
         const accounts = await this.accountRepo.find({ where: { userId } });
         if (accounts.length === 0) return [];
 
         const accountIds = accounts.map(a => a.id);
+        const whereClause: any = { accountId: In(accountIds), status: 'CLOSED' };
+        if (endDate) {
+            whereClause.closeTime = LessThanOrEqual(new Date(endDate));
+        }
 
         return this.tradeRepo.find({
-            where: { accountId: In(accountIds), status: 'CLOSED' },
+            where: whereClause,
             order: { closeTime: 'DESC' },
             take: 100
         });
@@ -505,12 +509,17 @@ export class DashboardService {
         }
     }
 
-    async getHeatmapData(userId: string) {
+    async getHeatmapData(userId: string, endDate?: string) {
         const accounts = await this.accountRepo.find({ where: { userId } });
         if (accounts.length === 0) return { pnl: [], counts: [] };
 
+        const whereClause: any = { accountId: In(accounts.map(a => a.id)), status: 'CLOSED' };
+        if (endDate) {
+            whereClause.closeTime = LessThanOrEqual(new Date(endDate));
+        }
+
         const trades = await this.tradeRepo.find({
-            where: { accountId: In(accounts.map(a => a.id)), status: 'CLOSED' }
+            where: whereClause
         });
 
         // Matrix (7 days x 24 hours)

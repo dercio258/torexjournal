@@ -2,9 +2,12 @@ import { Controller, Get, Post, Patch, Param, Body, UseGuards, Request } from '@
 import { AlertsService } from './alerts.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ScoringService } from './scoring.service';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('alerts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.BASIC)
 export class AlertsController {
     constructor(
         private readonly alertsService: AlertsService,

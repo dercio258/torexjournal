@@ -21,11 +21,16 @@ interface Trade {
 }
 
 import { useNavigate } from 'react-router-dom';
+import { DateBoundaryBanner } from '../components/dashboard/DateBoundaryBanner';
 
 export const Trades = () => {
     const navigate = useNavigate();
     const [trades, setTrades] = useState<Trade[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+
+    const [includeToday, setIncludeToday] = useState(() => {
+        return localStorage.getItem('trading_cossa_include_today') === 'true';
+    });
 
     // Filters
     const [ticketFilter, setTicketFilter] = useState('');
@@ -81,6 +86,14 @@ export const Trades = () => {
     // Filter & Sort Logic
     const filteredTrades = useMemo(() => {
         let result = trades.filter(trade => {
+            // Exclude today's trades if !includeToday
+            if (!includeToday) {
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                const tradeDate = new Date(trade.closeTime);
+                if (tradeDate >= todayStart) return false;
+            }
+
             // Ticket Filter
             if (ticketFilter && !trade.ticket?.toString().includes(ticketFilter)) return false;
 
@@ -122,7 +135,7 @@ export const Trades = () => {
                 default: return 0;
             }
         });
-    }, [trades, ticketFilter, symbolFilter, typeFilter, statusFilter, dateRange, sortOption]);
+    }, [trades, ticketFilter, symbolFilter, typeFilter, statusFilter, dateRange, sortOption, includeToday]);
 
     // Pagination Logic
     const totalPages = Math.ceil(filteredTrades.length / itemsPerPage);
@@ -154,6 +167,16 @@ export const Trades = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Date Boundary Indicator */}
+            <DateBoundaryBanner 
+                includeToday={includeToday} 
+                onToggle={() => {
+                    const nextVal = !includeToday;
+                    setIncludeToday(nextVal);
+                    localStorage.setItem('trading_cossa_include_today', String(nextVal));
+                }} 
+            />
 
             {/* Filters Bar */}
             <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 p-4 rounded-2xl flex flex-col gap-4">

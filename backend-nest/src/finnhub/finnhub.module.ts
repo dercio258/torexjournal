@@ -5,12 +5,14 @@ import { ConfigModule } from '@nestjs/config';
 import { FinnhubController } from './finnhub.controller';
 import { FinnhubService } from './finnhub.service';
 import { EconomicEvent } from './economic-event.entity';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([EconomicEvent]),
         HttpModule,
-        ConfigModule
+        ConfigModule,
+        PaymentModule
     ],
     controllers: [FinnhubController],
     providers: [FinnhubService],

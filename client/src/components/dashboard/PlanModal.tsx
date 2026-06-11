@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Sparkles, KeyRound, RefreshCw, Smartphone } from 'lucide-react';
+import { X, Sparkles, KeyRound, RefreshCw, Smartphone, ShieldAlert, Clock } from 'lucide-react';
 import api from '../../api';
 
 interface PlanModalProps {
-    type: 'NO_ACTIVE_PLAN' | 'UPGRADE_REQUIRED' | 'RENEWAL_CONFIRMATION';
+    type: 'NO_ACTIVE_PLAN' | 'UPGRADE_REQUIRED' | 'RENEWAL_CONFIRMATION' | 'PLAN_EXPIRED' | 'NEAR_EXPIRATION_WARNING';
     onClose?: () => void;
     featureName?: string;
     savedPaymentMethod?: 'mpesa' | 'emola' | 'card';
     savedPhoneNumber?: string;
     planTier?: 'BASIC' | 'PRO';
+    daysLeft?: number;
 }
 
 export const PlanModal = ({
@@ -18,7 +19,8 @@ export const PlanModal = ({
     featureName = 'Funcionalidade Avançada',
     savedPaymentMethod,
     savedPhoneNumber,
-    planTier = 'BASIC'
+    planTier = 'BASIC',
+    daysLeft
 }: PlanModalProps) => {
     const navigate = useNavigate();
     const [isRenewing, setIsRenewing] = useState(false);
@@ -105,7 +107,7 @@ export const PlanModal = ({
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/10 blur-[50px] rounded-full pointer-events-none" />
 
                 {/* Close Button for closeable variants */}
-                {type !== 'NO_ACTIVE_PLAN' && !showPinPrompt && (
+                {type !== 'NO_ACTIVE_PLAN' && type !== 'PLAN_EXPIRED' && !showPinPrompt && (
                     <button 
                         onClick={onClose} 
                         className="absolute top-6 right-6 p-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white transition-all"
@@ -231,6 +233,59 @@ export const PlanModal = ({
                                 </div>
                             </>
                         )}
+                    </div>
+                )}
+
+                {/* Variant 4: PLAN EXPIRED */}
+                {type === 'PLAN_EXPIRED' && (
+                    <div className="space-y-6">
+                        <div className="mx-auto w-16 h-16 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-2xl flex items-center justify-center animate-pulse">
+                            <ShieldAlert size={32} />
+                        </div>
+                        <div className="space-y-2">
+                            <h3 className="text-2xl font-black text-white tracking-tight uppercase">ASSINATURA EXPIRADA</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Sua assinatura expirou. Para continuar acompanhando seu desempenho, registrar novos trades e utilizar nossas ferramentas de análise, por favor reative sua assinatura.
+                            </p>
+                        </div>
+                        <button
+                            onClick={handleRedirectToPricing}
+                            className="w-full py-4 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white font-black rounded-xl transition-all shadow-lg shadow-rose-500/10 uppercase tracking-wider text-sm"
+                        >
+                            Renovar Assinatura
+                        </button>
+                    </div>
+                )}
+
+                {/* Variant 5: NEAR EXPIRATION WARNING */}
+                {type === 'NEAR_EXPIRATION_WARNING' && (
+                    <div className="space-y-6">
+                        <div className="mx-auto w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-2xl flex items-center justify-center">
+                            <Clock size={32} />
+                        </div>
+                        <div className="space-y-2">
+                            <h3 className="text-2xl font-black text-white tracking-tight uppercase">Assinatura Próxima do Fim</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Atenção: sua assinatura do Torex Journal expira em <strong className="text-amber-400">{daysLeft}</strong> dias. Renove agora para garantir acesso ininterrupto.
+                            </p>
+                        </div>
+                        <div className="space-y-3 pt-2">
+                            <button
+                                onClick={() => {
+                                    if (onClose) onClose();
+                                    navigate('/pricing');
+                                }}
+                                className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-amber-500/10 uppercase tracking-wider text-sm font-bold"
+                            >
+                                Renovar Agora
+                            </button>
+                            <button
+                                onClick={onClose}
+                                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl transition-colors border border-slate-800 text-xs uppercase"
+                            >
+                                Continuar para a Dashboard
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

@@ -442,6 +442,10 @@ export class SubscriptionService implements OnModuleInit {
         subscription.status = SubscriptionStatus.ACTIVE;
         await this.subscriptionRepo.save(subscription);
 
+        // Invalidate user plan cache in Redis
+        await this.cacheManager.del(`user_plan_tier:${subscription.userId}`).catch(() => {});
+        await this.cacheManager.del(`user_subscription_status:${subscription.userId}`).catch(() => {});
+
         // Schedule warning and renewal jobs in Bull Queue
         const warningTime = subscription.currentPeriodEnd.getTime() - 5 * 24 * 60 * 60 * 1000;
         const warningDelay = warningTime - Date.now();
@@ -563,11 +567,7 @@ export class SubscriptionService implements OnModuleInit {
             const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
             if (daysLeft <= 0) {
-                // Update in database to EXPIRED
-                sub.status = SubscriptionStatus.EXPIRED;
-                await this.subscriptionRepo.save(sub);
-                this.logger.log(`Subscription ${sub.id} for user ${userId} has expired.`);
-                await this.scheduleRemarketingFollowup(sub.id).catch(() => {});
+                this.logger.log(`Subscription ${sub.id} for user ${userId} has expired (checked on access, background job will update status).`);
                 
                 return {
                     hasActive: false,
@@ -577,12 +577,28 @@ export class SubscriptionService implements OnModuleInit {
                 };
             }
 
+            let showWarning = false;
+            if (daysLeft <= 5) {
+                const today = new Date().toDateString();
+                const lastShownRedis = await this.cacheManager.get<string>(`last_warning_shown_date:${userId}`);
+                if (lastShownRedis !== today) {
+                    const user = await this.userRepo.findOne({ where: { id: userId } });
+                    const lastShownDb = user?.lastWarningShown ? new Date(user.lastWarningShown).toDateString() : null;
+                    if (lastShownDb !== today) {
+                        showWarning = true;
+                    } else {
+                        await this.cacheManager.set(`last_warning_shown_date:${userId}`, today, 24 * 60 * 60 * 1000);
+                    }
+                }
+            }
+
             return {
                 hasActive: true,
                 tier: sub.planConfig.tier,
                 daysLeft,
                 expiryDate: sub.currentPeriodEnd,
-                id: sub.id
+                id: sub.id,
+                showWarning
             };
         }
 
@@ -824,5 +840,17 @@ export class SubscriptionService implements OnModuleInit {
             statuses,
             dailyMetrics
         };
+    }
+
+    async markWarningAsShown(userId: string) {
+        const today = new Date();
+        const todayStr = today.toDateString();
+        
+        // Update Redis cache
+        await this.cacheManager.set(`last_warning_shown_date:${userId}`, todayStr, 24 * 60 * 60 * 1000);
+        
+        // Update database user record
+        await this.userRepo.update(userId, { lastWarningShown: today });
+        return { success: true };
     }
 }

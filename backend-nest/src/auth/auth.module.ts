@@ -16,13 +16,14 @@ import { PaymentModule } from '../payment/payment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuditLogEntity } from './audit-log.entity';
 import { AuditLogService } from './audit-log.service';
+import { SessionEntity } from './session.entity';
 
 @Module({
     imports: [
         UsersModule,
         AccountModule,
         PassportModule,
-        TypeOrmModule.forFeature([AccountEntity, AuditLogEntity]),
+        TypeOrmModule.forFeature([AccountEntity, AuditLogEntity, SessionEntity]),
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({
@@ -34,6 +35,7 @@ import { AuditLogService } from './audit-log.service';
         EmailModule,
         PaymentModule,
         NotificationsModule,
+        ConfigModule
     ],
     providers: [AuthService, JwtStrategy, GoogleStrategy, GithubStrategy, AuditLogService],
     controllers: [AuthController],

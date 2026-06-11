@@ -68,6 +68,12 @@ export class SubscriptionController {
         return this.subscriptionService.renewActiveSubscription(req.user.id);
     }
 
+    @UseGuards(AuthGuard('jwt'))
+    @Post('warned')
+    async markWarningAsShown(@Request() req) {
+        return this.subscriptionService.markWarningAsShown(req.user.id);
+    }
+
     // --- Debito Status Sync (Manual or via simple status check) ---
     @Post('check-status/:reference')
     async checkStatus(@Param('reference') reference: string) {

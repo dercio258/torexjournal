@@ -24,10 +24,19 @@ export class AiService {
     ) { }
 
     async generateInsights(accountId: string, userId: string, metrics: any, logId?: number) {
-        // Read IP and Port from Env
-        const host = this.configService.get<string>('LLAMA_SERVER_HOST') || '127.0.0.1';
-        const port = this.configService.get<string>('LLAMA_SERVER_PORT') || '8080';
-        const url = `http://${host}:${port}/v1/chat/completions`; // Standard llama-server OpenAI compatible endpoint
+        const iaEndpoint = this.configService.get<string>('IA_ENDPOINT');
+        const iaApiKey = this.configService.get<string>('IA_API_KEY');
+
+        let url = iaEndpoint;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+        if (!url) {
+            const host = this.configService.get<string>('LLAMA_SERVER_HOST') || '127.0.0.1';
+            const port = this.configService.get<string>('LLAMA_SERVER_PORT') || '8080';
+            url = `http://${host}:${port}/v1/chat/completions`;
+        } else if (iaApiKey) {
+            headers['Authorization'] = `Bearer ${iaApiKey}`;
+        }
 
         const userPlan = await this.planPermissionService.getUserPlan(userId);
         const systemPrompt = userPlan === PlanTier.PREMIUM ? PREMIUM_SYSTEM_PROMPT : BASIC_SYSTEM_PROMPT;
@@ -41,14 +50,20 @@ export class AiService {
             ],
             temperature: 0.3,
             n_predict: 600,
+            max_tokens: 600, // Safe standard for standard OpenAI endpoints
             response_format: { type: "json_object" }
         };
 
         try {
-            this.logger.log(`Requesting insights from local LLaMA Server at ${url} for account ${accountId}...`);
+            if (iaEndpoint) {
+                this.logger.log(`Requesting insights from Remote IA Endpoint at ${url} for account ${accountId}...`);
+            } else {
+                this.logger.log(`Requesting insights from local LLaMA Server at ${url} for account ${accountId}...`);
+            }
+
             const response = await firstValueFrom(this.httpService.post(url, body, {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 120000 // 2 minutes timeout for local generation
+                headers,
+                timeout: 120000 // 2 minutes timeout
             }));
 
             const data = response.data;

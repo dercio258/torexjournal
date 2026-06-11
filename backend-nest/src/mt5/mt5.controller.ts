@@ -6,7 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Mt5Service } from './mt5.service';
 import { Mt5DataDto } from './dto/mt5-data.dto';
 import { Mt5InstanceService } from './mt5-instance.service';
-import { PlanGuard, RequirePlan } from '../common/guards/plan.guard';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 
 import { Mt5TcpServer } from '../mt5-tcp.server';
@@ -23,13 +23,15 @@ export class Mt5Controller {
     ) { }
 
     @Get('import-history')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async getImportHistory(@Req() req) {
         return this.mt5Service.getImportHistory(req.user.id);
     }
 
     @Delete('import-history/:id/revert')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async revertImport(@Param('id') id: string, @Req() req) {
         return this.mt5Service.revertImport(Number(id), req.user.id);
     }
@@ -78,7 +80,8 @@ export class Mt5Controller {
     }
 
     @Post('manual')
-    @UseGuards(JwtAuthGuard) // User must be logged in to add manual trades
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async createManualTrade(@Body() data: any, @Req() req) {
         return this.mt5Service.createManualTrade(data, req.user.id);
     }

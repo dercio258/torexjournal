@@ -16,6 +16,7 @@ import { TrendingUp, Calendar, Activity, AlertTriangle } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { PlanModal } from '../components/dashboard/PlanModal';
+import { DateBoundaryBanner } from '../components/dashboard/DateBoundaryBanner';
 
 ChartJS.register(
     CategoryScale,
@@ -34,6 +35,10 @@ export const Reports = () => {
     const isBasic = user?.tier === 'BASIC';
     const [trades, setTrades] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+
+    const [includeToday, setIncludeToday] = useState(() => {
+        return localStorage.getItem('trading_cossa_include_today') === 'true';
+    });
 
     useEffect(() => {
         if (token) fetchTrades();
@@ -60,23 +65,36 @@ export const Reports = () => {
         }
     };
 
+    // Filter trades based on includeToday option
+    const filteredTrades = useMemo(() => {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        return trades.filter(t => {
+            if (!includeToday) {
+                return t.closeTime < todayStart;
+            }
+            return true;
+        });
+    }, [trades, includeToday]);
+
     // --- Analytics Logic ---
     const analytics = useMemo(() => {
-        if (!trades.length) return null;
+        if (!filteredTrades.length) return null;
 
         let cumulative = 0;
-        const pnlCurvePoints = trades.map(t => {
+        const pnlCurvePoints = filteredTrades.map(t => {
             cumulative += t.profit;
             return { x: t.closeTime.toLocaleDateString(), y: cumulative };
         });
 
-        const wins = trades.filter(t => t.profit >= 0);
-        const losses = trades.filter(t => t.profit < 0);
+        const wins = filteredTrades.filter(t => t.profit >= 0);
+        const losses = filteredTrades.filter(t => t.profit < 0);
 
         const totalProfit = wins.reduce((acc, t) => acc + t.profit, 0);
         const totalLoss = Math.abs(losses.reduce((acc, t) => acc + t.profit, 0));
 
-        const winRate = (wins.length / trades.length) * 100;
+        const winRate = (wins.length / filteredTrades.length) * 100;
         const profitFactor = totalLoss === 0 ? totalProfit : totalProfit / totalLoss;
         const avgWin = wins.length ? totalProfit / wins.length : 0;
         const avgLoss = losses.length ? totalLoss / losses.length : 0;
@@ -86,7 +104,7 @@ export const Reports = () => {
         let peak = -Infinity;
         let maxDD = 0;
         let runningPnL = 0;
-        trades.forEach(t => {
+        filteredTrades.forEach(t => {
             runningPnL += t.profit;
             if (runningPnL > peak) peak = runningPnL;
             const dd = peak - runningPnL;
@@ -100,14 +118,14 @@ export const Reports = () => {
             profitFactor,
             expectancy,
             maxDrawdown: maxDD,
-            totalTrades: trades.length
+            totalTrades: filteredTrades.length
         };
-    }, [trades]);
+    }, [filteredTrades]);
 
     // --- Monthly Matrix Logic ---
     const monthlyMatrix = useMemo(() => {
         const matrix: Record<number, Record<number, number>> = {};
-        trades.forEach(t => {
+        filteredTrades.forEach(t => {
             const year = t.closeTime.getFullYear();
             const month = t.closeTime.getMonth(); // 0-11
             if (!matrix[year]) matrix[year] = {};
@@ -115,7 +133,7 @@ export const Reports = () => {
             matrix[year][month] += t.profit;
         });
         return matrix;
-    }, [trades]);
+    }, [filteredTrades]);
 
     const chartData = {
         labels: analytics?.pnlCurvePoints.map(p => p.x) || [],
@@ -149,6 +167,16 @@ export const Reports = () => {
                 </div>
             </header>
 
+            {/* Date Boundary Indicator */}
+            <DateBoundaryBanner 
+                includeToday={includeToday} 
+                onToggle={() => {
+                    const nextVal = !includeToday;
+                    setIncludeToday(nextVal);
+                    localStorage.setItem('trading_cossa_include_today', String(nextVal));
+                }} 
+            />
+
             {/* KPI Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <KpiCard label="Expectativa (Por Trade)" value={analytics?.expectancy.toFixed(2)} icon={<Activity size={16} />} color="text-indigo-400" />
@@ -161,7 +189,7 @@ export const Reports = () => {
             <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6">
                 <h3 className="text-lg font-bold text-slate-200 mb-4">Curva de Capital</h3>
                 <div className="h-80 w-full">
-                    {trades.length > 0 ? (
+                    {filteredTrades.length > 0 ? (
                         <Line data={chartData} options={{
                             responsive: true,
                             maintainAspectRatio: false,

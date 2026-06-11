@@ -3,15 +3,18 @@ import { OandaService } from './oanda.service';
 import { MarketDataParserService } from './market-data-parser.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('market-data')
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.BASIC)
 export class MarketDataController {
     constructor(
         private readonly oandaService: OandaService,
         private readonly marketDataParser: MarketDataParserService
     ) { }
 
-    @UseGuards(JwtAuthGuard)
     @Get('candles')
     async getCandles(
         @Query('symbol') symbol: string,
@@ -28,7 +31,6 @@ export class MarketDataController {
         return this.oandaService.getCandles(symbol, fromDate, toDate, granularity);
     }
 
-    @UseGuards(JwtAuthGuard)
     @Post('upload-mt5')
     @UseInterceptors(FileInterceptor('file'))
     async uploadMt5Csv(@UploadedFile() file: any) {

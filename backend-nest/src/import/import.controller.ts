@@ -5,8 +5,11 @@ import { ReportParserService } from './report-parser.service';
 import { Mt5Service } from '../mt5/mt5.service';
 import { ImportMethod } from '../mt5/import-log.entity';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 
 @Controller('import')
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.BASIC)
 export class ImportController {
     private readonly logger = new Logger(ImportController.name);
 
@@ -17,7 +20,6 @@ export class ImportController {
     ) { }
 
     @Post('report')
-    @UseGuards(JwtAuthGuard)
     @UseInterceptors(FileInterceptor('file'))
     async uploadReport(@UploadedFile() file: any, @Req() req) {
         if (!file) throw new BadRequestException('No file uploaded');

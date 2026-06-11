@@ -1,8 +1,12 @@
 import { Controller, Get, Query, UseGuards, InternalServerErrorException } from '@nestjs/common';
 import { TradingViewService } from './tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('tradingview')
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.PREMIUM)
 export class TradingViewController {
     constructor(private readonly tvService: TradingViewService) { }
 

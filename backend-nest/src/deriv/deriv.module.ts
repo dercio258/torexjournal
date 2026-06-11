@@ -10,13 +10,15 @@ import { DerivController } from './deriv.controller';
 import { UsersModule } from '../users/users.module';
 import { Mt5Module } from '../mt5/mt5.module';
 import { NormalizationModule } from '../import/normalization/normalization.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([DerivAuthEntity, DerivTransactionEntity, TradeEntity, AccountEntity]),
         UsersModule,
         Mt5Module, // Need for saving trades
-        NormalizationModule
+        NormalizationModule,
+        PaymentModule
     ],
     providers: [DerivService, DerivClient],
     controllers: [DerivController],

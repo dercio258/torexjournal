@@ -5,6 +5,7 @@ import { PaymentService } from './payment.service';
 import { SubscriptionService } from './subscription.service';
 import { PaymentController } from './payment.controller';
 import { SubscriptionController } from './subscription.controller';
+import { PaymentsController } from './payments.controller';
 import { PaymentEntity } from './payment.entity';
 import { Subscription } from './subscription.entity';
 import { SubscriptionPlanConfig } from './subscription-plan.entity';
@@ -20,6 +21,7 @@ import { DebitoService } from './debito.service';
 import { SubscriptionProcessor } from './subscription.processor';
 import { WebhookController } from './webhook.controller';
 import { EmailModule } from '../email/email.module';
+import { PlanGuard } from './plan.guard';
 
 @Module({
     imports: [
@@ -33,8 +35,8 @@ import { EmailModule } from '../email/email.module';
         NotificationsModule,
         EmailModule
     ],
-    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor],
-    controllers: [PaymentController, SubscriptionController, WebhookController],
-    exports: [SubscriptionService, PlanPermissionService, DebitoService],
+    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor, PlanGuard],
+    controllers: [PaymentController, SubscriptionController, PaymentsController, WebhookController],
+    exports: [SubscriptionService, PlanPermissionService, DebitoService, PlanGuard],
 })
 export class PaymentModule { }

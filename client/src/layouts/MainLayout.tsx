@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { ChatWidget } from '../components/network/ChatWidget';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,9 @@ import { Menu } from 'lucide-react';
 
 export const MainLayout = () => {
     const { user, isLoading } = useAuth();
-    const hasNoPlan = user && (!user.tier || user.tier === 'FREE');
+    const location = useLocation();
+    const isPaymentsPage = location.pathname === '/payments';
+    const hasNoPlan = user && (!user.tier || user.tier === 'FREE') && !isPaymentsPage;
     const showOnboarding = user && user.onboardingCompleted === false;
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 

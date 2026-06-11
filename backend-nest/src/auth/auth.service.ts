@@ -20,6 +20,7 @@ import { AuditLogService } from './audit-log.service';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import * as qrcode from 'qrcode';
 import { ConfigService } from '@nestjs/config';
+import { SessionEntity } from './session.entity';
 
 @Injectable()
 export class AuthService {
@@ -28,6 +29,8 @@ export class AuthService {
         private jwtService: JwtService,
         @InjectRepository(AccountEntity)
         private accountRepository: Repository<AccountEntity>,
+        @InjectRepository(SessionEntity)
+        private sessionRepository: Repository<SessionEntity>,
         @InjectQueue('email-queue') private emailQueue: Queue,
         @Inject(CACHE_MANAGER) private cacheManager: any,
         private planPermissionService: PlanPermissionService,
@@ -237,6 +240,22 @@ export class AuthService {
         // Store refresh token
         await this.usersService.updateRefreshToken(user.id, refreshToken);
 
+        // Persist session token in Database
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + 24); // 24h expiration
+
+        await this.sessionRepository.save({
+            userId: user.id,
+            token: accessToken,
+            userAgent,
+            ipAddress: ip,
+            expiresAt,
+            isActive: true
+        });
+
+        // Cache session status in Redis
+        await this.cacheManager.set(`user_session:${accessToken}`, 'active', 24 * 60 * 60 * 1000);
+
         await this.auditLogService.log(user.id, 'LOGIN_SUCCESS', { ip, userAgent }, ip, userAgent);
 
         // Dispatch Login Alert (Async)
@@ -264,6 +283,12 @@ export class AuthService {
                 onboardingCompleted: user.onboardingCompleted
             }
         };
+    }
+
+    async logout(token: string) {
+        if (!token) return;
+        await this.sessionRepository.update({ token }, { isActive: false });
+        await this.cacheManager.del(`user_session:${token}`).catch(() => {});
     }
 
     async refresh(refreshToken: string, ip?: string, userAgent?: string) {

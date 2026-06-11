@@ -12,11 +12,11 @@ interface HeatmapData {
     counts: HeatmapCell[][];
 }
 
-export const HeatmapChart = () => {
+export const HeatmapChart = ({ endDate }: { endDate?: string }) => {
     const { data, isLoading } = useQuery<HeatmapData>({
-        queryKey: ['heatmap'],
+        queryKey: ['heatmap', endDate],
         queryFn: async () => {
-            const res = await api.get('/dashboard/heatmap');
+            const res = await api.get('/dashboard/heatmap', { params: { endDate } });
             return res.data;
         }
     });
