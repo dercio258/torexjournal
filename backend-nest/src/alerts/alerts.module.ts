@@ -4,9 +4,13 @@ import { AlertEntity } from './alert.entity';
 import { AlertsService } from './alerts.service';
 import { AlertsController } from './alerts.controller';
 import { ScoringService } from './scoring.service';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([AlertEntity])],
+    imports: [
+        TypeOrmModule.forFeature([AlertEntity]),
+        PaymentModule,
+    ],
     providers: [AlertsService, ScoringService],
     controllers: [AlertsController],
     exports: [AlertsService, ScoringService]
