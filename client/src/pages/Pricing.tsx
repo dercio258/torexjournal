@@ -35,57 +35,52 @@ export const Pricing = () => {
     const [pricingConfig, setPricingConfig] = useState<any>(null);
 
     useEffect(() => {
-        const fetchPricing = async () => {
+        const fetchPricingAndPlans = async () => {
             try {
-                const { data } = await api.get('/payment/pricing-config');
-                setPricingConfig(data);
+                const pricingRes = await api.get('/payment/pricing-config');
+                setPricingConfig(pricingRes.data);
+
+                const plansRes = await api.get('/subscription/plans');
+                const mappedPlans = plansRes.data.map((plan: any) => {
+                    const features = plan.tier === 'BASIC'
+                        ? [
+                            'Painel de Performance',
+                            'Diário (Apenas Calendário)',
+                            'Importação Manual (CSV)',
+                            'Acesso à Network (Apenas Leitura)',
+                            'Gestão Emocional',
+                            'Configuração Telegram'
+                          ]
+                        : [
+                            'Tudo do Plano Básico',
+                            'Auto-Sync (MT4, MT5, Deriv)',
+                            'Backtest Ilimitado',
+                            'Relatórios Avançados',
+                            'Calendário Econômico',
+                            'IA Torex Analyst Pro',
+                            'Interação na Network (Postar/Comentar)'
+                          ];
+
+                    return {
+                        id: plan.id,
+                        tier: plan.tier,
+                        monthlyPrice: Number(plan.monthlyPrice),
+                        annualDiscountPercent: Number(plan.annualDiscountPercent),
+                        trialEnabled: plan.trialEnabled,
+                        trialDays: plan.trialDays,
+                        description: plan.description,
+                        features: plan.features && plan.features.length > 0 ? plan.features : features
+                    };
+                });
+                setPlans(mappedPlans);
             } catch (error) {
-                console.error("Failed to load pricing config", error);
+                console.error("Failed to load pricing or plans config", error);
+            } finally {
+                setIsLoading(false);
             }
         };
-        fetchPricing();
+        fetchPricingAndPlans();
     }, []);
-
-    useEffect(() => {
-        if (pricingConfig) {
-            setPlans([
-                {
-                    id: '1',
-                    tier: 'BASIC',
-                    monthlyPrice: Number(pricingConfig.basicoPrice) || 0,
-                    annualDiscountPercent: 20,
-                    trialEnabled: false,
-                    trialDays: 0,
-                    features: [
-                        'Painel de Performance',
-                        'Diário (Apenas Calendário)',
-                        'Importação Manual (CSV)',
-                        'Acesso à Network (Apenas Leitura)',
-                        'Gestão Emocional',
-                        'Configuração Telegram'
-                    ]
-                },
-                {
-                    id: '2',
-                    tier: 'PRO',
-                    monthlyPrice: Number(pricingConfig.premiumPrice) || 0,
-                    annualDiscountPercent: 20,
-                    trialEnabled: true,
-                    trialDays: 7,
-                    features: [
-                        'Tudo do Plano Básico',
-                        'Auto-Sync (MT4, MT5, Deriv)',
-                        'Backtest Ilimitado',
-                        'Relatórios Avançados',
-                        'Calendário Econômico',
-                        'IA Torex Analyst Pro',
-                        'Interação na Network (Postar/Comentar)'
-                    ]
-                }
-            ]);
-            setIsLoading(false);
-        }
-    }, [pricingConfig]);
 
     const handleSubscribe = (plan: PlanConfig) => {
         if (!user) {

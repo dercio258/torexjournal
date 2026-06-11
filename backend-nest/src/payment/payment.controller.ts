@@ -7,8 +7,8 @@ export class PaymentController {
     constructor(private readonly paymentService: PaymentService) { }
 
     @Get('pricing-config')
-    getPricingConfig(@Res() res: Response) {
-        const config = this.paymentService.getPricingConfig();
+    async getPricingConfig(@Res() res: Response) {
+        const config = await this.paymentService.getPricingConfig();
         return res.status(HttpStatus.OK).json(config);
     }
 }

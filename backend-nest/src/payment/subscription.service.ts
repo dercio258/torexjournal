@@ -176,6 +176,7 @@ export class SubscriptionService implements OnModuleInit {
                 debitoTransactionId: debitoId ? String(debitoId) : null,
                 status: SubscriptionStatus.APPROVAL_PENDING,
                 cycle,
+                paymentMethod,
             });
             sub.planConfig = config; // Attach config to avoid 500 error in activateSubscription
             await this.subscriptionRepo.save(sub);
@@ -292,6 +293,7 @@ export class SubscriptionService implements OnModuleInit {
                 debitoTransactionId: debitoId ? String(debitoId) : null,
                 status: SubscriptionStatus.APPROVAL_PENDING,
                 cycle,
+                paymentMethod,
             });
             sub.planConfig = config; // Attach config to avoid 500 error in activateSubscription
             await this.subscriptionRepo.save(sub);
@@ -678,5 +680,149 @@ export class SubscriptionService implements OnModuleInit {
             subscriptionId
         }, { delay: 2 * 24 * 60 * 60 * 1000 });
         this.logger.log(`Scheduled remarketing follow-up job for subscription ${subscriptionId} in 2 days`);
+    }
+
+    async getFinancialStats() {
+        const subscriptions = await this.subscriptionRepo.find({
+            relations: ['planConfig', 'user'],
+            order: { createdAt: 'ASC' }
+        });
+        const users = await this.userRepo.find({
+            order: { createdAt: 'ASC' }
+        });
+
+        const totalUsers = users.length;
+        const activeSubs = subscriptions.filter(s => s.status === SubscriptionStatus.ACTIVE);
+        const activeSubscribers = activeSubs.length;
+
+        const mznRateZar = Number(this.configService.get('mznratezar') || '0.25');
+        let estimatedMonthlyRevenueMZN = 0;
+        let estimatedMonthlyRevenueZAR = 0;
+
+        for (const sub of activeSubs) {
+            const price = sub.planConfig ? Number(sub.planConfig.monthlyPrice) : 0;
+            let subMonthlyRevenue = 0;
+            if (sub.cycle === SubscriptionCycle.YEARLY) {
+                const discount = price * 12 * (1 - (sub.planConfig?.annualDiscountPercent || 0) / 100);
+                subMonthlyRevenue = discount / 12;
+            } else {
+                subMonthlyRevenue = price;
+            }
+
+            let method = sub.paymentMethod?.toLowerCase() || 'card';
+            if (sub.paymentReference && !['mpesa', 'emola', 'card', 'payfast'].includes(method)) {
+                const ref = sub.paymentReference.toLowerCase();
+                if (ref.includes('mpesa')) method = 'mpesa';
+                else if (ref.includes('emola')) method = 'emola';
+                else method = 'card';
+            }
+
+            if (method === 'payfast') {
+                estimatedMonthlyRevenueZAR += subMonthlyRevenue * mznRateZar;
+            } else {
+                estimatedMonthlyRevenueMZN += subMonthlyRevenue;
+            }
+        }
+
+        const statuses = {
+            active: subscriptions.filter(s => s.status === SubscriptionStatus.ACTIVE || s.status === SubscriptionStatus.APPROVED).length,
+            pending: subscriptions.filter(s => s.status === SubscriptionStatus.APPROVAL_PENDING).length,
+            cancelled: subscriptions.filter(s => s.status === SubscriptionStatus.CANCELLED || s.status === SubscriptionStatus.EXPIRED).length
+        };
+
+        const paymentMethods = {
+            mpesa: 0,
+            emola: 0,
+            card: 0,
+            payfast: 0
+        };
+        for (const sub of subscriptions) {
+            let method = sub.paymentMethod?.toLowerCase() || 'card';
+            if (sub.paymentReference && !['mpesa', 'emola', 'card', 'payfast'].includes(method)) {
+                const ref = sub.paymentReference.toLowerCase();
+                if (ref.includes('mpesa')) method = 'mpesa';
+                else if (ref.includes('emola')) method = 'emola';
+                else method = 'card';
+            }
+            if (method in paymentMethods) {
+                paymentMethods[method as keyof typeof paymentMethods]++;
+            } else {
+                paymentMethods.card++;
+            }
+        }
+
+        const dailyMetrics: Record<string, { newSubscriptions: number; renewals: number; upgrades: number; totalUsers: number }> = {};
+        const userSubMap: Record<string, Subscription[]> = {};
+        for (const sub of subscriptions) {
+            if (!userSubMap[sub.userId]) {
+                userSubMap[sub.userId] = [];
+            }
+            userSubMap[sub.userId].push(sub);
+        }
+
+        const classificationMap: Record<string, 'new' | 'renewal' | 'upgrade'> = {};
+        for (const [userId, userSubs] of Object.entries(userSubMap)) {
+            userSubs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+            let lastTier: string | null = null;
+            for (let i = 0; i < userSubs.length; i++) {
+                const sub = userSubs[i];
+                const tier = sub.planConfig?.tier || 'BASIC';
+                let classification: 'new' | 'renewal' | 'upgrade' = 'new';
+                if (i > 0) {
+                    if (tier === 'PRO' && lastTier === 'BASIC') {
+                        classification = 'upgrade';
+                    } else {
+                        classification = 'renewal';
+                    }
+                }
+                classificationMap[sub.id] = classification;
+                lastTier = tier;
+            }
+        }
+
+        const formatDate = (date: Date) => date.toISOString().split('T')[0];
+
+        for (const sub of subscriptions) {
+            const dateStr = formatDate(sub.createdAt);
+            if (!dailyMetrics[dateStr]) {
+                dailyMetrics[dateStr] = { newSubscriptions: 0, renewals: 0, upgrades: 0, totalUsers: 0 };
+            }
+            const classification = classificationMap[sub.id] || 'new';
+            if (classification === 'new') dailyMetrics[dateStr].newSubscriptions++;
+            else if (classification === 'renewal') dailyMetrics[dateStr].renewals++;
+            else if (classification === 'upgrade') dailyMetrics[dateStr].upgrades++;
+        }
+
+        let userCumulative = 0;
+        const userGroups: Record<string, number> = {};
+        for (const user of users) {
+            const dateStr = formatDate(user.createdAt);
+            userGroups[dateStr] = (userGroups[dateStr] || 0) + 1;
+        }
+
+        const allDates = Array.from(new Set([
+            ...users.map(u => formatDate(u.createdAt)),
+            ...subscriptions.map(s => formatDate(s.createdAt))
+        ])).sort();
+
+        for (const dateStr of allDates) {
+            userCumulative += userGroups[dateStr] || 0;
+            if (!dailyMetrics[dateStr]) {
+                dailyMetrics[dateStr] = { newSubscriptions: 0, renewals: 0, upgrades: 0, totalUsers: userCumulative };
+            } else {
+                dailyMetrics[dateStr].totalUsers = userCumulative;
+            }
+        }
+
+        return {
+            totalUsers,
+            activeSubscribers,
+            estimatedMonthlyRevenue: estimatedMonthlyRevenueMZN,
+            estimatedMonthlyRevenueMZN,
+            estimatedMonthlyRevenueZAR,
+            paymentMethods,
+            statuses,
+            dailyMetrics
+        };
     }
 }

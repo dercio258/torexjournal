@@ -69,6 +69,9 @@ export class Subscription {
     @Column({ default: false })
     followUpSent: boolean;
 
+    @Column({ nullable: true })
+    paymentMethod: string;
+
     @CreateDateColumn()
     createdAt: Date;
 

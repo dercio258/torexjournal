@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Edit, Check, Plus } from 'lucide-react';
+import { Edit, Check } from 'lucide-react';
 import api from '../../api';
 
 export const AdminPlans = () => {
@@ -126,6 +126,12 @@ export const AdminPlans = () => {
                                 <span className="text-white font-medium">MT {plan.monthlyPrice}</span>
                             </div>
                             <div className="flex justify-between text-sm">
+                                <span className="text-slate-400">Preço Anual (Equiv.)</span>
+                                <span className="text-emerald-400 font-medium">
+                                    MT {(Number(plan.monthlyPrice) * 12 * (1 - Number(plan.annualDiscountPercent) / 100)).toFixed(2)}
+                                </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
                                 <span className="text-slate-400">Desconto Anual</span>
                                 <span className="text-emerald-400 font-medium">{plan.annualDiscountPercent}%</span>
                             </div>
@@ -145,15 +151,6 @@ export const AdminPlans = () => {
                         </Button>
                     </Card>
                 ))}
-
-                {/* Add New Plan Card */}
-                <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="p-6 border border-slate-800 bg-slate-900/20 border-dashed rounded-xl flex flex-col items-center justify-center text-slate-500 hover:bg-slate-900/40 hover:text-slate-300 hover:border-slate-700 transition-all cursor-pointer min-h-[300px]"
-                >
-                    <Plus className="w-12 h-12 mb-4 opacity-50" />
-                    <span className="font-medium">Criar Novo Plano</span>
-                </button>
             </div>
 
             <Modal

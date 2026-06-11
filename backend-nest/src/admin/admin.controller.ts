@@ -93,19 +93,7 @@ export class AdminController {
     @UseGuards(AdminAuthGuard)
     @Get('stats')
     async getStats() {
-        const users = await this.usersService.findAll();
-        const activeSubs = users.filter(u =>
-            u.subscriptions?.some(s => s.status === 'ACTIVE')
-        ).length;
-
-        // Estimated revenue calculation
-        const estimatedMonthlyRevenue = activeSubs * 49.90;
-
-        return {
-            totalUsers: users.length,
-            activeSubscribers: activeSubs,
-            estimatedMonthlyRevenue
-        };
+        return this.subscriptionService.getFinancialStats();
     }
 
     // --- Broadcast Notifications ---
