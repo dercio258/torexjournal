@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
 import { PaymentService } from './payment.service';
@@ -31,7 +31,7 @@ import { PlanGuard } from './plan.guard';
         }),
         UsersModule,
         ConfigModule,
-        AlertsModule,
+        forwardRef(() => AlertsModule),
         NotificationsModule,
         EmailModule
     ],
