@@ -323,6 +323,17 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
 
     async processTradeImport(data: { trades: any[], importMethod: ImportMethod, userId?: string, accountId?: string }) {
         const { trades, importMethod, userId, accountId } = data;
+
+        // Prevent foreign key violation if the user has been deleted or ID is invalid (stale queue jobs)
+        if (userId) {
+            const userRepo = this.dataSource.getRepository(UserEntity);
+            const userExists = await userRepo.findOne({ where: { id: userId } });
+            if (!userExists) {
+                this.logger.warn(`User with ID ${userId} not found in database. Discarding background trade import.`);
+                return { count: 0 };
+            }
+        }
+
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
