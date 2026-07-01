@@ -24,7 +24,7 @@ export const MainLayout = () => {
     }
 
     return (
-        <div className="flex h-screen overflow-hidden bg-slate-950 font-sans text-slate-100 pb-16 md:pb-0">
+        <div className="flex h-screen overflow-hidden bg-slate-950 font-sans text-slate-100">
             {hasNoPlan && <PlanRequiredOverlay />}
             {showOnboarding && <OnboardingSurvey onComplete={() => {}} />}
 
@@ -46,8 +46,8 @@ export const MainLayout = () => {
                 <div className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setIsSidebarOpen(false)} />
             )}
 
-            {/* Sidebar Wrapper */}
-            <div className={`fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 transition-transform duration-300 ease-in-out z-50 h-full`}>
+            {/* Sidebar Wrapper (fixed drawer on mobile, static sidebar on desktop) */}
+            <div className={`fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 transition-transform duration-300 ease-in-out z-50 h-full shrink-0`}>
                 <Sidebar onClose={() => setIsSidebarOpen(false)} />
             </div>
 
