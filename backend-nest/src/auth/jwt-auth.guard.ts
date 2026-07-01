@@ -26,15 +26,26 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         const fingerprint = crypto.createHash('sha256').update(`${ip}:${userAgent}:${deviceSignature}`).digest('hex');
         const rateLimitKey = `rl:private_access:${fingerprint}`;
 
-        let attempts = (await this.cacheManager.get<number>(rateLimitKey)) || 0;
-        if (attempts >= 9) {
+        let attempts = 0;
+        try {
+            attempts = (await this.cacheManager.get<number>(rateLimitKey)) || 0;
+        } catch (err) {
+            console.warn(`[JwtAuthGuard] Cache get failed: ${err.message}`);
+        }
+
+        if (attempts >= 200) {
             throw new HttpException({
                 statusCode: HttpStatus.TOO_MANY_REQUESTS,
-                message: 'Limite de requisições excedido. Máximo de 9 tentativas por minuto.',
+                message: 'Limite de requisições excedido. Máximo de 200 tentativas por minuto.',
                 error: 'Too Many Requests'
             }, HttpStatus.TOO_MANY_REQUESTS);
         }
-        await this.cacheManager.set(rateLimitKey, attempts + 1, 60000); // 1 minute window
+
+        try {
+            await this.cacheManager.set(rateLimitKey, attempts + 1, 60000); // 1 minute window
+        } catch (err) {
+            console.warn(`[JwtAuthGuard] Cache set failed: ${err.message}`);
+        }
 
         // 2. Validate JWT token using Passport AuthGuard
         try {

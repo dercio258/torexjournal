@@ -63,7 +63,7 @@ export class AiService {
 
             const response = await firstValueFrom(this.httpService.post(url, body, {
                 headers,
-                timeout: 120000 // 2 minutes timeout
+                timeout: 880000 // 8 minutes timeout
             }));
 
             const data = response.data;

@@ -1,5 +1,5 @@
 import { Controller, Post, UseInterceptors, UploadedFile, UseGuards, Req, Logger, BadRequestException } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReportParserService } from './report-parser.service';
 import { Mt5Service } from '../mt5/mt5.service';
@@ -20,7 +20,7 @@ export class ImportController {
     ) { }
 
     @Post('report')
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(new FastifyFileInterceptor('file'))
     async uploadReport(@UploadedFile() file: any, @Req() req) {
         if (!file) throw new BadRequestException('No file uploaded');
 

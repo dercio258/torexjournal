@@ -2,7 +2,7 @@ import { Controller, Get, Query, UseGuards, Post, UseInterceptors, UploadedFile,
 import { OandaService } from './oanda.service';
 import { MarketDataParserService } from './market-data-parser.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 
@@ -32,7 +32,7 @@ export class MarketDataController {
     }
 
     @Post('upload-mt5')
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(new FastifyFileInterceptor('file'))
     async uploadMt5Csv(@UploadedFile() file: any) {
         if (!file) throw new BadRequestException('No file uploaded');
         

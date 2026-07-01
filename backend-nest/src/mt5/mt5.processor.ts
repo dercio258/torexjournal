@@ -3,6 +3,7 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { Mt5Service } from './mt5.service';
+import { ImportMethod } from './import-log.entity';
 import { Mt5DataDto } from './dto/mt5-data.dto';
 
 @Processor('mt5-data')
@@ -24,10 +25,22 @@ export class Mt5Processor {
     }
 
     @Process('save-history')
-    async handleSaveHistory(job: Job<any[]>) {
-        this.logger.debug(`Processing save-history job, trades: ${job.data.length}`);
+    async handleSaveHistory(job: Job<any>) {
+        let trades: any[];
+        let userId: string | undefined;
+        let accountId: string | undefined;
+
+        if (Array.isArray(job.data)) {
+            trades = job.data;
+        } else {
+            trades = job.data.trades;
+            userId = job.data.userId;
+            accountId = job.data.accountId;
+        }
+
+        this.logger.debug(`Processing save-history job, trades: ${trades.length}, userId: ${userId}, accountId: ${accountId}`);
         try {
-            const result = await this.mt5Service.saveHistory(job.data);
+            const result = await this.mt5Service.saveHistory(trades, ImportMethod.EA, userId, accountId);
             this.logger.debug(`Save-history job completed. Saved: ${result.count}`);
         } catch (error) {
             this.logger.error(`Failed to process save-history job: ${error.message}`, error.stack);

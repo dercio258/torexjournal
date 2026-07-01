@@ -3,7 +3,7 @@ import { SubscriptionService } from './subscription.service';
 import { SubscriptionCycle } from './subscription.entity';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
-import { Response } from 'express';
+import { FastifyReply } from 'fastify';
 
 @Controller('subscription')
 export class SubscriptionController {
@@ -84,7 +84,7 @@ export class SubscriptionController {
     // Redirect status callback route
     @Get('payment/status/card')
     @Get('paymet/staus/card')
-    async handleCardStatusRedirect(@Query('reference') reference: string, @Res() res: Response) {
+    async handleCardStatusRedirect(@Query('reference') reference: string, @Res() res: FastifyReply) {
         this.logger.log(`User returned from gateway for reference: ${reference}`);
         
         if (reference) {

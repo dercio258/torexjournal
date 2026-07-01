@@ -28,9 +28,11 @@ import { DerivModule } from './deriv/deriv.module';
 import { AiModule } from './ai/ai.module';
 
 import { AlertsModule } from './alerts/alerts.module';
+import { ClickHouseModule } from './clickhouse/clickhouse.module';
 
 @Module({
   imports: [
+    ClickHouseModule,
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
 
@@ -83,16 +85,21 @@ import { AlertsModule } from './alerts/alerts.module';
           ? (isAbsolute(customPath) ? customPath : join(process.cwd(), customPath))
           : join(process.cwd(), '..', 'client', 'dist');
         
-        return [{
-          rootPath,
-          exclude: ['/api/(.*)'],
-        }];
+        return [
+          {
+            rootPath,
+            exclude: ['/api/(.*)'],
+          },
+          {
+            rootPath: join(process.cwd(), 'uploads'),
+            serveRoot: '/uploads',
+            serveStaticOptions: {
+              decorateReply: false,
+            } as any
+          }
+        ];
       },
       inject: [ConfigService],
-    }),
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'),
-      serveRoot: '/uploads',
     }),
     BullModule.forRootAsync({
       imports: [ConfigModule],

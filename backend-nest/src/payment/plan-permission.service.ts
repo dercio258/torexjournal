@@ -41,19 +41,27 @@ export class PlanPermissionService {
 
     async getCachedUserSubscription(userId: string): Promise<any | null> {
         const cacheKey = `user_subscription_status:${userId}`;
-        const cached = await this.cacheManager.get<string>(cacheKey);
-        if (cached) {
-            if (cached === 'null') return null;
-            try {
-                return JSON.parse(cached);
-            } catch {
-                // Ignore parse error
+        try {
+            const cached = await this.cacheManager.get<string>(cacheKey);
+            if (cached) {
+                if (cached === 'null') return null;
+                try {
+                    return JSON.parse(cached);
+                } catch {
+                    // Ignore parse error
+                }
             }
+        } catch (err) {
+            console.warn(`[PlanPermissionService] Cache get failed: ${err.message}`);
         }
 
         const sub = await this.getFullUserSubscription(userId);
         if (!sub) {
-            await this.cacheManager.set(cacheKey, 'null', 300000); // cache null for 5 mins
+            try {
+                await this.cacheManager.set(cacheKey, 'null', 300000); // cache null for 5 mins
+            } catch (err) {
+                console.warn(`[PlanPermissionService] Cache set failed: ${err.message}`);
+            }
             return null;
         }
 
@@ -68,15 +76,23 @@ export class PlanPermissionService {
             } : null
         };
 
-        await this.cacheManager.set(cacheKey, JSON.stringify(mappedSub), 3600000); // 1 hour
+        try {
+            await this.cacheManager.set(cacheKey, JSON.stringify(mappedSub), 3600000); // 1 hour
+        } catch (err) {
+            console.warn(`[PlanPermissionService] Cache set failed: ${err.message}`);
+        }
         return mappedSub;
     }
 
     async getUserPlan(userId: string): Promise<PlanTier> {
         const cacheKey = `user_plan_tier:${userId}`;
-        const cachedPlan = await this.cacheManager.get<PlanTier>(cacheKey);
-        if (cachedPlan) {
-            return cachedPlan;
+        try {
+            const cachedPlan = await this.cacheManager.get<PlanTier>(cacheKey);
+            if (cachedPlan) {
+                return cachedPlan;
+            }
+        } catch (err) {
+            console.warn(`[PlanPermissionService] Cache get failed: ${err.message}`);
         }
 
         const activeSub = await this.getFullUserSubscription(userId);
@@ -88,7 +104,11 @@ export class PlanPermissionService {
             else if (t === 'BASIC') tier = PlanTier.BASIC;
         }
 
-        await this.cacheManager.set(cacheKey, tier, 3600000); // 1 hour
+        try {
+            await this.cacheManager.set(cacheKey, tier, 3600000); // 1 hour
+        } catch (err) {
+            console.warn(`[PlanPermissionService] Cache set failed: ${err.message}`);
+        }
         return tier;
     }
 

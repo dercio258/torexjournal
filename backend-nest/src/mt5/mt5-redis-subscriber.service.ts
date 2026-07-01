@@ -70,7 +70,12 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
                             const fields = message[1];
                             const dataStr = fields[1]; // We stored JSON in the 'data' field (index 1)
 
-                            await this.processMessage(streamName, dataStr);
+                            const parsedFields: Record<string, string> = {};
+                            for (let i = 0; i < fields.length; i += 2) {
+                                parsedFields[fields[i]] = fields[i + 1];
+                            }
+
+                            await this.processMessage(streamName, dataStr, parsedFields);
 
                             // Acknowledge processed message
                             await this.redis.xack(streamName, this.CONSUMER_GROUP, id);
@@ -85,7 +90,7 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async processMessage(stream: string, message: string) {
+    private async processMessage(stream: string, message: string, parsedFields: Record<string, string>) {
         if (stream === 'stream:mt5_market_data') {
             try {
                 const data = JSON.parse(message);
@@ -122,7 +127,11 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
                 const trades = JSON.parse(message);
                 if (Array.isArray(trades)) {
                     this.logger.log(`Received ${trades.length} trades from stream. Queuing save...`);
-                    await this.mt5Queue.add('save-history', trades, { removeOnComplete: true, attempts: 3 });
+                    await this.mt5Queue.add('save-history', {
+                        trades,
+                        userId: parsedFields.userId || undefined,
+                        accountId: parsedFields.accountId || undefined
+                    }, { removeOnComplete: true, attempts: 3 });
                 }
             } catch (e) {
                 this.logger.error(`Error processing Trade Data message: ${e.message}`);

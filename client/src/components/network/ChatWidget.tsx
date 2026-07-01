@@ -28,21 +28,48 @@ export const ChatWidget = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
+    const [hasLoadedHistory, setHasLoadedHistory] = useState(false);
+    const isOpenRef = useRef(isOpen);
+
+    // Keep track of isOpen state in a ref for the socket listener to avoid re-running effect
     useEffect(() => {
+        isOpenRef.current = isOpen;
         if (isOpen) {
             scrollToBottom();
             setUnreadCount(0);
         }
-    }, [messages, isOpen]);
+    }, [isOpen]);
 
+    // Scroll to bottom on new messages if chat is open
     useEffect(() => {
-        if (!token) return;
+        if (isOpen) {
+            scrollToBottom();
+        }
+    }, [messages]);
 
-        // Fetch History
+    // Reset history load status and messages when token changes
+    useEffect(() => {
+        setMessages([]);
+        setHasLoadedHistory(false);
+        setUnreadCount(0);
+    }, [token]);
+
+    // Fetch history only when chat is opened
+    useEffect(() => {
+        if (!token || !isOpen || hasLoadedHistory) return;
+
         api.get('/network/chat/history').then(res => {
             // Reverse because backend gives us DESC (newest first), but chat displays oldest at top
             setMessages(res.data.reverse());
+            setHasLoadedHistory(true);
+        }).catch(err => {
+            console.error("Failed to load chat history", err);
         });
+    }, [token, isOpen, hasLoadedHistory]);
+
+    // Initialize Socket once per token
+    useEffect(() => {
+        if (!token) return;
 
         // Initialize Socket
         // Using namespace /network
@@ -52,14 +79,42 @@ export const ChatWidget = () => {
             transports: ['websocket']
         });
 
+        // Request notification permission if not yet decided
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission().catch(console.error);
+        }
+
         socket.on('connect', () => {
             console.log('Chat Connected');
         });
 
         socket.on('msgToClient', (msg: Message) => {
             setMessages(prev => [...prev, msg]);
-            if (!isOpen) {
+            if (!isOpenRef.current) {
                 setUnreadCount(prev => prev + 1);
+            }
+        });
+
+        socket.on('notification', (notif: { title: string; message: string; type: string }) => {
+            // Safety filter to block native popups for sensitive details like password, tokens, 2fa, etc.
+            const lowerTitle = notif.title?.toLowerCase() || '';
+            const lowerMsg = notif.message?.toLowerCase() || '';
+            const isSensitive = 
+                lowerTitle.includes('senha') || lowerTitle.includes('token') || lowerTitle.includes('2fa') || lowerTitle.includes('código') || lowerTitle.includes('recupera') ||
+                lowerMsg.includes('senha') || lowerMsg.includes('token') || lowerMsg.includes('2fa') || lowerMsg.includes('código') || lowerMsg.includes('recupera');
+
+            if (isSensitive) {
+                console.warn('[PWA Notification] Blocked native display of sensitive content:', notif.title);
+                return;
+            }
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(notif.title, {
+                    body: notif.message,
+                    icon: '/pwa-192x192.png',
+                    tag: 'torex-notification',
+                    badge: '/pwa-192x192.png'
+                });
             }
         });
 
@@ -67,8 +122,9 @@ export const ChatWidget = () => {
 
         return () => {
             socket.disconnect();
+            socketRef.current = null;
         };
-    }, [token, isOpen]);
+    }, [token]);
 
     const handleSend = () => {
         if (!newMessage.trim() || !socketRef.current) return;

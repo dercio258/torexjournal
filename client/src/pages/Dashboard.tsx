@@ -17,7 +17,7 @@ import {
 } from 'chart.js';
 import { PerformanceRadar } from '../components/dashboard/charts/PerformanceRadar';
 import { DailyPnLChart } from '../components/dashboard/charts/DailyPnLChart';
-import { HeatmapChart } from '../components/dashboard/charts/HeatmapChart';
+// import { HeatmapChart } from '../components/dashboard/charts/HeatmapChart';
 import { WinrateGauge, InstrumentRow, SessionRow, TraderHealthWidget } from '../components/dashboard/StatsWidgets';
 import { useDashboardStats, useSubscriptionStatus, useTradesFallback } from '../hooks/useDashboard';
 import { useAuth } from '../context/AuthContext';
@@ -442,10 +442,11 @@ export const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Heatmap Section */}
+            {/* Heatmap Section - Removida conforme solicitação
             <div className="h-[400px]">
                 <HeatmapChart endDate={queryDates.end} />
             </div>
+            */}
 
             {/* Detailed Stats Section */}
             <div>

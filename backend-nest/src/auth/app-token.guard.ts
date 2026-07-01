@@ -2,7 +2,6 @@ import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AccountEntity } from '../account/account.entity';
-import { Request } from 'express';
 
 @Injectable()
 export class AppTokenGuard implements CanActivate {
@@ -12,7 +11,7 @@ export class AppTokenGuard implements CanActivate {
     ) { }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const request = context.switchToHttp().getRequest<Request>();
+        const request = context.switchToHttp().getRequest<any>();
         // Headers are lowercase in Express unless configured otherwise
         const token = request.headers['x-app-token'] as string || request.body.token;
 

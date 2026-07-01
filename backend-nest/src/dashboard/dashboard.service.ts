@@ -7,6 +7,7 @@ import { TradeEntity } from '../mt5/trade.entity';
 import { AccountEntity } from '../account/account.entity';
 import { MentalLog } from './mental-log.entity';
 import { TechnicalJournal } from './technical-journal.entity';
+import { ClickHouseService } from '../clickhouse/clickhouse.service';
 
 @Injectable()
 export class DashboardService {
@@ -19,7 +20,8 @@ export class DashboardService {
         private mentalLogRepo: Repository<MentalLog>,
         @InjectRepository(TechnicalJournal)
         private techJournalRepo: Repository<TechnicalJournal>,
-        @Inject(CACHE_MANAGER) private cacheManager: Cache
+        @Inject(CACHE_MANAGER) private cacheManager: Cache,
+        private clickHouseService: ClickHouseService
     ) { }
 
     private async getPrimaryAccount(userId: string) {
@@ -31,6 +33,16 @@ export class DashboardService {
     }
 
     async getTrades(userId: string, endDate?: string) {
+        const cacheKey = `dashboard:trades:${userId}:${endDate || 'all'}`;
+        try {
+            const cached = await this.cacheManager.get<any[]>(cacheKey);
+            if (cached) {
+                return cached;
+            }
+        } catch (err) {
+            console.warn(`[DashboardService] Cache get failed for trades: ${err.message}`);
+        }
+
         const accounts = await this.accountRepo.find({ where: { userId } });
         if (accounts.length === 0) return [];
 
@@ -40,18 +52,29 @@ export class DashboardService {
             whereClause.closeTime = LessThanOrEqual(new Date(endDate));
         }
 
-        return this.tradeRepo.find({
+        const trades = await this.tradeRepo.find({
             where: whereClause,
             order: { closeTime: 'DESC' },
             take: 100
         });
+
+        try {
+            await this.cacheManager.set(cacheKey, trades, 300000); // 5 minutes cache
+        } catch (err) {
+            console.warn(`[DashboardService] Cache set failed for trades: ${err.message}`);
+        }
+        return trades;
     }
 
     async getPerformance(userId: string, startDate?: string, endDate?: string) {
         const cacheKey = `dashboard:performance:${userId}:${startDate || 'all'}:${endDate || 'all'}`;
-        const cached = await this.cacheManager.get(cacheKey);
-        if (cached) {
-            return cached;
+        try {
+            const cached = await this.cacheManager.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+        } catch (err) {
+            console.warn(`[DashboardService] Cache get failed for performance: ${err.message}`);
         }
 
         try {
@@ -85,10 +108,41 @@ export class DashboardService {
             // FILTER: Only consider CLOSED trades for performance metrics
             whereClause.status = 'CLOSED';
 
-            const trades = await this.tradeRepo.find({
-                where: whereClause,
-                order: { closeTime: 'ASC' }
-            });
+            let trades: any[] = [];
+            try {
+                let clickhouseQuery = `
+                    SELECT 
+                        id, accountId, ticket, contractId, symbol, type, 
+                        volume, openPrice, closePrice, profit, sl, tp, 
+                        commission, swap, openTime, closeTime, status, 
+                        magic, comment, session, mood, rating, setup, 
+                        lesson, tags, dataQuality, importLogId, updatedAt
+                    FROM trades 
+                    WHERE accountId IN ({accountIds:Array(String)}) AND status = 'CLOSED'
+                `;
+                const params: any = { accountIds };
+
+                if (startDate && endDate) {
+                    clickhouseQuery += ` AND closeTime BETWEEN {startDate:DateTime} AND {endDate:DateTime}`;
+                    params.startDate = new Date(startDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+                    params.endDate = new Date(endDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+                } else if (startDate) {
+                    clickhouseQuery += ` AND closeTime >= {startDate:DateTime}`;
+                    params.startDate = new Date(startDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+                } else if (endDate) {
+                    clickhouseQuery += ` AND closeTime <= {endDate:DateTime}`;
+                    params.endDate = new Date(endDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+                }
+
+                clickhouseQuery += ` ORDER BY closeTime ASC`;
+                trades = await this.clickHouseService.query(clickhouseQuery, params);
+            } catch (clickhouseErr) {
+                console.warn('ClickHouse query failed, falling back to PostgreSQL:', clickhouseErr.message);
+                trades = await this.tradeRepo.find({
+                    where: whereClause,
+                    order: { closeTime: 'ASC' }
+                });
+            }
 
             const dailyMap = new Map<string, number>();
             const moodMap = new Map<string, { count: number; pnl: number }>();
@@ -171,7 +225,7 @@ export class DashboardService {
                 radarMetrics,
                 dailyPnL: Array.from(dailyMap.entries()).map(([date, pnl]) => ({ date, pnl })),
                 tradePnL: trades.map(t => ({
-                    date: t.closeTime.toISOString(),
+                    date: t.closeTime ? new Date(t.closeTime).toISOString() : null,
                     value: (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0),
                     ticket: t.ticket
                 })),
@@ -181,15 +235,11 @@ export class DashboardService {
                 bySession: Array.from(sessionMap.entries()).map(([session, data]) => ({ session, ...data }))
             };
 
-            await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes (in milliseconds if using cache-manager < 5, seconds if > 5. Assuming NestJS wrapper handles it standardly as Milliseconds or seconds depending on config. NestJS cache-manager 5+ usually uses Milliseconds. Config in AppModule said ttl: 600 (seconds? default is seconds in Module config, but set method might vary). I will use 300000 for 5 mins to be safe or check CacheStore type).
-            // Correction: NestJS CacheModule default ttl is seconds. cacheManager.set ttl argument depends on store. Redis store generally takes seconds. 
-            // Wait, cache-manager v5 changed to milliseconds. NestJS wraps it. 
-            // Let's use 300 if seconds, or 300000 if ms.
-            // Safe bet: The AppModule config used 600. If that's working, then 300 is 5 mins.
-            // I'll use 300 * 1000 just in case logic is ms, or stick to module defaults.
-            // Actually, best to just pass 300 and see, or look up app.module.
-            // AppModule: ttl: 600.
-            // I will use `300` (seconds).
+            try {
+                await this.cacheManager.set(cacheKey, result, 300000); // 5 minutes
+            } catch (err) {
+                console.warn(`[DashboardService] Cache set failed for performance: ${err.message}`);
+            }
 
             return result;
 
@@ -492,21 +542,35 @@ export class DashboardService {
     }
 
     async invalidateUserCache(userId: string) {
-        const patterns = [
-            `dashboard:performance:${userId}:*`
-        ];
+        // Log it
+        console.log(`[DashboardService] Invalidation triggered for user ${userId}`);
 
-        for (const pattern of patterns) {
-            // Depending on the cache store (Redis vs Memory), keys() might work or we need manual tracking.
-            // For now, since most performance metrics use a predictable key, we'll try to delete the most common ones.
-            // If using Redis, we could use DEL with wildcard if supported or iterate.
-            
-            // Simplified: Invalidate the common 'all' period which is the most likely culprit for stale stats
-            await this.cacheManager.del(`dashboard:performance:${userId}:all:all`);
-            
-            // Log it
-            console.log(`[DashboardService] Cache invalidated for user ${userId}`);
+        // 1. Try to delete by pattern if supported by cache store (Redis/Memory)
+        const store = (this.cacheManager as any).store;
+        if (store && typeof store.keys === 'function') {
+            try {
+                const keys = await store.keys(`*:${userId}:*`);
+                if (keys && keys.length > 0) {
+                    for (const key of keys) {
+                        await this.cacheManager.del(key);
+                    }
+                    console.log(`[DashboardService] Deleted ${keys.length} pattern-matched cache keys.`);
+                    return;
+                }
+            } catch (err) {
+                console.warn('[DashboardService] Pattern-based cache invalidation failed:', err.message);
+            }
         }
+
+        // 2. Fallback to explicit deletion of common keys
+        const commonKeys = [
+            `dashboard:performance:${userId}:all:all`,
+            `dashboard:trades:${userId}:all`
+        ];
+        for (const key of commonKeys) {
+            await this.cacheManager.del(key);
+        }
+        console.log(`[DashboardService] Cleaned default common cache keys.`);
     }
 
     async getHeatmapData(userId: string, endDate?: string) {

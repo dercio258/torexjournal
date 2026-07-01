@@ -14,7 +14,7 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
     private redis: Redis;
 
     // Clients Map: socketId -> State
-    private clients = new Map<string, { socket: net.Socket, authenticated: boolean }>();
+    private clients = new Map<string, { socket: net.Socket, authenticated: boolean, userId?: string, accountId?: string }>();
 
     constructor(
         private configService: ConfigService,
@@ -146,7 +146,14 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
                     // Just validate it's JSON
                     JSON.parse(jsonStr);
                     // Add to Redis Stream
-                    this.redis.xadd('stream:mt5_trade_data', 'MAXLEN', '~', 5000, '*', 'data', jsonStr);
+                    this.redis.xadd(
+                        'stream:mt5_trade_data',
+                        'MAXLEN', '~', 5000,
+                        '*',
+                        'data', jsonStr,
+                        'userId', client.userId || '',
+                        'accountId', client.accountId || ''
+                    );
                     this.logger.debug(`Received Trades Update: ${jsonStr.length} bytes`);
                 } catch (e) {
                     this.logger.error('Invalid Trade JSON');
@@ -178,11 +185,13 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
         socket.write(Buffer.concat([header, payload]));
     }
 
-    private async validateClient(client: { socket: net.Socket, authenticated: boolean }, token: string) {
+    private async validateClient(client: { socket: net.Socket, authenticated: boolean, userId?: string, accountId?: string }, token: string) {
         try {
             const account = await this.mt5Service.validateAppToken(token);
             if (account) {
                 client.authenticated = true;
+                client.userId = account.userId;
+                client.accountId = account.id;
                 this.logger.log(`✅ Cliente Autenticado: ${client.socket.remoteAddress} (Account: ${account.id})`);
                 this.sendPacket(client.socket, 2, Buffer.alloc(0));
 

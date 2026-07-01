@@ -1,9 +1,11 @@
 import { Controller, Post, Body, UseGuards, Request, Get, Put, Res, Logger } from '@nestjs/common';
-import { Response } from 'express';
+import { FastifyReply } from 'fastify';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { AccountService } from '../account/account.service';
 import { AuthGuard } from '@nestjs/passport';
+import { GoogleOauthGuard } from './google-oauth.guard';
+import { GithubOauthGuard } from './github-oauth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { PlanPermissionService } from '../payment/plan-permission.service';
 import { ConfigService } from '@nestjs/config';
@@ -38,9 +40,11 @@ export class AuthController {
 
     @Post('register')
     @Throttle({ default: { limit: 3, ttl: 60000 } }) // Limit: 3 req/min
-    async register(@Body() body) {
+    async register(@Body() body, @Request() req) {
         try {
-            return await this.authService.register(body);
+            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+            const userAgent = req.headers['user-agent'];
+            return await this.authService.register(body, ip, userAgent);
         } catch (e) {
             return { success: false, error: e.message };
         }
@@ -112,9 +116,19 @@ export class AuthController {
             const planTier = await this.planPermissionService.getUserPlan(user.id);
             const subscription = await this.planPermissionService.getFullUserSubscription(user.id);
 
-            // Map backend apiToken to frontend token expectation
+            // Map only safe user fields and backend apiToken to frontend token expectation
             return {
-                ...user,
+                id: user.id,
+                name: user.name,
+                username: user.username,
+                email: user.email,
+                avatarUrl: user.avatarUrl,
+                whatsapp: user.whatsapp,
+                createdAt: user.createdAt,
+                twoFactorEnabled: user.twoFactorEnabled,
+                isTwoFactorConfirmed: user.isTwoFactorConfirmed,
+                onboardingCompleted: user.onboardingCompleted,
+                dailyLossLimit: user.dailyLossLimit,
                 token: user.apiToken,
                 is_connected: isConnected,
                 tier: planTier,
@@ -157,14 +171,14 @@ export class AuthController {
     async verify2fa(@Body() body, @Request() req) {
         const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         const userAgent = req.headers['user-agent'];
-        return this.authService.verify2fa(body.userId, body.otp, ip, userAgent);
+        return this.authService.verify2fa(body.twoFactorToken || body.userId, body.otp, ip, userAgent);
     }
 
     @Post('resend-2fa')
     async resend2fa(@Body() body, @Request() req) {
         const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
         const userAgent = req.headers['user-agent'];
-        return this.authService.resend2fa(body.userId, ip, userAgent);
+        return this.authService.resend2fa(body.twoFactorToken || body.userId, ip, userAgent);
     }
 
     @UseGuards(AuthGuard('jwt'))
@@ -191,16 +205,18 @@ export class AuthController {
         return this.authService.saveOnboardingSurvey(req.user.id, body);
     }
 
-    @UseGuards(AuthGuard('google'))
+    @UseGuards(GoogleOauthGuard)
     @Get('google')
     async googleAuth(@Request() req) {
         // Guard redirects to Google
     }
 
-    @UseGuards(AuthGuard('google'))
+    @UseGuards(GoogleOauthGuard)
     @Get('google/callback')
-    async googleAuthRedirect(@Request() req, @Res() res: Response) {
-        const result = await this.authService.validateGoogleUser(req.user);
+    async googleAuthRedirect(@Request() req, @Res() res: FastifyReply) {
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const userAgent = req.headers['user-agent'];
+        const result = await this.authService.validateGoogleUser(req.user, ip, userAgent);
         
         const frontendUrl = this.configService.get<string>('FRONTEND_URL');
         if (!frontendUrl) {
@@ -220,16 +236,18 @@ export class AuthController {
         return res.redirect(redirectUrl.toString());
     }
 
-    @UseGuards(AuthGuard('github'))
+    @UseGuards(GithubOauthGuard)
     @Get('github')
     async githubAuth(@Request() req) {
         // Guard redirects to GitHub
     }
 
-    @UseGuards(AuthGuard('github'))
+    @UseGuards(GithubOauthGuard)
     @Get('github/callback')
-    async githubAuthRedirect(@Request() req, @Res() res: Response) {
-        const result = await this.authService.validateGithubUser(req.user);
+    async githubAuthRedirect(@Request() req, @Res() res: FastifyReply) {
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const userAgent = req.headers['user-agent'];
+        const result = await this.authService.validateGithubUser(req.user, ip, userAgent);
 
         const frontendUrl = this.configService.get<string>('FRONTEND_URL');
         if (!frontendUrl) {

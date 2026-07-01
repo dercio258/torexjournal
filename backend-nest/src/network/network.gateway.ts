@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { Injectable, UseGuards, Inject, forwardRef } from '@nestjs/common';
 import { NetworkService } from './network.service';
 import { JwtService } from '@nestjs/jwt';
+import { OnEvent } from '@nestjs/event-emitter';
 
 @WebSocketGateway({
     cors: {
@@ -36,7 +37,16 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
                 client.disconnect();
                 return;
             }
-            // Simple validation
+            
+            const decoded = this.jwtService.decode(token) as any;
+            if (decoded) {
+                const userId = decoded.sub || decoded.id;
+                if (userId) {
+                    client.data.userId = userId;
+                    client.join(`user_room:${userId}`);
+                    console.log(`Client ${client.id} joined room user_room:${userId}`);
+                }
+            }
             console.log(`Client connected to Network: ${client.id}`);
         } catch (e) {
             client.disconnect();
@@ -45,6 +55,14 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
     handleDisconnect(client: Socket) {
         console.log(`Client disconnected from Network: ${client.id}`);
+    }
+
+    @OnEvent('notification.created')
+    handleNotificationCreated(payload: { userId: string; notification: any }) {
+        if (payload && payload.userId && payload.notification) {
+            // Emite de forma segura para a sala do usuário
+            this.server.to(`user_room:${payload.userId}`).emit('notification', payload.notification);
+        }
     }
 
     @SubscribeMessage('msgToServer')

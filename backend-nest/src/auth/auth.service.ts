@@ -428,7 +428,7 @@ export class AuthService {
         return { success: true, message: 'Senha redefinida com sucesso. Sua conta foi desbloqueada.' };
     }
 
-    async register(data: any) {
+    async register(data: any, ip?: string, userAgent?: string) {
         if (!data.otp) {
             throw new BadRequestException('OTP is required');
         }
@@ -477,21 +477,10 @@ export class AuthService {
             );
         }
 
-        const payload = { email: newUser.email, id: newUser.id };
-        const planTier = await this.planPermissionService.getUserPlan(newUser.id);
-
+        const authResponse = await this.generateAuthResponse(newUser, ip, userAgent, false);
         return {
-            success: true,
-            message: 'User registered successfully',
-            token: this.jwtService.sign(payload),
-            user: {
-                id: newUser.id,
-                name: newUser.name,
-                email: newUser.email,
-                api_token: newUser.apiToken,
-                tier: planTier,
-                onboardingCompleted: false
-            }
+            ...authResponse,
+            message: 'User registered successfully'
         };
     }
 
@@ -523,7 +512,7 @@ export class AuthService {
         }
     }
 
-    async validateGoogleUser(profile: any) {
+    async validateGoogleUser(profile: any, ip?: string, userAgent?: string) {
         let user = await this.usersService.findOneByGoogleId(profile.googleId);
 
         if (!user) {
@@ -568,24 +557,14 @@ export class AuthService {
             };
         }
 
-        const payload = { email: user.email, id: user.id };
-        const token = this.jwtService.sign(payload);
-
+        const authResponse = await this.generateAuthResponse(user, ip, userAgent, false);
         return {
-            success: true,
-            token,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                api_token: user.apiToken,
-                onboardingCompleted: user.onboardingCompleted
-            },
+            ...authResponse,
             requiresContact: !user.whatsapp
         };
     }
 
-    async validateGithubUser(profile: any) {
+    async validateGithubUser(profile: any, ip?: string, userAgent?: string) {
         let user = await this.usersService.findOneByGithubId(profile.githubId);
 
         if (!user) {
@@ -630,19 +609,9 @@ export class AuthService {
             };
         }
 
-        const payload = { email: user.email, id: user.id };
-        const token = this.jwtService.sign(payload);
-
+        const authResponse = await this.generateAuthResponse(user, ip, userAgent, false);
         return {
-            success: true,
-            token,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                api_token: user.apiToken,
-                onboardingCompleted: user.onboardingCompleted
-            },
+            ...authResponse,
             requiresContact: !user.whatsapp
         };
     }

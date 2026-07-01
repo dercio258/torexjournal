@@ -1,7 +1,5 @@
 import { Controller, Get, Post, Body, Param, UseGuards, Req, Delete, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { NetworkService } from './network.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../common/guards/plan.guard';
@@ -19,15 +17,7 @@ export class NetworkController {
 
     @Post('upload')
     @UseGuards(JwtAuthGuard)
-    @UseInterceptors(FileInterceptor('file', {
-        storage: diskStorage({
-            destination: './uploads',
-            filename: (req, file, cb) => {
-                const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-                return cb(null, `${randomName}${extname(file.originalname)}`);
-            }
-        })
-    }))
+    @UseInterceptors(new FastifyFileInterceptor('file', { dest: './uploads' }))
     async uploadImage(@UploadedFile() file) {
         return { imageUrl: `/uploads/${file.filename}` };
     }

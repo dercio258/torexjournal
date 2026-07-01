@@ -19,6 +19,9 @@
         "migration:revert": "npm run typeorm -- -d ./src/data-source.ts migration:revert"
     },
     "dependencies": {
+        "@clickhouse/client": "^1.23.0",
+        "@fastify/multipart": "^8.3.1",
+        "@fastify/static": "^7.0.4",
         "@hapi/boom": "^10.0.1",
         "@mathieuc/tradingview": "^3.5.2",
         "@nestjs-modules/mailer": "^2.0.2",
@@ -33,6 +36,10 @@
         "@nestjs/microservices": "^10.4.22",
         "@nestjs/passport": "^11.0.5",
         "@nestjs/platform-express": "^10.0.0",
+        "@nestjs/platform-fastify": "^10.4.22",
+        "@fastify/multipart": "^8.3.1",
+        "@fastify/static": "^7.0.4",
+        "@clickhouse/client": "^1.23.0",
         "@nestjs/platform-socket.io": "^10.4.22",
         "@nestjs/schedule": "^6.1.1",
         "@nestjs/serve-static": "^4.0.0",

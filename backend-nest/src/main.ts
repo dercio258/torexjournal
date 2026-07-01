@@ -1,13 +1,26 @@
 import { NestFactory } from '@nestjs/core';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Transport, MicroserviceOptions } from '@nestjs/microservices';
 import { GenericExceptionFilter } from './common/filters/generic-exception.filter';
+import multipart from '@fastify/multipart';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ trustProxy: true, bodyLimit: 52428800 }),
+    { rawBody: true }
+  );
+
+  // Register Fastify Multipart support
+  await app.register(multipart, {
+    limits: {
+      fileSize: 52428800, // 50MB file size limit
+    }
+  });
 
   // Enable CORS
   app.enableCors({

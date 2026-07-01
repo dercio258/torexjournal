@@ -13,6 +13,7 @@ import { MoreThan } from 'typeorm';
 import { randomInt } from 'crypto';
 import { BaileysService } from './baileys.service';
 import { WhatsAppTemplates } from './whatsapp-templates';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class NotificationsService {
@@ -32,6 +33,7 @@ export class NotificationsService {
         private telegramService: TelegramService,
         private emailService: EmailService,
         private baileysService: BaileysService,
+        private readonly eventEmitter: EventEmitter2,
     ) { }
 
     async findAll(userId: string) {
@@ -100,6 +102,9 @@ export class NotificationsService {
                 }
             }
         }
+
+        // Emit local event to propagate to WebSockets (PWA notifications)
+        this.eventEmitter.emit('notification.created', { userId, notification: saved });
 
         return saved;
     }

@@ -27,6 +27,9 @@ export class EmailService {
                 user,
                 pass,
             },
+            tls: {
+                rejectUnauthorized: false
+            }
         });
     }
 

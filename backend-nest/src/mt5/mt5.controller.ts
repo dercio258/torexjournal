@@ -53,8 +53,12 @@ export class Mt5Controller {
     @UseGuards(AppTokenGuard)
     @HttpCode(200)
     async saveHistory(@Body() trades: any[], @Req() req) {
-        // We can now access req.user or req.account if needed
-        await this.mt5Queue.add('save-history', trades, {
+        const account = req.account;
+        await this.mt5Queue.add('save-history', {
+            trades,
+            userId: account?.userId,
+            accountId: account?.id
+        }, {
             removeOnComplete: true,
             removeOnFail: 50,
             attempts: 3

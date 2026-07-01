@@ -1,8 +1,6 @@
 import { Controller, Get, Post, Patch, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Assuming this exists from AuthModule
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
@@ -58,15 +56,7 @@ export class DashboardController {
     }
 
     @Post('mental-log/image')
-    @UseInterceptors(FileInterceptor('file', {
-        storage: diskStorage({
-            destination: './uploads',
-            filename: (req, file, cb) => {
-                const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
-                return cb(null, `${randomName}${extname(file.originalname)}`);
-            }
-        })
-    }))
+    @UseInterceptors(new FastifyFileInterceptor('file', { dest: './uploads' }))
     async uploadMentalLogImage(@Req() req, @UploadedFile() file, @Body('session') session: string) {
         const imageUrl = `/uploads/${file.filename}`;
         await this.dashboardService.saveMentalLogImage(req.user.id, imageUrl, session);

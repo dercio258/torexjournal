@@ -19,7 +19,6 @@ import { Mt5TcpServer } from '../mt5-tcp.server';
 
 import { Mt5RedisSubscriber } from './mt5-redis-subscriber.service';
 import { TradeHistoryEntity } from './trade-history.entity';
-import { MarketTickEntity } from './market-tick.entity';
 import { CloudInstanceEntity } from './cloud-instance.entity';
 import { Mt5InstanceService } from './mt5-instance.service';
 import { ImportController } from '../import/import.controller';
@@ -35,7 +34,7 @@ import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([AccountEntity, PositionEntity, TradeEntity, TradeHistoryEntity, MarketTickEntity, CloudInstanceEntity, ImportLog]),
+        TypeOrmModule.forFeature([AccountEntity, PositionEntity, TradeEntity, TradeHistoryEntity, CloudInstanceEntity, ImportLog]),
         NotificationsModule,
         AiModule,
         NormalizationModule,

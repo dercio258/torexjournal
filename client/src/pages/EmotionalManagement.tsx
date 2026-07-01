@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { BrainCircuit, Save, Zap, Moon, Target, Smile, AlertTriangle, Coffee, History, ExternalLink, Calendar, Share2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
-// keeping for now or remove if strictly unused. Actually I'll remove it.
+import api from '../api';
 import html2canvas from 'html2canvas';
 
 interface MentalLog {
@@ -152,12 +152,9 @@ const EmotionalManagement = () => {
 
     const fetchUserProfile = async () => {
         try {
-            const res = await fetch(`${window.location.origin}/api/auth/profile`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setUserName(data.name || data.email || 'Trader');
+            const res = await api.get('/auth/profile');
+            if (res.data) {
+                setUserName(res.data.name || res.data.email || 'Trader');
             }
         } catch (error) {
             console.error("Failed to fetch profile", error);
@@ -167,21 +164,15 @@ const EmotionalManagement = () => {
     const fetchLog = async () => {
         try {
             setLoading(true);
-            const res = await fetch(`${window.location.origin}/api/mental-log/today?session=${currentSession}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+            const res = await api.get('/dashboard/mental-log/today', {
+                params: { session: currentSession }
             });
-            if (res.ok) {
-                const data = await res.json();
-                if (data) setLog(data);
-            }
+            if (res.data) setLog(res.data);
 
             // Fetch History
-            const historyRes = await fetch(`${window.location.origin}/api/mental-log/history`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (historyRes.ok) {
-                const historyData = await historyRes.json();
-                setHistory(historyData);
+            const historyRes = await api.get('/dashboard/mental-log/history');
+            if (historyRes.data) {
+                setHistory(historyRes.data);
             }
 
         } catch (error) {
@@ -198,21 +189,14 @@ const EmotionalManagement = () => {
             setSaving(true);
  
             // 1. Save Text Data
-            const res = await fetch(`${window.location.origin}/api/mental-log`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    ...log,
-                    session: currentSession,
-                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-                })
+            const res = await api.post('/dashboard/mental-log', {
+                ...log,
+                session: currentSession,
+                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
             });
 
-            if (res.ok) {
-                const savedLog = await res.json();
+            if (res.data) {
+                const savedLog = res.data;
                 setLog(savedLog);
 
                 // 2. Capture & Upload Screenshot
@@ -230,10 +214,10 @@ const EmotionalManagement = () => {
                             formData.append('file', blob, `log-${Date.now()}.png`);
                             formData.append('session', currentSession);
  
-                            await fetch(`${window.location.origin}/api/mental-log/image`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}` },
-                                body: formData
+                            await api.post('/dashboard/mental-log/image', formData, {
+                                headers: {
+                                    'Content-Type': 'multipart/form-data'
+                                }
                             });
 
                             // Refresh history to show new image link

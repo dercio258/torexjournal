@@ -8,8 +8,8 @@ import { AccountEntity } from '../account/account.entity';
 import { PositionEntity } from './position.entity';
 import { TradeEntity } from './trade.entity';
 import { TradeHistoryEntity } from './trade-history.entity';
-import { MarketTickEntity } from './market-tick.entity';
 import { UserEntity } from '../users/user.entity';
+import { ClickHouseService } from '../clickhouse/clickhouse.service';
 import { Mt5Gateway } from './mt5.gateway';
 import { ImportLog, ImportMethod, ImportStatus } from './import-log.entity';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -35,8 +35,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         private tradeRepo: Repository<TradeEntity>,
         @InjectRepository(TradeHistoryEntity)
         private historyRepo: Repository<TradeHistoryEntity>,
-        @InjectRepository(MarketTickEntity)
-        private tickRepo: Repository<MarketTickEntity>,
+        private clickHouseService: ClickHouseService,
         @InjectRepository(ImportLog)
         private importLogRepo: Repository<ImportLog>,
         private dataSource: DataSource,
@@ -273,14 +272,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async saveHistory(trades: any[], importMethod: ImportMethod = ImportMethod.EA, userId?: string) {
+    async saveHistory(trades: any[], importMethod: ImportMethod = ImportMethod.EA, userId?: string, accountId?: string) {
         try {
-            // 1. Resolve Account ID if userId is provided (Fast DB check)
-            let accountId = null;
-            if (userId) {
+            // 1. Resolve Account ID
+            let resolvedAccountId = accountId || null;
+            if (!resolvedAccountId && userId) {
                 const account = await this.accountRepo.findOne({ where: { userId } });
                 if (account) {
-                    accountId = account.id;
+                    resolvedAccountId = account.id;
                 } else {
                     this.logger.warn(`No account found for user ${userId}. Creating a default manual account to store imported trades.`);
                     const newAcc = this.accountRepo.create({
@@ -289,7 +288,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         isConnected: false
                     });
                     const savedAcc = await this.accountRepo.save(newAcc);
-                    accountId = savedAcc.id;
+                    resolvedAccountId = savedAcc.id;
                 }
             }
 
@@ -305,14 +304,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 trades: normalizedTrades,
                 importMethod,
                 userId,
-                accountId
+                accountId: resolvedAccountId
             }, {
                 attempts: 3,
                 backoff: { type: 'exponential', delay: 5000 },
                 removeOnComplete: true
             });
 
-            this.logger.log(`Queued background import for ${normalizedTrades.length} trades (Method: ${importMethod}, User: ${userId || 'N/A'})`);
+            this.logger.log(`Queued background import for ${normalizedTrades.length} trades (Method: ${importMethod}, User: ${userId || 'N/A'}, Account: ${resolvedAccountId || 'N/A'})`);
 
             return { success: true, count: normalizedTrades.length, message: 'Background processing started' };
 
@@ -379,6 +378,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 }
 
                 await queryRunner.manager.save(tradesToSave);
+                
+                // Sync trades to ClickHouse
+                await this.clickHouseService.saveTrades(tradesToSave);
             }
 
             await queryRunner.commitTransaction();
@@ -517,7 +519,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         trade.lesson = journalData.lesson;
         trade.tags = journalData.tags;
 
-        return this.tradeRepo.save(trade);
+        const saved = await this.tradeRepo.save(trade);
+        await this.clickHouseService.saveTrade(saved);
+        return saved;
     }
 
     async createManualTrade(data: any, userId: string): Promise<TradeEntity> {
@@ -548,6 +552,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         });
 
         const saved = await this.tradeRepo.save(newTrade);
+        await this.clickHouseService.saveTrade(saved);
 
         // Invalidate Dashboard Cache
         await this.dashboardService.invalidateUserCache(userId);
@@ -581,7 +586,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         if (!tick || !tick.symbol) return;
 
         try {
-            await this.tickRepo.save({
+            await this.clickHouseService.saveTick({
                 timestamp: new Date(Number(tick.time)), // Ensure millis
                 symbol: tick.symbol,
                 bid: tick.bid,
@@ -591,10 +596,8 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 mt5Id: mt5_id
             });
         } catch (e) {
-            // Log only critical errors, ignore duplicate/benign for high freq
-            if (e.code !== '23505') {
-                // this.logger.error(`Tick Save Error: ${e.message}`);
-            }
+            // Log only critical errors
+            this.logger.error(`Tick Save Error: ${e.message}`);
         }
     }
 

@@ -21,8 +21,8 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401 || error.response?.status === 403) {
-            console.error(`API Auth Error (${error.response.status}) on URL:`, error.config?.url);
+        if (error.response?.status === 401) {
+            console.error(`API Auth Error (401) on URL:`, error.config?.url);
             const isAdminRequest = error.config?.url?.startsWith('/admin') || window.location.pathname.startsWith('/admin');
             if (isAdminRequest) {
                 localStorage.removeItem('adminToken');
