@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Monitor, Upload, Search } from 'lucide-react';
+import { Monitor, Upload, Search, Lock } from 'lucide-react';
 
 interface Broker {
     id: string;
@@ -63,13 +63,20 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredBrokers.map(broker => (
-                    <div
-                        key={broker.id}
-                        onClick={() => onSelect(broker)}
-                        className="group relative bg-slate-900/50 border border-slate-800/50 hover:bg-slate-800/50 hover:border-emerald-500/30 rounded-xl p-5 cursor-pointer transition-all flex items-center gap-4 overflow-hidden"
-                    >
-                        <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all" />
+                {filteredBrokers.map(broker => {
+                    const isLocked = broker.type === 'AUTO_SYNC';
+                    return (
+                        <div
+                            key={broker.id}
+                            onClick={() => onSelect(broker)}
+                            className="group relative bg-slate-900/50 border border-slate-800/50 hover:bg-slate-800/50 hover:border-emerald-500/30 rounded-xl p-5 cursor-pointer transition-all flex items-center gap-4 overflow-hidden"
+                        >
+                            {isLocked && (
+                                <div className="absolute top-3 right-3 text-slate-500 group-hover:text-emerald-400 transition-colors">
+                                    <Lock size={14} />
+                                </div>
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/0 to-emerald-500/0 group-hover:from-emerald-500/5 group-hover:to-transparent transition-all" />
 
                         <div className="relative shrink-0">
                             {broker.icon}
@@ -89,8 +96,9 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                             </div>
                             <p className="text-xs text-slate-500 mt-1 line-clamp-1">{broker.description}</p>
                         </div>
-                    </div>
-                ))}
+                        </div>
+                    );
+                })}
             </div>
 
             {filteredBrokers.length === 0 && (

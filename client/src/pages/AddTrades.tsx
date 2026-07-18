@@ -4,7 +4,7 @@ import { BrokerSelector } from '../components/dashboard/BrokerSelector';
 import { AutoSyncForm } from '../components/dashboard/AutoSyncForm';
 import { ManualImportForm } from '../components/dashboard/ManualImportForm';
 import { ImportHistory } from '../components/dashboard/ImportHistory';
-import { Copy, Terminal, Cloud, FileText } from 'lucide-react';
+import { Copy, Terminal, Cloud, FileText, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 import { PlanModal } from '../components/dashboard/PlanModal';
@@ -12,9 +12,10 @@ import { PlanModal } from '../components/dashboard/PlanModal';
 export const AddTrades = () => {
     const { user } = useAuth();
     const [step, setStep] = useState<'SELECT' | 'CONNECT_MT_CLOUD' | 'CONNECT_MT_OPTIONS' | 'CONNECT_MT_EA' | 'CONNECT_DERIV' | 'CONNECT_MANUAL' | 'CONNECT_MANUAL_MT'>('SELECT');
-    const [mtVersion, setMtVersion] = useState<'4' | '5'>('5');
+    const [mtVersion] = useState<'4' | '5'>('5');
     // selectedBroker state removed as it is no longer used for rendering info
     const [appToken, setAppToken] = useState<string | null>(null);
+    const [showDevModal, setShowDevModal] = useState(false);
 
     useEffect(() => {
         const fetchToken = async () => {
@@ -28,28 +29,16 @@ export const AddTrades = () => {
         fetchToken();
     }, [user]);
 
-    const isBasic = user?.tier === 'BASIC';
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
     const [upgradeFeature, setUpgradeFeature] = useState('');
 
     const handleSelectBroker = (broker: any) => {
-        if (isBasic && !['manual_csv', 'mt4', 'mt5'].includes(broker.id)) {
-            setUpgradeFeature(`Conexão Auto-Sync ${broker.name || broker.id}`);
-            setShowUpgradeModal(true);
+        if (broker.type === 'AUTO_SYNC') {
+            setUpgradeFeature(broker.name || broker.id);
+            setShowDevModal(true);
             return;
         }
-        // No longer storing selectedBroker since we only care about step routing
-        if (broker.id === 'deriv') {
-            setStep('CONNECT_DERIV');
-        } else if (broker.id === 'mt5') {
-            setMtVersion('5');
-            setStep('CONNECT_MT_OPTIONS');
-        } else if (broker.id === 'mt4') {
-            setMtVersion('4');
-            setStep('CONNECT_MT_OPTIONS');
-        } else {
-            setStep('CONNECT_MANUAL');
-        }
+        setStep('CONNECT_MANUAL');
     };
 
     const handleBack = () => {
@@ -91,7 +80,10 @@ export const AddTrades = () => {
                                     <h3 className="text-xl font-bold text-slate-100 mb-2">Usar Expert Advisor (EA)</h3>
                                     <p className="text-slate-400 text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader {mtVersion} rodando no seu computador ou VPS.</p>
                                 </Card>
-                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group" onClick={() => setStep('CONNECT_MT_CLOUD')}>
+                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group relative" onClick={() => setShowDevModal(true)}>
+                                    <div className="absolute top-4 right-4 text-slate-500 group-hover:text-emerald-400 transition-colors">
+                                        <Lock size={16} />
+                                    </div>
                                     <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Cloud size={32} />
                                     </div>
@@ -238,6 +230,35 @@ export const AddTrades = () => {
                     featureName={upgradeFeature} 
                     onClose={() => setShowUpgradeModal(false)} 
                 />
+            )}
+
+            {showDevModal && (
+                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900/95 border border-slate-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+                        {/* Glow decorativo */}
+                        <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+                        <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-6 shadow-lg shadow-emerald-500/5">
+                            <Lock size={28} className="animate-pulse" />
+                        </div>
+
+                        <h3 className="text-xl font-bold text-white mb-2">
+                            Funcionalidade em Desenvolvimento
+                        </h3>
+                        
+                        <p className="text-sm text-slate-400 leading-relaxed mb-8">
+                            A sincronização automática para {upgradeFeature} está sendo preparada com muito carinho e estará disponível em breve. Aguarde, em breve!
+                        </p>
+
+                        <button
+                            onClick={() => setShowDevModal(false)}
+                            className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-500/15 active:scale-98"
+                        >
+                            Entendido, até breve!
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );
