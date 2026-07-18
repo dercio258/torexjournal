@@ -83,7 +83,9 @@ import { ClickHouseModule } from './clickhouse/clickhouse.module';
         const customPath = configService.get<string>('FRONTEND_BUILD_PATH');
         const rootPath = customPath 
           ? (isAbsolute(customPath) ? customPath : join(process.cwd(), customPath))
-          : join(process.cwd(), '..', 'client', 'dist');
+          : join(__dirname, '..', '..', 'client', 'dist');
+        
+        const uploadsPath = join(__dirname, '..', 'uploads');
         
         return [
           {
@@ -91,7 +93,7 @@ import { ClickHouseModule } from './clickhouse/clickhouse.module';
             exclude: ['/api/(.*)'],
           },
           {
-            rootPath: join(process.cwd(), 'uploads'),
+            rootPath: uploadsPath,
             serveRoot: '/uploads',
             serveStaticOptions: {
               decorateReply: false,
