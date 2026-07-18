@@ -38,7 +38,7 @@ import { ClickHouseModule } from './clickhouse/clickhouse.module';
 
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env', '../.env'],
+      envFilePath: ['.env', '../.env', 'backend-nest/.env'],
     }),
     // Cache Module (Global)
     CacheModule.registerAsync({
