@@ -48,8 +48,8 @@ export const Landing = () => {
         mascotRocket: "https://res.cloudinary.com/dndlqdylc/image/upload/v1788819094/mascot-rocket-BkEtyIqW_ji8mlc.png",
         dashboardMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790959463602_0d9ff4122d063a3e_img-20260911-wa0012.jpg",
         reportsMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790960143809_ed412afba184c0fa_img-20260911-wa0022.jpg",
-        tradesMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1791303086942_70508b69bef5e0f8_diario.png",
-        calendarMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/conteudo/originals/1791302679484_b21832ff3a42f0e8_trade_logs.PNG",
+        tradesMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/conteudo/originals/1791302679484_b21832ff3a42f0e8_trade_logs.PNG",
+        calendarMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1791303086942_70508b69bef5e0f8_diario.png",
         emotionsMockup: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1791303054223_4d0b75a6535a7c5c_emocional.png",
         logo: "https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790957899791_0521d2dc46a60392_touro_design_1.jpeg"
     };
