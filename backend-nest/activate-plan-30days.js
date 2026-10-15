@@ -7,9 +7,9 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 async function activateThirtyDaysPlan() {
-    const targetEmail = process.argv[2];
+    const rawEmail = process.argv[2];
 
-    if (!targetEmail) {
+    if (!rawEmail) {
         console.log('\n======================================================');
         console.log('📌 SCRIPT DE ATIVAÇÃO DE PLANO DE 30 DIAS');
         console.log('======================================================');
@@ -21,6 +21,7 @@ async function activateThirtyDaysPlan() {
         process.exit(1);
     }
 
+    const targetEmail = rawEmail.trim();
     const tier = (process.argv[3] || 'PREMIUM').toUpperCase();
 
     const client = new Client({
@@ -36,15 +37,35 @@ async function activateThirtyDaysPlan() {
         await client.connect();
         console.log('✅ Conexão estabelecida com sucesso.');
 
-        // 1. Localizar usuário
-        const userRes = await client.query('SELECT id, email, name FROM users WHERE email = $1', [targetEmail]);
+        // 1. Localizar usuário (case-insensitive)
+        let userRes = await client.query(
+            'SELECT id, email, name FROM users WHERE LOWER(email) = LOWER($1)', 
+            [targetEmail]
+        );
+
+        // Se não encontrar exatamente, tenta buscar similar (por partes do email)
         if (userRes.rows.length === 0) {
-            console.error(`❌ Usuário com o email "${targetEmail}" não foi encontrado no banco de dados!`);
+            console.warn(`⚠️ Email "${targetEmail}" exato não encontrado. Buscando similares...`);
+            const similarRes = await client.query(
+                'SELECT id, email, name FROM users WHERE email ILIKE $1 OR name ILIKE $1 LIMIT 5',
+                [`%${targetEmail.split('@')[0]}%`]
+            );
+
+            if (similarRes.rows.length > 0) {
+                console.log('\n🔍 Usuários similares encontrados no banco:');
+                similarRes.rows.forEach(u => {
+                    console.log(`   👉 Email: ${u.email} | Nome: ${u.name || 'N/A'}`);
+                });
+                console.log('\nPor favor, execute o script novamente com o email exato listado acima.');
+            } else {
+                console.error(`❌ Nenhum usuário com email parecido com "${targetEmail}" foi encontrado.`);
+                console.log('💡 Dica: Execute `node list-users.js` para ver todos os usuários cadastrados.');
+            }
             return;
         }
 
         const user = userRes.rows[0];
-        console.log(`👤 Usuário localizado: ${user.name || user.email} (ID: ${user.id})`);
+        console.log(`👤 Usuário localizado: ${user.name || user.email} (Email: ${user.email} | ID: ${user.id})`);
 
         // 2. Localizar ou criar a configuração do plano
         let planRes = await client.query(
