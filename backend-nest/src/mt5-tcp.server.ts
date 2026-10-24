@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as net from 'net';
-import { Redis } from 'ioredis';
+import Redis from 'ioredis';
 // Removed: import * as protobuf from 'protobufjs'; // Parsing manual for V2
 // Removed: path, crypto (for V2 simple token)
 

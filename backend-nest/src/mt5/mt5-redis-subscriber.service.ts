@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { Redis } from 'ioredis';
+import Redis from 'ioredis';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
