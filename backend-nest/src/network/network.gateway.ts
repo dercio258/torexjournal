@@ -1,12 +1,13 @@
 import {
     WebSocketGateway,
     WebSocketServer,
-    SubscribeMessage,
     OnGatewayConnection,
     OnGatewayDisconnect,
     MessageBody,
     ConnectedSocket
 } from '@nestjs/websockets';
+import * as Ws from '@nestjs/websockets';
+const SubscribeMessage: any = (Ws as any).SubscribeMessage;
 import { Server, Socket } from 'socket.io';
 import { Injectable, UseGuards, Inject, forwardRef } from '@nestjs/common';
 import { NetworkService } from './network.service';
