@@ -75,7 +75,7 @@ async function bootstrap() {
   }
 
   // Use Socket.IO Adapter (supports namespaces)
-  app.useWebSocketAdapter(new IoAdapter(app));
+  app.useWebSocketAdapter(new IoAdapter(app as any) as any);
 
   // Global Validation Pipe
   app.useGlobalPipes(

@@ -19,17 +19,10 @@ import { AccountModule } from './account/account.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
-import { NetworkModule } from './network/network.module';
-import { TradingViewModule } from './tradingview/tradingview.module';
-import { FinnhubModule } from './finnhub/finnhub.module';
 import { MarketDataModule } from './market-data/market-data.module';
-import { DerivModule } from './deriv/deriv.module';
 import { AiModule } from './ai/ai.module';
-
 import { AlertsModule } from './alerts/alerts.module';
 import { ClickHouseModule } from './clickhouse/clickhouse.module';
-import { EconomicCalendarModule } from './economic-calendar/economic-calendar.module';
-import { LeaderboardModule } from './leaderboard/leaderboard.module';
 
 @Module({
   imports: [
@@ -91,7 +84,6 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
       inject: [ConfigService],
     }),
     Mt5Module,
-    FinnhubModule,
     AuthModule,
     UsersModule,
     PaymentModule,
@@ -99,14 +91,9 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
     DashboardModule,
     NotificationsModule,
     AdminModule,
-    NetworkModule,
-    TradingViewModule,
     MarketDataModule,
-    DerivModule,
     AiModule,
     AlertsModule,
-    EconomicCalendarModule,
-    LeaderboardModule,
   ],
 
   controllers: [],

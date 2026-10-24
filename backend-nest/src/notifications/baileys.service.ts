@@ -26,6 +26,10 @@ export class BaileysService implements OnModuleInit {
     }
 
     async onModuleInit() {
+        if (this.configService.get('WHATSAPP_ENABLED') !== 'true') {
+            this.logger.log('WhatsApp (Baileys) desativado (WHATSAPP_ENABLED != true)');
+            return;
+        }
         this.logger.log('Initializing BaileysService with Evolution API');
         // Do not block startup, poll in background
         this.isPolling = true;
