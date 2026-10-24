@@ -33,6 +33,9 @@ export class LeaderboardService implements OnModuleInit {
     ) {}
 
     async onModuleInit() {
+        if (process.env.MT5_DEDICATED_SERVER === 'true') {
+            return;
+        }
         try {
             await this.recalculateRanks();
         } catch (err) {

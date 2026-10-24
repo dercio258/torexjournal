@@ -40,6 +40,10 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
     ) { }
 
     async onModuleInit() {
+        if (this.configService.get('MT5_DEDICATED_SERVER') === 'true' || this.configService.get('DERIV_ENABLED') === 'false') {
+            this.logger.log('Deriv integration desativada neste servidor.');
+            return;
+        }
         this.logger.log('Initializing Deriv Service - Auto-connecting active accounts');
         const activeAuths = await this.derivAuthRepo.find({ where: { isActive: true } });
         for (const auth of activeAuths) {

@@ -26,8 +26,8 @@ export class BaileysService implements OnModuleInit {
     }
 
     async onModuleInit() {
-        if (this.configService.get('MT5_DEDICATED_SERVER') === 'true' || this.configService.get('WHATSAPP_ENABLED') === 'false') {
-            this.logger.log('WhatsApp (Baileys) desativado neste servidor.');
+        if (this.configService.get('MT5_DEDICATED_SERVER') === 'true' || this.configService.get('WHATSAPP_ENABLED') !== 'true') {
+            this.logger.log('WhatsApp (Baileys) desativado neste servidor (defina WHATSAPP_ENABLED=true para ativar).');
             return;
         }
         this.logger.log('Initializing BaileysService with Evolution API');

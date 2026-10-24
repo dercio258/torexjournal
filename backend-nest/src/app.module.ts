@@ -1,3 +1,8 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+dotenv.config({ path: '../.env' });
+dotenv.config({ path: 'backend-nest/.env' });
+
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
