@@ -304,7 +304,7 @@ export class NotificationsCronService {
     // Runs every 5 minutes to check and expire subscriptions in database and Redis
     @Cron(CronExpression.EVERY_5_MINUTES)
     async checkExpiredSubscriptions() {
-        if (process.env.ENABLE_SUBSCRIPTION_CRON !== 'true') return;
+        if (process.env.MT5_DEDICATED_SERVER === 'true') return;
         const now = new Date();
         try {
             const expiredActiveSubs = await this.subscriptionRepo.find({
