@@ -11,19 +11,19 @@ class MT5ProcessManager:
 
     def __init__(self):
         self.terminal_path = settings.mt5_default_path
-        self.instances_dir = Path(settings.instances_dir)
+        self.instances_dir = Path(settings.instances_dir).resolve()
         self.processes: Dict[int, subprocess.Popen] = {}
         self.pids: Dict[int, int] = {}
 
     def get_account_instance_dir(self, account_id: int) -> Path:
-        instance_dir = self.instances_dir / f"acc_{account_id}"
+        instance_dir = (self.instances_dir / f"acc_{account_id}").resolve()
         instance_dir.mkdir(parents=True, exist_ok=True)
         return instance_dir
 
     def create_startup_config(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> Path:
         """Gera arquivo de inicialização .ini para o terminal"""
         instance_dir = self.get_account_instance_dir(account_id)
-        config_path = instance_dir / "startup.ini"
+        config_path = (instance_dir / "startup.ini").resolve()
         
         content = [
             "; TorexJournal MT5 Auto-Generated Config",
@@ -58,10 +58,11 @@ class MT5ProcessManager:
         instance_dir = self.get_account_instance_dir(account_id)
         config_path = self.create_startup_config(account_id, login, server, password)
 
+        # No modo /portable com cwd=instance_dir, o MT5 carrega o config relativo ao cwd
         cmd = [
             self.terminal_path,
-            f"/portable",
-            f"/config:{str(config_path)}"
+            "/portable",
+            f"/config:{config_path.name}"
         ]
 
         try:
@@ -83,14 +84,33 @@ class MT5ProcessManager:
     def is_running(self, account_id: int) -> bool:
         """Verifica se o processo do terminal da conta ainda está ativo"""
         pid = self.pids.get(account_id)
-        if not pid:
-            return False
+        if pid:
+            try:
+                p = psutil.Process(pid)
+                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        # Verifica se o processo terminal64 foi spawnado por nós ou para esta conta
+        instance_dir = self.get_account_instance_dir(account_id)
+        instance_str = str(instance_dir).lower()
         try:
-            p = psutil.Process(pid)
-            return p.is_running() and p.status() != psutil.STATUS_ZOMBIE
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            self.cleanup_account(account_id)
-            return False
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    name = proc.info.get('name') or ''
+                    if 'terminal64' in name.lower():
+                        cmdline = " ".join(proc.info.get('cmdline') or []).lower()
+                        if instance_str in cmdline or f"acc_{account_id}" in cmdline:
+                            self.pids[account_id] = proc.info['pid']
+                            return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+
+        self.cleanup_account(account_id)
+        return False
 
     def stop_terminal(self, account_id: int, timeout: int = 5) -> bool:
         """Encerra a instância do terminal da conta de forma limpa"""

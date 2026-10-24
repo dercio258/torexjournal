@@ -190,6 +190,11 @@ class WorkerManager:
         if not acc:
             return
 
+        # Garante a conexão IPC do MT5 para esta conta antes de extrair os dados
+        if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
+            logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {account_id}")
+            return
+
         # 1. Atualizar métricas financeiras
         acc_info = self.sync_engine.fetch_account_info(account_id, acc.login, acc.server)
         if acc_info:

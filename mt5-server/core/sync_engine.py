@@ -25,6 +25,19 @@ class SyncEngine:
     def __init__(self):
         self.connected_account: Optional[int] = None
 
+    def ensure_connected(self, account_id: int, login: str, server: str, password: Optional[str] = None, path: Optional[str] = None) -> bool:
+        """Garante que a sessão IPC com o terminal MT5 está ativa para esta conta antes da sincronização"""
+        if not MT5_AVAILABLE:
+            self.connected_account = account_id
+            return True
+
+        if self.connected_account == account_id:
+            info = mt5.account_info()
+            if info is not None:
+                return True
+
+        return self.connect_account(account_id, login, server, password, path)
+
     def connect_account(self, account_id: int, login: str, server: str, password: Optional[str] = None, path: Optional[str] = None) -> bool:
         """Inicializa a conexão IPC com o terminal MT5 da conta especificada"""
         if not MT5_AVAILABLE:
@@ -32,19 +45,23 @@ class SyncEngine:
             self.connected_account = account_id
             return True
 
+        # Se já estava conectado a outra conta, desconectar antes de chavear
+        if self.connected_account is not None and self.connected_account != account_id:
+            mt5.shutdown()
+
         init_kwargs = {
             "portable": True,
-            "timeout": 15000,
+            "timeout": 30000,
         }
         if path:
             init_kwargs["path"] = path
 
         if not mt5.initialize(**init_kwargs):
-            logger.error(f"mt5.initialize() falhou: {mt5.last_error()}")
+            logger.error(f"mt5.initialize() falhou para terminal {path or 'default'}: {mt5.last_error()}")
             return False
 
         if login and server:
-            login_int = int(login) if login.isdigit() else 0
+            login_int = int(login) if str(login).isdigit() else 0
             login_success = mt5.login(login=login_int, password=password or "", server=server)
             if not login_success:
                 logger.error(f"mt5.login() falhou para {login} @ {server}: {mt5.last_error()}")
