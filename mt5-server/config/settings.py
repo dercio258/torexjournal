@@ -24,7 +24,11 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        env_file=(
+            str(BASE_DIR / ".env"),
+            str(BASE_DIR.parent / ".env"),
+            str(BASE_DIR.parent / "backend-nest" / ".env"),
+        ),
         env_file_encoding="utf-8",
         extra="ignore"
     )

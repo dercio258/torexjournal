@@ -30,6 +30,8 @@ def setup_logging():
 def main():
     setup_logging()
     logger.info("Iniciando TorexJournal MT5 Server Worker...")
+    logger.info(f"Backend URL: {settings.backend_url}")
+    logger.info(f"Worker ID: {settings.worker_id}")
     
     manager = WorkerManager()
 
