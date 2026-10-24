@@ -5,6 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "cd backend-nest && npm install --allow-git=all && npm run build",
+    "build:client": "cd client && npm run build",
+    "build:all": "cd client && npm run build && cd ../backend-nest && npm run build",
     "start": "node server.js",
     "start:prod": "cd backend-nest && npm run start:prod"
   },

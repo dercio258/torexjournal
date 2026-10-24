@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Cloud, Power, AlertTriangle, CheckCircle, ArrowLeft } from 'lucide-react';
 import api from '../../api';
+import { useAccount } from '../../context/AccountContext';
 
 interface AutoSyncFormProps {
     brokerName: string;
@@ -12,6 +13,7 @@ interface AutoSyncFormProps {
 }
 
 export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFormProps) => {
+    const { refreshAccounts } = useAccount();
     const [login, setLogin] = useState('');
     const [password, setPassword] = useState('');
     const [server, setServer] = useState(serverName);
@@ -25,14 +27,23 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         setStatus(null);
 
         try {
-            await api.post('/mt5/cloud/connect', {
+            const res = await api.post('/mt5/cloud/connect', {
                 login,
                 pass: password,
                 server
             });
-            setStatus({ type: 'success', message: 'Connection request sent! Terminal is starting...' });
+            setStatus({ 
+                type: 'success', 
+                message: res.data?.message || 'Solicitação enviada com sucesso! O servidor Windows está iniciando a sincronização...' 
+            });
+            if (refreshAccounts) {
+                await refreshAccounts();
+            }
         } catch (e: any) {
-            setStatus({ type: 'error', message: e.response?.data?.message || e.message || 'Connection failed' });
+            setStatus({ 
+                type: 'error', 
+                message: e.response?.data?.message || e.message || 'Falha ao conectar conta.' 
+            });
         } finally {
             setIsLoading(false);
         }
@@ -45,44 +56,44 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 className="flex items-center gap-2 text-[#9CA3AF] hover:text-[#F3F4F6] transition-colors mb-6 text-sm"
             >
                 <ArrowLeft size={16} />
-                Back to Brokers
+                Voltar às opções
             </button>
 
             <Card className="p-8 bg-[#111319] border-white/[0.08] shadow-2xl">
                 <div className="flex items-center gap-4 mb-8">
-                    <div className="w-12 h-12 bg-yellow-400/10 rounded-full flex items-center justify-center text-yellow-400">
+                    <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-400">
                         <Cloud size={24} />
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-[#F3F4F6]">Connect {brokerName}</h2>
-                        <p className="text-sm text-[#9CA3AF]">Enter your trading credentials to auto-sync.</p>
+                        <h2 className="text-xl font-bold text-[#F3F4F6]">Conectar {brokerName}</h2>
+                        <p className="text-sm text-[#9CA3AF]">Insira as credenciais de leitura para sincronização em nuvem.</p>
                     </div>
                 </div>
 
                 <div className="space-y-6">
                     <Input
-                        label="Login ID"
-                        placeholder="Enter your MetaTrader Login ID"
+                        label="Número da Conta (Login MT5)"
+                        placeholder="Ex: 50123456"
                         value={login}
                         onChange={(e) => setLogin(e.target.value)}
                         className="bg-[#08090C] border-white/[0.08]"
                     />
 
                     <Input
-                        label="Investor Password"
+                        label="Senha de Investidor"
                         type="password"
-                        placeholder="Enter Investor Password (or regular)"
+                        placeholder="Digite a Senha de Investidor (apenas leitura)"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="bg-[#08090C] border-white/[0.08]"
                     />
                     <p className="text-xs text-[#6B7280] -mt-4">
-                        * Investor password allows read-only access (safer).
+                        * A senha de investidor garante acesso seguro apenas para leitura de trades.
                     </p>
 
                     <Input
-                        label="Server Name"
-                        placeholder="Search for your server (e.g. Exness-Real2)"
+                        label="Servidor da Corretora"
+                        placeholder="Ex: Exness-Real2, IC Markets-Live, MetaQuotes-Demo"
                         value={server}
                         onChange={(e) => setServer(e.target.value)}
                         className="bg-[#08090C] border-white/[0.08]"
@@ -106,7 +117,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         disabled={!login || !password || !server || isLoading}
                         icon={<Power size={18} />}
                     >
-                        Import Trades
+                        Conectar e Sincronizar Agora
                     </Button>
                 </div>
             </Card>

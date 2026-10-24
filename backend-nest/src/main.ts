@@ -42,17 +42,61 @@ async function bootstrap() {
   });
 
   // Register Frontend static files (client/dist) with proper MIME types & SPA fallback
-  const clientDist = fs.existsSync(join(process.cwd(), '..', 'client', 'dist'))
-    ? join(process.cwd(), '..', 'client', 'dist')
-    : join(__dirname, '..', '..', 'client', 'dist');
+  const candidateClientPaths = [
+    join(process.cwd(), '..', 'client', 'dist'),
+    join(process.cwd(), 'client', 'dist'),
+    join(__dirname, '..', '..', 'client', 'dist'),
+    join(__dirname, '..', 'client', 'dist'),
+  ];
+  const clientDist = candidateClientPaths.find(p => fs.existsSync(p));
 
-  if (fs.existsSync(clientDist)) {
+  if (clientDist) {
     await app.register(fastifyStatic, {
       root: clientDist,
       prefix: '/',
       wildcard: true,
       decorateReply: false
     });
+    console.log(`✅ Frontend SPA static files served from: ${clientDist}`);
+
+    // SPA Fallback Handler: redirect non-API frontend routes to index.html
+    const fastifyInstance = app.getHttpAdapter().getInstance();
+    fastifyInstance.setNotFoundHandler((req: any, reply: any) => {
+      const url = req.raw?.url || req.url || '';
+      // Retornar 404 apenas para endpoints de API e uploads
+      if (url.startsWith('/api') || url.startsWith('/uploads')) {
+        reply.status(404).send({
+          statusCode: 404,
+          message: `Cannot ${req.raw?.method || req.method} ${url}`,
+          error: 'Not Found'
+        });
+        return;
+      }
+
+      // Arquivos estáticos com extensão ausentes (.js, .css, .png, etc.)
+      if (/\.[a-zA-Z0-9]+$/.test(url.split('?')[0])) {
+        reply.status(404).send({
+          statusCode: 404,
+          message: `Static file not found: ${url}`,
+          error: 'Not Found'
+        });
+        return;
+      }
+
+      // Rotas do React SPA (ex: /add-trades, /dashboard, /login)
+      const indexPath = join(clientDist, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        reply.type('text/html').send(fs.createReadStream(indexPath));
+      } else {
+        reply.status(404).send({
+          statusCode: 404,
+          message: `Cannot ${req.raw?.method || req.method} ${url}`,
+          error: 'Not Found'
+        });
+      }
+    });
+  } else {
+    console.warn('⚠️ Frontend client/dist not found. Run "cd client && npm run build" to serve the frontend.');
   }
 
   // Enable CORS

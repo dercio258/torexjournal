@@ -216,9 +216,11 @@ export const AddTrades = () => {
                                     <h3 className="text-xl font-bold text-slate-100 mb-2">Usar Expert Advisor (EA)</h3>
                                     <p className="text-slate-400 text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader {mtVersion} rodando no seu computador ou VPS.</p>
                                 </Card>
-                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group relative" onClick={() => setShowDevModal(true)}>
-                                    <div className="absolute top-4 right-4 text-slate-500 group-hover:text-emerald-400 transition-colors">
-                                        <Lock size={16} />
+                                <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group relative" onClick={() => setStep('CONNECT_MT_CLOUD')}>
+                                    <div className="absolute top-4 right-4">
+                                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                            Disponível
+                                        </span>
                                     </div>
                                     <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Cloud size={32} />
