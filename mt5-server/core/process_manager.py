@@ -46,7 +46,7 @@ class MT5ProcessManager:
         return config_path
 
     def start_terminal(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> bool:
-        """Inicia uma instância portátil do MT5 isolada para a conta"""
+        """Inicia uma instância portátil do MT5 isolada para a conta verificando antes recursos disponíveis"""
         if self.is_running(account_id):
             logger.info(f"Terminal da conta {account_id} já está em execução (PID: {self.pids.get(account_id)})")
             return True
@@ -55,18 +55,35 @@ class MT5ProcessManager:
             logger.error(f"Executável do MT5 não encontrado em: {self.terminal_path}")
             return False
 
+        # Verificação técnica de recursos antes de abrir o processo pesado do MT5
+        mem = psutil.virtual_memory()
+        cpu_usage = psutil.cpu_percent(interval=None)
+        used_mb = round((mem.total - mem.available) / (1024 * 1024), 1)
+        total_mb = round(mem.total / (1024 * 1024), 1)
+        available_mb = round(mem.available / (1024 * 1024), 1)
+        mem_pct = round(mem.percent, 1)
+
+        if mem_pct >= 90.0 or available_mb < 200.0 or cpu_usage >= 95.0:
+            logger.error(
+                f"[RECURSOS CRÍTICOS] Impossível iniciar terminal da conta {account_id}! "
+                f"RAM consumida: {used_mb} MB / {total_mb} MB ({mem_pct}%) | "
+                f"RAM livre: {available_mb} MB | CPU: {cpu_usage}%. "
+                f"Operação cancelada para evitar congelamento da VPS."
+            )
+            return False
+
         instance_dir = self.get_account_instance_dir(account_id)
         config_path = self.create_startup_config(account_id, login, server, password)
 
-        # No modo /portable com cwd=instance_dir, o MT5 carrega o config relativo ao cwd
+        # Passa o caminho absoluto do arquivo para o comando
         cmd = [
             self.terminal_path,
             "/portable",
-            f"/config:{config_path.name}"
+            f"/config:{config_path.resolve()}"
         ]
 
         try:
-            logger.info(f"Iniciando terminal isolado para conta {account_id}...")
+            logger.info(f"Iniciando terminal para conta {account_id} (RAM livre: {available_mb} MB)...")
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(instance_dir),

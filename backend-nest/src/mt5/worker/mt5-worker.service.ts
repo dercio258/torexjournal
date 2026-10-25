@@ -8,6 +8,7 @@ import { Mt5Service } from '../mt5.service';
 import { Mt5Gateway } from '../mt5.gateway';
 import { ImportMethod } from '../import-log.entity';
 
+// telemtria 
 export enum WorkerTaskType {
     START_ACCOUNT = 'START_ACCOUNT',
     STOP_ACCOUNT = 'STOP_ACCOUNT',
@@ -122,10 +123,21 @@ export class Mt5WorkerService {
     }
 
     getWorkerStatus(workerId?: string) {
+        const now = Date.now();
+        const checkWorker = (w: WorkerNodeState) => {
+            const lastHb = w.lastHeartbeat ? new Date(w.lastHeartbeat).getTime() : 0;
+            const isOnline = lastHb > 0 && (now - lastHb < 45000);
+            return {
+                ...w,
+                isOnline
+            };
+        };
+
         if (workerId) {
-            return this.workers.get(workerId) || null;
+            const w = this.workers.get(workerId);
+            return w ? checkWorker(w) : null;
         }
-        return Array.from(this.workers.values());
+        return Array.from(this.workers.values()).map(checkWorker);
     }
 
     // ==========================================

@@ -123,6 +123,9 @@ class WorkerHeartbeat(BaseModel):
     workerId: str
     cpuPercent: float
     memoryPercent: float
+    memoryUsedMb: Optional[float] = None
+    memoryTotalMb: Optional[float] = None
+    memoryAvailableMb: Optional[float] = None
     activeTerminals: int
     monitoredAccounts: List[int]
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -135,3 +138,25 @@ class WorkerEvent(BaseModel):
     message: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class ResourceMetrics(BaseModel):
+    cpuPercent: float
+    memoryPercent: float
+    memoryUsedMb: float
+    memoryTotalMb: float
+    memoryAvailableMb: float
+    processMemoryMb: Optional[float] = None
+    processCpuPercent: Optional[float] = None
+    isCritical: bool = False
+    criticalReasons: List[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class ResourceExhaustionError(RuntimeError):
+    """Exceção levantada quando recursos de CPU ou Memória atingem níveis críticos."""
+    def __init__(self, message: str, metrics: Dict[str, Any], operation: str = "", account_id: Optional[int] = None):
+        super().__init__(message)
+        self.message = message
+        self.metrics = metrics
+        self.operation = operation
+        self.account_id = account_id
+

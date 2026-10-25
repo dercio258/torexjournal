@@ -1,4 +1,5 @@
 import datetime
+import psutil
 from typing import List, Optional, Tuple
 from loguru import logger
 
@@ -17,6 +18,7 @@ from models.schemas import (
     SyncTradesPayload,
     SyncPositionsPayload,
     SyncOrdersPayload,
+    ResourceExhaustionError,
 )
 
 class SyncEngine:
@@ -109,6 +111,23 @@ class SyncEngine:
             mt5.shutdown()
         self.connected_account = None
 
+    @staticmethod
+    def get_resource_snapshot() -> dict:
+        """Coleta snapshot imediato de memória e CPU para diagnóstico técnico de extração."""
+        cpu_usage = psutil.cpu_percent(interval=None)
+        mem = psutil.virtual_memory()
+        used_mb = round((mem.total - mem.available) / (1024 * 1024), 1)
+        total_mb = round(mem.total / (1024 * 1024), 1)
+        available_mb = round(mem.available / (1024 * 1024), 1)
+        mem_percent = round(mem.percent, 1)
+        return {
+            "cpu_percent": cpu_usage,
+            "memory_percent": mem_percent,
+            "memory_used_mb": used_mb,
+            "memory_total_mb": total_mb,
+            "memory_available_mb": available_mb
+        }
+
     def fetch_account_info(self, account_id: int, login: str, server: str) -> Optional[AccountInfo]:
         """Obtém dados de saldo, patrimônio e margem da conta"""
         if not MT5_AVAILABLE:
@@ -126,27 +145,40 @@ class SyncEngine:
                 profit=50.0,
             )
 
-        info = mt5.account_info()
-        if info is None:
-            logger.warning(f"Não foi possível obter account_info(): {mt5.last_error()}")
-            return None
+        try:
+            info = mt5.account_info()
+            if info is None:
+                logger.warning(f"Não foi possível obter account_info(): {mt5.last_error()}")
+                return None
 
-        return AccountInfo(
-            accountId=account_id,
-            login=login,
-            server=server,
-            currency=info.currency,
-            balance=info.balance,
-            equity=info.equity,
-            margin=info.margin,
-            freeMargin=info.margin_free,
-            marginLevel=info.margin_level,
-            leverage=info.leverage,
-            profit=info.profit,
-            company=info.company,
-            name=info.name,
-            tradeAllowed=info.trade_allowed,
-        )
+            return AccountInfo(
+                accountId=account_id,
+                login=login,
+                server=server,
+                currency=info.currency,
+                balance=info.balance,
+                equity=info.equity,
+                margin=info.margin,
+                freeMargin=info.margin_free,
+                marginLevel=info.margin_level,
+                leverage=info.leverage,
+                profit=info.profit,
+                company=info.company,
+                name=info.name,
+                tradeAllowed=info.trade_allowed,
+            )
+        except MemoryError as e:
+            res = self.get_resource_snapshot()
+            err_msg = (
+                f"[ESGOTAMENTO DE MEMÓRIA] Falha ao extrair account_info para conta {account_id}! "
+                f"Memória Consumida: {res['memory_used_mb']} MB / {res['memory_total_mb']} MB ({res['memory_percent']}%) | "
+                f"RAM Livre: {res['memory_available_mb']} MB | CPU: {res['cpu_percent']}%. Abortando."
+            )
+            logger.critical(err_msg)
+            raise ResourceExhaustionError(err_msg, res, operation="fetch_account_info", account_id=account_id)
+        except Exception as e:
+            logger.error(f"Erro inesperado ao extrair account_info para conta {account_id}: {e}")
+            return None
 
     def fetch_positions(self, account_id: int) -> SyncPositionsPayload:
         """Obtém todas as posições abertas no momento"""
@@ -154,26 +186,36 @@ class SyncEngine:
         if not MT5_AVAILABLE:
             return SyncPositionsPayload(accountId=account_id, positions=positions_list)
 
-        positions = mt5.positions_get()
-        if positions is not None:
-            for pos in positions:
-                positions_list.append(PositionData(
-                    ticket=pos.ticket,
-                    symbol=pos.symbol,
-                    type="POSITION_TYPE_BUY" if pos.type == mt5.POSITION_TYPE_BUY else "POSITION_TYPE_SELL",
-                    volume=pos.volume,
-                    priceOpen=pos.price_open,
-                    priceCurrent=pos.price_current,
-                    sl=pos.sl,
-                    tp=pos.tp,
-                    profit=pos.profit,
-                    swap=pos.swap,
-                    magic=pos.magic,
-                    comment=pos.comment,
-                    time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
-                ))
+        try:
+            positions = mt5.positions_get()
+            if positions is not None:
+                for pos in positions:
+                    positions_list.append(PositionData(
+                        ticket=pos.ticket,
+                        symbol=pos.symbol,
+                        type="POSITION_TYPE_BUY" if pos.type == mt5.POSITION_TYPE_BUY else "POSITION_TYPE_SELL",
+                        volume=pos.volume,
+                        priceOpen=pos.price_open,
+                        priceCurrent=pos.price_current,
+                        sl=pos.sl,
+                        tp=pos.tp,
+                        profit=pos.profit,
+                        swap=pos.swap,
+                        magic=pos.magic,
+                        comment=pos.comment,
+                        time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
+                    ))
 
-        return SyncPositionsPayload(accountId=account_id, positions=positions_list)
+            return SyncPositionsPayload(accountId=account_id, positions=positions_list)
+        except MemoryError as e:
+            res = self.get_resource_snapshot()
+            err_msg = (
+                f"[ESGOTAMENTO DE MEMÓRIA] Falha ao extrair posições para conta {account_id}! "
+                f"Memória Consumida: {res['memory_used_mb']} MB / {res['memory_total_mb']} MB ({res['memory_percent']}%) | "
+                f"RAM Livre: {res['memory_available_mb']} MB | CPU: {res['cpu_percent']}%. Abortando."
+            )
+            logger.critical(err_msg)
+            raise ResourceExhaustionError(err_msg, res, operation="fetch_positions", account_id=account_id)
 
     def fetch_orders(self, account_id: int) -> SyncOrdersPayload:
         """Obtém ordens pendentes ativas"""
@@ -181,25 +223,35 @@ class SyncEngine:
         if not MT5_AVAILABLE:
             return SyncOrdersPayload(accountId=account_id, orders=orders_list)
 
-        orders = mt5.orders_get()
-        if orders is not None:
-            for ord in orders:
-                orders_list.append(OrderData(
-                    ticket=ord.ticket,
-                    symbol=ord.symbol,
-                    type=str(ord.type),
-                    state=str(ord.state),
-                    volumeInitial=ord.volume_initial,
-                    volumeCurrent=ord.volume_current,
-                    priceOpen=ord.price_open,
-                    sl=ord.sl,
-                    tp=ord.tp,
-                    timeSetup=datetime.datetime.fromtimestamp(ord.time_setup, tz=datetime.timezone.utc),
-                    magic=ord.magic,
-                    comment=ord.comment,
-                ))
+        try:
+            orders = mt5.orders_get()
+            if orders is not None:
+                for ord in orders:
+                    orders_list.append(OrderData(
+                        ticket=ord.ticket,
+                        symbol=ord.symbol,
+                        type=str(ord.type),
+                        state=str(ord.state),
+                        volumeInitial=ord.volume_initial,
+                        volumeCurrent=ord.volume_current,
+                        priceOpen=ord.price_open,
+                        sl=ord.sl,
+                        tp=ord.tp,
+                        timeSetup=datetime.datetime.fromtimestamp(ord.time_setup, tz=datetime.timezone.utc),
+                        magic=ord.magic,
+                        comment=ord.comment,
+                    ))
 
-        return SyncOrdersPayload(accountId=account_id, orders=orders_list)
+            return SyncOrdersPayload(accountId=account_id, orders=orders_list)
+        except MemoryError as e:
+            res = self.get_resource_snapshot()
+            err_msg = (
+                f"[ESGOTAMENTO DE MEMÓRIA] Falha ao extrair ordens para conta {account_id}! "
+                f"Memória Consumida: {res['memory_used_mb']} MB / {res['memory_total_mb']} MB ({res['memory_percent']}%) | "
+                f"RAM Livre: {res['memory_available_mb']} MB | CPU: {res['cpu_percent']}%. Abortando."
+            )
+            logger.critical(err_msg)
+            raise ResourceExhaustionError(err_msg, res, operation="fetch_orders", account_id=account_id)
 
     def fetch_incremental_deals(
         self,
@@ -221,36 +273,53 @@ class SyncEngine:
         start_time = from_date or datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
         end_time = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(hours=1)
 
-        deals = mt5.history_deals_get(start_time, end_time)
-        if deals is not None:
-            for d in deals:
-                if d.ticket > last_deal_ticket:
-                    # Mapeia tipos
-                    entry_type = "DEAL_ENTRY_IN" if d.entry == 0 else ("DEAL_ENTRY_OUT" if d.entry == 1 else "DEAL_ENTRY_INOUT")
-                    deal_type = "DEAL_TYPE_BUY" if d.type == 0 else ("DEAL_TYPE_SELL" if d.type == 1 else "DEAL_TYPE_BALANCE")
+        try:
+            deals = mt5.history_deals_get(start_time, end_time)
+            if deals is not None:
+                for d in deals:
+                    if d.ticket > last_deal_ticket:
+                        # Mapeia tipos
+                        entry_type = "DEAL_ENTRY_IN" if d.entry == 0 else ("DEAL_ENTRY_OUT" if d.entry == 1 else "DEAL_ENTRY_INOUT")
+                        deal_type = "DEAL_TYPE_BUY" if d.type == 0 else ("DEAL_TYPE_SELL" if d.type == 1 else "DEAL_TYPE_BALANCE")
 
-                    deal_obj = DealData(
-                        ticket=d.ticket,
-                        orderTicket=d.order,
-                        positionId=d.position_id,
-                        symbol=d.symbol or "",
-                        type=deal_type,
-                        entry=entry_type,
-                        volume=d.volume,
-                        price=d.price,
-                        profit=d.profit,
-                        commission=d.commission,
-                        swap=d.swap,
-                        magic=d.magic,
-                        comment=d.comment,
-                        time=datetime.datetime.fromtimestamp(d.time, tz=datetime.timezone.utc),
-                    )
-                    trades_list.append(deal_obj)
-                    if d.ticket > max_ticket:
-                        max_ticket = d.ticket
+                        deal_obj = DealData(
+                            ticket=d.ticket,
+                            orderTicket=d.order,
+                            positionId=d.position_id,
+                            symbol=d.symbol or "",
+                            type=deal_type,
+                            entry=entry_type,
+                            volume=d.volume,
+                            price=d.price,
+                            profit=d.profit,
+                            commission=d.commission,
+                            swap=d.swap,
+                            magic=d.magic,
+                            comment=d.comment,
+                            time=datetime.datetime.fromtimestamp(d.time, tz=datetime.timezone.utc),
+                        )
+                        trades_list.append(deal_obj)
+                        if d.ticket > max_ticket:
+                            max_ticket = d.ticket
 
-        return SyncTradesPayload(
-            accountId=account_id,
-            lastDealTicket=max_ticket,
-            trades=trades_list
-        )
+            return SyncTradesPayload(
+                accountId=account_id,
+                lastDealTicket=max_ticket,
+                trades=trades_list
+            )
+        except MemoryError as e:
+            res = self.get_resource_snapshot()
+            err_msg = (
+                f"[ESGOTAMENTO DE MEMÓRIA] Falha ao extrair negócios (deals) da conta {account_id}! "
+                f"Memória Consumida: {res['memory_used_mb']} MB / {res['memory_total_mb']} MB ({res['memory_percent']}%) | "
+                f"RAM Livre: {res['memory_available_mb']} MB | CPU: {res['cpu_percent']}%. Interrompendo para evitar colapso."
+            )
+            logger.critical(err_msg)
+            raise ResourceExhaustionError(err_msg, res, operation="fetch_incremental_deals", account_id=account_id)
+        except Exception as e:
+            res = self.get_resource_snapshot()
+            logger.error(
+                f"[ERRO EXTRAÇÃO DEALS] Falha ao processar deals da conta {account_id}: {e}. "
+                f"Memória Consumida: {res['memory_used_mb']} MB ({res['memory_percent']}%) | CPU: {res['cpu_percent']}%"
+            )
+            return SyncTradesPayload(accountId=account_id, lastDealTicket=last_deal_ticket, trades=[])
