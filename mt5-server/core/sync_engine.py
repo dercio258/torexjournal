@@ -47,25 +47,57 @@ class SyncEngine:
 
         # Se já estava conectado a outra conta, desconectar antes de chavear
         if self.connected_account is not None and self.connected_account != account_id:
-            mt5.shutdown()
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            self.connected_account = None
 
-        init_kwargs = {
-            "portable": True,
-            "timeout": 30000,
-        }
+        login_int = int(login) if str(login).isdigit() else 0
+        init_success = False
+
+        # Tentativa 1: Inicialização direta com credenciais e path (60s timeout para VPS)
         if path:
-            init_kwargs["path"] = path
+            try:
+                init_success = mt5.initialize(
+                    path=path,
+                    login=login_int,
+                    password=password or "",
+                    server=server,
+                    timeout=60000
+                )
+            except Exception as e:
+                logger.debug(f"Tentativa 1 falhou: {e}")
 
-        if not mt5.initialize(**init_kwargs):
-            logger.error(f"mt5.initialize() falhou para terminal {path or 'default'}: {mt5.last_error()}")
+        # Tentativa 2: Conectar ao terminal que já está aberto/em execução
+        if not init_success:
+            logger.info("Tentando conectar diretamente ao terminal MT5 em execução...")
+            try:
+                init_success = mt5.initialize(timeout=60000)
+            except Exception as e:
+                logger.debug(f"Tentativa 2 falhou: {e}")
+
+        # Tentativa 3: Inicialização com flag portable
+        if not init_success and path:
+            logger.info("Tentando inicialização com modo portable...")
+            try:
+                init_success = mt5.initialize(path=path, portable=True, timeout=60000)
+            except Exception as e:
+                logger.debug(f"Tentativa 3 falhou: {e}")
+
+        if not init_success:
+            logger.error(f"mt5.initialize() falhou em todas as tentativas: {mt5.last_error()}")
             return False
 
+        # Se conectou ao terminal, garantir login na conta correta
         if login and server:
-            login_int = int(login) if str(login).isdigit() else 0
-            login_success = mt5.login(login=login_int, password=password or "", server=server)
-            if not login_success:
-                logger.error(f"mt5.login() falhou para {login} @ {server}: {mt5.last_error()}")
-                return False
+            current_info = mt5.account_info()
+            if current_info is None or str(current_info.login) != str(login):
+                logger.info(f"Efetuando login no MT5 ({login} @ {server})...")
+                login_success = mt5.login(login=login_int, password=password or "", server=server)
+                if not login_success:
+                    logger.error(f"mt5.login() falhou para {login} @ {server}: {mt5.last_error()}")
+                    return False
 
         self.connected_account = account_id
         logger.success(f"Conexão MT5 ativa com conta {account_id} ({login}@{server})")
