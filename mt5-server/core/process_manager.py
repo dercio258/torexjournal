@@ -1,4 +1,5 @@
 import os
+import time
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional
@@ -54,6 +55,9 @@ class MT5ProcessManager:
         if not os.path.exists(self.terminal_path):
             logger.error(f"Executável do MT5 não encontrado em: {self.terminal_path}")
             return False
+
+        # Encerra qualquer processo terminal64.exe anterior ou órfão que possa estar travando a porta IPC 22346
+        self.kill_all_terminals()
 
         mem = psutil.virtual_memory()
         available_mb = round(mem.available / (1024 * 1024), 1)
@@ -158,6 +162,23 @@ class MT5ProcessManager:
     def cleanup_account(self, account_id: int):
         self.processes.pop(account_id, None)
         self.pids.pop(account_id, None)
+
+    def kill_all_terminals(self):
+        """Encerra todas as instâncias de terminal64 para desimpedir a porta IPC 22346 e evitar erro 10048"""
+        killed = 0
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                name = proc.info.get('name') or ''
+                if 'terminal64' in name.lower():
+                    logger.warning(f"Encerrando terminal MT5 anterior/órfão (PID: {proc.info['pid']}) para desimpedir a porta 22346...")
+                    proc.kill()
+                    killed += 1
+            except Exception:
+                pass
+        if killed > 0:
+            time.sleep(2)
+        self.processes.clear()
+        self.pids.clear()
 
     def stop_all(self):
         """Encerra todos os terminais gerenciados pelo worker"""

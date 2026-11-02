@@ -171,15 +171,7 @@ class WorkerManager:
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha na troca de credentialToken")
                 return
 
-        # Registra no pool de contas
-        self.account_manager.add_or_update_account(
-            account_id=task.accountId,
-            login=task.login,
-            server=task.server,
-            password=password
-        )
-
-        # Inicia processo do terminal
+        # 1. Inicia processo do terminal (garantindo que qualquer processo antigo/preso foi encerrado)
         started = self.process_manager.start_terminal(
             account_id=task.accountId,
             login=task.login,
@@ -188,10 +180,19 @@ class WorkerManager:
         )
 
         if started:
-            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 iniciado e conta online.")
-            # Aguarda o terminal MT5 inicializar portas IPC e conexão com broker antes da primeira sincronização
+            # 2. Aguarda o terminal MT5 inicializar portas IPC e conexão com broker antes da primeira sincronização
             time.sleep(5)
-            # Dispara sincronização inicial
+
+            # 3. Registra no pool de contas ativo após o terminal estar pronto (evita corrida com _sync_loop)
+            self.account_manager.add_or_update_account(
+                account_id=task.accountId,
+                login=task.login,
+                server=task.server,
+                password=password
+            )
+
+            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 iniciado e conta online.")
+            # 4. Dispara sincronização inicial
             self._sync_single_account(task.accountId)
         else:
             self.api_client.ack_task(task.id, TaskStatus.FAILED, "Não foi possível iniciar o terminal MT5.")
