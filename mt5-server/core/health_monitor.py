@@ -248,7 +248,7 @@ class HealthMonitor:
                 history.append(now)
                 self.recovery_history[acc_id] = history
 
-                if len(history) >= 3:
+                if settings.enable_resource_guard and len(history) >= 3:
                     # Ativa cooldown de 5 minutos (300 segundos) para quebrar o loop infinito
                     self.cooldowns[acc_id] = now + 300
                     logger.critical(

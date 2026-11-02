@@ -68,17 +68,11 @@ class SyncEngine:
         except Exception as e:
             logger.debug(f"Tentativa 1 (terminal em execução) falhou: {e}")
 
-        # Tentativa 2: Se não houver terminal aberto, inicializa pelo caminho fornecido com credenciais
+        # Tentativa 2: Se não houver terminal aberto, inicializa pelo caminho fornecido
         if not init_success and path:
             logger.info(f"Nenhum terminal ativo encontrado. Inicializando terminal MT5 via executável: {path}")
             try:
-                init_success = mt5.initialize(
-                    path=path,
-                    login=login_clean,
-                    password=pass_clean,
-                    server=server_clean,
-                    timeout=60000
-                )
+                init_success = mt5.initialize(path=path, timeout=60000)
             except Exception as e:
                 logger.debug(f"Tentativa 2 (inicialização via path) falhou: {e}")
 

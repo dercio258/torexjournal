@@ -55,13 +55,14 @@ class MT5ProcessManager:
             logger.error(f"Executável do MT5 não encontrado em: {self.terminal_path}")
             return False
 
+        mem = psutil.virtual_memory()
+        available_mb = round(mem.available / (1024 * 1024), 1)
+
         # Verificação técnica de recursos antes de abrir o processo pesado do MT5 (apenas se habilitado)
         if settings.enable_resource_guard:
-            mem = psutil.virtual_memory()
             cpu_usage = psutil.cpu_percent(interval=None)
             used_mb = round((mem.total - mem.available) / (1024 * 1024), 1)
             total_mb = round(mem.total / (1024 * 1024), 1)
-            available_mb = round(mem.available / (1024 * 1024), 1)
             mem_pct = round(mem.percent, 1)
 
             if mem_pct >= settings.max_memory_percent or available_mb < settings.min_available_memory_mb or cpu_usage >= settings.max_cpu_percent:
