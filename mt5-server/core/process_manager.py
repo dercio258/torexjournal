@@ -109,34 +109,15 @@ class MT5ProcessManager:
             return False
 
     def is_running(self, account_id: int) -> bool:
-        """Verifica se o processo do terminal da conta ainda está ativo"""
-        pid = self.pids.get(account_id)
-        if pid:
+        """Verifica se há um processo terminal64.exe ativo no sistema"""
+        for proc in psutil.process_iter(['name', 'status']):
             try:
-                p = psutil.Process(pid)
-                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                name = proc.info.get('name') or ''
+                if 'terminal64' in name.lower():
+                    if proc.info.get('status') != psutil.STATUS_ZOMBIE:
+                        return True
+            except Exception:
                 pass
-
-        # Verifica se o processo terminal64 foi spawnado por nós ou para esta conta
-        instance_dir = self.get_account_instance_dir(account_id)
-        instance_str = str(instance_dir).lower()
-        try:
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                try:
-                    name = proc.info.get('name') or ''
-                    if 'terminal64' in name.lower():
-                        cmdline = " ".join(proc.info.get('cmdline') or []).lower()
-                        if instance_str in cmdline or f"acc_{account_id}" in cmdline:
-                            self.pids[account_id] = proc.info['pid']
-                            return True
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            pass
-
-        self.cleanup_account(account_id)
         return False
 
     def stop_terminal(self, account_id: int, timeout: int = 5) -> bool:

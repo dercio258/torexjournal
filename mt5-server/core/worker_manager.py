@@ -171,19 +171,16 @@ class WorkerManager:
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha na troca de credentialToken")
                 return
 
-        # 1. Inicia processo do terminal (garantindo que qualquer processo antigo/preso foi encerrado)
-        started = self.process_manager.start_terminal(
+        # Conecta ao MT5 (abrindo o terminal de forma limpa caso esteja fechado) e efetua o login direto
+        connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
             server=task.server,
-            password=password
+            password=password,
+            path=settings.mt5_default_path
         )
 
-        if started:
-            # 2. Aguarda o terminal MT5 inicializar portas IPC e conexão com broker antes da primeira sincronização
-            time.sleep(5)
-
-            # 3. Registra no pool de contas ativo após o terminal estar pronto (evita corrida com _sync_loop)
+        if connected:
             self.account_manager.add_or_update_account(
                 account_id=task.accountId,
                 login=task.login,
@@ -191,11 +188,11 @@ class WorkerManager:
                 password=password
             )
 
-            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 iniciado e conta online.")
-            # 4. Dispara sincronização inicial
+            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 conectado e conta autenticada com sucesso.")
+            # Dispara sincronização inicial
             self._sync_single_account(task.accountId)
         else:
-            self.api_client.ack_task(task.id, TaskStatus.FAILED, "Não foi possível iniciar o terminal MT5.")
+            self.api_client.ack_task(task.id, TaskStatus.FAILED, "Não foi possível conectar o terminal MT5 e autenticar a conta.")
 
     def _handle_stop_account(self, task: Task):
         self.process_manager.stop_terminal(task.accountId)
@@ -346,8 +343,8 @@ class WorkerManager:
                             severity="WARNING",
                             message=f"Terminal da conta {acc_id} caiu. Iniciando auto-recovery."
                         ))
-                        # Reinicia processo
-                        restarted = self.process_manager.start_terminal(acc.account_id, acc.login, acc.server, acc.password)
+                        # Reconecta e recupera a sessão MT5
+                        restarted = self.sync_engine.ensure_connected(acc.account_id, acc.login, acc.server, acc.password, settings.mt5_default_path)
                         if restarted:
                             logger.success(f"[Auto-Recovery] Terminal da conta {acc_id} recuperado com sucesso!")
                             self._sync_single_account(acc_id)

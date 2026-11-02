@@ -28,85 +28,99 @@ class SyncEngine:
     def __init__(self):
         self.connected_account: Optional[int] = None
 
+    @staticmethod
+    def _kill_stuck_terminals():
+        """Encerra processos terminal64.exe presos que possam estar bloqueando a porta IPC 22346"""
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                name = proc.info.get('name') or ''
+                if 'terminal64' in name.lower():
+                    logger.warning(f"Encerrando processo terminal64 órfão (PID: {proc.info['pid']}) para liberar portas...")
+                    proc.kill()
+            except Exception:
+                pass
+
     def ensure_connected(self, account_id: int, login: str, server: str, password: Optional[str] = None, path: Optional[str] = None) -> bool:
-        """Garante que a sessão IPC com o terminal MT5 está ativa para esta conta antes da sincronização"""
+        """Garante que a sessão IPC com o terminal MT5 está ativa e na conta correta antes da sincronização"""
         if not MT5_AVAILABLE:
             self.connected_account = account_id
             return True
 
-        if self.connected_account == account_id:
+        login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
+
+        # Se já está conectado ao terminal e à conta correta, retorna imediatamente
+        try:
             info = mt5.account_info()
-            if info is not None and str(info.login) == str(login).strip():
+            if info is not None and str(info.login) == str(login_clean):
+                self.connected_account = account_id
                 return True
+        except Exception:
+            pass
 
         return self.connect_account(account_id, login, server, password, path)
 
     def connect_account(self, account_id: int, login: str, server: str, password: Optional[str] = None, path: Optional[str] = None) -> bool:
-        """Inicializa a conexão IPC com o terminal MT5 da conta especificada"""
+        """Conecta ao terminal MT5 (abrindo se necessário) e efetua login seguro sem conflito de portas"""
         if not MT5_AVAILABLE:
             logger.warning(f"[Mock] Conectando mock MT5 para conta {account_id}")
             self.connected_account = account_id
             return True
 
-        # Se já estava conectado a outra conta, desconectar antes de chavear
-        if self.connected_account is not None and self.connected_account != account_id:
-            try:
-                mt5.shutdown()
-            except Exception:
-                pass
-            self.connected_account = None
-
         login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
         server_clean = str(server).strip()
         pass_clean = str(password).strip() if password else ""
-        init_success = False
+        from config.settings import settings
+        term_path = path or settings.mt5_default_path
 
-        # Tentativa 1: Aguarda o terminal MT5 estar pronto e conecta à sessão IPC (tenta por até 45s para VPS)
-        logger.info("Aguardando inicialização do terminal MT5 e conectando à sessão IPC...")
-        for wait_attempt in range(1, 10):
+        # Passo 1: Tenta conectar diretamente a um terminal já aberto na VPS
+        init_ok = False
+        try:
+            logger.info("Verificando se já existe um terminal MT5 ativo...")
+            init_ok = mt5.initialize(timeout=5000)
+        except Exception as e:
+            logger.debug(f"Terminal ativo não respondeu: {e}")
+
+        # Passo 2: Se nenhum terminal responder, limpa processos presos e abre o terminal pelo caminho oficial
+        if not init_ok:
+            logger.info(f"Nenhum terminal ativo. Limpando processos órfãos e inicializando MT5 via: {term_path}")
+            self._kill_stuck_terminals()
+            time.sleep(2)
             try:
-                init_success = mt5.initialize(timeout=5000)
-                if init_success:
-                    logger.success(f"Conectado com sucesso ao terminal MT5 ativo (tentativa {wait_attempt})!")
-                    break
+                # O próprio mt5.initialize(path=...) abre o executável e aguarda a porta IPC 22346 sem conflitos
+                init_ok = mt5.initialize(path=term_path, timeout=60000)
             except Exception as e:
-                logger.debug(f"Aguardando IPC (tentativa {wait_attempt}): {e}")
-            time.sleep(3)
+                logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
 
-        # Tentativa 2: Se nenhum terminal ativo respondeu após o tempo de espera, inicializa via path
-        if not init_success and path:
-            logger.info(f"Nenhum terminal ativo respondeu na porta 22346. Inicializando terminal MT5 via executável: {path}")
-            try:
-                init_success = mt5.initialize(path=path, timeout=60000)
-            except Exception as e:
-                logger.debug(f"Tentativa 2 (inicialização via path) falhou: {e}")
-
-        if not init_success:
-            logger.error(f"mt5.initialize() falhou em todas as tentativas: {mt5.last_error()}")
+        if not init_ok:
+            logger.error(f"Não foi possível inicializar o MT5: {mt5.last_error()}")
             return False
 
-        # Se conectou ao terminal, garantir login na conta correta com retentativas (aguarda socket de rede do MT5)
-        if login and server:
-            current_info = mt5.account_info()
-            if current_info is None or str(current_info.login) != str(login_clean):
-                logger.info(f"Efetuando login no MT5 ({login_clean} @ {server_clean})...")
-                for attempt in range(1, 6):
-                    login_success = mt5.login(login=login_clean, password=pass_clean, server=server_clean)
-                    if login_success:
-                        logger.success(f"Login MT5 confirmado com sucesso na tentativa {attempt} para {login_clean} @ {server_clean}")
-                        break
-                    
-                    err = mt5.last_error()
-                    logger.warning(f"Tentativa {attempt}/5 de login MT5 falhou: {err}. Aguardando 3s para sincronização de rede...")
-                    time.sleep(3)
-                else:
-                    final_info = mt5.account_info()
-                    if final_info is None or str(final_info.login) != str(login_clean):
-                        logger.error(f"mt5.login() falhou após 5 tentativas para {login_clean} @ {server_clean}: {mt5.last_error()}")
-                        return False
+        logger.success("Terminal MT5 conectado via IPC com sucesso!")
+
+        # Passo 3: Garante o login na conta correta com retries para conexão com a corretora
+        if login_clean and server_clean:
+            for attempt in range(1, 6):
+                info = mt5.account_info()
+                if info is not None and str(info.login) == str(login_clean):
+                    logger.success(f"Conta {login_clean} confirmada ativa no MT5!")
+                    break
+
+                logger.info(f"Tentativa {attempt}/5: Efetuando login no MT5 ({login_clean} @ {server_clean})...")
+                login_ok = mt5.login(login=login_clean, password=pass_clean, server=server_clean, timeout=30000)
+                if login_ok:
+                    logger.success(f"Login efetuado com sucesso na conta {login_clean} ({server_clean})!")
+                    break
+
+                err = mt5.last_error()
+                logger.warning(f"Tentativa {attempt}/5 de login falhou: {err}. Aguardando 3s para rede da corretora...")
+                time.sleep(3)
+            else:
+                final_info = mt5.account_info()
+                if final_info is None or str(final_info.login) != str(login_clean):
+                    logger.error(f"Falha de autenticação no MT5 após 5 tentativas: {mt5.last_error()}")
+                    return False
 
         self.connected_account = account_id
-        logger.success(f"Conexão MT5 ativa com conta {account_id} ({login_clean}@{server_clean})")
         return True
 
     def disconnect(self):
