@@ -1,3 +1,4 @@
+import time
 import datetime
 import psutil
 from typing import List, Optional, Tuple
@@ -35,7 +36,7 @@ class SyncEngine:
 
         if self.connected_account == account_id:
             info = mt5.account_info()
-            if info is not None:
+            if info is not None and str(info.login) == str(login).strip():
                 return True
 
         return self.connect_account(account_id, login, server, password, path)
@@ -55,33 +56,35 @@ class SyncEngine:
                 pass
             self.connected_account = None
 
-        login_int = int(login) if str(login).isdigit() else 0
+        login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
+        server_clean = str(server).strip()
+        pass_clean = str(password).strip() if password else ""
         init_success = False
 
-        # Tentativa 1: Inicialização direta com credenciais e path (60s timeout para VPS)
-        if path:
+        # Tentativa 1: Conectar diretamente ao terminal MT5 que já está aberto/em execução (evita conflito na porta 22346)
+        logger.info("Tentando conectar à sessão IPC do terminal MT5 em execução...")
+        try:
+            init_success = mt5.initialize(timeout=15000)
+        except Exception as e:
+            logger.debug(f"Tentativa 1 (terminal em execução) falhou: {e}")
+
+        # Tentativa 2: Se não houver terminal aberto, inicializa pelo caminho fornecido com credenciais
+        if not init_success and path:
+            logger.info(f"Nenhum terminal ativo encontrado. Inicializando terminal MT5 via executável: {path}")
             try:
                 init_success = mt5.initialize(
                     path=path,
-                    login=login_int,
-                    password=password or "",
-                    server=server,
+                    login=login_clean,
+                    password=pass_clean,
+                    server=server_clean,
                     timeout=60000
                 )
             except Exception as e:
-                logger.debug(f"Tentativa 1 falhou: {e}")
+                logger.debug(f"Tentativa 2 (inicialização via path) falhou: {e}")
 
-        # Tentativa 2: Conectar ao terminal que já está aberto/em execução
-        if not init_success:
-            logger.info("Tentando conectar diretamente ao terminal MT5 em execução...")
-            try:
-                init_success = mt5.initialize(timeout=60000)
-            except Exception as e:
-                logger.debug(f"Tentativa 2 falhou: {e}")
-
-        # Tentativa 3: Inicialização com flag portable
+        # Tentativa 3: Inicialização com flag portable se aplicável
         if not init_success and path:
-            logger.info("Tentando inicialização com modo portable...")
+            logger.info("Tentando inicialização via path com modo portable...")
             try:
                 init_success = mt5.initialize(path=path, portable=True, timeout=60000)
             except Exception as e:
@@ -91,18 +94,28 @@ class SyncEngine:
             logger.error(f"mt5.initialize() falhou em todas as tentativas: {mt5.last_error()}")
             return False
 
-        # Se conectou ao terminal, garantir login na conta correta
+        # Se conectou ao terminal, garantir login na conta correta com retentativas (aguarda socket de rede do MT5)
         if login and server:
             current_info = mt5.account_info()
-            if current_info is None or str(current_info.login) != str(login):
-                logger.info(f"Efetuando login no MT5 ({login} @ {server})...")
-                login_success = mt5.login(login=login_int, password=password or "", server=server)
-                if not login_success:
-                    logger.error(f"mt5.login() falhou para {login} @ {server}: {mt5.last_error()}")
-                    return False
+            if current_info is None or str(current_info.login) != str(login_clean):
+                logger.info(f"Efetuando login no MT5 ({login_clean} @ {server_clean})...")
+                for attempt in range(1, 6):
+                    login_success = mt5.login(login=login_clean, password=pass_clean, server=server_clean)
+                    if login_success:
+                        logger.success(f"Login MT5 confirmado com sucesso na tentativa {attempt} para {login_clean} @ {server_clean}")
+                        break
+                    
+                    err = mt5.last_error()
+                    logger.warning(f"Tentativa {attempt}/5 de login MT5 falhou: {err}. Aguardando 3s para sincronização de rede...")
+                    time.sleep(3)
+                else:
+                    final_info = mt5.account_info()
+                    if final_info is None or str(final_info.login) != str(login_clean):
+                        logger.error(f"mt5.login() falhou após 5 tentativas para {login_clean} @ {server_clean}: {mt5.last_error()}")
+                        return False
 
         self.connected_account = account_id
-        logger.success(f"Conexão MT5 ativa com conta {account_id} ({login}@{server})")
+        logger.success(f"Conexão MT5 ativa com conta {account_id} ({login_clean}@{server_clean})")
         return True
 
     def disconnect(self):

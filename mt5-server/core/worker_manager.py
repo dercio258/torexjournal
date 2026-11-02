@@ -189,6 +189,8 @@ class WorkerManager:
 
         if started:
             self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 iniciado e conta online.")
+            # Aguarda o terminal MT5 inicializar portas IPC e conexão com broker antes da primeira sincronização
+            time.sleep(5)
             # Dispara sincronização inicial
             self._sync_single_account(task.accountId)
         else:
