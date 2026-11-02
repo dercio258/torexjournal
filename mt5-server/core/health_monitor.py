@@ -46,20 +46,21 @@ class HealthMonitor:
         except Exception as e:
             logger.debug(f"Não foi possível obter métricas do processo atual: {e}")
 
-        # Avaliação técnica de limites críticos
+        # Avaliação técnica de limites críticos (apenas se a guarda de recursos estiver habilitada)
         critical_reasons = []
-        if mem_percent >= settings.max_memory_percent:
-            critical_reasons.append(
-                f"Memória RAM consumida em nível crítico: {mem_percent}% (limite máx: {settings.max_memory_percent}%)"
-            )
-        if available_mb < settings.min_available_memory_mb:
-            critical_reasons.append(
-                f"Memória RAM livre insuficiente: {available_mb} MB (mínimo necessário: {settings.min_available_memory_mb} MB)"
-            )
-        if cpu_usage >= settings.max_cpu_percent:
-            critical_reasons.append(
-                f"Consumo de CPU em saturação: {cpu_usage}% (limite máx: {settings.max_cpu_percent}%)"
-            )
+        if settings.enable_resource_guard:
+            if mem_percent >= settings.max_memory_percent:
+                critical_reasons.append(
+                    f"Memória RAM consumida em nível crítico: {mem_percent}% (limite máx: {settings.max_memory_percent}%)"
+                )
+            if available_mb < settings.min_available_memory_mb:
+                critical_reasons.append(
+                    f"Memória RAM livre insuficiente: {available_mb} MB (mínimo necessário: {settings.min_available_memory_mb} MB)"
+                )
+            if cpu_usage >= settings.max_cpu_percent:
+                critical_reasons.append(
+                    f"Consumo de CPU em saturação: {cpu_usage}% (limite máx: {settings.max_cpu_percent}%)"
+                )
 
         is_critical = len(critical_reasons) > 0
 
@@ -103,6 +104,10 @@ class HealthMonitor:
         """
         now = time.time()
         metrics = self.get_resource_metrics()
+
+        # Se o circuit breaker / resource guard estiver desativado, permite execução irrestrita
+        if not settings.enable_resource_guard:
+            return True, None, metrics
 
         # 1. Verifica se já está em período de cooldown anti-loop
         if now < self.sync_cooldown_until:
@@ -151,6 +156,9 @@ class HealthMonitor:
         if not is_safe:
             return False, error_msg, metrics
 
+        if not settings.enable_resource_guard:
+            return True, None, metrics
+
         # Checa quarentena específica da conta
         now = time.time()
         cooldown_until = self.cooldowns.get(account_id, 0)
@@ -167,6 +175,8 @@ class HealthMonitor:
 
     def record_account_resource_failure(self, account_id: int, reason: str, metrics: Optional[dict] = None):
         """Registra falha de extração ou de recursos de uma conta e aciona quarentena se houver repetição."""
+        if not settings.enable_resource_guard:
+            return
         now = time.time()
         history = self.account_resource_failures.setdefault(account_id, [])
         history = [t for t in history if now - t < 300]
@@ -212,8 +222,8 @@ class HealthMonitor:
         metrics = self.get_resource_metrics()
         now = time.time()
 
-        # 1. CIRCUIT BREAKER DE RECURSOS: Não reinicia terminais se a VPS estiver sem RAM ou CPU
-        if metrics["is_critical"]:
+        # 1. CIRCUIT BREAKER DE RECURSOS: Não reinicia terminais se a VPS estiver sem RAM ou CPU (apenas se ativado)
+        if settings.enable_resource_guard and metrics["is_critical"]:
             logger.error(
                 f"[CIRCUIT BREAKER] Recursos da VPS no limite crítico! "
                 f"Memória consumida: {metrics['memory_used_mb']} MB / {metrics['memory_total_mb']} MB ({metrics['memory_percent']}%) | "

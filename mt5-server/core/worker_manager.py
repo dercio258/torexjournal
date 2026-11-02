@@ -90,6 +90,8 @@ class WorkerManager:
 
     def _send_resource_alert(self, message: str, metrics: dict, account_id: Optional[int] = None):
         """Envia evento técnico de alerta para o backend respeitando rate limit para evitar storm de logs/rede."""
+        if not settings.enable_resource_guard:
+            return
         now = time.time()
         if now - self.last_resource_alert_time >= 30:
             self.last_resource_alert_time = now

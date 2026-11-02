@@ -24,9 +24,10 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     # Resource Thresholds & Anti-Loop
-    max_memory_percent: float = Field(default=90.0, alias="MAX_MEMORY_PERCENT")
-    max_cpu_percent: float = Field(default=95.0, alias="MAX_CPU_PERCENT")
-    min_available_memory_mb: float = Field(default=200.0, alias="MIN_AVAILABLE_MEMORY_MB")
+    enable_resource_guard: bool = Field(default=False, alias="ENABLE_RESOURCE_GUARD")
+    max_memory_percent: float = Field(default=95.0, alias="MAX_MEMORY_PERCENT")
+    max_cpu_percent: float = Field(default=99.0, alias="MAX_CPU_PERCENT")
+    min_available_memory_mb: float = Field(default=150.0, alias="MIN_AVAILABLE_MEMORY_MB")
     resource_cooldown_seconds: int = Field(default=30, alias="RESOURCE_COOLDOWN_SECONDS")
     max_consecutive_resource_failures: int = Field(default=5, alias="MAX_CONSECUTIVE_RESOURCE_FAILURES")
 
