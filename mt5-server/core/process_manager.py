@@ -89,7 +89,6 @@ class MT5ProcessManager:
         # Passa o caminho absoluto do arquivo para o comando
         cmd = [
             self.terminal_path,
-            "/portable",
             f"/config:{config_path.resolve()}"
         ]
 

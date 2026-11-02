@@ -61,28 +61,25 @@ class SyncEngine:
         pass_clean = str(password).strip() if password else ""
         init_success = False
 
-        # Tentativa 1: Conectar diretamente ao terminal MT5 que já está aberto/em execução (evita conflito na porta 22346)
-        logger.info("Tentando conectar à sessão IPC do terminal MT5 em execução...")
-        try:
-            init_success = mt5.initialize(timeout=15000)
-        except Exception as e:
-            logger.debug(f"Tentativa 1 (terminal em execução) falhou: {e}")
+        # Tentativa 1: Aguarda o terminal MT5 estar pronto e conecta à sessão IPC (tenta por até 45s para VPS)
+        logger.info("Aguardando inicialização do terminal MT5 e conectando à sessão IPC...")
+        for wait_attempt in range(1, 10):
+            try:
+                init_success = mt5.initialize(timeout=5000)
+                if init_success:
+                    logger.success(f"Conectado com sucesso ao terminal MT5 ativo (tentativa {wait_attempt})!")
+                    break
+            except Exception as e:
+                logger.debug(f"Aguardando IPC (tentativa {wait_attempt}): {e}")
+            time.sleep(3)
 
-        # Tentativa 2: Se não houver terminal aberto, inicializa pelo caminho fornecido
+        # Tentativa 2: Se nenhum terminal ativo respondeu após o tempo de espera, inicializa via path
         if not init_success and path:
-            logger.info(f"Nenhum terminal ativo encontrado. Inicializando terminal MT5 via executável: {path}")
+            logger.info(f"Nenhum terminal ativo respondeu na porta 22346. Inicializando terminal MT5 via executável: {path}")
             try:
                 init_success = mt5.initialize(path=path, timeout=60000)
             except Exception as e:
                 logger.debug(f"Tentativa 2 (inicialização via path) falhou: {e}")
-
-        # Tentativa 3: Inicialização com flag portable se aplicável
-        if not init_success and path:
-            logger.info("Tentando inicialização via path com modo portable...")
-            try:
-                init_success = mt5.initialize(path=path, portable=True, timeout=60000)
-            except Exception as e:
-                logger.debug(f"Tentativa 3 falhou: {e}")
 
         if not init_success:
             logger.error(f"mt5.initialize() falhou em todas as tentativas: {mt5.last_error()}")
