@@ -22,27 +22,32 @@ class MT5ProcessManager:
         return instance_dir
 
     def create_startup_config(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> Path:
-        """Gera arquivo de inicialização .ini para o terminal"""
+        """Gera arquivo de inicialização .ini para o terminal com formatação compatível com Windows/MT5"""
         instance_dir = self.get_account_instance_dir(account_id)
         config_path = (instance_dir / "startup.ini").resolve()
         
+        login_str = str(login).strip()
+        server_str = str(server).strip()
+        pass_str = str(password).strip() if password else ""
+
         content = [
             "; TorexJournal MT5 Auto-Generated Config",
             "[Common]",
-            f"Login={login}",
-            f"Server={server}",
+            f"Login={login_str}",
         ]
-        if password:
-            content.append(f"Password={password}")
+        if pass_str:
+            content.append(f"Password={pass_str}")
         content.extend([
-            "EnableNews=0",
+            f"Server={server_str}",
+            "NewsEnable=0",
             "CertInstall=0",
             "[Start]",
             "Profile=Default"
         ])
         
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(content))
+        # Windows INI requer quebras de linha CRLF (\r\n) e UTF-8 com BOM para o parser do MT5
+        with open(config_path, "w", encoding="utf-8-sig", newline="\r\n") as f:
+            f.write("\r\n".join(content) + "\r\n")
             
         return config_path
 
