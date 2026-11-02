@@ -1,3 +1,6 @@
+import json
+import os
+from pathlib import Path
 from typing import Dict, Optional, List
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -21,6 +24,46 @@ class AccountManager:
     def __init__(self):
         self.max_capacity = settings.max_accounts
         self.accounts: Dict[int, AccountSession] = {}
+        self.pool_file = Path("data/accounts_pool.json")
+        self._load_pool()
+
+    def _load_pool(self):
+        """Carrega contas persistidas para não perder monitoramento em caso de restart"""
+        try:
+            if self.pool_file.exists():
+                with open(self.pool_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for item in data:
+                        acc_id = int(item["account_id"])
+                        session = AccountSession(
+                            account_id=acc_id,
+                            login=str(item["login"]),
+                            server=str(item["server"]),
+                            last_deal_ticket=int(item.get("last_deal_ticket", 0)),
+                            status="ONLINE"
+                        )
+                        self.accounts[acc_id] = session
+                logger.info(f"Carregadas {len(self.accounts)} contas persistidas do pool ({self.pool_file})")
+        except Exception as e:
+            logger.warning(f"Não foi possível carregar pool de contas salvas: {e}")
+
+    def _save_pool(self):
+        """Salva metadados do pool em disco (sem salvar senhas em texto puro)"""
+        try:
+            self.pool_file.parent.mkdir(parents=True, exist_ok=True)
+            export_data = []
+            for acc in self.accounts.values():
+                export_data.append({
+                    "account_id": acc.account_id,
+                    "login": acc.login,
+                    "server": acc.server,
+                    "last_deal_ticket": acc.last_deal_ticket,
+                    "last_sync_time": acc.last_sync_time.isoformat() if acc.last_sync_time else None
+                })
+            with open(self.pool_file, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Falha ao persistir pool de contas: {e}")
 
     def can_accept_account(self) -> bool:
         """Verifica se o worker ainda tem capacidade para gerenciar novas contas"""
@@ -42,6 +85,7 @@ class AccountManager:
                 acc.password = password
             if last_deal_ticket > acc.last_deal_ticket:
                 acc.last_deal_ticket = last_deal_ticket
+            self._save_pool()
             return acc
 
         if not self.can_accept_account():
@@ -56,6 +100,7 @@ class AccountManager:
         )
         self.accounts[account_id] = session
         logger.info(f"Conta {account_id} ({login}@{server}) adicionada ao pool. Total: {len(self.accounts)}/{self.max_capacity}")
+        self._save_pool()
         return session
 
     def get_account(self, account_id: int) -> Optional[AccountSession]:
@@ -65,6 +110,7 @@ class AccountManager:
         if account_id in self.accounts:
             self.accounts.pop(account_id)
             logger.info(f"Conta {account_id} removida do pool do worker. Total restante: {len(self.accounts)}")
+            self._save_pool()
 
     def get_active_account_ids(self) -> List[int]:
         return list(self.accounts.keys())
@@ -78,6 +124,7 @@ class AccountManager:
             acc.error_count = 0
             acc.last_error = None
             acc.status = "ONLINE"
+            self._save_pool()
 
     def mark_error(self, account_id: int, error_message: str):
         acc = self.accounts.get(account_id)
@@ -88,3 +135,4 @@ class AccountManager:
                 acc.status = "FAILED"
             else:
                 acc.status = "OFFLINE"
+            self._save_pool()

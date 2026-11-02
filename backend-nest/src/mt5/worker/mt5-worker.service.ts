@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Like } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { AccountEntity } from '../../account/account.entity';
 import { PositionEntity } from '../position.entity';
@@ -285,11 +285,12 @@ export class Mt5WorkerService {
                 marginFree: account.marginFree,
                 marginLevel: account.marginLevel
             });
+            this.mt5Gateway.broadcastConnectionStatus({ isConnected: true });
         } catch (err) {
             // Ignore socket broadcast errors
         }
 
-        return { success: true };
+        return { success: true, accountId: account.id, balance: account.balance, equity: account.equity };
     }
 
     async syncPositions(accountIdNum: number, login: string, positions: any[]) {
@@ -387,14 +388,46 @@ export class Mt5WorkerService {
     }
 
     private async findAccountByLoginOrId(login: string, accountIdNum?: number): Promise<AccountEntity | null> {
+        const loginStr = (login || accountIdNum || '').toString().trim();
+        if (!loginStr) return null;
+
+        // 1. Busca exata por mt5Id
         let account = await this.accountRepo.findOne({
-            where: { mt5Id: login }
+            where: { mt5Id: loginStr }
         });
 
         if (!account && accountIdNum) {
             account = await this.accountRepo.findOne({
-                where: { mt5Id: accountIdNum.toString() }
+                where: { mt5Id: accountIdNum.toString().trim() }
             });
+        }
+
+        // 2. Se loginStr for UUID, busca por id da entidade
+        if (!account && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(loginStr)) {
+            account = await this.accountRepo.findOne({
+                where: { id: loginStr }
+            });
+        }
+
+        // 3. Busca por nome da conta contendo o login (ex: "MT5 32410208")
+        if (!account) {
+            account = await this.accountRepo.findOne({
+                where: { name: Like(`%${loginStr}%`) }
+            });
+        }
+
+        // 4. Se não encontrar, vincula à conta ativa mais recente sem mt5Id
+        if (!account) {
+            const candidate = await this.accountRepo.findOne({
+                where: { isArchived: false },
+                order: { updatedAt: 'DESC' }
+            });
+            if (candidate && !candidate.mt5Id) {
+                this.logger.log(`Vinculando automaticamente MT5 ID ${loginStr} à conta "${candidate.name}" (${candidate.id})`);
+                candidate.mt5Id = loginStr;
+                await this.accountRepo.save(candidate);
+                account = candidate;
+            }
         }
 
         return account;

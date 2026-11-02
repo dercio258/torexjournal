@@ -14,7 +14,7 @@ from models.schemas import (
 from api_client.client import BackendApiClient
 from .account_manager import AccountManager
 from .process_manager import MT5ProcessManager
-from .sync_engine import SyncEngine
+from .sync_engine import SyncEngine, MT5_AVAILABLE, mt5
 from .local_queue import LocalQueue
 from .health_monitor import HealthMonitor
 from .retry_manager import RetryManager
@@ -237,7 +237,25 @@ class WorkerManager:
                     time.sleep(settings.resource_cooldown_seconds)
                     continue
 
-                for account_id in self.account_manager.get_active_account_ids():
+                active_ids = self.account_manager.get_active_account_ids()
+
+                # Auto-detecção de terminal MT5 ativo se o pool de contas estiver vazio
+                if not active_ids and MT5_AVAILABLE:
+                    try:
+                        if mt5.initialize(timeout=3000):
+                            info = mt5.account_info()
+                            if info and info.login:
+                                logger.info(f"Terminal MT5 ativo detectado na VPS (Conta {info.login} @ {info.server}). Adicionando ao pool de sincronização...")
+                                self.account_manager.add_or_update_account(
+                                    account_id=info.login,
+                                    login=str(info.login),
+                                    server=str(info.server or "MT5-Broker")
+                                )
+                                active_ids = self.account_manager.get_active_account_ids()
+                    except Exception as e:
+                        logger.debug(f"Auto-detecção MT5: {e}")
+
+                for account_id in active_ids:
                     if not self.is_running:
                         break
                     self._sync_single_account(account_id)
@@ -253,7 +271,7 @@ class WorkerManager:
         # Checagem de integridade e quarentena da conta com métricas de memória/CPU
         is_safe, error_msg, metrics = self.health_monitor.check_account_resource_guard(
             account_id,
-            operation=f"Extração Conta {account_id}"
+            operation=f"Extração Conta {acc.login}"
         )
         if not is_safe:
             return
@@ -261,34 +279,40 @@ class WorkerManager:
         try:
             # Garante a conexão IPC do MT5 para esta conta antes de extrair os dados
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
-                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {account_id}")
+                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}")
                 return
 
             # 1. Atualizar métricas financeiras
             acc_info = self.sync_engine.fetch_account_info(account_id, acc.login, acc.server)
             if acc_info:
+                logger.info(f"[SYNC] Enviando métricas da conta {acc.login} (Saldo: ${acc_info.balance:.2f}, Equity: ${acc_info.equity:.2f})...")
                 success = self.api_client.sync_account(acc_info)
                 if not success:
                     self.local_queue.enqueue("/sync/accounts", acc_info.model_dump(mode="json"))
 
             # 2. Atualizar posições abertas
-            positions_payload = self.sync_engine.fetch_positions(account_id)
+            positions_payload = self.sync_engine.fetch_positions(account_id, login=acc.login)
             pos_success = self.api_client.sync_positions(positions_payload)
             if not pos_success:
                 self.local_queue.enqueue("/sync/positions", positions_payload.model_dump(mode="json"))
 
             # 3. Atualizar ordens pendentes
-            orders_payload = self.sync_engine.fetch_orders(account_id)
+            orders_payload = self.sync_engine.fetch_orders(account_id, login=acc.login)
             ord_success = self.api_client.sync_orders(orders_payload)
             if not ord_success:
                 self.local_queue.enqueue("/sync/orders", orders_payload.model_dump(mode="json"))
 
             # 4. Sincronização incremental de histórico de Deals
             last_ticket = 0 if force_full else acc.last_deal_ticket
-            deals_payload = self.sync_engine.fetch_incremental_deals(account_id, last_deal_ticket=last_ticket)
+            deals_payload = self.sync_engine.fetch_incremental_deals(
+                account_id=account_id,
+                login=acc.login,
+                server=acc.server,
+                last_deal_ticket=last_ticket
+            )
             
             if deals_payload.trades:
-                logger.info(f"Sincronizando {len(deals_payload.trades)} novos negócios da conta {account_id}...")
+                logger.info(f"[SYNC] Sincronizando {len(deals_payload.trades)} novos negócios da conta {acc.login}...")
                 deal_success = self.api_client.sync_trades(deals_payload)
                 if deal_success:
                     self.account_manager.update_checkpoint(account_id, deals_payload.lastDealTicket)

@@ -209,11 +209,11 @@ class SyncEngine:
             logger.error(f"Erro inesperado ao extrair account_info para conta {account_id}: {e}")
             return None
 
-    def fetch_positions(self, account_id: int) -> SyncPositionsPayload:
+    def fetch_positions(self, account_id: int, login: Optional[str] = None) -> SyncPositionsPayload:
         """Obtém todas as posições abertas no momento"""
         positions_list: List[PositionData] = []
         if not MT5_AVAILABLE:
-            return SyncPositionsPayload(accountId=account_id, positions=positions_list)
+            return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
 
         try:
             positions = mt5.positions_get()
@@ -235,7 +235,7 @@ class SyncEngine:
                         time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
                     ))
 
-            return SyncPositionsPayload(accountId=account_id, positions=positions_list)
+            return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
         except MemoryError as e:
             res = self.get_resource_snapshot()
             err_msg = (
@@ -246,11 +246,11 @@ class SyncEngine:
             logger.critical(err_msg)
             raise ResourceExhaustionError(err_msg, res, operation="fetch_positions", account_id=account_id)
 
-    def fetch_orders(self, account_id: int) -> SyncOrdersPayload:
+    def fetch_orders(self, account_id: int, login: Optional[str] = None) -> SyncOrdersPayload:
         """Obtém ordens pendentes ativas"""
         orders_list: List[OrderData] = []
         if not MT5_AVAILABLE:
-            return SyncOrdersPayload(accountId=account_id, orders=orders_list)
+            return SyncOrdersPayload(accountId=account_id, login=login, orders=orders_list)
 
         try:
             orders = mt5.orders_get()
@@ -271,7 +271,7 @@ class SyncEngine:
                         comment=ord.comment,
                     ))
 
-            return SyncOrdersPayload(accountId=account_id, orders=orders_list)
+            return SyncOrdersPayload(accountId=account_id, login=login, orders=orders_list)
         except MemoryError as e:
             res = self.get_resource_snapshot()
             err_msg = (
@@ -285,6 +285,8 @@ class SyncEngine:
     def fetch_incremental_deals(
         self,
         account_id: int,
+        login: Optional[str] = None,
+        server: Optional[str] = None,
         last_deal_ticket: int = 0,
         from_date: Optional[datetime.datetime] = None
     ) -> SyncTradesPayload:
@@ -296,43 +298,61 @@ class SyncEngine:
         max_ticket = last_deal_ticket
 
         if not MT5_AVAILABLE:
-            return SyncTradesPayload(accountId=account_id, lastDealTicket=max_ticket, trades=[])
+            return SyncTradesPayload(accountId=account_id, login=login, server=server, lastDealTicket=max_ticket, trades=[])
 
-        # Se não fornecido from_date, busca a partir de 2000 ou 30 dias atrás
-        start_time = from_date or datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
-        end_time = datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(hours=1)
+        # Se não fornecido from_date, busca a partir de 2020 para carregar histórico completo
+        start_time = from_date or datetime.datetime(2020, 1, 1)
+        end_time = datetime.datetime.now() + datetime.timedelta(hours=2)
+
+        # Garantir datetimes sem tzinfo (naive) para compatibilidade plena com o MT5 C-extension
+        if isinstance(start_time, datetime.datetime) and start_time.tzinfo is not None:
+            start_time = start_time.replace(tzinfo=None)
+        if isinstance(end_time, datetime.datetime) and end_time.tzinfo is not None:
+            end_time = end_time.replace(tzinfo=None)
 
         try:
             deals = mt5.history_deals_get(start_time, end_time)
-            if deals is not None:
-                for d in deals:
-                    if d.ticket > last_deal_ticket:
-                        # Mapeia tipos
-                        entry_type = "DEAL_ENTRY_IN" if d.entry == 0 else ("DEAL_ENTRY_OUT" if d.entry == 1 else "DEAL_ENTRY_INOUT")
-                        deal_type = "DEAL_TYPE_BUY" if d.type == 0 else ("DEAL_TYPE_SELL" if d.type == 1 else "DEAL_TYPE_BALANCE")
+            # Tentativa de fallback com timestamps numéricos inteiros
+            if deals is None:
+                start_ts = int(start_time.timestamp())
+                end_ts = int(end_time.timestamp())
+                deals = mt5.history_deals_get(start_ts, end_ts)
 
-                        deal_obj = DealData(
-                            ticket=d.ticket,
-                            orderTicket=d.order,
-                            positionId=d.position_id,
-                            symbol=d.symbol or "",
-                            type=deal_type,
-                            entry=entry_type,
-                            volume=d.volume,
-                            price=d.price,
-                            profit=d.profit,
-                            commission=d.commission,
-                            swap=d.swap,
-                            magic=d.magic,
-                            comment=d.comment,
-                            time=datetime.datetime.fromtimestamp(d.time, tz=datetime.timezone.utc),
-                        )
-                        trades_list.append(deal_obj)
-                        if d.ticket > max_ticket:
-                            max_ticket = d.ticket
+            if deals is None:
+                err = mt5.last_error()
+                logger.warning(f"mt5.history_deals_get retornou None para conta {login or account_id}: {err}")
+                return SyncTradesPayload(accountId=account_id, login=login, server=server, lastDealTicket=last_deal_ticket, trades=[])
+
+            for d in deals:
+                if d.ticket > last_deal_ticket:
+                    # Mapeia tipos
+                    entry_type = "DEAL_ENTRY_IN" if d.entry == 0 else ("DEAL_ENTRY_OUT" if d.entry == 1 else "DEAL_ENTRY_INOUT")
+                    deal_type = "DEAL_TYPE_BUY" if d.type == 0 else ("DEAL_TYPE_SELL" if d.type == 1 else "DEAL_TYPE_BALANCE")
+
+                    deal_obj = DealData(
+                        ticket=d.ticket,
+                        orderTicket=d.order,
+                        positionId=d.position_id,
+                        symbol=d.symbol or "",
+                        type=deal_type,
+                        entry=entry_type,
+                        volume=d.volume,
+                        price=d.price,
+                        profit=d.profit,
+                        commission=d.commission,
+                        swap=d.swap,
+                        magic=d.magic,
+                        comment=d.comment or "",
+                        time=datetime.datetime.fromtimestamp(d.time, tz=datetime.timezone.utc),
+                    )
+                    trades_list.append(deal_obj)
+                    if d.ticket > max_ticket:
+                        max_ticket = d.ticket
 
             return SyncTradesPayload(
                 accountId=account_id,
+                login=login,
+                server=server,
                 lastDealTicket=max_ticket,
                 trades=trades_list
             )
@@ -351,4 +371,4 @@ class SyncEngine:
                 f"[ERRO EXTRAÇÃO DEALS] Falha ao processar deals da conta {account_id}: {e}. "
                 f"Memória Consumida: {res['memory_used_mb']} MB ({res['memory_percent']}%) | CPU: {res['cpu_percent']}%"
             )
-            return SyncTradesPayload(accountId=account_id, lastDealTicket=last_deal_ticket, trades=[])
+            return SyncTradesPayload(accountId=account_id, login=login, server=server, lastDealTicket=last_deal_ticket, trades=[])

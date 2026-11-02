@@ -108,15 +108,19 @@ class PositionData(BaseModel):
 
 class SyncTradesPayload(BaseModel):
     accountId: int
+    login: Optional[str] = None
+    server: Optional[str] = None
     lastDealTicket: int
     trades: List[DealData]
 
 class SyncOrdersPayload(BaseModel):
     accountId: int
+    login: Optional[str] = None
     orders: List[OrderData]
 
 class SyncPositionsPayload(BaseModel):
     accountId: int
+    login: Optional[str] = None
     positions: List[PositionData]
 
 class WorkerHeartbeat(BaseModel):

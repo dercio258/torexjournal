@@ -30,7 +30,8 @@ class BackendApiClient:
         url = f"{self.base_url}{endpoint}"
         try:
             response = self.session.post(url, json=json_data, timeout=self.timeout)
-            response.raise_for_status()
+            if not response.ok:
+                logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {response.text}")
             return response
         except requests.exceptions.RequestException as e:
             logger.warning(f"Erro na comunicação POST {endpoint}: {e}")
@@ -40,7 +41,8 @@ class BackendApiClient:
         url = f"{self.base_url}{endpoint}"
         try:
             response = self.session.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
+            if not response.ok:
+                logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {response.text}")
             return response
         except requests.exceptions.RequestException as e:
             logger.warning(f"Erro na comunicação GET {endpoint}: {e}")
@@ -104,12 +106,35 @@ class BackendApiClient:
     def sync_account(self, account_info: AccountInfo) -> bool:
         """Atualiza saldo, equity, margem e alavancagem"""
         res = self._post("/sync/accounts", account_info.model_dump(mode="json"))
-        return res is not None and res.status_code == 200
+        if res and res.status_code == 200:
+            try:
+                data = res.json()
+                if data.get("success"):
+                    logger.info(f"Métricas da conta {account_info.login} sincronizadas com sucesso (Saldo: ${account_info.balance:.2f}, Equity: ${account_info.equity:.2f})")
+                    return True
+                else:
+                    logger.warning(f"Backend recusou métricas da conta {account_info.login}: {data.get('message')}")
+                    return False
+            except Exception:
+                return True
+        return False
 
     def sync_trades(self, payload: SyncTradesPayload) -> bool:
         """Envia histórico incremental de negociações (Deals)"""
         res = self._post("/sync/trades", payload.model_dump(mode="json"))
-        return res is not None and res.status_code == 200
+        if res and res.status_code == 200:
+            try:
+                data = res.json()
+                if data.get("success"):
+                    saved_count = data.get("saved", len(payload.trades))
+                    logger.success(f"{saved_count} trades da conta {payload.login or payload.accountId} persistidos com sucesso no backend!")
+                    return True
+                else:
+                    logger.warning(f"Backend recusou trades da conta {payload.login or payload.accountId}: {data.get('message')}")
+                    return False
+            except Exception:
+                return True
+        return False
 
     def sync_orders(self, payload: SyncOrdersPayload) -> bool:
         """Envia lista atualizada de ordens pendentes"""
@@ -119,7 +144,13 @@ class BackendApiClient:
     def sync_positions(self, payload: SyncPositionsPayload) -> bool:
         """Envia posições abertas em tempo real"""
         res = self._post("/sync/positions", payload.model_dump(mode="json"))
-        return res is not None and res.status_code == 200
+        if res and res.status_code == 200:
+            try:
+                data = res.json()
+                return data.get("success", False) is True
+            except Exception:
+                return True
+        return False
 
     def send_event(self, event: WorkerEvent) -> bool:
         """Envia notificação de eventos críticos para o dashboard"""
