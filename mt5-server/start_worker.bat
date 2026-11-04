@@ -24,12 +24,12 @@ IF NOT EXIST "venv\Scripts\python.exe" (
 )
 
 :SUPERVISOR_LOOP
-echo [%DATE% %TIME%] Iniciando MT5 Worker (main.py)...
+echo [%DATE% %TIME%] Iniciando MT5 Worker - main.py...
 "venv\Scripts\python.exe" main.py
 SET EXIT_CODE=%ERRORLEVEL%
 
 IF %EXIT_CODE% EQU 0 (
-    echo [%DATE% %TIME%] Worker encerrado normalmente (codigo 0).
+    echo [%DATE% %TIME%] Worker encerrado normalmente [codigo 0].
     goto :END
 )
 
