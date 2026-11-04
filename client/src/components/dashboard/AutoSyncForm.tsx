@@ -14,7 +14,11 @@ import {
     Wifi,
     WifiOff,
     ShieldCheck,
-    LogOut
+    LogOut,
+    TrendingUp,
+    TrendingDown,
+    FileCheck,
+    Clock
 } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
@@ -32,6 +36,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const [server, setServer] = useState(serverName);
     const [isLoading, setIsLoading] = useState(false);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [requestFeedback, setRequestFeedback] = useState<string | null>(null);
     const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
     const [cloudState, setCloudState] = useState<any>(null);
     const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -75,21 +80,23 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             try {
                 const res = await api.get(`/mt5/cloud/task/${taskId}`);
                 const task = res.data?.task;
-                if (res.data?.account || res.data?.worker) {
-                    setCloudState((prev: any) => ({
-                        ...(prev || {}),
-                        account: res.data.account || prev?.account,
-                        worker: res.data.worker || prev?.worker,
-                        activeTask: task,
-                    }));
-                }
+                setCloudState((prev: any) => ({
+                    ...(prev || {}),
+                    account: res.data?.account || prev?.account,
+                    worker: res.data?.worker || prev?.worker,
+                    recentTrades: res.data?.recentTrades ?? prev?.recentTrades ?? [],
+                    totalTradesCount: res.data?.totalTradesCount ?? prev?.totalTradesCount ?? 0,
+                    auditLogs: res.data?.auditLogs ?? prev?.auditLogs ?? [],
+                    recentEvents: res.data?.recentEvents ?? prev?.recentEvents ?? [],
+                    activeTask: task,
+                }));
 
                 if (!task) return;
 
                 if (task.status === 'IN_PROGRESS' || task.status === 'RECEIVED') {
                     setStatus({
                         type: 'info',
-                        message: task.message || `Autenticando conta ${targetLogin} no servidor MT5...`
+                        message: task.message || `Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.`
                     });
                 } else if (task.status === 'SUCCESS') {
                     clearInterval(pollTimerRef.current);
@@ -103,6 +110,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     });
                     await fetchCloudStatus(targetLogin);
                     if (refreshAccounts) await refreshAccounts();
+                    window.dispatchEvent(new Event('trade-imported'));
                 } else if (task.status === 'FAILED') {
                     clearInterval(pollTimerRef.current);
                     pollTimerRef.current = null;
@@ -114,6 +122,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         message: task.errorMessage || task.message || 'Falha ao autenticar no servidor MT5. Verifique login, senha e nome do servidor.'
                     });
                     await fetchCloudStatus(targetLogin);
+                    window.dispatchEvent(new Event('trade-imported'));
                 }
             } catch (err) {
                 // Keep polling on transient error
@@ -125,9 +134,10 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         if (!login || !password || !server) return;
 
         setIsLoading(true);
+        setRequestFeedback(null);
         setStatus({
             type: 'info',
-            message: 'Enviando credenciais seguras ao servidor Windows MT5...'
+            message: 'Enviando solicitação de conexão ao servidor Windows MT5...'
         });
 
         try {
@@ -142,9 +152,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 setServer(res.data.server);
             }
 
+            const confirmationMsg =
+                'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.';
+            setRequestFeedback(confirmationMsg);
             setStatus({
                 type: 'info',
-                message: res.data?.message || 'O servidor Windows está inicializando o MT5 e autenticando sua conta...'
+                message: confirmationMsg
             });
 
             if (res.data?.taskId) {
@@ -153,6 +166,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 setIsLoading(false);
                 await fetchCloudStatus(login.trim());
                 if (refreshAccounts) await refreshAccounts();
+                window.dispatchEvent(new Event('trade-imported'));
             }
         } catch (e: any) {
             setIsLoading(false);
@@ -168,11 +182,13 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         if (!targetLogin) return;
 
         setIsSyncing(true);
+        const syncMsg = 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.';
+        setRequestFeedback(syncMsg);
         setStatus({
             type: 'info',
             message: forceFull
                 ? 'Solicitando sincronização completa de histórico ao servidor Windows...'
-                : 'Solicitando atualização imediata de saldo, posições e trades...'
+                : syncMsg
         });
 
         try {
@@ -186,6 +202,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             } else {
                 setIsSyncing(false);
                 await fetchCloudStatus(targetLogin);
+                window.dispatchEvent(new Event('trade-imported'));
             }
         } catch (e: any) {
             setIsSyncing(false);
@@ -205,6 +222,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 login: targetLogin,
                 accountId: cloudState?.account?.id || selectedAccountId
             });
+            setRequestFeedback(null);
             setStatus({
                 type: 'info',
                 message: `Monitoramento da conta ${targetLogin} desconectado.`
@@ -221,10 +239,43 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
     const worker = cloudState?.worker;
     const acc = cloudState?.account;
+    const activeTask = cloudState?.activeTask;
+    const recentTrades: any[] = cloudState?.recentTrades || [];
+    const totalTradesCount: number = cloudState?.totalTradesCount ?? acc?.totalTradesCount ?? 0;
+    const auditLogs: any[] = cloudState?.auditLogs || [];
+    const recentEvents: any[] = cloudState?.recentEvents || [];
     const isAccConnected = acc?.isConnected || acc?.connectionState === 'CONNECTED';
 
+    const getConnectionBadge = () => {
+        const state = acc?.connectionState || (isAccConnected ? 'CONNECTED' : 'DISCONNECTED');
+        if (activeTaskId || state === 'CONNECTING' || state === 'SYNCING') {
+            return {
+                label: state === 'SYNCING' ? 'SINCRONIZANDO' : 'CONECTANDO...',
+                className: 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 animate-pulse'
+            };
+        }
+        if (state === 'CONNECTED' || isAccConnected) {
+            return {
+                label: 'CONECTADO',
+                className: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+            };
+        }
+        if (state === 'AUTH_FAILED') {
+            return {
+                label: 'FALHA DE AUTENTICAÇÃO',
+                className: 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+            };
+        }
+        return {
+            label: 'DESCONECTADO',
+            className: 'bg-slate-500/15 text-slate-400 border border-slate-500/30'
+        };
+    };
+
+    const connectionBadge = getConnectionBadge();
+
     return (
-        <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-right-4 space-y-6">
+        <div className="max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 space-y-6">
             <div className="flex items-center justify-between">
                 <button
                     onClick={onBack}
@@ -249,7 +300,24 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 </div>
             </div>
 
-            {/* Painel de Status da Conta Conectada */}
+            {/* Feedback Visual Imediato da Solicitação de Conexão */}
+            {requestFeedback && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3 shadow-lg">
+                    <CheckCircle size={20} className="text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1 flex-1">
+                        <p className="text-sm font-semibold text-emerald-300">
+                            {requestFeedback}
+                        </p>
+                        {activeTask && (
+                            <p className="text-xs text-emerald-200/80">
+                                Etapa atual ({activeTask.status}): {activeTask.message || 'Sincronizando com o terminal MetaTrader 5...'}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Painel de Status da Conexão e Métricas da Conta MT5 */}
             {acc && acc.mt5Id && (
                 <Card className="p-6 bg-[#111319] border-white/[0.08] shadow-xl">
                     <div className="flex flex-wrap items-center justify-between gap-4 pb-4 mb-4 border-b border-white/[0.06]">
@@ -262,16 +330,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 <Server size={20} />
                             </div>
                             <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                     <h3 className="font-bold text-slate-100">
                                         MT5 #{acc.mt5Id}
                                     </h3>
-                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                                        isAccConnected
-                                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                            : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                    }`}>
-                                        {isAccConnected ? 'CONECTADO' : (acc.connectionState || 'DESCONECTADO')}
+                                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${connectionBadge.className}`}>
+                                        {connectionBadge.label}
                                     </span>
                                     {acc.tradeMode && (
                                         <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
@@ -284,6 +348,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     {acc.accountHolderName ? ` • ${acc.accountHolderName}` : ''}
                                     {acc.pingMs ? ` • Ping: ${acc.pingMs} ms` : ''}
                                 </p>
+                                {acc.statusMessage && (
+                                    <p className="text-xs text-indigo-300 mt-1">
+                                        Status: {acc.statusMessage}
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -324,21 +393,21 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
-                            <span className="text-xs text-slate-400 block">Alavancagem / Margem</span>
-                            <span className="font-bold text-slate-100 text-base">
-                                1:{acc.leverage || 100}
+                            <span className="text-xs text-slate-400 block">Trades Importados</span>
+                            <span className="font-bold text-indigo-400 text-base">
+                                {totalTradesCount} operações
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
                             <span className="text-xs text-slate-400 block">Posições Abertas</span>
-                            <span className="font-bold text-indigo-400 text-base">
+                            <span className="font-bold text-slate-100 text-base">
                                 {acc.openPositionsCount ?? 0} ativas
                             </span>
                         </div>
                     </div>
 
                     {acc.lastSyncAt && (
-                        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
                             <span>Última sincronização com a VPS: {new Date(acc.lastSyncAt).toLocaleString()}</span>
                             <button
                                 onClick={() => handleForceSync(true)}
@@ -426,6 +495,166 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     </Button>
                 </div>
             </Card>
+
+            {/* Painel de Trades Importados da Conta */}
+            {acc && acc.mt5Id && (
+                <Card className="p-6 bg-[#111319] border-white/[0.08] shadow-xl">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2.5">
+                            <FileCheck size={18} className="text-emerald-400" />
+                            <h3 className="text-base font-bold text-slate-100">
+                                Trades Importados ({totalTradesCount})
+                            </h3>
+                        </div>
+                        <span className="text-xs text-slate-400">
+                            Conta MT5 #{acc.mt5Id}
+                        </span>
+                    </div>
+
+                    {recentTrades.length === 0 ? (
+                        <div className="p-6 text-center rounded-xl bg-[#08090C] border border-white/[0.05] text-slate-400 text-sm">
+                            Nenhum trade fechado encontrado no histórico desta conta MT5 até o momento. Assim que novas operações forem realizadas no MT5, elas serão importadas automaticamente.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                    <tr className="border-b border-white/[0.06] text-slate-400 uppercase">
+                                        <th className="py-2.5 px-3">Ticket</th>
+                                        <th className="py-2.5 px-3">Ativo</th>
+                                        <th className="py-2.5 px-3">Tipo</th>
+                                        <th className="py-2.5 px-3">Volume</th>
+                                        <th className="py-2.5 px-3">Preço</th>
+                                        <th className="py-2.5 px-3">Data Fechamento</th>
+                                        <th className="py-2.5 px-3 text-right">Resultado (P&amp;L)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/[0.04]">
+                                    {recentTrades.map((trade: any) => {
+                                        const pnl = Number(trade.netPnl ?? trade.profit ?? 0);
+                                        const isWin = pnl >= 0;
+                                        return (
+                                            <tr key={trade.id || trade.ticket} className="hover:bg-white/[0.02]">
+                                                <td className="py-2.5 px-3 font-mono text-slate-300">
+                                                    #{trade.ticket || trade.contractId}
+                                                </td>
+                                                <td className="py-2.5 px-3 font-bold text-slate-100">
+                                                    {trade.symbol}
+                                                </td>
+                                                <td className="py-2.5 px-3">
+                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
+                                                        (trade.type || '').toUpperCase().includes('BUY')
+                                                            ? 'bg-emerald-500/15 text-emerald-400'
+                                                            : 'bg-rose-500/15 text-rose-400'
+                                                    }`}>
+                                                        {(trade.type || '').toUpperCase().includes('BUY') ? (
+                                                            <TrendingUp size={11} />
+                                                        ) : (
+                                                            <TrendingDown size={11} />
+                                                        )}
+                                                        {trade.type}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2.5 px-3 text-slate-300">
+                                                    {Number(trade.volume || 0).toFixed(2)}
+                                                </td>
+                                                <td className="py-2.5 px-3 font-mono text-slate-400">
+                                                    {Number(trade.openPrice || 0)} → {Number(trade.closePrice || 0)}
+                                                </td>
+                                                <td className="py-2.5 px-3 text-slate-400">
+                                                    {trade.closeTime
+                                                        ? new Date(trade.closeTime).toLocaleString()
+                                                        : trade.openTime
+                                                            ? new Date(trade.openTime).toLocaleString()
+                                                            : '-'}
+                                                </td>
+                                                <td className={`py-2.5 px-3 text-right font-bold ${
+                                                    isWin ? 'text-emerald-400' : 'text-rose-400'
+                                                }`}>
+                                                    {isWin ? '+' : ''}{pnl.toFixed(2)} {acc.currency || 'USD'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </Card>
+            )}
+
+            {/* Logs de Auditoria de Conexão e Sincronização (Backend Audit Trail) */}
+            {(auditLogs.length > 0 || recentEvents.length > 0) && (
+                <Card className="p-6 bg-[#111319] border-white/[0.08] shadow-xl">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2.5">
+                            <Clock size={18} className="text-indigo-400" />
+                            <h3 className="text-base font-bold text-slate-100">
+                                Logs de Auditoria da Conexão MT5
+                            </h3>
+                        </div>
+                        <span className="text-xs text-slate-400">
+                            Registros do Backend &amp; Worker
+                        </span>
+                    </div>
+
+                    <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                        {recentEvents.map((ev: any) => (
+                            <div
+                                key={ev.id}
+                                className="flex items-start justify-between gap-3 p-3 rounded-xl bg-[#08090C] border border-white/[0.05] text-xs"
+                            >
+                                <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`px-2 py-0.5 rounded font-semibold text-[10px] ${
+                                            ev.severity === 'ERROR'
+                                                ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                                : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                                        }`}>
+                                            {ev.eventType}
+                                        </span>
+                                        <span className="text-slate-500 font-mono text-[11px]">
+                                            [{ev.workerId}]
+                                        </span>
+                                    </div>
+                                    <p className="text-slate-300 mt-1">{ev.message}</p>
+                                </div>
+                                <span className="text-slate-500 shrink-0 text-[11px]">
+                                    {new Date(ev.timestamp).toLocaleTimeString()}
+                                </span>
+                            </div>
+                        ))}
+
+                        {auditLogs.map((log: any) => (
+                            <div
+                                key={`audit-${log.id}`}
+                                className="flex items-start justify-between gap-3 p-3 rounded-xl bg-[#08090C] border border-white/[0.05] text-xs"
+                            >
+                                <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`px-2 py-0.5 rounded font-semibold text-[10px] ${
+                                            log.status === 'SUCCESS'
+                                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                                : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                        }`}>
+                                            AUDITORIA DB • {log.status === 'SUCCESS' ? 'SUCESSO' : 'FALHA'}
+                                        </span>
+                                        <span className="text-slate-400 font-medium">
+                                            {log.tradesCount} novos trades
+                                        </span>
+                                    </div>
+                                    <p className="text-slate-300 mt-1">
+                                        {log.details || log.errorDetails || log.fileName || `Sincronização automática (${log.method})`}
+                                    </p>
+                                </div>
+                                <span className="text-slate-500 shrink-0 text-[11px]">
+                                    {new Date(log.createdAt).toLocaleString()}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+            )}
         </div>
     );
 };

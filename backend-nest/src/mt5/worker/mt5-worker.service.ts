@@ -4,9 +4,10 @@ import { Repository, Like } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { AccountEntity, AccountType } from '../../account/account.entity';
 import { PositionEntity } from '../position.entity';
+import { TradeEntity } from '../trade.entity';
 import { Mt5Service } from '../mt5.service';
 import { Mt5Gateway } from '../mt5.gateway';
-import { ImportMethod } from '../import-log.entity';
+import { ImportLog, ImportMethod, ImportStatus } from '../import-log.entity';
 
 export enum WorkerTaskType {
     START_ACCOUNT = 'START_ACCOUNT',
@@ -83,6 +84,7 @@ export interface AccountLiveTelemetry {
     openPositionsCount?: number;
     pendingOrdersCount?: number;
     lastDealTicket?: number;
+    lastSyncedTradesCount?: number;
     orders?: any[];
 }
 
@@ -102,6 +104,7 @@ export interface WorkerEventRecord {
 @Injectable()
 export class Mt5WorkerService {
     private readonly logger = new Logger(Mt5WorkerService.name);
+    private readonly auditLogger = new Logger('MT5AuditTrail');
 
     // In-memory queues & telemetry state
     private pendingTasks: Map<string, WorkerTask> = new Map();
@@ -115,6 +118,10 @@ export class Mt5WorkerService {
         private readonly accountRepo: Repository<AccountEntity>,
         @InjectRepository(PositionEntity)
         private readonly positionRepo: Repository<PositionEntity>,
+        @InjectRepository(TradeEntity)
+        private readonly tradeRepo: Repository<TradeEntity>,
+        @InjectRepository(ImportLog)
+        private readonly importLogRepo: Repository<ImportLog>,
         private readonly mt5Service: Mt5Service,
         private readonly mt5Gateway: Mt5Gateway,
     ) { }
@@ -250,7 +257,7 @@ export class Mt5WorkerService {
         }
 
         const initialMsg = type === WorkerTaskType.START_ACCOUNT
-            ? `Aguardando servidor Windows MT5 iniciar conexão para ${cleanLogin}@${cleanServer}...`
+            ? `Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.`
             : `Tarefa ${type} enfileirada para ${cleanLogin}...`;
 
         const task: WorkerTask = {
@@ -282,7 +289,24 @@ export class Mt5WorkerService {
             });
         }
 
-        this.logger.log(`Nova tarefa enfileirada para o worker: [${type}] (P${task.priority}) para conta ${cleanLogin}@${cleanServer} (TaskID: ${taskId})`);
+        // Record audit event for connection/sync request
+        this.recentEvents.unshift({
+            id: randomUUID(),
+            workerId: 'BACKEND-API',
+            accountId: numericAccId,
+            login: cleanLogin,
+            server: cleanServer,
+            eventType: type === WorkerTaskType.START_ACCOUNT ? 'CONNECTION_REQUESTED' : `TASK_${type}_REQUESTED`,
+            severity: 'INFO',
+            message: initialMsg,
+            metadata: { taskId, type, priority: task.priority },
+            timestamp: new Date().toISOString(),
+        });
+        if (this.recentEvents.length > 100) this.recentEvents.length = 100;
+
+        this.auditLogger.log(
+            `[AUDIT] Solicitação ${type} criada para conta MT5 ${cleanLogin}@${cleanServer} (TaskID: ${taskId}, Prioridade: P${task.priority})`
+        );
         return task;
     }
 
@@ -302,9 +326,12 @@ export class Mt5WorkerService {
                 if (claim) {
                     task.status = WorkerTaskStatus.IN_PROGRESS;
                     task.dispatchedAt = new Date();
-                    if (!task.message || task.message.startsWith('Aguardando')) {
-                        task.message = `Worker Windows recebeu a tarefa e está iniciando execução para ${task.login}...`;
+                    if (!task.message || task.message.startsWith('Aguardando') || task.message.startsWith('Solicitação de conexão enviada')) {
+                        task.message = `Worker Windows recebeu a tarefa e está iniciando a sincronização para ${task.login}...`;
                     }
+                    this.auditLogger.log(
+                        `[AUDIT] Worker Windows reivindicou tarefa [${task.id}] (${task.type}) para conta ${task.login}@${task.server}`
+                    );
                 }
                 tasks.push(task);
             }
@@ -347,7 +374,9 @@ export class Mt5WorkerService {
         if (status === WorkerTaskStatus.FAILED && message) {
             task.errorMessage = message;
         }
-        this.logger.log(`Tarefa [${taskId}] (${task.type} - ${task.login}) atualizada para status: ${status}. ${message || ''}`);
+        this.auditLogger.log(
+            `[AUDIT] Tarefa [${taskId}] (${task.type} - ${task.login}@${task.server}) -> Status: ${status} | Msg: ${message || 'N/A'} | Details: ${JSON.stringify(task.details || {})}`
+        );
 
         // Update live telemetry state for this account
         if (task.login) {
@@ -372,6 +401,9 @@ export class Mt5WorkerService {
                     existingTel.statusMessage = message || 'Conectado e sincronizado.';
                     existingTel.lastError = null;
                     existingTel.lastSyncAt = new Date().toISOString();
+                    if (task.details?.syncedTradesCount !== undefined) {
+                        existingTel.lastSyncedTradesCount = Number(task.details.syncedTradesCount) || 0;
+                    }
                 }
             } else if (status === WorkerTaskStatus.FAILED) {
                 if (task.type === WorkerTaskType.START_ACCOUNT) {
@@ -384,31 +416,77 @@ export class Mt5WorkerService {
             this.accountTelemetry.set(task.login, existingTel);
         }
 
-        // Update account connection status in PostgreSQL on STOP_ACCOUNT or failed START_ACCOUNT
-        if (
-            (task.type === WorkerTaskType.STOP_ACCOUNT && status === WorkerTaskStatus.SUCCESS) ||
-            (task.type === WorkerTaskType.START_ACCOUNT && status === WorkerTaskStatus.FAILED)
-        ) {
-            this.findAccountByLoginOrId(task.login, task.accountId)
-                .then(async (acc) => {
-                    if (acc && acc.isConnected) {
-                        acc.isConnected = false;
-                        await this.accountRepo.save(acc);
-                        try {
-                            this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
-                        } catch { }
-                    }
-                })
-                .catch(() => { });
-        }
-
+        // Persist database audit log (ImportLog) and update AccountEntity on completion
         if (status === WorkerTaskStatus.SUCCESS || status === WorkerTaskStatus.FAILED) {
+            this.persistTaskAuditLog(task, status, message).catch((err) => {
+                this.logger.warn(`Erro ao gravar log de auditoria para tarefa ${taskId}: ${err.message}`);
+            });
+
             // Keep task in memory for 15 minutes so frontend polling can read final result
             setTimeout(() => {
                 this.pendingTasks.delete(taskId);
             }, 900000);
         }
         return { success: true };
+    }
+
+    private async persistTaskAuditLog(task: WorkerTask, status: WorkerTaskStatus, message?: string) {
+        const acc = await this.findAccountByLoginOrId(task.login, task.accountId);
+        if (!acc) return;
+
+        if (
+            (task.type === WorkerTaskType.STOP_ACCOUNT && status === WorkerTaskStatus.SUCCESS) ||
+            (task.type === WorkerTaskType.START_ACCOUNT && status === WorkerTaskStatus.FAILED)
+        ) {
+            if (acc.isConnected) {
+                acc.isConnected = false;
+                await this.accountRepo.save(acc);
+                try {
+                    this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
+                } catch { }
+            }
+        }
+
+        // Create persistent ImportLog audit record for connection/sync attempts
+        const isSyncTask =
+            task.type === WorkerTaskType.START_ACCOUNT ||
+            task.type === WorkerTaskType.SYNC_ACCOUNT ||
+            task.type === WorkerTaskType.FORCE_FULL_SYNC;
+
+        if (!isSyncTask) return;
+
+        const syncedTradesCount = Number(task.details?.syncedTradesCount || 0);
+
+        if (status === WorkerTaskStatus.FAILED) {
+            const failLog = this.importLogRepo.create({
+                userId: acc.userId,
+                accountId: acc.id,
+                method: ImportMethod.AUTO_SYNC,
+                status: ImportStatus.FAILED,
+                tradesCount: 0,
+                details: message || task.errorMessage || `Falha na conexão/autenticação com o servidor MT5 (${task.login}@${task.server || acc.broker})`,
+            });
+            await this.importLogRepo.save(failLog);
+            this.auditLogger.warn(
+                `[AUDIT-DB] Log de falha persistido (ImportLog #${failLog.id}) para conta ${task.login}: ${failLog.details}`
+            );
+        } else if (status === WorkerTaskStatus.SUCCESS && syncedTradesCount === 0) {
+            // When syncedTradesCount > 0, Mt5Service.saveHistory already persisted an ImportLog record.
+            // When syncedTradesCount === 0, we still record a SUCCESS connection/sync audit entry so the user has full auditability.
+            const totalExistingTrades = await this.tradeRepo.count({ where: { accountId: acc.id } });
+            const okLog = this.importLogRepo.create({
+                userId: acc.userId,
+                accountId: acc.id,
+                method: ImportMethod.AUTO_SYNC,
+                status: ImportStatus.SUCCESS,
+                tradesCount: 0,
+                details: message || `Conexão MT5 Cloud (${task.login}@${task.details?.server || task.server || acc.broker}) autenticada e sincronizada (${totalExistingTrades} trades no histórico)`,
+            });
+            await this.importLogRepo.save(okLog);
+            this.auditLogger.log(
+                `[AUDIT-DB] Log de sincronização sem novos negócios persistido (ImportLog #${okLog.id}) para conta ${task.login}`
+            );
+        }
     }
 
     exchangeCredential(taskId: string, accountId: number, credentialToken: string) {
@@ -742,7 +820,7 @@ export class Mt5WorkerService {
             }
         }
 
-        this.logger.log(`Evento Worker [${event.workerId}] (${event.eventType} - ${cleanLogin || 'GLOBAL'}): ${event.message}`);
+        this.auditLogger.log(`Evento Worker [${event.workerId}] (${event.eventType} - ${cleanLogin || 'GLOBAL'}): ${event.message}`);
         return { success: true };
     }
 
@@ -772,9 +850,26 @@ export class Mt5WorkerService {
         const telemetry = mt5Login ? this.accountTelemetry.get(mt5Login) || null : null;
         const activeTask = mt5Login ? this.getLatestTaskForLogin(mt5Login) : null;
         const positions = account ? await this.positionRepo.find({ where: { accountId: account.id } }) : [];
+        const totalTradesCount = account
+            ? await this.tradeRepo.count({ where: { accountId: account.id } })
+            : 0;
+        const recentTrades = account
+            ? await this.tradeRepo.find({
+                where: { accountId: account.id },
+                order: { closeTime: 'DESC', openTime: 'DESC' },
+                take: 15,
+            })
+            : [];
+        const auditLogs = account
+            ? await this.importLogRepo.find({
+                where: { accountId: account.id },
+                order: { createdAt: 'DESC' },
+                take: 10,
+            })
+            : [];
         const accountEvents = mt5Login
-            ? this.recentEvents.filter(e => e.login === mt5Login || (e.accountId && e.accountId.toString() === mt5Login)).slice(0, 10)
-            : this.recentEvents.slice(0, 5);
+            ? this.recentEvents.filter(e => e.login === mt5Login || (e.accountId && e.accountId.toString() === mt5Login)).slice(0, 12)
+            : this.recentEvents.slice(0, 6);
 
         return {
             worker: {
@@ -818,9 +913,14 @@ export class Mt5WorkerService {
                 openPositionsCount: positions.length,
                 pendingOrdersCount: telemetry?.pendingOrdersCount ?? 0,
                 lastDealTicket: telemetry?.lastDealTicket ?? 0,
+                lastSyncedTradesCount: telemetry?.lastSyncedTradesCount ?? 0,
+                totalTradesCount,
             } : null,
             positions,
             orders: telemetry?.orders || [],
+            recentTrades,
+            totalTradesCount,
+            auditLogs,
             activeTask,
             recentEvents: accountEvents,
         };

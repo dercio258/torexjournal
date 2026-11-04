@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { History, FileText, Server, Trash2, Wallet, Filter } from 'lucide-react';
+import { History, FileText, Server, Trash2, Wallet, Filter, Cloud } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccount } from '../../context/AccountContext';
 import api from '../../api';
@@ -8,8 +8,11 @@ interface ImportLog {
     id: number;
     method: 'EA' | 'FILE' | 'AUTO_SYNC' | 'MANUAL' | 'DERIV';
     status: 'SUCCESS' | 'FAILED' | 'PARTIAL';
-    details: string;
+    details?: string;
+    fileName?: string;
+    errorDetails?: string;
     tradesCount: number;
+    skipsCount?: number;
     createdAt: string;
     accountId?: string;
     account?: {
@@ -76,10 +79,28 @@ export const ImportHistory = () => {
 
     const getIcon = (method: string) => {
         switch (method) {
+            case 'AUTO_SYNC': return <Cloud size={18} className="text-emerald-500 dark:text-emerald-400" />;
             case 'EA': return <Server size={18} className="text-indigo-500 dark:text-indigo-400" />;
             case 'FILE': return <FileText size={18} className="text-emerald-500 dark:text-emerald-400" />;
             default: return <History size={18} className="text-slate-500 dark:text-slate-400" />;
         }
+    };
+
+    const getLogSummary = (log: ImportLog): string => {
+        if (log.details) return log.details;
+        if (log.status === 'FAILED') {
+            return log.errorDetails || 'Falha na importação / autenticação MT5';
+        }
+        if (log.method === 'AUTO_SYNC') {
+            if (log.tradesCount > 0) {
+                return `Sincronização MT5 Cloud: ${log.tradesCount} trade(s) importado(s)${log.skipsCount ? ` (${log.skipsCount} já existentes)` : ''}`;
+            }
+            return log.errorDetails || `Sincronização MT5 Cloud concluída (${log.skipsCount || 0} trades no histórico)`;
+        }
+        if (log.fileName) {
+            return `Arquivo: ${log.fileName} (${log.tradesCount} importados)`;
+        }
+        return `Importação via ${log.method}: ${log.tradesCount} trade(s) processado(s)`;
     };
 
     const getAccountNameForLog = (log: ImportLog): string => {
@@ -178,7 +199,7 @@ export const ImportHistory = () => {
                                         </div>
 
                                         <p className="text-xs sm:text-sm text-slate-600 dark:text-[#9CA3AF]">
-                                            {log.details}
+                                            {getLogSummary(log)}
                                         </p>
                                     </div>
                                 </div>

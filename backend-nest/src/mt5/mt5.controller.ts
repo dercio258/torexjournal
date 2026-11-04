@@ -139,6 +139,10 @@ export class Mt5Controller {
             task,
             account: cloudStatus.account,
             worker: cloudStatus.worker,
+            recentTrades: cloudStatus.recentTrades,
+            totalTradesCount: cloudStatus.totalTradesCount,
+            auditLogs: cloudStatus.auditLogs,
+            recentEvents: cloudStatus.recentEvents,
         };
     }
 
@@ -189,6 +193,10 @@ export class Mt5Controller {
             numId
         );
 
+        this.logger.log(
+            `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${account.id}, TaskID: ${task.id})`
+        );
+
         // 3. Optional local instance startup if configured
         let localInstance = null;
         try {
@@ -199,7 +207,7 @@ export class Mt5Controller {
 
         return {
             success: true,
-            message: task.message || 'Solicitação de conexão enviada! O servidor Windows está autenticando no MT5...',
+            message: 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.',
             taskId: task.id,
             task,
             accountId: account.id,
