@@ -6,9 +6,12 @@ import * as fs from 'fs';
 @Catch()
 export class GenericExceptionFilter implements ExceptionFilter {
     private readonly logger = new Logger(GenericExceptionFilter.name);
-    private readonly clientDist = fs.existsSync(join(process.cwd(), '..', 'client', 'dist'))
-        ? join(process.cwd(), '..', 'client', 'dist')
-        : join(__dirname, '..', '..', '..', 'client', 'dist');
+    private readonly clientDist = [
+        join(process.cwd(), '..', 'client', 'dist'),
+        join(process.cwd(), 'client', 'dist'),
+        join(__dirname, '..', '..', '..', '..', 'client', 'dist'),
+        join(__dirname, '..', '..', '..', 'client', 'dist'),
+    ].find(p => fs.existsSync(p)) || join(process.cwd(), '..', 'client', 'dist');
 
     catch(exception: any, host: ArgumentsHost) {
         const ctx = host.switchToHttp();
@@ -16,9 +19,15 @@ export class GenericExceptionFilter implements ExceptionFilter {
         const request = ctx.getRequest<FastifyRequest>();
 
         const url = request.raw?.url || request.url || '';
+        const cleanPath = url.split('?')[0];
 
-        // SPA Fallback: rotas de navegação que não são /api entregam o index.html
-        if (exception instanceof NotFoundException && !url.startsWith('/api')) {
+        // SPA Fallback: rotas de navegação GET que não são /api, /uploads ou arquivos estáticos ausentes entregam o index.html
+        if (
+            exception instanceof NotFoundException &&
+            !cleanPath.startsWith('/api') &&
+            !cleanPath.startsWith('/uploads') &&
+            !/\.[a-zA-Z0-9]+$/.test(cleanPath)
+        ) {
             const indexPath = join(this.clientDist, 'index.html');
             if (fs.existsSync(indexPath)) {
                 return response.status(HttpStatus.OK).type('text/html').send(fs.createReadStream(indexPath));
