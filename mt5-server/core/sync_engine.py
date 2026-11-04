@@ -258,7 +258,8 @@ class SyncEngine:
             # Passo 1: Verifica se o IPC já está ativo ou reutiliza terminal MT5 já aberto (evita matar o processo à toa)
             init_ok = False
             try:
-                if mt5.terminal_info() is not None:
+                term_info = mt5.terminal_info()
+                if term_info is not None and isinstance(getattr(term_info, "name", None), str):
                     init_ok = True
                 else:
                     init_ok = mt5.initialize(timeout=15000)
