@@ -52,7 +52,31 @@ class LocalQueue:
                     cursor.execute("ALTER TABLE offline_buffer ADD COLUMN last_error TEXT DEFAULT NULL")
                 if "next_retry_at" not in existing_cols:
                     cursor.execute("ALTER TABLE offline_buffer ADD COLUMN next_retry_at REAL DEFAULT 0")
+                # Limpa itens órfãos acumulados da conta demo padrão 10013466931
+                cursor.execute(
+                    "DELETE FROM offline_buffer WHERE status = 'PENDING' AND payload LIKE '%10013466931%'"
+                )
                 conn.commit()
+
+    def purge_account_items(self, account_id: Any):
+        """Remove imediatamente todos os itens pendentes de uma conta inexistente no backend."""
+        acc_str = str(account_id).strip()
+        if not acc_str:
+            return
+        with self._lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "DELETE FROM offline_buffer WHERE (status IS NULL OR status = 'PENDING') AND payload LIKE ?",
+                        (f"%{acc_str}%",)
+                    )
+                    deleted = cursor.rowcount
+                    conn.commit()
+                    if deleted and deleted > 0:
+                        logger.info(f"Removidos {deleted} itens pendentes do buffer offline para a conta {acc_str}.")
+            except Exception as e:
+                logger.error(f"Erro ao limpar itens da conta {acc_str} no buffer offline: {e}")
 
     def enqueue(self, endpoint: str, payload: Dict[str, Any]):
         """Adiciona um payload não entregue à fila de buffer offline."""
@@ -154,4 +178,5 @@ class LocalQueue:
                     conn.commit()
             except Exception as e:
                 logger.error(f"Erro ao atualizar falha do item {item_id} no buffer offline: {e}")
+
 

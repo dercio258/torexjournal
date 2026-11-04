@@ -253,12 +253,24 @@ class WorkerManager:
             message=f"Autenticando conta {task.login} no servidor {normalized_server}..."
         ))
 
+        def _report_progress(step_msg: str):
+            try:
+                self.api_client.ack_task(
+                    task.id,
+                    TaskStatus.IN_PROGRESS,
+                    step_msg,
+                    details={"step": "AUTHENTICATING_MT5", "login": task.login, "server": normalized_server}
+                )
+            except Exception:
+                pass
+
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
             server=normalized_server,
             password=password,
-            path=settings.mt5_default_path
+            path=settings.mt5_default_path,
+            progress_callback=_report_progress,
         )
 
         if connected:
@@ -557,6 +569,10 @@ class WorkerManager:
                             msg = str(body.get("message") or "Recusado pelo backend")
                             is_perm = "not found" in msg.lower()
                             self.local_queue.mark_failed(item_id, msg, permanent=is_perm)
+                            if is_perm and isinstance(payload, dict):
+                                orphan_acc = payload.get("accountId") or payload.get("login")
+                                if orphan_acc:
+                                    self.local_queue.purge_account_items(orphan_acc)
                         else:
                             self.local_queue.remove(item_id)
                     except Exception:
