@@ -40,15 +40,17 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
     const [cloudState, setCloudState] = useState<any>(null);
     const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+    const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
     const pollTimerRef = useRef<any>(null);
 
     const fetchCloudStatus = async (overrideLogin?: string) => {
         try {
             const params: Record<string, string> = {};
             if (selectedAccountId) params.accountId = selectedAccountId;
-            if (overrideLogin || login) params.login = overrideLogin || login;
+            if (overrideLogin || login) params.login = (overrideLogin || login).trim();
             const res = await api.get('/mt5/cloud/status', { params });
             setCloudState(res.data);
+            setLastUpdatedAt(new Date().toLocaleTimeString());
 
             if (res.data?.account?.mt5Id && !login) {
                 setLogin(res.data.account.mt5Id);
@@ -65,7 +67,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         fetchCloudStatus();
         const interval = setInterval(() => {
             fetchCloudStatus();
-        }, 10000);
+        }, 5000);
         return () => {
             clearInterval(interval);
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -80,6 +82,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             try {
                 const res = await api.get(`/mt5/cloud/task/${taskId}`);
                 const task = res.data?.task;
+                setLastUpdatedAt(new Date().toLocaleTimeString());
                 setCloudState((prev: any) => ({
                     ...(prev || {}),
                     account: res.data?.account || prev?.account,
@@ -96,7 +99,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 if (task.status === 'IN_PROGRESS' || task.status === 'RECEIVED') {
                     setStatus({
                         type: 'info',
-                        message: task.message || `Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.`
+                        message: task.message || `Worker processando conexão para ${targetLogin}...`
                     });
                 } else if (task.status === 'SUCCESS') {
                     clearInterval(pollTimerRef.current);
@@ -127,7 +130,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             } catch (err) {
                 // Keep polling on transient error
             }
-        }, 2000);
+        }, 1500);
     };
 
     const handleConnect = async () => {
@@ -160,11 +163,13 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 message: confirmationMsg
             });
 
+            // Carrega imediatamente o estado inicial do backend
+            await fetchCloudStatus(login.trim());
+
             if (res.data?.taskId) {
                 startTaskPolling(res.data.taskId, login.trim());
             } else {
                 setIsLoading(false);
-                await fetchCloudStatus(login.trim());
                 if (refreshAccounts) await refreshAccounts();
                 window.dispatchEvent(new Event('trade-imported'));
             }
@@ -197,11 +202,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 accountId: cloudState?.account?.id || selectedAccountId,
                 forceFull
             });
+            await fetchCloudStatus(targetLogin);
             if (res.data?.taskId) {
                 startTaskPolling(res.data.taskId, targetLogin);
             } else {
                 setIsSyncing(false);
-                await fetchCloudStatus(targetLogin);
                 window.dispatchEvent(new Event('trade-imported'));
             }
         } catch (e: any) {
@@ -274,9 +279,17 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
     const connectionBadge = getConnectionBadge();
 
+    // Cálculo das 4 etapas visuais de comunicação bidirecional
+    const taskStatus = activeTask?.status;
+    const step1Done = !!requestFeedback || !!activeTask || isAccConnected;
+    const step2Done = taskStatus === 'IN_PROGRESS' || taskStatus === 'SUCCESS' || taskStatus === 'FAILED' || isAccConnected;
+    const step3Done = isAccConnected || taskStatus === 'SUCCESS';
+    const step3Failed = taskStatus === 'FAILED' || acc?.connectionState === 'AUTH_FAILED';
+    const step4Done = taskStatus === 'SUCCESS' || (isAccConnected && !!acc?.lastSyncAt);
+
     return (
         <div className="max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 <button
                     onClick={onBack}
                     className="flex items-center gap-2 text-[#9CA3AF] hover:text-[#F3F4F6] transition-colors text-sm"
@@ -300,22 +313,130 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 </div>
             </div>
 
-            {/* Feedback Visual Imediato da Solicitação de Conexão */}
-            {requestFeedback && (
-                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3 shadow-lg">
-                    <CheckCircle size={20} className="text-emerald-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1 flex-1">
-                        <p className="text-sm font-semibold text-emerald-300">
-                            {requestFeedback}
+            {/* Formulário de Conexão / Atualização de Credenciais MT5 */}
+            <Card className="p-8 bg-[#111319] border-white/[0.08] shadow-2xl">
+                <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-400">
+                        <Cloud size={24} />
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-bold text-[#F3F4F6]">Conectar {brokerName}</h2>
+                        <p className="text-sm text-[#9CA3AF]">
+                            Insira as credenciais para o servidor Windows MT5 autenticar e sincronizar em tempo real.
                         </p>
-                        {activeTask && (
-                            <p className="text-xs text-emerald-200/80">
-                                Etapa atual ({activeTask.status}): {activeTask.message || 'Sincronizando com o terminal MetaTrader 5...'}
-                            </p>
-                        )}
                     </div>
                 </div>
-            )}
+
+                <div className="space-y-6">
+                    <Input
+                        label="Número da Conta (Login MT5)"
+                        placeholder="Ex: 202658742"
+                        value={login}
+                        onChange={(e) => setLogin(e.target.value)}
+                        className="bg-[#08090C] border-white/[0.08]"
+                    />
+
+                    <Input
+                        label="Senha da Conta / Investidor"
+                        type="password"
+                        placeholder="Digite a senha da conta MT5"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="bg-[#08090C] border-white/[0.08]"
+                    />
+                    <p className="text-xs text-[#6B7280] -mt-4 flex items-center gap-1.5">
+                        <ShieldCheck size={14} className="text-emerald-400" />
+                        Suas credenciais são transmitidas via token único temporário e criptografadas no cofre da VPS.
+                    </p>
+
+                    <Input
+                        label="Servidor da Corretora"
+                        placeholder="Ex: Deriv-Demo, Deriv-Server, Exness-MT5Real"
+                        value={server}
+                        onChange={(e) => setServer(e.target.value)}
+                        className="bg-[#08090C] border-white/[0.08]"
+                    />
+
+                    {/* Banner de Confirmação Exata Solicitação Enviada */}
+                    {requestFeedback && (
+                        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3">
+                            <CheckCircle size={20} className="text-emerald-400 shrink-0 mt-0.5" />
+                            <div className="space-y-1 flex-1">
+                                <p className="text-sm font-semibold text-emerald-300">
+                                    {requestFeedback}
+                                </p>
+                                <p className="text-xs text-emerald-200/80">
+                                    Comunicação bidirecional ativa {lastUpdatedAt ? `(última leitura: ${lastUpdatedAt})` : ''}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Status Dinâmico em Tempo Real do Worker */}
+                    {status && (
+                        <div className={`p-4 rounded-xl flex items-center justify-between gap-3 text-sm ${
+                            status.type === 'success'
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : status.type === 'info'
+                                    ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20'
+                                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}>
+                            <div className="flex items-center gap-3">
+                                {status.type === 'success' ? (
+                                    <CheckCircle size={18} className="shrink-0" />
+                                ) : status.type === 'info' ? (
+                                    <Activity size={18} className="shrink-0 animate-pulse" />
+                                ) : (
+                                    <AlertTriangle size={18} className="shrink-0" />
+                                )}
+                                <span>{status.message}</span>
+                            </div>
+                            <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${connectionBadge.className}`}>
+                                {connectionBadge.label}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* Pipeline Visual Bidirecional de 4 Etapas */}
+                    {(requestFeedback || activeTask || acc?.mt5Id) && (
+                        <div className="p-4 rounded-xl bg-[#08090C] border border-white/[0.06] space-y-3">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="font-semibold text-slate-200">Progresso da Comunicação Bidirecional</span>
+                                <span>Worker: {worker?.isOnline ? 'CONECTADO' : 'AGUARDANDO VPS'}</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                                <div className={`p-2.5 rounded-lg border ${step1Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
+                                    <span className="font-bold block">1. Backend Linux</span>
+                                    <span>{step1Done ? 'Solicitação registrada' : 'Aguardando envio'}</span>
+                                </div>
+                                <div className={`p-2.5 rounded-lg border ${step2Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step1Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
+                                    <span className="font-bold block">2. Worker Windows</span>
+                                    <span>{step2Done ? 'Tarefa recebida' : 'Aguardando Worker...'}</span>
+                                </div>
+                                <div className={`p-2.5 rounded-lg border ${step3Failed ? 'bg-rose-500/15 border-rose-500/30 text-rose-300' : step3Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step2Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
+                                    <span className="font-bold block">3. Login no MT5</span>
+                                    <span>{step3Failed ? 'Falha de login' : step3Done ? 'Conta autenticada' : 'Autenticando...'}</span>
+                                </div>
+                                <div className={`p-2.5 rounded-lg border ${step4Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step3Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
+                                    <span className="font-bold block">4. Dados &amp; Trades</span>
+                                    <span>{step4Done ? `${totalTradesCount} trade(s) no histórico` : 'Sincronizando...'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <Button
+                        variant="gradient"
+                        className="w-full py-6 text-base"
+                        onClick={handleConnect}
+                        isLoading={isLoading || !!activeTaskId}
+                        disabled={!login || !password || !server || isLoading || !!activeTaskId}
+                        icon={<Power size={18} />}
+                    >
+                        {activeTaskId ? 'Autenticando e Sincronizando na VPS...' : 'Conectar e Sincronizar Agora'}
+                    </Button>
+                </div>
+            </Card>
 
             {/* Painel de Status da Conexão e Métricas da Conta MT5 */}
             {acc && acc.mt5Id && (
@@ -358,7 +479,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
                         <div className="flex items-center gap-2">
                             <Button
-                                variant="outline"
+                                variant="secondary"
                                 className="text-xs px-3 py-2"
                                 onClick={() => handleForceSync(false)}
                                 isLoading={isSyncing}
@@ -368,7 +489,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             </Button>
                             {isAccConnected && (
                                 <Button
-                                    variant="outline"
+                                    variant="secondary"
                                     className="text-xs px-3 py-2 text-rose-400 border-rose-500/30 hover:bg-rose-500/10"
                                     onClick={handleDisconnect}
                                     icon={<LogOut size={14} />}
@@ -419,82 +540,6 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     )}
                 </Card>
             )}
-
-            {/* Formulário de Conexão / Atualização de Credenciais MT5 */}
-            <Card className="p-8 bg-[#111319] border-white/[0.08] shadow-2xl">
-                <div className="flex items-center gap-4 mb-8">
-                    <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-400">
-                        <Cloud size={24} />
-                    </div>
-                    <div>
-                        <h2 className="text-xl font-bold text-[#F3F4F6]">Conectar {brokerName}</h2>
-                        <p className="text-sm text-[#9CA3AF]">
-                            Insira as credenciais para o servidor Windows MT5 autenticar e sincronizar em tempo real.
-                        </p>
-                    </div>
-                </div>
-
-                <div className="space-y-6">
-                    <Input
-                        label="Número da Conta (Login MT5)"
-                        placeholder="Ex: 202658742"
-                        value={login}
-                        onChange={(e) => setLogin(e.target.value)}
-                        className="bg-[#08090C] border-white/[0.08]"
-                    />
-
-                    <Input
-                        label="Senha da Conta / Investidor"
-                        type="password"
-                        placeholder="Digite a senha da conta MT5"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="bg-[#08090C] border-white/[0.08]"
-                    />
-                    <p className="text-xs text-[#6B7280] -mt-4 flex items-center gap-1.5">
-                        <ShieldCheck size={14} className="text-emerald-400" />
-                        Suas credenciais são transmitidas via token único temporário e criptografadas no cofre da VPS.
-                    </p>
-
-                    <Input
-                        label="Servidor da Corretora"
-                        placeholder="Ex: Deriv-Demo, Deriv-Server, Exness-MT5Real"
-                        value={server}
-                        onChange={(e) => setServer(e.target.value)}
-                        className="bg-[#08090C] border-white/[0.08]"
-                    />
-
-                    {status && (
-                        <div className={`p-4 rounded-lg flex items-center gap-3 text-sm ${
-                            status.type === 'success'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : status.type === 'info'
-                                    ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20'
-                                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}>
-                            {status.type === 'success' ? (
-                                <CheckCircle size={18} className="shrink-0" />
-                            ) : status.type === 'info' ? (
-                                <Activity size={18} className="shrink-0 animate-pulse" />
-                            ) : (
-                                <AlertTriangle size={18} className="shrink-0" />
-                            )}
-                            <span>{status.message}</span>
-                        </div>
-                    )}
-
-                    <Button
-                        variant="gradient"
-                        className="w-full py-6 text-base"
-                        onClick={handleConnect}
-                        isLoading={isLoading || !!activeTaskId}
-                        disabled={!login || !password || !server || isLoading || !!activeTaskId}
-                        icon={<Power size={18} />}
-                    >
-                        {activeTaskId ? 'Autenticando e Sincronizando na VPS...' : 'Conectar e Sincronizar Agora'}
-                    </Button>
-                </div>
-            </Card>
 
             {/* Painel de Trades Importados da Conta */}
             {acc && acc.mt5Id && (
