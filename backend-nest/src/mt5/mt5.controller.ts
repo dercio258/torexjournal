@@ -116,34 +116,75 @@ export class Mt5Controller {
         };
     }
 
+    @Get('cloud/status')
+    @UseGuards(JwtAuthGuard)
+    async getCloudStatus(
+        @Req() req,
+        @Query('accountId') accountId?: string,
+        @Query('login') login?: string
+    ) {
+        return this.mt5WorkerService.getCloudConnectionStatus(req.user.id, accountId, login);
+    }
+
+    @Get('cloud/task/:taskId')
+    @UseGuards(JwtAuthGuard)
+    async getCloudTaskStatus(@Param('taskId') taskId: string, @Req() req) {
+        const task = this.mt5WorkerService.getTaskById(taskId);
+        const cloudStatus = await this.mt5WorkerService.getCloudConnectionStatus(
+            req.user.id,
+            undefined,
+            task?.login
+        );
+        return {
+            task,
+            account: cloudStatus.account,
+            worker: cloudStatus.worker,
+        };
+    }
+
     @Post('cloud/connect')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PREMIUM)
-    async connectCloud(@Body() body: { login: string, pass: string, server: string }, @Req() req) {
+    async connectCloud(@Body() body: { login: string; pass: string; server: string; accountId?: string }, @Req() req) {
+        const cleanLogin = (body.login || '').toString().trim();
+        const cleanServer = (body.server || '').toString().trim();
+
         // 1. Ensure user has an account record in database
-        let account = await this.accountRepo.findOne({ where: { mt5Id: body.login } });
+        let account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
+        if (!account && body.accountId) {
+            const selectedAcc = await this.accountRepo.findOne({ where: { id: body.accountId, userId: req.user.id } });
+            if (selectedAcc && (!selectedAcc.mt5Id || selectedAcc.mt5Id === cleanLogin)) {
+                selectedAcc.mt5Id = cleanLogin;
+                selectedAcc.broker = cleanServer || selectedAcc.broker;
+                account = await this.accountRepo.save(selectedAcc);
+            }
+        }
+        if (!account) {
+            account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
+        }
         if (!account) {
             account = this.accountRepo.create({
                 userId: req.user.id,
-                mt5Id: body.login,
-                broker: body.server,
-                name: `MT5 ${body.login}`,
+                mt5Id: cleanLogin,
+                broker: cleanServer,
+                name: `MT5 ${cleanLogin}`,
                 isConnected: false,
                 balance: 0,
                 equity: 0
             });
             await this.accountRepo.save(account);
-        } else if (!account.userId) {
-            account.userId = req.user.id;
+        } else {
+            account.userId = account.userId || req.user.id;
+            if (cleanServer) account.broker = cleanServer;
             await this.accountRepo.save(account);
         }
 
         // 2. Dispatch task for the Python Worker on Windows Server
-        const numId = parseInt(body.login.replace(/\D/g, ''), 10) || 1;
+        const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
         const task = this.mt5WorkerService.createAccountTask(
             WorkerTaskType.START_ACCOUNT,
-            body.login,
-            body.server,
+            cleanLogin,
+            cleanServer,
             body.pass,
             numId
         );
@@ -151,39 +192,88 @@ export class Mt5Controller {
         // 3. Optional local instance startup if configured
         let localInstance = null;
         try {
-            localInstance = await this.mt5InstanceService.startInstance(req.user.id, body.login, body.pass, body.server);
+            localInstance = await this.mt5InstanceService.startInstance(req.user.id, cleanLogin, body.pass, task.server);
         } catch (e) {
             this.logger.log(`Mt5InstanceService local não ativo (${e.message}). Tarefa enviada ao MT5 Worker.`);
         }
 
         return {
             success: true,
-            message: 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.',
+            message: task.message || 'Solicitação de conexão enviada! O servidor Windows está autenticando no MT5...',
             taskId: task.id,
+            task,
             accountId: account.id,
+            server: task.server,
             instance: localInstance
+        };
+    }
+
+    @Post('cloud/sync')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PREMIUM)
+    async syncCloud(@Body() body: { login?: string; accountId?: string; forceFull?: boolean }, @Req() req) {
+        let account: AccountEntity | null = null;
+        if (body.accountId) {
+            account = await this.accountRepo.findOne({ where: { id: body.accountId, userId: req.user.id } });
+        }
+        if (!account && body.login) {
+            account = await this.accountRepo.findOne({ where: { mt5Id: body.login.trim(), userId: req.user.id } });
+        }
+        if (!account) {
+            account = await this.accountRepo.findOne({
+                where: { userId: req.user.id, isArchived: false },
+                order: { updatedAt: 'DESC' }
+            });
+        }
+        const cleanLogin = (body.login || account?.mt5Id || '').toString().trim();
+        if (!cleanLogin) {
+            return { success: false, message: 'Nenhuma conta MT5 vinculada para sincronizar.' };
+        }
+        const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
+        const taskType = body.forceFull ? WorkerTaskType.FORCE_FULL_SYNC : WorkerTaskType.SYNC_ACCOUNT;
+        const task = this.mt5WorkerService.createAccountTask(
+            taskType,
+            cleanLogin,
+            account?.broker || '',
+            undefined,
+            numId
+        );
+        return {
+            success: true,
+            message: 'Sincronização solicitada ao servidor Windows MT5!',
+            taskId: task.id,
+            task
         };
     }
 
     @Post('cloud/disconnect')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PREMIUM)
-    async disconnectCloud(@Body() body: { login: string }, @Req() req) {
-        const numId = parseInt(body.login.replace(/\D/g, ''), 10) || 1;
-        this.mt5WorkerService.createAccountTask(
+    async disconnectCloud(@Body() body: { login: string; accountId?: string }, @Req() req) {
+        const cleanLogin = (body.login || '').toString().trim();
+        const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
+        const task = this.mt5WorkerService.createAccountTask(
             WorkerTaskType.STOP_ACCOUNT,
-            body.login,
+            cleanLogin,
             '',
             undefined,
             numId
         );
 
+        if (cleanLogin) {
+            const acc = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
+            if (acc) {
+                acc.isConnected = false;
+                await this.accountRepo.save(acc);
+            }
+        }
+
         try {
-            await this.mt5InstanceService.stopInstance(req.user.id, body.login);
+            await this.mt5InstanceService.stopInstance(req.user.id, cleanLogin);
         } catch (e) {
             // ignore local error
         }
 
-        return { success: true, message: 'Terminal desconectado' };
+        return { success: true, message: 'Terminal desconectado', taskId: task.id };
     }
 }

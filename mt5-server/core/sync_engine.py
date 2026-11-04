@@ -296,7 +296,9 @@ class SyncEngine:
             self._dismiss_mt5_dialogs()
 
             if not init_ok:
-                logger.error(f"Não foi possível inicializar o MT5: {mt5.last_error()}")
+                err = mt5.last_error()
+                self.last_connect_error = f"Não foi possível inicializar o MT5: {err}"
+                logger.error(self.last_connect_error)
                 return False
 
             # Passo 3: Garante login na conta correta
@@ -305,6 +307,7 @@ class SyncEngine:
                 if self._is_account_authenticated(info, login_clean):
                     self._wait_for_broker_sync(login_clean, timeout_sec=8.0)
                     self.connected_account = account_id
+                    self.last_connect_error = None
                     return True
 
                 if server_clean:
@@ -325,17 +328,21 @@ class SyncEngine:
                             break
 
                         err = mt5.last_error()
+                        self.last_connect_error = f"Erro MT5 {err} ao autenticar {login_clean}@{server_clean}"
                         logger.warning(f"Tentativa {attempt}/5 de login falhou: {err}. Aguardando 2s...")
                         time.sleep(2)
                     else:
                         final_info = mt5.account_info()
                         if not self._is_account_authenticated(final_info, login_clean):
-                            logger.error(f"Falha de autenticação no MT5 para {login_clean}@{server_clean} após 5 tentativas: {mt5.last_error()}")
+                            err = mt5.last_error()
+                            self.last_connect_error = f"Falha de autenticação no MT5 para {login_clean}@{server_clean} após 5 tentativas: {err}"
+                            logger.error(self.last_connect_error)
                             return False
 
                 self._wait_for_broker_sync(login_clean, timeout_sec=10.0)
 
             self.connected_account = account_id
+            self.last_connect_error = None
             return True
 
     def disconnect(self):
@@ -363,7 +370,7 @@ class SyncEngine:
         }
 
     def fetch_account_info(self, account_id: int, login: str, server: str) -> Optional[AccountInfo]:
-        """Obtém dados de saldo, patrimônio e margem da conta."""
+        """Obtém dados completos de saldo, patrimônio, margem, ping e status de conexão da conta."""
         with self._ipc_lock:
             if not MT5_AVAILABLE:
                 return AccountInfo(
@@ -386,21 +393,39 @@ class SyncEngine:
                     logger.warning(f"Não foi possível obter account_info(): {mt5.last_error()}")
                     return None
 
+                term = mt5.terminal_info()
+                ping_raw = getattr(term, "ping_last", 0) if term is not None else 0
+                ping_ms = round(float(ping_raw or 0) / 1000.0, 2) if isinstance(ping_raw, (int, float)) else 0.0
+                term_build = getattr(term, "build", None) if term is not None else None
+                term_build_int = int(term_build) if isinstance(term_build, int) else None
+                term_connected = bool(getattr(term, "connected", True)) if term is not None else True
+
+                raw_mode = getattr(info, "trade_mode", 0)
+                trade_mode_map = {0: "DEMO", 1: "CONTEST", 2: "REAL"}
+                trade_mode_str = trade_mode_map.get(raw_mode, "DEMO" if "demo" in str(server).lower() else "REAL")
+                actual_server = str(getattr(info, "server", "") or server)
+
                 return AccountInfo(
                     accountId=account_id,
                     login=login,
-                    server=server,
-                    currency=info.currency,
-                    balance=info.balance,
-                    equity=info.equity,
-                    margin=info.margin,
-                    freeMargin=info.margin_free,
-                    marginLevel=info.margin_level,
-                    leverage=info.leverage,
-                    profit=info.profit,
-                    company=info.company,
-                    name=info.name,
-                    tradeAllowed=info.trade_allowed,
+                    server=actual_server,
+                    currency=str(getattr(info, "currency", "USD") or "USD"),
+                    balance=float(getattr(info, "balance", 0.0) or 0.0),
+                    equity=float(getattr(info, "equity", 0.0) or 0.0),
+                    margin=float(getattr(info, "margin", 0.0) or 0.0),
+                    freeMargin=float(getattr(info, "margin_free", 0.0) or 0.0),
+                    marginLevel=float(getattr(info, "margin_level", 0.0) or 0.0),
+                    leverage=int(getattr(info, "leverage", 1) or 1),
+                    profit=float(getattr(info, "profit", 0.0) or 0.0),
+                    credit=float(getattr(info, "credit", 0.0) or 0.0),
+                    company=str(getattr(info, "company", "") or ""),
+                    name=str(getattr(info, "name", "") or ""),
+                    tradeMode=trade_mode_str,
+                    tradeAllowed=bool(getattr(info, "trade_allowed", True)),
+                    tradeExpert=bool(getattr(info, "trade_expert", True)),
+                    pingMs=ping_ms,
+                    terminalBuild=term_build_int,
+                    connected=term_connected,
                 )
             except MemoryError:
                 res = self.get_resource_snapshot()

@@ -216,7 +216,14 @@ class WorkerManager:
 
     def _handle_start_account(self, task: Task):
         password = None
+        normalized_server = self.sync_engine._normalize_broker_server(task.server)
         if task.credentialToken:
+            self.api_client.ack_task(
+                task.id,
+                TaskStatus.IN_PROGRESS,
+                f"Resgatando credenciais seguras para conta {task.login}@{normalized_server}...",
+                details={"step": "EXCHANGE_CREDENTIALS", "login": task.login, "server": normalized_server}
+            )
             cred_response = self.api_client.exchange_credential(
                 task_id=task.id,
                 account_id=task.accountId,
@@ -226,13 +233,30 @@ class WorkerManager:
                 password = cred_response.password
                 logger.info(f"Credencial resgatada com sucesso para conta {task.accountId}")
             else:
-                self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha na troca de credentialToken")
+                err_msg = "Falha na troca de credentialToken (token expirado ou inválido)"
+                self.api_client.ack_task(task.id, TaskStatus.FAILED, err_msg, details={"error": err_msg})
                 return
+
+        self.api_client.ack_task(
+            task.id,
+            TaskStatus.IN_PROGRESS,
+            f"Inicializando MT5 e autenticando conta {task.login} no servidor {normalized_server}...",
+            details={"step": "AUTHENTICATING_MT5", "login": task.login, "server": normalized_server}
+        )
+        self.api_client.send_event(WorkerEvent(
+            workerId=settings.worker_id,
+            accountId=task.accountId,
+            login=task.login,
+            server=normalized_server,
+            eventType="ACCOUNT_CONNECTING",
+            severity="INFO",
+            message=f"Autenticando conta {task.login} no servidor {normalized_server}..."
+        ))
 
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
-            server=task.server,
+            server=normalized_server,
             password=password,
             path=settings.mt5_default_path
         )
@@ -241,26 +265,74 @@ class WorkerManager:
             self.account_manager.add_or_update_account(
                 account_id=task.accountId,
                 login=task.login,
-                server=task.server,
+                server=normalized_server,
                 password=password
             )
-            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 conectado e conta autenticada com sucesso.")
-            self._sync_single_account(task.accountId)
+            self.api_client.ack_task(
+                task.id,
+                TaskStatus.IN_PROGRESS,
+                f"Conta {task.login} autenticada! Sincronizando saldo, posições e histórico de operações...",
+                details={"step": "SYNCING_DATA", "login": task.login, "server": normalized_server}
+            )
+            sync_summary = self._sync_single_account(task.accountId) or {}
+            bal_str = f"${sync_summary.get('balance', 0.0):.2f}" if "balance" in sync_summary else ""
+            trades_cnt = sync_summary.get("syncedTradesCount", 0)
+            success_msg = (
+                f"Terminal MT5 conectado e sincronizado com sucesso! "
+                f"{f'Saldo: {bal_str} | ' if bal_str else ''}{trades_cnt} novos negócios importados."
+            )
+            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, success_msg, details=sync_summary)
+            self.api_client.send_event(WorkerEvent(
+                workerId=settings.worker_id,
+                accountId=task.accountId,
+                login=task.login,
+                server=normalized_server,
+                eventType="ACCOUNT_CONNECTED",
+                severity="INFO",
+                message=success_msg,
+                metadata=sync_summary
+            ))
         else:
-            self.api_client.ack_task(task.id, TaskStatus.FAILED, "Não foi possível conectar o terminal MT5 e autenticar a conta.")
+            err_detail = getattr(self.sync_engine, "last_connect_error", None) or (
+                "Não foi possível conectar o terminal MT5 e autenticar a conta. Verifique login, senha e servidor."
+            )
+            self.api_client.ack_task(
+                task.id,
+                TaskStatus.FAILED,
+                err_detail,
+                details={"step": "FAILED", "error": err_detail, "login": task.login, "server": normalized_server}
+            )
+            self.api_client.send_event(WorkerEvent(
+                workerId=settings.worker_id,
+                accountId=task.accountId,
+                login=task.login,
+                server=normalized_server,
+                eventType="ACCOUNT_LOGIN_FAILED",
+                severity="ERROR",
+                message=err_detail,
+                metadata={"error": err_detail}
+            ))
 
     def _handle_stop_account(self, task: Task):
         self.process_manager.stop_terminal(task.accountId)
         self.account_manager.remove_account(task.accountId)
         self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Conta e terminal encerrados.")
+        self.api_client.send_event(WorkerEvent(
+            workerId=settings.worker_id,
+            accountId=task.accountId,
+            login=task.login,
+            eventType="ACCOUNT_STOPPED",
+            severity="INFO",
+            message=f"Monitoramento da conta {task.login} encerrado a pedido do usuário."
+        ))
 
     def _handle_sync_account(self, task: Task):
-        self._sync_single_account(task.accountId)
-        self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Sincronização concluída.")
+        summary = self._sync_single_account(task.accountId) or {}
+        self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Sincronização concluída.", details=summary)
 
     def _handle_force_full_sync(self, task: Task):
-        self._sync_single_account(task.accountId, force_full=True)
-        self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Sincronização completa concluída.")
+        summary = self._sync_single_account(task.accountId, force_full=True) or {}
+        self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Sincronização completa concluída.", details=summary)
 
     def _handle_restart_terminal(self, task: Task):
         acc = self.account_manager.get_account(task.accountId)
@@ -278,9 +350,11 @@ class WorkerManager:
             path=settings.mt5_default_path,
         )
         if restarted:
-            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal reiniciado e autenticado com sucesso.")
+            summary = self._sync_single_account(acc.account_id) or {}
+            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal reiniciado e autenticado com sucesso.", details=summary)
         else:
-            self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha ao reiniciar terminal.")
+            err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha ao reiniciar terminal."
+            self.api_client.ack_task(task.id, TaskStatus.FAILED, err_detail)
 
     # -------------------------------------------------------------
     # 2. WATCHDOG INTEGRADO & SINCRONIZAÇÃO ROUND-ROBIN
@@ -319,28 +393,63 @@ class WorkerManager:
 
             self._sync_single_account(account_id)
 
-    def _sync_single_account(self, account_id: int, force_full: bool = False):
+    def _sync_single_account(self, account_id: int, force_full: bool = False) -> Optional[Dict[str, Any]]:
         acc = self.account_manager.get_account(account_id)
         if not acc:
-            return
+            return None
 
         is_safe, error_msg, metrics = self.health_monitor.check_account_resource_guard(
             account_id,
             operation=f"Extração Conta {acc.login}"
         )
         if not is_safe:
-            return
+            return None
 
         try:
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
-                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server} (verifique login, senha e nome exato do servidor da corretora)")
-                self.account_manager.mark_error(account_id, "Falha de conexão IPC/Login no MT5")
-                return
+                err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
+                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")
+                self.account_manager.mark_error(account_id, err_detail)
+                self.api_client.send_event(WorkerEvent(
+                    workerId=settings.worker_id,
+                    accountId=account_id,
+                    login=acc.login,
+                    server=acc.server,
+                    eventType="ACCOUNT_DISCONNECTED",
+                    severity="WARNING",
+                    message=err_detail,
+                    metadata={"error": err_detail}
+                ))
+                return None
+
+            summary: Dict[str, Any] = {
+                "accountId": account_id,
+                "login": acc.login,
+                "server": acc.server,
+                "connected": True,
+            }
 
             # 1. Atualizar métricas financeiras
             acc_info = self.sync_engine.fetch_account_info(account_id, acc.login, acc.server)
             if acc_info:
-                logger.info(f"[SYNC] Enviando métricas da conta {acc.login} (Saldo: ${acc_info.balance:.2f}, Equity: ${acc_info.equity:.2f})...")
+                summary.update({
+                    "balance": acc_info.balance,
+                    "equity": acc_info.equity,
+                    "margin": acc_info.margin,
+                    "freeMargin": acc_info.freeMargin,
+                    "marginLevel": acc_info.marginLevel,
+                    "leverage": acc_info.leverage,
+                    "currency": acc_info.currency,
+                    "company": acc_info.company,
+                    "accountHolderName": acc_info.name,
+                    "tradeMode": acc_info.tradeMode,
+                    "pingMs": acc_info.pingMs,
+                    "terminalBuild": acc_info.terminalBuild,
+                })
+                logger.info(
+                    f"[SYNC] Enviando métricas da conta {acc.login} "
+                    f"(Saldo: ${acc_info.balance:.2f}, Equity: ${acc_info.equity:.2f}, Ping: {acc_info.pingMs}ms)..."
+                )
                 success = self.api_client.sync_account(acc_info)
                 if not success:
                     err_reason = getattr(self.api_client, "last_error_reason", None)
@@ -350,12 +459,13 @@ class WorkerManager:
                             f"Removendo conta órfã do cofre local para não bloquear o terminal."
                         )
                         self.account_manager.remove_account(account_id)
-                        return
+                        return None
                     if err_reason in (None, "NETWORK_ERROR"):
                         self.local_queue.enqueue("/sync/accounts", acc_info.model_dump(mode="json"))
 
             # 2. Atualizar posições abertas
             positions_payload = self.sync_engine.fetch_positions(account_id, login=acc.login)
+            summary["openPositionsCount"] = len(positions_payload.positions)
             pos_success = self.api_client.sync_positions(positions_payload)
             if not pos_success:
                 err_reason = getattr(self.api_client, "last_error_reason", None)
@@ -364,6 +474,7 @@ class WorkerManager:
 
             # 3. Atualizar ordens pendentes
             orders_payload = self.sync_engine.fetch_orders(account_id, login=acc.login)
+            summary["pendingOrdersCount"] = len(orders_payload.orders)
             ord_success = self.api_client.sync_orders(orders_payload)
             if not ord_success:
                 self.local_queue.enqueue("/sync/orders", orders_payload.model_dump(mode="json"))
@@ -378,6 +489,9 @@ class WorkerManager:
                 last_deal_ticket=last_ticket,
                 last_deal_time=last_deal_time,
             )
+
+            summary["syncedTradesCount"] = len(deals_payload.trades)
+            summary["lastDealTicket"] = deals_payload.lastDealTicket
 
             if deals_payload.trades:
                 latest_time = max((t.time for t in deals_payload.trades if t.time), default=acc.last_deal_time)
@@ -399,6 +513,8 @@ class WorkerManager:
                     max(acc.last_deal_ticket, deals_payload.lastDealTicket),
                     last_deal_time=acc.last_deal_time,
                 )
+
+            return summary
 
         except ResourceExhaustionError as re:
             logger.critical(f"[PROTEÇÃO ATIVA - EXTRAÇÃO SUSPENSA] {re.message}")

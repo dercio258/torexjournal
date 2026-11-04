@@ -67,9 +67,15 @@ class AccountInfo(BaseModel):
     marginLevel: Optional[float] = 0.0
     leverage: int
     profit: float = 0.0
+    credit: float = 0.0
     company: Optional[str] = None
     name: Optional[str] = None
+    tradeMode: Optional[str] = "DEMO"
     tradeAllowed: bool = True
+    tradeExpert: bool = True
+    pingMs: Optional[float] = 0.0
+    terminalBuild: Optional[int] = None
+    connected: bool = True
     updatedAt: datetime = Field(default_factory=_utc_now)
 
 
@@ -158,6 +164,8 @@ class WorkerHeartbeat(BaseModel):
 class WorkerEvent(BaseModel):
     workerId: str
     accountId: Optional[int] = None
+    login: Optional[str] = None
+    server: Optional[str] = None
     eventType: str
     severity: str  # INFO, WARNING, ERROR, CRITICAL
     message: str

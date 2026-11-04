@@ -66,14 +66,14 @@ export class Mt5WorkerController {
 
     @Post('sync/orders')
     @HttpCode(200)
-    async syncOrders(@Body() body: any) {
-        return { success: true };
+    async syncOrders(@Body() body: { accountId: number; login?: string; orders: any[] }) {
+        const login = body.login || body.accountId?.toString();
+        return this.workerService.syncOrders(body.accountId, login, body.orders || []);
     }
 
     @Post('events')
     @HttpCode(200)
     async handleEvent(@Body() body: any) {
-        this.logger.warn(`Evento recebido do worker [${body.workerId}]: ${body.eventType} - ${body.message}`);
-        return { success: true };
+        return this.workerService.recordWorkerEvent(body);
     }
 }

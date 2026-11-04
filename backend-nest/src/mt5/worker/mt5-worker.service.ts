@@ -2,13 +2,12 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { AccountEntity } from '../../account/account.entity';
+import { AccountEntity, AccountType } from '../../account/account.entity';
 import { PositionEntity } from '../position.entity';
 import { Mt5Service } from '../mt5.service';
 import { Mt5Gateway } from '../mt5.gateway';
 import { ImportMethod } from '../import-log.entity';
 
-// telemtria 
 export enum WorkerTaskType {
     START_ACCOUNT = 'START_ACCOUNT',
     STOP_ACCOUNT = 'STOP_ACCOUNT',
@@ -35,6 +34,8 @@ export interface WorkerTask {
     from?: string | null;
     options?: Record<string, any>;
     status: WorkerTaskStatus;
+    message?: string;
+    details?: Record<string, any>;
     createdAt: Date;
     dispatchedAt?: Date;
     completedAt?: Date;
@@ -55,19 +56,59 @@ export interface WorkerNodeState {
     lastHeartbeat?: Date;
     cpuPercent?: number;
     memoryPercent?: number;
+    memoryUsedMb?: number;
+    memoryTotalMb?: number;
+    memoryAvailableMb?: number;
     activeTerminals?: number;
     monitoredAccounts?: number[];
     isOnline: boolean;
+}
+
+export interface AccountLiveTelemetry {
+    login: string;
+    server: string;
+    company?: string;
+    accountHolderName?: string;
+    tradeMode?: string;
+    tradeAllowed?: boolean;
+    tradeExpert?: boolean;
+    credit?: number;
+    pingMs?: number;
+    terminalBuild?: number;
+    connected: boolean;
+    connectionState: 'CONNECTING' | 'CONNECTED' | 'SYNCING' | 'DISCONNECTED' | 'AUTH_FAILED';
+    statusMessage?: string;
+    lastError?: string | null;
+    lastSyncAt?: string;
+    openPositionsCount?: number;
+    pendingOrdersCount?: number;
+    lastDealTicket?: number;
+    orders?: any[];
+}
+
+export interface WorkerEventRecord {
+    id: string;
+    workerId: string;
+    accountId?: number;
+    login?: string;
+    server?: string;
+    eventType: string;
+    severity: string;
+    message: string;
+    metadata?: Record<string, any>;
+    timestamp: string;
 }
 
 @Injectable()
 export class Mt5WorkerService {
     private readonly logger = new Logger(Mt5WorkerService.name);
 
-    // In-memory queues (can be backed by Redis in cluster setup)
+    // In-memory queues & telemetry state
     private pendingTasks: Map<string, WorkerTask> = new Map();
     private credentialsStore: Map<string, TemporaryCredential> = new Map();
     private workers: Map<string, WorkerNodeState> = new Map();
+    private accountTelemetry: Map<string, AccountLiveTelemetry> = new Map();
+    private recentEvents: WorkerEventRecord[] = [];
 
     constructor(
         @InjectRepository(AccountEntity)
@@ -78,6 +119,20 @@ export class Mt5WorkerService {
         private readonly mt5Gateway: Mt5Gateway,
     ) { }
 
+    private normalizeBrokerServer(server: string): string {
+        const s = (server || '').trim();
+        const lower = s.toLowerCase();
+        const typoMap: Record<string, string> = {
+            'deric-demo': 'Deriv-Demo',
+            'deriv-demo': 'Deriv-Demo',
+            'deric-server': 'Deriv-Server',
+            'deriv-server': 'Deriv-Server',
+            'deric-server-02': 'Deriv-Server-02',
+            'deriv-server-02': 'Deriv-Server-02',
+        };
+        return typoMap[lower] || s;
+    }
+
     // ==========================================
     // 1. WORKER REGISTRATION & TELEMETRY
     // ==========================================
@@ -86,7 +141,7 @@ export class Mt5WorkerService {
         this.workers.set(workerId, {
             workerId,
             capacity,
-            systemInfo,
+            systemInfo: systemInfo || {},
             lastHeartbeat: new Date(),
             isOnline: true
         });
@@ -97,31 +152,28 @@ export class Mt5WorkerService {
         workerId: string;
         cpuPercent: number;
         memoryPercent: number;
+        memoryUsedMb?: number;
+        memoryTotalMb?: number;
+        memoryAvailableMb?: number;
         activeTerminals: number;
         monitoredAccounts: number[];
         timestamp?: string;
     }) {
-        const worker = this.workers.get(heartbeat.workerId);
-        if (worker) {
-            worker.lastHeartbeat = new Date();
-            worker.cpuPercent = heartbeat.cpuPercent;
-            worker.memoryPercent = heartbeat.memoryPercent;
-            worker.activeTerminals = heartbeat.activeTerminals;
-            worker.monitoredAccounts = heartbeat.monitoredAccounts || [];
-            worker.isOnline = true;
-        } else {
-            this.workers.set(heartbeat.workerId, {
-                workerId: heartbeat.workerId,
-                capacity: 10,
-                systemInfo: {},
-                lastHeartbeat: new Date(),
-                cpuPercent: heartbeat.cpuPercent,
-                memoryPercent: heartbeat.memoryPercent,
-                activeTerminals: heartbeat.activeTerminals,
-                monitoredAccounts: heartbeat.monitoredAccounts || [],
-                isOnline: true
-            });
-        }
+        const existing = this.workers.get(heartbeat.workerId);
+        this.workers.set(heartbeat.workerId, {
+            workerId: heartbeat.workerId,
+            capacity: existing?.capacity || 10,
+            systemInfo: existing?.systemInfo || {},
+            lastHeartbeat: new Date(),
+            cpuPercent: heartbeat.cpuPercent,
+            memoryPercent: heartbeat.memoryPercent,
+            memoryUsedMb: heartbeat.memoryUsedMb,
+            memoryTotalMb: heartbeat.memoryTotalMb,
+            memoryAvailableMb: heartbeat.memoryAvailableMb,
+            activeTerminals: heartbeat.activeTerminals,
+            monitoredAccounts: heartbeat.monitoredAccounts || [],
+            isOnline: true
+        });
         return { success: true };
     }
 
@@ -170,6 +222,7 @@ export class Mt5WorkerService {
         options: Record<string, any> = {}
     ): WorkerTask {
         const cleanLogin = (login || '').toString().trim();
+        const cleanServer = this.normalizeBrokerServer(server);
 
         // Supersede older queued (unclaimed) tasks for the same login & type
         for (const [existingId, existingTask] of this.pendingTasks.entries()) {
@@ -190,11 +243,15 @@ export class Mt5WorkerService {
             credentialToken = `token_${randomUUID().replace(/-/g, '')}`;
             this.credentialsStore.set(credentialToken, {
                 login: cleanLogin,
-                server,
+                server: cleanServer,
                 password,
                 expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes TTL
             });
         }
+
+        const initialMsg = type === WorkerTaskType.START_ACCOUNT
+            ? `Aguardando servidor Windows MT5 iniciar conexão para ${cleanLogin}@${cleanServer}...`
+            : `Tarefa ${type} enfileirada para ${cleanLogin}...`;
 
         const task: WorkerTask = {
             id: taskId,
@@ -202,16 +259,30 @@ export class Mt5WorkerService {
             priority: options?.priority ?? this.getDefaultPriority(type),
             accountId: numericAccId,
             login: cleanLogin,
-            server,
+            server: cleanServer,
             credentialToken,
             from: options?.from || null,
             options,
             status: WorkerTaskStatus.RECEIVED,
+            message: initialMsg,
+            details: {},
             createdAt: new Date()
         };
 
         this.pendingTasks.set(taskId, task);
-        this.logger.log(`Nova tarefa enfileirada para o worker: [${type}] (P${task.priority}) para conta ${cleanLogin}@${server} (TaskID: ${taskId})`);
+
+        if (type === WorkerTaskType.START_ACCOUNT && cleanLogin) {
+            const existingTel = this.accountTelemetry.get(cleanLogin);
+            this.accountTelemetry.set(cleanLogin, {
+                ...(existingTel || { login: cleanLogin, server: cleanServer, connected: false }),
+                server: cleanServer || existingTel?.server || '',
+                connectionState: 'CONNECTING',
+                statusMessage: initialMsg,
+                lastError: null,
+            });
+        }
+
+        this.logger.log(`Nova tarefa enfileirada para o worker: [${type}] (P${task.priority}) para conta ${cleanLogin}@${cleanServer} (TaskID: ${taskId})`);
         return task;
     }
 
@@ -231,6 +302,9 @@ export class Mt5WorkerService {
                 if (claim) {
                     task.status = WorkerTaskStatus.IN_PROGRESS;
                     task.dispatchedAt = new Date();
+                    if (!task.message || task.message.startsWith('Aguardando')) {
+                        task.message = `Worker Windows recebeu a tarefa e está iniciando execução para ${task.login}...`;
+                    }
                 }
                 tasks.push(task);
             }
@@ -244,19 +318,73 @@ export class Mt5WorkerService {
         return tasks;
     }
 
+    getTaskById(taskId: string): WorkerTask | null {
+        return this.pendingTasks.get(taskId) || null;
+    }
+
+    getLatestTaskForLogin(login: string): WorkerTask | null {
+        const cleanLogin = (login || '').toString().trim();
+        if (!cleanLogin) return null;
+        const matching = Array.from(this.pendingTasks.values()).filter(t => t.login === cleanLogin);
+        if (matching.length === 0) return null;
+        matching.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return matching[0];
+    }
+
     ackTask(taskId: string, status: WorkerTaskStatus, message?: string, details?: Record<string, any>) {
         const task = this.pendingTasks.get(taskId);
         if (!task) {
             return { success: false, message: 'Task not found' };
         }
         task.status = status;
-        task.completedAt = new Date();
+        if (message) task.message = message;
+        if (details && Object.keys(details).length > 0) {
+            task.details = { ...(task.details || {}), ...details };
+        }
+        if (status === WorkerTaskStatus.SUCCESS || status === WorkerTaskStatus.FAILED) {
+            task.completedAt = new Date();
+        }
         if (status === WorkerTaskStatus.FAILED && message) {
             task.errorMessage = message;
         }
         this.logger.log(`Tarefa [${taskId}] (${task.type} - ${task.login}) atualizada para status: ${status}. ${message || ''}`);
 
-        // Update account connection status on STOP_ACCOUNT or failed START_ACCOUNT
+        // Update live telemetry state for this account
+        if (task.login) {
+            const existingTel = this.accountTelemetry.get(task.login) || {
+                login: task.login,
+                server: task.server,
+                connected: false,
+                connectionState: 'CONNECTING' as const,
+            };
+
+            if (status === WorkerTaskStatus.IN_PROGRESS) {
+                existingTel.connectionState = task.type === WorkerTaskType.START_ACCOUNT ? 'CONNECTING' : 'SYNCING';
+                existingTel.statusMessage = message || existingTel.statusMessage;
+            } else if (status === WorkerTaskStatus.SUCCESS) {
+                if (task.type === WorkerTaskType.STOP_ACCOUNT) {
+                    existingTel.connected = false;
+                    existingTel.connectionState = 'DISCONNECTED';
+                    existingTel.statusMessage = message || 'Conta desconectada.';
+                } else {
+                    existingTel.connected = true;
+                    existingTel.connectionState = 'CONNECTED';
+                    existingTel.statusMessage = message || 'Conectado e sincronizado.';
+                    existingTel.lastError = null;
+                    existingTel.lastSyncAt = new Date().toISOString();
+                }
+            } else if (status === WorkerTaskStatus.FAILED) {
+                if (task.type === WorkerTaskType.START_ACCOUNT) {
+                    existingTel.connected = false;
+                    existingTel.connectionState = 'AUTH_FAILED';
+                }
+                existingTel.lastError = message || 'Falha na execução da tarefa no MT5.';
+                existingTel.statusMessage = message;
+            }
+            this.accountTelemetry.set(task.login, existingTel);
+        }
+
+        // Update account connection status in PostgreSQL on STOP_ACCOUNT or failed START_ACCOUNT
         if (
             (task.type === WorkerTaskType.STOP_ACCOUNT && status === WorkerTaskStatus.SUCCESS) ||
             (task.type === WorkerTaskType.START_ACCOUNT && status === WorkerTaskStatus.FAILED)
@@ -275,17 +403,16 @@ export class Mt5WorkerService {
         }
 
         if (status === WorkerTaskStatus.SUCCESS || status === WorkerTaskStatus.FAILED) {
-            // Remove from active queue after 5 minutes to avoid memory leak
+            // Keep task in memory for 15 minutes so frontend polling can read final result
             setTimeout(() => {
                 this.pendingTasks.delete(taskId);
-            }, 300000);
+            }, 900000);
         }
         return { success: true };
     }
 
     exchangeCredential(taskId: string, accountId: number, credentialToken: string) {
         const now = Date.now();
-        // Lazy cleanup of expired credentials
         for (const [k, v] of this.credentialsStore.entries()) {
             if (now > v.expiresAt) {
                 this.credentialsStore.delete(k);
@@ -298,7 +425,6 @@ export class Mt5WorkerService {
             throw new NotFoundException('Credential token invalid or expired');
         }
 
-        // Return credentials
         const result = {
             login: cred.login,
             server: cred.server,
@@ -306,7 +432,6 @@ export class Mt5WorkerService {
             expiresInSeconds: 60
         };
 
-        // Burn token 30s after exchange (allows immediate retry on transient network glitch)
         setTimeout(() => {
             this.credentialsStore.delete(credentialToken);
         }, 30000);
@@ -329,27 +454,67 @@ export class Mt5WorkerService {
         marginLevel?: number;
         leverage: number;
         profit?: number;
+        credit?: number;
         company?: string;
         name?: string;
+        tradeMode?: string;
         tradeAllowed?: boolean;
+        tradeExpert?: boolean;
+        pingMs?: number;
+        terminalBuild?: number;
+        connected?: boolean;
     }) {
-        const account = await this.findAccountByLoginOrId(accountInfo.login, accountInfo.accountId);
+        const cleanLogin = (accountInfo.login || accountInfo.accountId || '').toString().trim();
+        const account = await this.findAccountByLoginOrId(cleanLogin, accountInfo.accountId);
         if (!account) {
-            this.logger.warn(`Conta MT5 ${accountInfo.login} não encontrada no banco de dados para sync de métricas.`);
+            this.logger.warn(`Conta MT5 ${cleanLogin} não encontrada no banco de dados para sync de métricas.`);
             return { success: false, message: 'Account not found' };
         }
 
-        account.balance = Number(accountInfo.balance) || 0;
-        account.equity = Number(accountInfo.equity) || 0;
+        const balanceNum = Number(accountInfo.balance) || 0;
+        const equityNum = Number(accountInfo.equity) || 0;
+
+        account.balance = balanceNum;
+        account.equity = equityNum;
         account.margin = Number(accountInfo.margin) || 0;
         account.marginFree = Number(accountInfo.freeMargin) || 0;
         account.marginLevel = Number(accountInfo.marginLevel) || 0;
         account.leverage = Number(accountInfo.leverage) || 1;
         if (accountInfo.currency) account.currency = accountInfo.currency;
-        account.isConnected = true;
+        if (Number(account.initialBalance) === 0 && balanceNum > 0) {
+            account.initialBalance = balanceNum;
+        }
+        if (accountInfo.server || accountInfo.company) {
+            account.broker = accountInfo.server || accountInfo.company || account.broker;
+        }
+        if (accountInfo.tradeMode) {
+            account.type = accountInfo.tradeMode.toUpperCase() === 'DEMO' ? AccountType.DEMO : AccountType.LIVE;
+        }
+        account.isConnected = accountInfo.connected !== false;
         account.lastSeen = new Date();
 
         await this.accountRepo.save(account);
+
+        // Store rich live telemetry in memory
+        const existingTel = this.accountTelemetry.get(cleanLogin);
+        this.accountTelemetry.set(cleanLogin, {
+            ...(existingTel || {}),
+            login: cleanLogin,
+            server: accountInfo.server || existingTel?.server || account.broker,
+            company: accountInfo.company || existingTel?.company || '',
+            accountHolderName: accountInfo.name || existingTel?.accountHolderName || '',
+            tradeMode: accountInfo.tradeMode || existingTel?.tradeMode || 'DEMO',
+            tradeAllowed: accountInfo.tradeAllowed ?? true,
+            tradeExpert: accountInfo.tradeExpert ?? true,
+            credit: Number(accountInfo.credit) || 0,
+            pingMs: Number(accountInfo.pingMs) || 0,
+            terminalBuild: accountInfo.terminalBuild || existingTel?.terminalBuild,
+            connected: account.isConnected,
+            connectionState: account.isConnected ? 'CONNECTED' : 'DISCONNECTED',
+            statusMessage: `Sincronizado com sucesso (${accountInfo.server || account.broker})`,
+            lastError: null,
+            lastSyncAt: new Date().toISOString(),
+        });
 
         // Broadcast to connected frontend clients via WebSocket
         try {
@@ -360,21 +525,28 @@ export class Mt5WorkerService {
                 marginFree: account.marginFree,
                 marginLevel: account.marginLevel
             });
-            this.mt5Gateway.broadcastConnectionStatus({ isConnected: true });
+            this.mt5Gateway.broadcastConnectionStatus({ isConnected: account.isConnected });
         } catch (err) {
             // Ignore socket broadcast errors
         }
 
-        return { success: true, accountId: account.id, balance: account.balance, equity: account.equity };
+        return {
+            success: true,
+            accountId: account.id,
+            mt5Id: account.mt5Id,
+            balance: account.balance,
+            equity: account.equity,
+            isConnected: account.isConnected
+        };
     }
 
     async syncPositions(accountIdNum: number, login: string, positions: any[]) {
-        const account = await this.findAccountByLoginOrId(login, accountIdNum);
+        const cleanLogin = (login || accountIdNum || '').toString().trim();
+        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum);
         if (!account) {
             return { success: false, message: 'Account not found' };
         }
 
-        // Clean existing positions for this account and re-insert current ones
         await this.positionRepo.delete({ accountId: account.id });
 
         if (positions && positions.length > 0) {
@@ -396,21 +568,44 @@ export class Mt5WorkerService {
             await this.positionRepo.save(newPositions);
         }
 
+        const existingTel = this.accountTelemetry.get(cleanLogin);
+        if (existingTel) {
+            existingTel.openPositionsCount = positions ? positions.length : 0;
+            this.accountTelemetry.set(cleanLogin, existingTel);
+        }
+
         return { success: true, count: positions ? positions.length : 0 };
     }
 
+    async syncOrders(accountIdNum: number, login: string, orders: any[]) {
+        const cleanLogin = (login || accountIdNum || '').toString().trim();
+        const existingTel = this.accountTelemetry.get(cleanLogin);
+        if (existingTel) {
+            existingTel.orders = orders || [];
+            existingTel.pendingOrdersCount = orders ? orders.length : 0;
+            this.accountTelemetry.set(cleanLogin, existingTel);
+        }
+        return { success: true, count: orders ? orders.length : 0 };
+    }
+
     async syncTrades(accountIdNum: number, login: string, deals: any[], lastDealTicket?: number) {
-        const account = await this.findAccountByLoginOrId(login, accountIdNum);
+        const cleanLogin = (login || accountIdNum || '').toString().trim();
+        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum);
         if (!account) {
-            this.logger.warn(`Conta ${login} não encontrada para inserção de trades.`);
+            this.logger.warn(`Conta ${cleanLogin} não encontrada para inserção de trades.`);
             return { success: false, message: 'Account not found' };
+        }
+
+        const existingTel = this.accountTelemetry.get(cleanLogin);
+        if (existingTel && lastDealTicket) {
+            existingTel.lastDealTicket = lastDealTicket;
+            this.accountTelemetry.set(cleanLogin, existingTel);
         }
 
         if (!deals || deals.length === 0) {
             return { success: true, count: 0 };
         }
 
-        // Filter out non-trading deals (e.g. balance deposits if needed, or process them)
         const tradingDeals = deals.filter((d) => {
             const dealType = (d.type || '').toUpperCase();
             return !dealType.includes('BALANCE') && !dealType.includes('CREDIT');
@@ -420,7 +615,6 @@ export class Mt5WorkerService {
             return { success: true, count: 0 };
         }
 
-        // Format deals into the structure that mt5Service.saveHistory expects
         const normalizedTrades = tradingDeals.map((deal) => {
             const ticket = (deal.ticket || '').toString();
             const positionId = (deal.positionId || deal.orderTicket || deal.ticket || '').toString();
@@ -467,6 +661,169 @@ export class Mt5WorkerService {
         );
 
         return { success: true, saved: result.count, lastTicket: lastDealTicket };
+    }
+
+    async recordWorkerEvent(event: {
+        workerId: string;
+        accountId?: number;
+        login?: string;
+        server?: string;
+        eventType: string;
+        severity: string;
+        message: string;
+        metadata?: Record<string, any>;
+        timestamp?: string;
+    }) {
+        const cleanLogin = (event.login || event.accountId || '').toString().trim();
+        const record: WorkerEventRecord = {
+            id: randomUUID(),
+            workerId: event.workerId,
+            accountId: event.accountId,
+            login: cleanLogin || undefined,
+            server: event.server,
+            eventType: event.eventType,
+            severity: event.severity || 'INFO',
+            message: event.message,
+            metadata: event.metadata || {},
+            timestamp: event.timestamp || new Date().toISOString(),
+        };
+
+        this.recentEvents.unshift(record);
+        if (this.recentEvents.length > 100) {
+            this.recentEvents.length = 100;
+        }
+
+        if (cleanLogin) {
+            const existingTel = this.accountTelemetry.get(cleanLogin) || {
+                login: cleanLogin,
+                server: event.server || '',
+                connected: false,
+                connectionState: 'DISCONNECTED' as const,
+            };
+
+            if (event.eventType === 'ACCOUNT_CONNECTING') {
+                existingTel.connectionState = 'CONNECTING';
+                existingTel.statusMessage = event.message;
+                existingTel.lastError = null;
+            } else if (event.eventType === 'ACCOUNT_CONNECTED') {
+                existingTel.connected = true;
+                existingTel.connectionState = 'CONNECTED';
+                existingTel.statusMessage = event.message;
+                existingTel.lastError = null;
+                existingTel.lastSyncAt = new Date().toISOString();
+            } else if (event.eventType === 'ACCOUNT_LOGIN_FAILED') {
+                existingTel.connected = false;
+                existingTel.connectionState = 'AUTH_FAILED';
+                existingTel.lastError = event.message;
+                existingTel.statusMessage = event.message;
+            } else if (event.eventType === 'ACCOUNT_DISCONNECTED' || event.eventType === 'ACCOUNT_STOPPED') {
+                existingTel.connected = false;
+                existingTel.connectionState = 'DISCONNECTED';
+                existingTel.statusMessage = event.message;
+                if (event.eventType === 'ACCOUNT_DISCONNECTED') {
+                    existingTel.lastError = event.message;
+                }
+            }
+            this.accountTelemetry.set(cleanLogin, existingTel);
+
+            if (
+                event.eventType === 'ACCOUNT_LOGIN_FAILED' ||
+                event.eventType === 'ACCOUNT_DISCONNECTED' ||
+                event.eventType === 'ACCOUNT_STOPPED'
+            ) {
+                const acc = await this.findAccountByLoginOrId(cleanLogin, event.accountId);
+                if (acc && acc.isConnected) {
+                    acc.isConnected = false;
+                    await this.accountRepo.save(acc);
+                    try {
+                        this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
+                    } catch { }
+                }
+            }
+        }
+
+        this.logger.log(`Evento Worker [${event.workerId}] (${event.eventType} - ${cleanLogin || 'GLOBAL'}): ${event.message}`);
+        return { success: true };
+    }
+
+    async getCloudConnectionStatus(userId: string, accountId?: string, login?: string) {
+        const workersList = this.getWorkerStatus() as WorkerNodeState[];
+        const primaryWorker = Array.isArray(workersList) && workersList.length > 0 ? workersList[0] : null;
+
+        let account: AccountEntity | null = null;
+        if (accountId) {
+            account = await this.accountRepo.findOne({ where: { id: accountId, userId } });
+        }
+        if (!account && login) {
+            account = await this.accountRepo.findOne({ where: { mt5Id: login.trim(), userId } });
+        }
+        if (!account) {
+            const userAccounts = await this.accountRepo.find({
+                where: { userId, isArchived: false },
+                order: { updatedAt: 'DESC' }
+            });
+            account = userAccounts.find(a => !!a.mt5Id && a.isConnected)
+                || userAccounts.find(a => !!a.mt5Id)
+                || userAccounts[0]
+                || null;
+        }
+
+        const mt5Login = account?.mt5Id || login || '';
+        const telemetry = mt5Login ? this.accountTelemetry.get(mt5Login) || null : null;
+        const activeTask = mt5Login ? this.getLatestTaskForLogin(mt5Login) : null;
+        const positions = account ? await this.positionRepo.find({ where: { accountId: account.id } }) : [];
+        const accountEvents = mt5Login
+            ? this.recentEvents.filter(e => e.login === mt5Login || (e.accountId && e.accountId.toString() === mt5Login)).slice(0, 10)
+            : this.recentEvents.slice(0, 5);
+
+        return {
+            worker: {
+                isOnline: primaryWorker ? primaryWorker.isOnline : false,
+                workerId: primaryWorker?.workerId || null,
+                cpuPercent: primaryWorker?.cpuPercent ?? 0,
+                memoryPercent: primaryWorker?.memoryPercent ?? 0,
+                memoryUsedMb: primaryWorker?.memoryUsedMb ?? null,
+                memoryTotalMb: primaryWorker?.memoryTotalMb ?? null,
+                activeTerminals: primaryWorker?.activeTerminals ?? 0,
+                monitoredAccounts: primaryWorker?.monitoredAccounts || [],
+                lastHeartbeat: primaryWorker?.lastHeartbeat || null,
+            },
+            account: account ? {
+                id: account.id,
+                name: account.name,
+                mt5Id: account.mt5Id,
+                broker: account.broker,
+                type: account.type,
+                currency: account.currency,
+                balance: Number(account.balance) || 0,
+                equity: Number(account.equity) || 0,
+                margin: Number(account.margin) || 0,
+                marginFree: Number(account.marginFree) || 0,
+                marginLevel: Number(account.marginLevel) || 0,
+                leverage: account.leverage || 1,
+                isConnected: account.isConnected,
+                lastSeen: account.lastSeen,
+                // Live telemetry from MT5 Worker
+                server: telemetry?.server || account.broker,
+                company: telemetry?.company || null,
+                accountHolderName: telemetry?.accountHolderName || null,
+                tradeMode: telemetry?.tradeMode || (account.type === AccountType.DEMO ? 'DEMO' : 'REAL'),
+                tradeAllowed: telemetry?.tradeAllowed ?? true,
+                pingMs: telemetry?.pingMs ?? 0,
+                terminalBuild: telemetry?.terminalBuild ?? null,
+                connectionState: telemetry?.connectionState || (account.isConnected ? 'CONNECTED' : 'DISCONNECTED'),
+                statusMessage: telemetry?.statusMessage || null,
+                lastError: telemetry?.lastError || null,
+                lastSyncAt: telemetry?.lastSyncAt || (account.lastSeen ? account.lastSeen.toISOString() : null),
+                openPositionsCount: positions.length,
+                pendingOrdersCount: telemetry?.pendingOrdersCount ?? 0,
+                lastDealTicket: telemetry?.lastDealTicket ?? 0,
+            } : null,
+            positions,
+            orders: telemetry?.orders || [],
+            activeTask,
+            recentEvents: accountEvents,
+        };
     }
 
     private async findAccountByLoginOrId(login: string, accountIdNum?: number): Promise<AccountEntity | null> {
