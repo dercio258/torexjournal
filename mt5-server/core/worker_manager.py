@@ -17,10 +17,13 @@ from .process_manager import MT5ProcessManager
 from .sync_engine import SyncEngine, MT5_AVAILABLE, mt5
 from .local_queue import LocalQueue
 from .health_monitor import HealthMonitor
-from .retry_manager import RetryManager
+
 
 class WorkerManager:
-    """Orquestrador principal do TorexJournal MT5 Worker."""
+    """
+    Orquestrador principal do TorexJournal MT5 Worker.
+    Opera em arquitetura Single-Loop Determinística (Zero Race Condition no IPC do MT5).
+    """
 
     def __init__(self):
         self.api_client = BackendApiClient()
@@ -29,67 +32,124 @@ class WorkerManager:
         self.sync_engine = SyncEngine()
         self.local_queue = LocalQueue()
         self.health_monitor = HealthMonitor(self.process_manager)
-        
+
         self.is_running = False
-        self._threads = []
+        self.is_registered = False
+        self._orchestrator_thread: Optional[threading.Thread] = None
         self.last_resource_alert_time: float = 0
 
-    def start(self):
-        """Inicia os loops assíncronos do worker"""
-        logger.info(f"=== Inicializando TorexJournal MT5 Worker [{settings.worker_id}] ===")
-        logger.info(f"Capacidade máxima configurada: {settings.max_accounts} contas")
-        
-        # 1. Registro no Backend Linux
+        # Timestamps de controle do Event Tick Loop
+        self._last_poll_ts: float = 0.0
+        self._last_sync_ts: float = 0.0
+        self._last_heartbeat_ts: float = 0.0
+        self._last_flush_ts: float = 0.0
+        # Deduplicação local de tarefas (task_id -> timestamp de processamento)
+        self._processed_tasks: dict[str, float] = {}
+
+    def _ensure_registered(self) -> bool:
+        if self.is_registered:
+            return True
         system_info = {
             "max_accounts": settings.max_accounts,
             "poll_interval": settings.poll_interval_seconds,
             "sync_interval": settings.sync_interval_seconds,
         }
-        registered = self.api_client.register(capacity=settings.max_accounts, system_info=system_info)
-        if not registered:
-            logger.warning("Falha no handshake inicial com o backend Linux. O worker continuará em modo retry.")
+        self.is_registered = self.api_client.register(
+            capacity=settings.max_accounts,
+            system_info=system_info,
+        )
+        return self.is_registered
+
+    def start(self):
+        """Inicia o orquestrador determinístico em loop único."""
+        logger.info(f"=== Inicializando TorexJournal MT5 Worker [{settings.worker_id}] ===")
+        logger.info(f"Capacidade máxima configurada: {settings.max_accounts} contas")
+
+        if not self._ensure_registered():
+            logger.warning("Falha no handshake inicial com o backend. O worker tentará registrar novamente nos próximos ciclos.")
 
         self.is_running = True
-
-        # Inicia threads operacionais
-        self._spawn_thread(self._polling_loop, "TaskPolling")
-        self._spawn_thread(self._heartbeat_loop, "Heartbeat")
-        self._spawn_thread(self._sync_loop, "IncrementalSync")
-        self._spawn_thread(self._watchdog_loop, "WatchdogAutoRecovery")
-        self._spawn_thread(self._offline_flush_loop, "OfflineBufferFlush")
-
-        logger.success("Worker iniciado e operando em segundo plano.")
+        self._orchestrator_thread = threading.Thread(
+            target=self._orchestrator_loop,
+            name="MT5OrchestratorLoop",
+            daemon=True,
+        )
+        self._orchestrator_thread.start()
+        logger.success("Worker iniciado em modo Single-Loop Determinístico.")
 
     def stop(self):
-        """Encerra o worker de forma limpa (graceful shutdown)"""
+        """Encerra o worker de forma limpa (graceful shutdown)."""
         logger.info("Encerrando TorexJournal MT5 Worker...")
         self.is_running = False
-        
-        # Encerra processos
+        if self._orchestrator_thread and self._orchestrator_thread.is_alive():
+            self._orchestrator_thread.join(timeout=5.0)
+
         self.process_manager.stop_all()
         self.sync_engine.disconnect()
         logger.info("Todos os recursos foram liberados.")
 
-    def _spawn_thread(self, target, name: str):
-        t = threading.Thread(target=target, name=name, daemon=True)
-        t.start()
-        self._threads.append(t)
-
     # -------------------------------------------------------------
-    # 1. LOOP DE POLLING DE TAREFAS
+    # LOOP CENTRAL DETERMINÍSTICO (TICK DE 0.5s)
     # -------------------------------------------------------------
-    def _polling_loop(self):
+    def _orchestrator_loop(self):
         while self.is_running:
             try:
-                tasks = self.api_client.get_tasks()
-                for task in tasks:
-                    self._execute_task(task)
+                self.run_single_tick()
             except Exception as e:
-                logger.error(f"Erro no loop de polling de tarefas: {e}")
-            time.sleep(settings.poll_interval_seconds)
+                logger.error(f"Erro inesperado no ciclo do orquestrador: {e}")
+            time.sleep(0.5)
+
+    def run_single_tick(self, now: Optional[float] = None):
+        """Executa uma iteração determinística do orquestrador respeitando prioridades."""
+        current_ts = now if now is not None else time.time()
+
+        # 1. PRIORIDADE MÁXIMA: Polling e execução imediata de tarefas do usuário (a cada poll_interval_seconds)
+        if current_ts - self._last_poll_ts >= settings.poll_interval_seconds:
+            self._last_poll_ts = time.time()
+            self._poll_and_execute_tasks()
+
+        # 2. TELEMETRIA & AUTO-REGISTRO: Heartbeat periódico (a cada heartbeat_interval_seconds)
+        if current_ts - self._last_heartbeat_ts >= settings.heartbeat_interval_seconds:
+            self._last_heartbeat_ts = time.time()
+            self._ensure_registered()
+            self._send_heartbeat()
+
+        # 3. WATCHDOG & SINCRONIZAÇÃO INCREMENTAL ROUND-ROBIN (a cada sync_interval_seconds)
+        if current_ts - self._last_sync_ts >= settings.sync_interval_seconds:
+            self._last_sync_ts = time.time()
+            self._run_watchdog_and_sync_cycle()
+
+        # 4. FLUSH DO BUFFER OFFLINE SQLITE (a cada 15s)
+        if current_ts - self._last_flush_ts >= 15.0:
+            self._last_flush_ts = time.time()
+            self._flush_offline_batch()
+
+    # -------------------------------------------------------------
+    # 1. EXECUÇÃO DE TAREFAS (PRIORIDADE ALTA + DEDUPLICAÇÃO)
+    # -------------------------------------------------------------
+    def _poll_and_execute_tasks(self):
+        try:
+            tasks = self.api_client.get_tasks()
+            if not tasks:
+                return
+            now = time.time()
+            # Limpa IDs expirados (> 120s) do cache de deduplicação
+            self._processed_tasks = {tid: ts for tid, ts in self._processed_tasks.items() if now - ts < 120.0}
+
+            # Ordena por prioridade (menor valor numérico = mais urgente)
+            tasks.sort(key=lambda t: t.priority)
+            for task in tasks:
+                if not self.is_running:
+                    break
+                if task.id in self._processed_tasks:
+                    continue
+                self._processed_tasks[task.id] = time.time()
+                self._execute_task(task)
+        except Exception as e:
+            logger.error(f"Erro ao consultar/executar tarefas pendentes: {e}")
 
     def _send_resource_alert(self, message: str, metrics: dict, account_id: Optional[int] = None):
-        """Envia evento técnico de alerta para o backend respeitando rate limit para evitar storm de logs/rede."""
+        """Envia evento técnico de alerta para o backend respeitando rate limit."""
         if not settings.enable_resource_guard:
             return
         now = time.time()
@@ -110,7 +170,6 @@ class WorkerManager:
     def _execute_task(self, task: Task):
         logger.info(f"Processando tarefa [{task.id}] - Tipo: {task.type} (Conta {task.accountId})")
 
-        # 1. Checagem prévia de viabilidade de recursos e anti-loop
         is_safe, error_msg, metrics = self.health_monitor.check_resource_guard(
             operation=f"Execução de Tarefa {task.type}",
             account_id=task.accountId
@@ -157,7 +216,6 @@ class WorkerManager:
 
     def _handle_start_account(self, task: Task):
         password = None
-        # Resgate de credencial protegida via token temporário (one-time)
         if task.credentialToken:
             cred_response = self.api_client.exchange_credential(
                 task_id=task.id,
@@ -171,7 +229,6 @@ class WorkerManager:
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha na troca de credentialToken")
                 return
 
-        # Conecta ao MT5 (abrindo o terminal de forma limpa caso esteja fechado) e efetua o login direto
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
@@ -187,9 +244,7 @@ class WorkerManager:
                 server=task.server,
                 password=password
             )
-
             self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal MT5 conectado e conta autenticada com sucesso.")
-            # Dispara sincronização inicial
             self._sync_single_account(task.accountId)
         else:
             self.api_client.ack_task(task.id, TaskStatus.FAILED, "Não foi possível conectar o terminal MT5 e autenticar a conta.")
@@ -215,60 +270,77 @@ class WorkerManager:
 
         self.process_manager.stop_terminal(task.accountId)
         time.sleep(2)
-        started = self.process_manager.start_terminal(acc.account_id, acc.login, acc.server, acc.password)
-        if started:
-            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal reiniciado com sucesso.")
+        restarted = self.sync_engine.connect_account(
+            account_id=acc.account_id,
+            login=acc.login,
+            server=acc.server,
+            password=acc.password,
+            path=settings.mt5_default_path,
+        )
+        if restarted:
+            self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Terminal reiniciado e autenticado com sucesso.")
         else:
             self.api_client.ack_task(task.id, TaskStatus.FAILED, "Falha ao reiniciar terminal.")
 
     # -------------------------------------------------------------
-    # 2. SINCRONIZAÇÃO INCREMENTAL
+    # 2. WATCHDOG INTEGRADO & SINCRONIZAÇÃO ROUND-ROBIN
     # -------------------------------------------------------------
-    def _sync_loop(self):
-        while self.is_running:
+    def _run_watchdog_and_sync_cycle(self):
+        is_safe, error_msg, metrics = self.health_monitor.check_resource_guard(
+            operation="Sincronização Incremental"
+        )
+        if not is_safe:
+            self._send_resource_alert(error_msg, metrics)
+            return
+
+        active_ids = self.account_manager.get_active_account_ids()
+
+        # Auto-detecção de terminal MT5 ativo na VPS se o pool estiver vazio
+        if not active_ids and MT5_AVAILABLE:
             try:
-                # Checagem preventiva de hardware antes de iniciar a rodada de sincronização
-                is_safe, error_msg, metrics = self.health_monitor.check_resource_guard(
-                    operation="Sincronização Incremental"
-                )
-                if not is_safe:
-                    self._send_resource_alert(error_msg, metrics)
-                    # Dorme o período de cooldown sem iterar sobre as contas, evitando loops e consumo excessivo
-                    time.sleep(settings.resource_cooldown_seconds)
-                    continue
-
-                active_ids = self.account_manager.get_active_account_ids()
-
-                # Auto-detecção de terminal MT5 ativo se o pool de contas estiver vazio
-                if not active_ids and MT5_AVAILABLE:
-                    try:
-                        if mt5.initialize(timeout=3000):
-                            info = mt5.account_info()
-                            if info and info.login:
-                                logger.info(f"Terminal MT5 ativo detectado na VPS (Conta {info.login} @ {info.server}). Adicionando ao pool de sincronização...")
-                                self.account_manager.add_or_update_account(
-                                    account_id=info.login,
-                                    login=str(info.login),
-                                    server=str(info.server or "MT5-Broker")
-                                )
-                                active_ids = self.account_manager.get_active_account_ids()
-                    except Exception as e:
-                        logger.debug(f"Auto-detecção MT5: {e}")
-
-                for account_id in active_ids:
-                    if not self.is_running:
-                        break
-                    self._sync_single_account(account_id)
+                if mt5.initialize(timeout=3000):
+                    info = mt5.account_info()
+                    if info and info.login:
+                        logger.info(
+                            f"Terminal MT5 ativo detectado na VPS (Conta {info.login} @ {info.server}). "
+                            f"Adicionando ao pool de sincronização..."
+                        )
+                        self.account_manager.add_or_update_account(
+                            account_id=info.login,
+                            login=str(info.login),
+                            server=str(info.server or "MT5-Broker")
+                        )
+                        active_ids = self.account_manager.get_active_account_ids()
             except Exception as e:
-                logger.error(f"Erro no loop de sincronização incremental: {e}")
-            time.sleep(settings.sync_interval_seconds)
+                logger.debug(f"Auto-detecção MT5: {e}")
+
+        # Watchdog: verifica terminais caídos antes da rodada
+        dead_accounts = set(self.health_monitor.check_and_recover_dead_terminals(active_ids))
+        for acc_id in dead_accounts:
+            self.api_client.send_event(WorkerEvent(
+                workerId=settings.worker_id,
+                accountId=acc_id,
+                eventType="TERMINAL_CRASH_DETECTED",
+                severity="WARNING",
+                message=f"Terminal da conta {acc_id} inativo. Auto-recovery acionado no ciclo de sync."
+            ))
+
+        for account_id in active_ids:
+            if not self.is_running:
+                break
+            # Preempção cooperativa: checa se chegou tarefa urgente do usuário entre uma conta e outra
+            now = time.time()
+            if now - self._last_poll_ts >= settings.poll_interval_seconds:
+                self._last_poll_ts = now
+                self._poll_and_execute_tasks()
+
+            self._sync_single_account(account_id)
 
     def _sync_single_account(self, account_id: int, force_full: bool = False):
         acc = self.account_manager.get_account(account_id)
         if not acc:
             return
 
-        # Checagem de integridade e quarentena da conta com métricas de memória/CPU
         is_safe, error_msg, metrics = self.health_monitor.check_account_resource_guard(
             account_id,
             operation=f"Extração Conta {acc.login}"
@@ -277,9 +349,9 @@ class WorkerManager:
             return
 
         try:
-            # Garante a conexão IPC do MT5 para esta conta antes de extrair os dados
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
                 logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}")
+                self.account_manager.mark_error(account_id, "Falha de conexão IPC/Login no MT5")
                 return
 
             # 1. Atualizar métricas financeiras
@@ -302,24 +374,35 @@ class WorkerManager:
             if not ord_success:
                 self.local_queue.enqueue("/sync/orders", orders_payload.model_dump(mode="json"))
 
-            # 4. Sincronização incremental de histórico de Deals
+            # 4. Sincronização incremental de histórico de Deals com Watermark
             last_ticket = 0 if force_full else acc.last_deal_ticket
+            last_deal_time = None if force_full else acc.last_deal_time
             deals_payload = self.sync_engine.fetch_incremental_deals(
                 account_id=account_id,
                 login=acc.login,
                 server=acc.server,
-                last_deal_ticket=last_ticket
+                last_deal_ticket=last_ticket,
+                last_deal_time=last_deal_time,
             )
-            
+
             if deals_payload.trades:
+                latest_time = max((t.time for t in deals_payload.trades if t.time), default=acc.last_deal_time)
                 logger.info(f"[SYNC] Sincronizando {len(deals_payload.trades)} novos negócios da conta {acc.login}...")
                 deal_success = self.api_client.sync_trades(deals_payload)
                 if deal_success:
-                    self.account_manager.update_checkpoint(account_id, deals_payload.lastDealTicket)
+                    self.account_manager.update_checkpoint(
+                        account_id,
+                        deals_payload.lastDealTicket,
+                        last_deal_time=latest_time,
+                    )
                 else:
                     self.local_queue.enqueue("/sync/trades", deals_payload.model_dump(mode="json"))
             else:
-                self.account_manager.update_checkpoint(account_id, acc.last_deal_ticket)
+                self.account_manager.update_checkpoint(
+                    account_id,
+                    max(acc.last_deal_ticket, deals_payload.lastDealTicket),
+                    last_deal_time=acc.last_deal_time,
+                )
 
         except ResourceExhaustionError as re:
             logger.critical(f"[PROTEÇÃO ATIVA - EXTRAÇÃO SUSPENSA] {re.message}")
@@ -336,57 +419,47 @@ class WorkerManager:
             self.health_monitor.record_account_resource_failure(account_id, str(e), res_metrics)
 
     # -------------------------------------------------------------
-    # 3. TELEMETRIA E HEARTBEAT
+    # 3. HEARTBEAT E FLUSH DE BUFFER OFFLINE
     # -------------------------------------------------------------
-    def _heartbeat_loop(self):
-        while self.is_running:
-            try:
-                monitored = self.account_manager.get_active_account_ids()
-                heartbeat_data = self.health_monitor.collect_telemetry(monitored)
-                self.api_client.heartbeat(heartbeat_data)
-            except Exception as e:
-                logger.warning(f"Erro no envio de heartbeat: {e}")
-            time.sleep(settings.heartbeat_interval_seconds)
+    def _send_heartbeat(self):
+        try:
+            monitored = self.account_manager.get_active_account_ids()
+            heartbeat_data = self.health_monitor.collect_telemetry(monitored)
+            self.api_client.heartbeat(heartbeat_data)
+        except Exception as e:
+            logger.warning(f"Erro no envio de heartbeat: {e}")
 
-    # -------------------------------------------------------------
-    # 4. WATCHDOG E AUTO-RECOVERY
-    # -------------------------------------------------------------
-    def _watchdog_loop(self):
-        while self.is_running:
-            try:
-                monitored = self.account_manager.get_active_account_ids()
-                dead_accounts = self.health_monitor.check_and_recover_dead_terminals(monitored)
-                for acc_id in dead_accounts:
-                    acc = self.account_manager.get_account(acc_id)
-                    if acc:
-                        logger.warning(f"[Auto-Recovery] Tentando ressuscitar terminal da conta {acc_id}...")
-                        self.api_client.send_event(WorkerEvent(
-                            workerId=settings.worker_id,
-                            accountId=acc_id,
-                            eventType="TERMINAL_CRASH_DETECTED",
-                            severity="WARNING",
-                            message=f"Terminal da conta {acc_id} caiu. Iniciando auto-recovery."
-                        ))
-                        # Reconecta e recupera a sessão MT5
-                        restarted = self.sync_engine.ensure_connected(acc.account_id, acc.login, acc.server, acc.password, settings.mt5_default_path)
-                        if restarted:
-                            logger.success(f"[Auto-Recovery] Terminal da conta {acc_id} recuperado com sucesso!")
-                            self._sync_single_account(acc_id)
-            except Exception as e:
-                logger.error(f"Erro no loop do Watchdog: {e}")
-            time.sleep(5)
+    def _flush_offline_batch(self):
+        try:
+            batch = self.local_queue.peek_batch(limit=20)
+            for item_id, endpoint, payload in batch:
+                res = self.api_client._post(endpoint, payload)
+                if res is None:
+                    self.local_queue.mark_failed(item_id, "Falha de conexão HTTP com backend")
+                    continue
 
-    # -------------------------------------------------------------
-    # 5. FLUSH DE BUFFER OFFLINE
-    # -------------------------------------------------------------
-    def _offline_flush_loop(self):
-        while self.is_running:
-            try:
-                batch = self.local_queue.peek_batch(limit=20)
-                for item_id, endpoint, payload in batch:
-                    res = self.api_client._post(endpoint, payload)
-                    if res and res.status_code in (200, 201):
+                if res.status_code in (200, 201):
+                    try:
+                        body = res.json()
+                        if isinstance(body, dict) and body.get("success") is False:
+                            msg = str(body.get("message") or "Recusado pelo backend")
+                            is_perm = "not found" in msg.lower()
+                            self.local_queue.mark_failed(item_id, msg, permanent=is_perm)
+                        else:
+                            self.local_queue.remove(item_id)
+                    except Exception:
                         self.local_queue.remove(item_id)
-            except Exception as e:
-                logger.warning(f"Erro ao descarregar buffer offline: {e}")
-            time.sleep(15)
+                elif 400 <= res.status_code < 500 and res.status_code != 429:
+                    self.local_queue.mark_failed(
+                        item_id,
+                        f"HTTP {res.status_code}: {res.text[:200]}",
+                        permanent=True
+                    )
+                else:
+                    self.local_queue.mark_failed(
+                        item_id,
+                        f"HTTP {res.status_code}: {res.text[:200]}"
+                    )
+        except Exception as e:
+            logger.warning(f"Erro ao descarregar buffer offline: {e}")
+

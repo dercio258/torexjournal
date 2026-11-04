@@ -36,6 +36,9 @@ export interface WorkerTask {
     options?: Record<string, any>;
     status: WorkerTaskStatus;
     createdAt: Date;
+    dispatchedAt?: Date;
+    completedAt?: Date;
+    errorMessage?: string;
 }
 
 export interface TemporaryCredential {
@@ -143,6 +146,21 @@ export class Mt5WorkerService {
     // ==========================================
     // 2. TASK QUEUE & CREDENTIALS
     // ==========================================
+    private getDefaultPriority(type: WorkerTaskType): number {
+        switch (type) {
+            case WorkerTaskType.START_ACCOUNT:
+            case WorkerTaskType.STOP_ACCOUNT:
+                return 1;
+            case WorkerTaskType.RESTART_TERMINAL:
+                return 2;
+            case WorkerTaskType.FORCE_FULL_SYNC:
+                return 3;
+            case WorkerTaskType.SYNC_ACCOUNT:
+            default:
+                return 5;
+        }
+    }
+
     createAccountTask(
         type: WorkerTaskType,
         login: string,
@@ -151,14 +169,27 @@ export class Mt5WorkerService {
         accountIdNum?: number,
         options: Record<string, any> = {}
     ): WorkerTask {
+        const cleanLogin = (login || '').toString().trim();
+
+        // Supersede older queued (unclaimed) tasks for the same login & type
+        for (const [existingId, existingTask] of this.pendingTasks.entries()) {
+            if (
+                existingTask.login === cleanLogin &&
+                existingTask.status === WorkerTaskStatus.RECEIVED &&
+                (existingTask.type === type || type === WorkerTaskType.STOP_ACCOUNT)
+            ) {
+                this.pendingTasks.delete(existingId);
+            }
+        }
+
         const taskId = randomUUID();
-        const numericAccId = accountIdNum || parseInt(login.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000000);
+        const numericAccId = accountIdNum || parseInt(cleanLogin.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000000);
 
         let credentialToken: string | undefined = undefined;
         if (password) {
             credentialToken = `token_${randomUUID().replace(/-/g, '')}`;
             this.credentialsStore.set(credentialToken, {
-                login,
+                login: cleanLogin,
                 server,
                 password,
                 expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes TTL
@@ -168,29 +199,48 @@ export class Mt5WorkerService {
         const task: WorkerTask = {
             id: taskId,
             type,
-            priority: 1,
+            priority: options?.priority ?? this.getDefaultPriority(type),
             accountId: numericAccId,
-            login,
+            login: cleanLogin,
             server,
             credentialToken,
+            from: options?.from || null,
             options,
             status: WorkerTaskStatus.RECEIVED,
             createdAt: new Date()
         };
 
         this.pendingTasks.set(taskId, task);
-        this.logger.log(`Nova tarefa enfileirada para o worker: [${type}] para conta ${login}@${server} (TaskID: ${taskId})`);
+        this.logger.log(`Nova tarefa enfileirada para o worker: [${type}] (P${task.priority}) para conta ${cleanLogin}@${server} (TaskID: ${taskId})`);
         return task;
     }
 
-    getPendingTasks(): WorkerTask[] {
-        // Return tasks that are not yet SUCCESS or FAILED
+    getPendingTasks(claim: boolean = true): WorkerTask[] {
+        const now = Date.now();
         const tasks: WorkerTask[] = [];
         for (const task of this.pendingTasks.values()) {
-            if (task.status === WorkerTaskStatus.RECEIVED || task.status === WorkerTaskStatus.IN_PROGRESS) {
+            const refTime = task.dispatchedAt
+                ? new Date(task.dispatchedAt).getTime()
+                : (task.createdAt ? new Date(task.createdAt).getTime() : now);
+            const ageMs = now - refTime;
+
+            if (
+                task.status === WorkerTaskStatus.RECEIVED ||
+                (task.status === WorkerTaskStatus.IN_PROGRESS && ageMs > 90000)
+            ) {
+                if (claim) {
+                    task.status = WorkerTaskStatus.IN_PROGRESS;
+                    task.dispatchedAt = new Date();
+                }
                 tasks.push(task);
             }
         }
+
+        tasks.sort((a, b) => {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
+
         return tasks;
     }
 
@@ -200,7 +250,29 @@ export class Mt5WorkerService {
             return { success: false, message: 'Task not found' };
         }
         task.status = status;
-        this.logger.log(`Tarefa [${taskId}] atualizada para status: ${status}. ${message || ''}`);
+        task.completedAt = new Date();
+        if (status === WorkerTaskStatus.FAILED && message) {
+            task.errorMessage = message;
+        }
+        this.logger.log(`Tarefa [${taskId}] (${task.type} - ${task.login}) atualizada para status: ${status}. ${message || ''}`);
+
+        // Update account connection status on STOP_ACCOUNT or failed START_ACCOUNT
+        if (
+            (task.type === WorkerTaskType.STOP_ACCOUNT && status === WorkerTaskStatus.SUCCESS) ||
+            (task.type === WorkerTaskType.START_ACCOUNT && status === WorkerTaskStatus.FAILED)
+        ) {
+            this.findAccountByLoginOrId(task.login, task.accountId)
+                .then(async (acc) => {
+                    if (acc && acc.isConnected) {
+                        acc.isConnected = false;
+                        await this.accountRepo.save(acc);
+                        try {
+                            this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
+                        } catch { }
+                    }
+                })
+                .catch(() => { });
+        }
 
         if (status === WorkerTaskStatus.SUCCESS || status === WorkerTaskStatus.FAILED) {
             // Remove from active queue after 5 minutes to avoid memory leak
@@ -212,15 +284,18 @@ export class Mt5WorkerService {
     }
 
     exchangeCredential(taskId: string, accountId: number, credentialToken: string) {
+        const now = Date.now();
+        // Lazy cleanup of expired credentials
+        for (const [k, v] of this.credentialsStore.entries()) {
+            if (now > v.expiresAt) {
+                this.credentialsStore.delete(k);
+            }
+        }
+
         const cred = this.credentialsStore.get(credentialToken);
         if (!cred) {
             this.logger.warn(`Tentativa de resgate com token expirado ou inválido: ${credentialToken}`);
             throw new NotFoundException('Credential token invalid or expired');
-        }
-
-        if (Date.now() > cred.expiresAt) {
-            this.credentialsStore.delete(credentialToken);
-            throw new NotFoundException('Credential token expired');
         }
 
         // Return credentials
@@ -231,10 +306,10 @@ export class Mt5WorkerService {
             expiresInSeconds: 60
         };
 
-        // Burn token after successful exchange (one-time use)
+        // Burn token 30s after exchange (allows immediate retry on transient network glitch)
         setTimeout(() => {
             this.credentialsStore.delete(credentialToken);
-        }, 10000);
+        }, 30000);
 
         return result;
     }
@@ -350,11 +425,16 @@ export class Mt5WorkerService {
             const ticket = (deal.ticket || '').toString();
             const positionId = (deal.positionId || deal.orderTicket || deal.ticket || '').toString();
             const dealTime = deal.time ? new Date(deal.time) : new Date();
+            const parsedOpenTime = deal.openTime ? new Date(deal.openTime) : null;
 
             const isOut = (deal.entry || '').toUpperCase().includes('OUT');
             const profit = Number(deal.profit) || 0;
             const commission = Number(deal.commission) || 0;
             const swap = Number(deal.swap) || 0;
+            const closePrice = Number(deal.price) || 0;
+            const openPrice = deal.openPrice !== undefined && deal.openPrice !== null
+                ? Number(deal.openPrice) || closePrice
+                : closePrice;
 
             return {
                 ticket: ticket,
@@ -362,13 +442,15 @@ export class Mt5WorkerService {
                 symbol: deal.symbol || 'Unknown',
                 type: (deal.type || '').toUpperCase().includes('BUY') ? 'BUY' : 'SELL',
                 volume: Number(deal.volume) || 0,
-                openPrice: Number(deal.price) || 0,
-                closePrice: Number(deal.price) || 0,
+                openPrice: openPrice,
+                closePrice: closePrice,
                 profit: profit,
                 commission: commission,
                 swap: swap,
                 netPnl: profit + commission + swap,
-                openTime: isOut ? new Date(dealTime.getTime() - 60000) : dealTime,
+                openTime: parsedOpenTime && !isNaN(parsedOpenTime.getTime())
+                    ? parsedOpenTime
+                    : (isOut ? new Date(dealTime.getTime() - 60000) : dealTime),
                 closeTime: isOut || profit !== 0 ? dealTime : null,
                 status: isOut || profit !== 0 ? 'CLOSED' : 'OPEN',
                 comment: deal.comment || '',

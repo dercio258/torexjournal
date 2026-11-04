@@ -41,6 +41,8 @@ class MT5ProcessManager:
             f"Server={server_str}",
             "NewsEnable=0",
             "CertInstall=0",
+            "ProxyEnable=0",
+            "KeepPrivate=1",
             "[Start]",
             "Profile=Default"
         ])
@@ -52,22 +54,18 @@ class MT5ProcessManager:
         return config_path
 
     def start_terminal(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> bool:
-        """Inicia uma instância portátil do MT5 isolada para a conta verificando antes recursos disponíveis"""
+        """Inicia uma instância portátil do MT5 verificando antes recursos disponíveis."""
         if self.is_running(account_id):
-            logger.info(f"Terminal da conta {account_id} já está em execução (PID: {self.pids.get(account_id)})")
+            logger.info(f"Terminal MT5 já está em execução (PID: {self.pids.get(account_id)})")
             return True
 
         if not os.path.exists(self.terminal_path):
             logger.error(f"Executável do MT5 não encontrado em: {self.terminal_path}")
             return False
 
-        # Encerra qualquer processo terminal64.exe anterior ou órfão que possa estar travando a porta IPC 22346
-        self.kill_all_terminals()
-
         mem = psutil.virtual_memory()
         available_mb = round(mem.available / (1024 * 1024), 1)
 
-        # Verificação técnica de recursos antes de abrir o processo pesado do MT5 (apenas se habilitado)
         if settings.enable_resource_guard:
             cpu_usage = psutil.cpu_percent(interval=None)
             used_mb = round((mem.total - mem.available) / (1024 * 1024), 1)
@@ -86,9 +84,9 @@ class MT5ProcessManager:
         instance_dir = self.get_account_instance_dir(account_id)
         config_path = self.create_startup_config(account_id, login, server, password)
 
-        # Passa o caminho absoluto do arquivo para o comando
         cmd = [
             self.terminal_path,
+            "/portable",
             f"/config:{config_path.resolve()}"
         ]
 
@@ -108,13 +106,25 @@ class MT5ProcessManager:
             logger.error(f"Falha ao iniciar terminal para conta {account_id}: {e}")
             return False
 
-    def is_running(self, account_id: int) -> bool:
-        """Verifica se há um processo terminal64.exe ativo no sistema"""
-        for proc in psutil.process_iter(['name', 'status']):
+    def is_running(self, account_id: Optional[int] = None) -> bool:
+        """Verifica se o processo terminal64.exe da conta (ou global em modo multiplexado) está ativo."""
+        if account_id is not None and account_id in self.pids:
+            pid = self.pids[account_id]
+            if psutil.pid_exists(pid):
+                try:
+                    p = psutil.Process(pid)
+                    if p.status() != psutil.STATUS_ZOMBIE and 'terminal64' in (p.name() or '').lower():
+                        return True
+                except Exception:
+                    pass
+
+        for proc in psutil.process_iter(['pid', 'name', 'status']):
             try:
                 name = proc.info.get('name') or ''
                 if 'terminal64' in name.lower():
                     if proc.info.get('status') != psutil.STATUS_ZOMBIE:
+                        if account_id is not None:
+                            self.pids[account_id] = proc.info['pid']
                         return True
             except Exception:
                 pass

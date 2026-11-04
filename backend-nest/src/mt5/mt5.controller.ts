@@ -112,7 +112,7 @@ export class Mt5Controller {
     async getWorkerStatus() {
         return {
             workers: this.mt5WorkerService.getWorkerStatus(),
-            pendingTasks: this.mt5WorkerService.getPendingTasks().length
+            pendingTasks: this.mt5WorkerService.getPendingTasks(false).length
         };
     }
 

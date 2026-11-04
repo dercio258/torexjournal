@@ -1,3 +1,4 @@
+import threading
 import requests
 from typing import List, Optional, Dict, Any
 from loguru import logger
@@ -17,6 +18,7 @@ from models.schemas import (
 
 class BackendApiClient:
     def __init__(self):
+        self._http_lock = threading.RLock()
         self.base_url = settings.backend_url.rstrip("/") + "/api/v1/mt5-worker"
         self.session = requests.Session()
         self.session.headers.update({
@@ -28,25 +30,27 @@ class BackendApiClient:
 
     def _post(self, endpoint: str, json_data: Any) -> Optional[requests.Response]:
         url = f"{self.base_url}{endpoint}"
-        try:
-            response = self.session.post(url, json=json_data, timeout=self.timeout)
-            if not response.ok:
-                logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {response.text}")
-            return response
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Erro na comunicação POST {endpoint}: {e}")
-            return None
+        with self._http_lock:
+            try:
+                response = self.session.post(url, json=json_data, timeout=self.timeout)
+                if not response.ok:
+                    logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {response.text}")
+                return response
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Erro na comunicação POST {endpoint}: {e}")
+                return None
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[requests.Response]:
         url = f"{self.base_url}{endpoint}"
-        try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            if not response.ok:
-                logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {response.text}")
-            return response
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Erro na comunicação GET {endpoint}: {e}")
-            return None
+        with self._http_lock:
+            try:
+                response = self.session.get(url, params=params, timeout=self.timeout)
+                if not response.ok:
+                    logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {response.text}")
+                return response
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Erro na comunicação GET {endpoint}: {e}")
+                return None
 
     def register(self, capacity: int, system_info: Dict[str, Any]) -> bool:
         """Registra o worker no Backend Linux"""

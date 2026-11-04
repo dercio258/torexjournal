@@ -429,8 +429,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
 
             let finalLogId = null;
             if (tradesToSave.length > 0) {
-                // Update Account balance with net PnL of new trades
-                if (accountId) {
+                // Update Account balance with net PnL of new trades ONLY for manual/file imports.
+                // For AUTO_SYNC, syncAccountMetrics already sets the authoritative real-time MT5 balance & equity.
+                if (accountId && importMethod !== ImportMethod.AUTO_SYNC) {
                     const acc = await queryRunner.manager.findOne(AccountEntity, { where: { id: accountId } });
                     if (acc) {
                         const netPnLDelta = tradesToSave.reduce((sum, tr) => sum + (Number(tr.profit || 0) + Number(tr.commission || 0) + Number(tr.swap || 0)), 0);

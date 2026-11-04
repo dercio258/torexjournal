@@ -1,6 +1,6 @@
 import time
 import psutil
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Tuple, Optional
 from loguru import logger
 from config.settings import settings
@@ -214,7 +214,7 @@ class HealthMonitor:
             memoryAvailableMb=metrics["memory_available_mb"],
             activeTerminals=active_terminals_count,
             monitoredAccounts=monitored_accounts,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     def check_and_recover_dead_terminals(self, monitored_accounts: List[int]) -> List[int]:

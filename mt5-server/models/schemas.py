@@ -1,7 +1,12 @@
 from enum import Enum
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
 
 class TaskType(str, Enum):
     START_ACCOUNT = "START_ACCOUNT"
@@ -10,11 +15,13 @@ class TaskType(str, Enum):
     FORCE_FULL_SYNC = "FORCE_FULL_SYNC"
     RESTART_TERMINAL = "RESTART_TERMINAL"
 
+
 class TaskStatus(str, Enum):
     RECEIVED = "RECEIVED"
     IN_PROGRESS = "IN_PROGRESS"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
 
 class Task(BaseModel):
     id: str
@@ -27,22 +34,26 @@ class Task(BaseModel):
     from_date: Optional[datetime] = Field(default=None, alias="from")
     options: Dict[str, Any] = Field(default_factory=dict)
 
+
 class TaskAck(BaseModel):
     taskId: str
     status: TaskStatus
     message: Optional[str] = None
     details: Dict[str, Any] = Field(default_factory=dict)
 
+
 class CredentialRequest(BaseModel):
     taskId: str
     accountId: int
     credentialToken: str
+
 
 class CredentialResponse(BaseModel):
     login: str
     server: str
     password: str
     expiresInSeconds: int = 60
+
 
 class AccountInfo(BaseModel):
     accountId: int
@@ -59,7 +70,8 @@ class AccountInfo(BaseModel):
     company: Optional[str] = None
     name: Optional[str] = None
     tradeAllowed: bool = True
-    updatedAt: datetime = Field(default_factory=datetime.utcnow)
+    updatedAt: datetime = Field(default_factory=_utc_now)
+
 
 class DealData(BaseModel):
     ticket: int
@@ -67,15 +79,18 @@ class DealData(BaseModel):
     positionId: Optional[int] = None
     symbol: str
     type: str  # DEAL_TYPE_BUY, DEAL_TYPE_SELL, etc.
-    entry: str  # DEAL_ENTRY_IN, DEAL_ENTRY_OUT, etc.
+    entry: str  # DEAL_ENTRY_IN, DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT_BY
     volume: float
     price: float
+    openPrice: Optional[float] = None
     profit: float
     commission: float = 0.0
     swap: float = 0.0
     magic: Optional[int] = 0
     comment: Optional[str] = ""
     time: datetime
+    openTime: Optional[datetime] = None
+
 
 class OrderData(BaseModel):
     ticket: int
@@ -90,6 +105,7 @@ class OrderData(BaseModel):
     timeSetup: datetime
     magic: Optional[int] = 0
     comment: Optional[str] = ""
+
 
 class PositionData(BaseModel):
     ticket: int
@@ -106,6 +122,7 @@ class PositionData(BaseModel):
     comment: Optional[str] = ""
     time: datetime
 
+
 class SyncTradesPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
@@ -113,15 +130,18 @@ class SyncTradesPayload(BaseModel):
     lastDealTicket: int
     trades: List[DealData]
 
+
 class SyncOrdersPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
     orders: List[OrderData]
 
+
 class SyncPositionsPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
     positions: List[PositionData]
+
 
 class WorkerHeartbeat(BaseModel):
     workerId: str
@@ -132,7 +152,8 @@ class WorkerHeartbeat(BaseModel):
     memoryAvailableMb: Optional[float] = None
     activeTerminals: int
     monitoredAccounts: List[int]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utc_now)
+
 
 class WorkerEvent(BaseModel):
     workerId: str
@@ -141,7 +162,8 @@ class WorkerEvent(BaseModel):
     severity: str  # INFO, WARNING, ERROR, CRITICAL
     message: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utc_now)
+
 
 class ResourceMetrics(BaseModel):
     cpuPercent: float
@@ -153,7 +175,8 @@ class ResourceMetrics(BaseModel):
     processCpuPercent: Optional[float] = None
     isCritical: bool = False
     criticalReasons: List[str] = Field(default_factory=list)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utc_now)
+
 
 class ResourceExhaustionError(RuntimeError):
     """Exceção levantada quando recursos de CPU ou Memória atingem níveis críticos."""
@@ -163,4 +186,5 @@ class ResourceExhaustionError(RuntimeError):
         self.metrics = metrics
         self.operation = operation
         self.account_id = account_id
+
 
