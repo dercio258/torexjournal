@@ -170,6 +170,33 @@ class SyncEngine:
         info = mt5.account_info()
         return info is not None and (not expected_login or int(info.login) == int(expected_login))
 
+    @staticmethod
+    def _normalize_broker_server(server: str) -> str:
+        """Corrige erros comuns de digitação de servidores de corretoras (ex: Deric-demo -> Deriv-Demo)."""
+        s = (server or "").strip()
+        lower = s.lower()
+        typo_map = {
+            "deric-demo": "Deriv-Demo",
+            "deriv-demo": "Deriv-Demo",
+            "deric-server": "Deriv-Server",
+            "deriv-server": "Deriv-Server",
+            "deric-server-02": "Deriv-Server-02",
+            "deriv-server-02": "Deriv-Server-02",
+        }
+        return typo_map.get(lower, s)
+
+    @staticmethod
+    def _is_account_authenticated(info: Any, expected_login: int) -> bool:
+        """Verifica se a conta está realmente autenticada na corretora (evita falso positivo com saldo $0 após falha de login)."""
+        if info is None or str(getattr(info, "login", "")) != str(expected_login):
+            return False
+        term = mt5.terminal_info() if MT5_AVAILABLE else None
+        if term is not None and not getattr(term, "connected", True):
+            # Se o terminal está desconectado e alavancagem/saldo estão zerados, o login ainda não autenticou
+            if getattr(info, "leverage", 0) == 0 and getattr(info, "balance", 0.0) == 0.0:
+                return False
+        return True
+
     def ensure_connected(
         self,
         account_id: int,
@@ -189,7 +216,7 @@ class SyncEngine:
 
             try:
                 info = mt5.account_info()
-                if info is not None and str(info.login) == str(login_clean):
+                if self._is_account_authenticated(info, login_clean):
                     self.connected_account = account_id
                     return True
             except Exception:
@@ -213,10 +240,11 @@ class SyncEngine:
                 return True
 
             login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
-            server_clean = str(server).strip()
+            server_clean = self._normalize_broker_server(server)
+            if server and server_clean != server.strip():
+                logger.info(f"Servidor da corretora normalizado automaticamente: '{server}' -> '{server_clean}'")
             pass_clean = str(password).strip() if password else ""
             from config.settings import settings
-            from pathlib import Path
             term_path = path or settings.mt5_default_path
 
             # Se o executável estiver em C:\Program Files, portable=True exige UAC para gravar na pasta.
@@ -227,12 +255,15 @@ class SyncEngine:
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
 
-            # Passo 1: Tenta reutilizar terminal MT5 já aberto (evita reiniciar o processo à toa)
+            # Passo 1: Verifica se o IPC já está ativo ou reutiliza terminal MT5 já aberto (evita matar o processo à toa)
             init_ok = False
             try:
-                init_ok = mt5.initialize(timeout=5000)
-                if not init_ok and term_path:
-                    init_ok = mt5.initialize(path=term_path, portable=use_portable, timeout=10000)
+                if mt5.terminal_info() is not None:
+                    init_ok = True
+                else:
+                    init_ok = mt5.initialize(timeout=15000)
+                    if not init_ok and term_path:
+                        init_ok = mt5.initialize(path=term_path, portable=use_portable, timeout=20000)
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
@@ -270,7 +301,7 @@ class SyncEngine:
             # Passo 3: Garante login na conta correta
             if login_clean:
                 info = mt5.account_info()
-                if info is not None and str(info.login) == str(login_clean):
+                if self._is_account_authenticated(info, login_clean):
                     self._wait_for_broker_sync(login_clean, timeout_sec=8.0)
                     self.connected_account = account_id
                     return True
@@ -279,7 +310,7 @@ class SyncEngine:
                     for attempt in range(1, 6):
                         self._dismiss_mt5_dialogs()
                         info = mt5.account_info()
-                        if info is not None and str(info.login) == str(login_clean):
+                        if self._is_account_authenticated(info, login_clean):
                             break
 
                         logger.info(f"Tentativa {attempt}/5: Efetuando login no MT5 ({login_clean} @ {server_clean})...")
@@ -297,8 +328,8 @@ class SyncEngine:
                         time.sleep(2)
                     else:
                         final_info = mt5.account_info()
-                        if final_info is None or str(final_info.login) != str(login_clean):
-                            logger.error(f"Falha de autenticação no MT5 após 5 tentativas: {mt5.last_error()}")
+                        if not self._is_account_authenticated(final_info, login_clean):
+                            logger.error(f"Falha de autenticação no MT5 para {login_clean}@{server_clean} após 5 tentativas: {mt5.last_error()}")
                             return False
 
                 self._wait_for_broker_sync(login_clean, timeout_sec=10.0)

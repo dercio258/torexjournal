@@ -294,25 +294,8 @@ class WorkerManager:
             return
 
         active_ids = self.account_manager.get_active_account_ids()
-
-        # Auto-detecção de terminal MT5 ativo na VPS se o pool estiver vazio
-        if not active_ids and MT5_AVAILABLE:
-            try:
-                if mt5.initialize(timeout=3000):
-                    info = mt5.account_info()
-                    if info and info.login:
-                        logger.info(
-                            f"Terminal MT5 ativo detectado na VPS (Conta {info.login} @ {info.server}). "
-                            f"Adicionando ao pool de sincronização..."
-                        )
-                        self.account_manager.add_or_update_account(
-                            account_id=info.login,
-                            login=str(info.login),
-                            server=str(info.server or "MT5-Broker")
-                        )
-                        active_ids = self.account_manager.get_active_account_ids()
-            except Exception as e:
-                logger.debug(f"Auto-detecção MT5: {e}")
+        if not active_ids:
+            return
 
         # Watchdog: verifica terminais caídos antes da rodada
         dead_accounts = set(self.health_monitor.check_and_recover_dead_terminals(active_ids))
@@ -350,7 +333,7 @@ class WorkerManager:
 
         try:
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
-                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}")
+                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server} (verifique login, senha e nome exato do servidor da corretora)")
                 self.account_manager.mark_error(account_id, "Falha de conexão IPC/Login no MT5")
                 return
 
@@ -360,13 +343,24 @@ class WorkerManager:
                 logger.info(f"[SYNC] Enviando métricas da conta {acc.login} (Saldo: ${acc_info.balance:.2f}, Equity: ${acc_info.equity:.2f})...")
                 success = self.api_client.sync_account(acc_info)
                 if not success:
-                    self.local_queue.enqueue("/sync/accounts", acc_info.model_dump(mode="json"))
+                    err_reason = getattr(self.api_client, "last_error_reason", None)
+                    if err_reason == "ACCOUNT_NOT_FOUND":
+                        logger.warning(
+                            f"Conta {acc.login} (ID: {account_id}) não existe no Backend ('Account not found'). "
+                            f"Removendo conta órfã do cofre local para não bloquear o terminal."
+                        )
+                        self.account_manager.remove_account(account_id)
+                        return
+                    if err_reason in (None, "NETWORK_ERROR"):
+                        self.local_queue.enqueue("/sync/accounts", acc_info.model_dump(mode="json"))
 
             # 2. Atualizar posições abertas
             positions_payload = self.sync_engine.fetch_positions(account_id, login=acc.login)
             pos_success = self.api_client.sync_positions(positions_payload)
             if not pos_success:
-                self.local_queue.enqueue("/sync/positions", positions_payload.model_dump(mode="json"))
+                err_reason = getattr(self.api_client, "last_error_reason", None)
+                if err_reason in (None, "NETWORK_ERROR"):
+                    self.local_queue.enqueue("/sync/positions", positions_payload.model_dump(mode="json"))
 
             # 3. Atualizar ordens pendentes
             orders_payload = self.sync_engine.fetch_orders(account_id, login=acc.login)
@@ -396,7 +390,9 @@ class WorkerManager:
                         last_deal_time=latest_time,
                     )
                 else:
-                    self.local_queue.enqueue("/sync/trades", deals_payload.model_dump(mode="json"))
+                    err_reason = getattr(self.api_client, "last_error_reason", None)
+                    if err_reason in (None, "NETWORK_ERROR"):
+                        self.local_queue.enqueue("/sync/trades", deals_payload.model_dump(mode="json"))
             else:
                 self.account_manager.update_checkpoint(
                     account_id,

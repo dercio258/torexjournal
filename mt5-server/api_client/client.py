@@ -109,6 +109,7 @@ class BackendApiClient:
 
     def sync_account(self, account_info: AccountInfo) -> bool:
         """Atualiza saldo, equity, margem e alavancagem"""
+        self.last_error_reason = None
         res = self._post("/sync/accounts", account_info.model_dump(mode="json"))
         if res and res.status_code == 200:
             try:
@@ -117,14 +118,21 @@ class BackendApiClient:
                     logger.info(f"Métricas da conta {account_info.login} sincronizadas com sucesso (Saldo: ${account_info.balance:.2f}, Equity: ${account_info.equity:.2f})")
                     return True
                 else:
-                    logger.warning(f"Backend recusou métricas da conta {account_info.login}: {data.get('message')}")
+                    msg = str(data.get("message") or "")
+                    if "account not found" in msg.lower():
+                        self.last_error_reason = "ACCOUNT_NOT_FOUND"
+                    else:
+                        self.last_error_reason = "REJECTED"
+                    logger.warning(f"Backend recusou métricas da conta {account_info.login}: {msg}")
                     return False
             except Exception:
                 return True
+        self.last_error_reason = "NETWORK_ERROR"
         return False
 
     def sync_trades(self, payload: SyncTradesPayload) -> bool:
         """Envia histórico incremental de negociações (Deals)"""
+        self.last_error_reason = None
         res = self._post("/sync/trades", payload.model_dump(mode="json"))
         if res and res.status_code == 200:
             try:
@@ -134,10 +142,16 @@ class BackendApiClient:
                     logger.success(f"{saved_count} trades da conta {payload.login or payload.accountId} persistidos com sucesso no backend!")
                     return True
                 else:
-                    logger.warning(f"Backend recusou trades da conta {payload.login or payload.accountId}: {data.get('message')}")
+                    msg = str(data.get("message") or "")
+                    if "account not found" in msg.lower():
+                        self.last_error_reason = "ACCOUNT_NOT_FOUND"
+                    else:
+                        self.last_error_reason = "REJECTED"
+                    logger.warning(f"Backend recusou trades da conta {payload.login or payload.accountId}: {msg}")
                     return False
             except Exception:
                 return True
+        self.last_error_reason = "NETWORK_ERROR"
         return False
 
     def sync_orders(self, payload: SyncOrdersPayload) -> bool:
@@ -147,13 +161,22 @@ class BackendApiClient:
 
     def sync_positions(self, payload: SyncPositionsPayload) -> bool:
         """Envia posições abertas em tempo real"""
+        self.last_error_reason = None
         res = self._post("/sync/positions", payload.model_dump(mode="json"))
         if res and res.status_code == 200:
             try:
                 data = res.json()
-                return data.get("success", False) is True
+                if data.get("success", False) is True:
+                    return True
+                msg = str(data.get("message") or "")
+                if "account not found" in msg.lower():
+                    self.last_error_reason = "ACCOUNT_NOT_FOUND"
+                else:
+                    self.last_error_reason = "REJECTED"
+                return False
             except Exception:
                 return True
+        self.last_error_reason = "NETWORK_ERROR"
         return False
 
     def send_event(self, event: WorkerEvent) -> bool:
