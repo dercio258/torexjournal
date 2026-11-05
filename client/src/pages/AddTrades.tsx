@@ -94,13 +94,23 @@ export const AddTrades = () => {
 
     const [showUpgradeModal, setShowUpgradeModal] = useState(false);
     const [upgradeFeature, setUpgradeFeature] = useState('');
+    const [selectedMt5Broker, setSelectedMt5Broker] = useState<string>('');
+    const [selectedMt5Server, setSelectedMt5Server] = useState<string>('');
 
     const handleSelectBroker = (broker: any) => {
         if (broker.id === 'deriv') {
             setStep('CONNECT_DERIV');
             return;
         }
+        if (broker.id === 'mt5_broker_direct') {
+            setSelectedMt5Broker(broker.name || 'MetaTrader 5');
+            setSelectedMt5Server(broker.defaultServer || '');
+            setStep('CONNECT_MT_CLOUD');
+            return;
+        }
         if (broker.id === 'mt5') {
+            setSelectedMt5Broker(`MetaTrader ${mtVersion}`);
+            setSelectedMt5Server('');
             setStep('CONNECT_MT_OPTIONS');
             return;
         }
@@ -296,7 +306,11 @@ export const AddTrades = () => {
                     )}
 
                     {step === 'CONNECT_MT_CLOUD' && (
-                        <AutoSyncForm brokerName={`MetaTrader ${mtVersion}`} onBack={() => setStep('CONNECT_MT_OPTIONS')} />
+                        <AutoSyncForm
+                            brokerName={selectedMt5Broker || `MetaTrader ${mtVersion}`}
+                            serverName={selectedMt5Server}
+                            onBack={() => setStep('SELECT')}
+                        />
                     )}
 
                     {step === 'CONNECT_DERIV' && (
