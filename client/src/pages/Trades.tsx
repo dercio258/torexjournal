@@ -1,21 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    MoreHorizontal, Download, RefreshCw, ChevronLeft, ChevronRight, Plus
+    MoreHorizontal, Download, RefreshCw, ChevronLeft, ChevronRight, Plus, FileSpreadsheet, Globe, Printer
 } from 'lucide-react';
 import api from '../api';
 import { useAccount } from '../context/AccountContext';
+import { exportTradingDocument, DocumentFormat } from '../utils/documentExporter';
 
 interface Trade {
     id: number;
     ticket?: number;
+    openTime?: string;
     closeTime: string;
     symbol: string;
     type: string;
     volume: number;
+    rawProfit?: number;
     profit: number;
     openPrice: number;
     closePrice: number;
+    sl?: number;
+    tp?: number;
     commission: number;
     swap: number;
     session?: string;
@@ -25,7 +30,7 @@ interface Trade {
 
 export const Trades = () => {
     const navigate = useNavigate();
-    const { selectedAccountId, isConsolidated } = useAccount();
+    const { selectedAccountId, selectedAccount, isConsolidated } = useAccount();
     const [trades, setTrades] = useState<Trade[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -53,13 +58,17 @@ export const Trades = () => {
                 const mappedTrades = res.data.map((t: any) => ({
                     id: t.id,
                     ticket: t.ticket,
+                    openTime: t.openTime || t.closeTime,
                     closeTime: t.closeTime,
                     symbol: t.symbol ? t.symbol.replace(/m$/, '') : '',
                     type: t.type,
                     volume: Number(t.volume),
+                    rawProfit: Number(t.profit),
                     profit: Number(t.profit) + Number(t.commission) + Number(t.swap),
                     openPrice: Number(t.openPrice),
                     closePrice: Number(t.closePrice),
+                    sl: Number(t.sl || 0),
+                    tp: Number(t.tp || 0),
                     commission: Number(t.commission),
                     swap: Number(t.swap),
                     session: t.session || '-',
@@ -145,10 +154,59 @@ export const Trades = () => {
         }
     };
 
+    const handleExportDocument = (format: DocumentFormat) => {
+        const totalTrades = filteredTrades.length;
+        const wins = filteredTrades.filter(t => t.profit > 0).length;
+        const losses = filteredTrades.filter(t => t.profit < 0).length;
+        const grossProfit = filteredTrades.filter(t => t.profit > 0).reduce((acc, t) => acc + t.profit, 0);
+        const grossLoss = Math.abs(filteredTrades.filter(t => t.profit < 0).reduce((acc, t) => acc + t.profit, 0));
+        const netProfit = filteredTrades.reduce((acc, t) => acc + t.profit, 0);
+        const totalVolume = filteredTrades.reduce((acc, t) => acc + t.volume, 0);
+        const totalCommission = filteredTrades.reduce((acc, t) => acc + t.commission, 0);
+        const totalSwap = filteredTrades.reduce((acc, t) => acc + t.swap, 0);
+        const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+        const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? '∞' : '0.00';
+
+        const periodLabel =
+            dateRange.start && dateRange.end
+                ? `${dateRange.start} a ${dateRange.end}`
+                : dateRange.start
+                    ? `A partir de ${dateRange.start}`
+                    : dateRange.end
+                        ? `Até ${dateRange.end}`
+                        : 'Todo o Histórico Filtrado';
+
+        exportTradingDocument(format, {
+            accountName: selectedAccount ? selectedAccount.name : 'Portfólio Consolidado',
+            accountType: selectedAccount?.type || 'DEMO / LIVE',
+            broker: selectedAccount?.broker || 'MetaTrader 5',
+            currency: selectedAccount?.currency || 'USD',
+            periodLabel,
+            kpis: {
+                netProfit,
+                grossProfit,
+                grossLoss,
+                winRate,
+                totalTrades,
+                wins,
+                losses,
+                profitFactor,
+                totalVolume: totalVolume.toFixed(2),
+                totalCommission,
+                totalSwap,
+            },
+            trades: filteredTrades.map((t) => ({
+                ...t,
+                profit: t.rawProfit ?? t.profit,
+                netPnl: t.profit,
+            })),
+        });
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
             {/* Header Actions Toolbar */}
-            <div className="flex flex-wrap items-center justify-end gap-2.5 pb-1">
+            <div className="flex flex-wrap items-center justify-end gap-2 pb-1">
                 <button
                     onClick={() => navigate('/add-trades')}
                     className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all shadow-sm font-bold text-xs cursor-pointer active:scale-95"
@@ -162,8 +220,37 @@ export const Trades = () => {
                 >
                     <RefreshCw size={15} className={isLoading ? 'animate-spin text-indigo-500 dark:text-indigo-400' : ''} />
                 </button>
-                <button className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 dark:bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-600/20 transition-all border border-indigo-200 dark:border-indigo-600/20 font-bold text-xs cursor-pointer">
+                <button
+                    onClick={() => handleExportDocument('csv')}
+                    disabled={isLoading || filteredTrades.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 dark:bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-600/20 transition-all border border-indigo-200 dark:border-indigo-600/20 font-bold text-xs cursor-pointer disabled:opacity-50"
+                    title="Exportar trades filtrados em CSV estruturado com logo e KPIs"
+                >
                     <Download size={15} /> Exportar CSV
+                </button>
+                <button
+                    onClick={() => handleExportDocument('excel')}
+                    disabled={isLoading || filteredTrades.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-emerald-50 dark:bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-600/20 transition-all border border-emerald-200 dark:border-emerald-600/20 font-bold text-xs cursor-pointer disabled:opacity-50"
+                    title="Exportar planilha Excel (.xls) com logotipo TorexJournal"
+                >
+                    <FileSpreadsheet size={15} /> Excel
+                </button>
+                <button
+                    onClick={() => handleExportDocument('html')}
+                    disabled={isLoading || filteredTrades.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-cyan-50 dark:bg-cyan-600/10 text-cyan-600 dark:text-cyan-400 rounded-xl hover:bg-cyan-100 dark:hover:bg-cyan-600/20 transition-all border border-cyan-200 dark:border-cyan-600/20 font-bold text-xs cursor-pointer disabled:opacity-50"
+                    title="Exportar relatório HTML completo com logotipo TorexJournal"
+                >
+                    <Globe size={15} /> HTML
+                </button>
+                <button
+                    onClick={() => handleExportDocument('pdf')}
+                    disabled={isLoading || filteredTrades.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 dark:bg-amber-600/10 text-amber-600 dark:text-amber-400 rounded-xl hover:bg-amber-100 dark:hover:bg-amber-600/20 transition-all border border-amber-200 dark:border-amber-600/20 font-bold text-xs cursor-pointer disabled:opacity-50"
+                    title="Gerar PDF Executivo com logotipo TorexJournal"
+                >
+                    <Printer size={15} /> PDF
                 </button>
             </div>
 
