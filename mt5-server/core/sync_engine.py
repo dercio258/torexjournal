@@ -186,26 +186,21 @@ class SyncEngine:
         return typo_map.get(lower, s)
 
     @staticmethod
-    def _is_account_authenticated(info: Any, expected_login: int) -> bool:
+    def _is_account_authenticated(info: Any, expected_login: int, expected_server: Optional[str] = None) -> bool:
         """
-        Verifica se a conta está realmente autenticada na corretora.
-        Quando o servidor (ex: Deriv-Demo) não está cadastrado no servers.dat do MT5 ou a senha falha,
-        o MT5 cria um slot vazio com login=expected_login, porém com name='', balance=0.0 e leverage=0.
+        Verifica se o terminal MT5 já está posicionado na conta esperada.
+        Nota: Contas demo/reais podem legitimamente ter saldo $0.00 e name='' (como 202658742 @ Deriv-Demo).
         """
         if info is None or str(getattr(info, "login", "")) != str(expected_login):
             return False
-        holder_name = str(getattr(info, "name", "") or "").strip()
-        balance = float(getattr(info, "balance", 0.0) or 0.0)
-        equity = float(getattr(info, "equity", 0.0) or 0.0)
-        leverage = int(getattr(info, "leverage", 0) or 0)
-        if holder_name or balance > 0 or equity > 0:
-            return True
-        term = mt5.terminal_info() if MT5_AVAILABLE else None
-        if term is not None and getattr(term, "connected", False) and leverage > 0:
-            return True
-        return False
+        if expected_server:
+            current_srv = str(getattr(info, "server", "") or "").strip().lower()
+            target_srv = expected_server.strip().lower()
+            if current_srv and target_srv and current_srv != target_srv:
+                return False
+        return True
 
-    def _run_with_dialog_watchdog(self, fn, initial_delay: float = 2.0):
+    def _run_with_dialog_watchdog(self, fn, initial_delay: float = 2.5):
         """
         Executa uma chamada IPC bloqueante (mt5.initialize / mt5.login) monitorando e fechando
         em background qualquer popup modal Win32 ('#32770', ex: 'Login') que trave a thread UI do MT5.
@@ -228,24 +223,6 @@ class SyncEngine:
         finally:
             stop_evt.set()
 
-    def _reset_ipc_session(self, term_path: Optional[str], use_portable: bool) -> bool:
-        """Reinicializa o pipe IPC do Python após erro (-10005, 'IPC timeout') sem passar credenciais no initialize."""
-        try:
-            self._dismiss_mt5_dialogs()
-            mt5.shutdown()
-            time.sleep(0.8)
-            self._dismiss_mt5_dialogs()
-            ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000))
-            if not ok and term_path:
-                mt5.shutdown()
-                ok = self._run_with_dialog_watchdog(
-                    lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
-                )
-            return bool(ok)
-        except Exception as e:
-            logger.debug(f"Falha ao resetar sessão IPC: {e}")
-            return False
-
     def ensure_connected(
         self,
         account_id: int,
@@ -263,10 +240,11 @@ class SyncEngine:
 
             self._dismiss_mt5_dialogs()
             login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
+            server_clean = self._normalize_broker_server(server)
 
             try:
                 info = mt5.account_info()
-                if self._is_account_authenticated(info, login_clean):
+                if self._is_account_authenticated(info, login_clean, server_clean):
                     self.connected_account = account_id
                     return True
             except Exception:
@@ -290,7 +268,7 @@ class SyncEngine:
         path: Optional[str] = None,
         progress_callback: Optional[Any] = None,
     ) -> bool:
-        """Conecta ao terminal MT5 (sem passar credenciais no mt5.initialize para evitar IPC timeout) e efetua login seguro."""
+        """Conecta ao terminal MT5 reutilizando a instância ativa sem derrubar o pipe IPC."""
         with self._ipc_lock:
             if not MT5_AVAILABLE:
                 logger.warning(f"[Mock] Conectando mock MT5 para conta {account_id}")
@@ -312,8 +290,7 @@ class SyncEngine:
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
 
-            # Passo 1: Inicializa APENAS o canal IPC com o terminal MT5 (NUNCA passa login/senha no initialize,
-            # pois se o servidor demorar a responder o próprio initialize falha com -10005 IPC timeout!)
+            # Passo 1: Verifica se o IPC já está ativo ou anexa ao terminal MT5 já aberto (SEM chamar mt5.shutdown()!)
             init_ok = False
             try:
                 term_info = mt5.terminal_info()
@@ -322,31 +299,25 @@ class SyncEngine:
                 else:
                     if progress_callback:
                         progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
-                    mt5.shutdown()
                     init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000))
                     if not init_ok and term_path:
-                        mt5.shutdown()
                         init_ok = self._run_with_dialog_watchdog(
                             lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
                         )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se nenhum terminal responder, reinicia o processo terminal64.exe limpo (sem credenciais no initialize)
+            # Passo 2: Se nenhum terminal responder, reinicia o processo terminal64.exe
             if not init_ok:
-                logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 limpo via: {term_path}")
+                logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 via: {term_path}")
                 if progress_callback:
                     progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
-                try:
-                    mt5.shutdown()
-                except Exception:
-                    pass
                 self._kill_stuck_terminals()
                 self._clean_pending_liveupdate()
-                time.sleep(2.5)
+                time.sleep(2.0)
                 try:
                     init_ok = self._run_with_dialog_watchdog(
-                        lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=45000),
+                        lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=60000),
                         initial_delay=4.0,
                     )
                 except Exception as e:
@@ -360,24 +331,35 @@ class SyncEngine:
                 logger.error(self.last_connect_error)
                 return False
 
-            # Passo 3: Garante login na conta correta via mt5.login()
+            # Passo 3: Verifica se já está na conta correta (evita chamar mt5.login desnecessariamente!)
             if login_clean:
                 info = mt5.account_info()
-                if self._is_account_authenticated(info, login_clean):
-                    logger.success(f"Sessão MT5 já autenticada na conta {login_clean} ({server_clean})!")
-                    self._wait_for_broker_sync(login_clean, timeout_sec=6.0)
-                    self.connected_account = account_id
-                    self.last_connect_error = None
-                    return True
+                if self._is_account_authenticated(info, login_clean, server_clean):
+                    holder_name = (getattr(info, "name", "") or "").strip()
+                    bal = float(getattr(info, "balance", 0.0) or 0.0)
+                    if holder_name or bal > 0:
+                        logger.success(
+                            f"Sessão MT5 já autenticada na conta {login_clean}: {holder_name} ({getattr(info, 'server', server_clean)})!"
+                        )
+                        self._wait_for_broker_sync(login_clean, timeout_sec=4.0)
+                        self.connected_account = account_id
+                        self.last_connect_error = None
+                        return True
+                    else:
+                        logger.warning(
+                            f"Conta {login_clean} está selecionada no MT5 (ícone amarelo sem nome / saldo 0.0). "
+                            f"Tentando autenticar com o servidor {server_clean}..."
+                        )
 
                 if server_clean:
                     max_attempts = 2
                     for attempt in range(1, max_attempts + 1):
                         self._dismiss_mt5_dialogs()
                         info = mt5.account_info()
-                        if self._is_account_authenticated(info, login_clean):
-                            logger.success(f"Conta {login_clean} ({server_clean}) detectada como autenticada no MT5!")
-                            break
+                        if self._is_account_authenticated(info, login_clean, server_clean):
+                            if (getattr(info, "name", "") or "").strip() or float(getattr(info, "balance", 0.0) or 0.0) > 0:
+                                logger.success(f"Conta {login_clean} ({server_clean}) ativa e autenticada no MT5!")
+                                break
 
                         msg_step = f"Tentativa {attempt}/{max_attempts}: Autenticando conta {login_clean} no servidor {server_clean}..."
                         logger.info(msg_step)
@@ -405,44 +387,44 @@ class SyncEngine:
                             )
 
                         if login_ok:
-                            self._wait_for_broker_sync(login_clean, timeout_sec=8.0)
-                            info_check = mt5.account_info()
-                            if self._is_account_authenticated(info_check, login_clean):
-                                logger.success(f"Login efetuado com sucesso na conta {login_clean} ({server_clean})!")
-                                break
-
-                        err = mt5.last_error()
-                        logger.warning(f"Tentativa {attempt}/{max_attempts} de login retornou {err}. Reconectando sessão IPC...")
-
-                        # Reinicializa o canal IPC caso tenha ocorrido timeout (-10005)
-                        self._reset_ipc_session(term_path, use_portable)
-                        self._wait_for_broker_sync(login_clean, timeout_sec=5.0)
-                        info_after_reset = mt5.account_info()
-                        if self._is_account_authenticated(info_after_reset, login_clean):
-                            logger.success(
-                                f"Conta {login_clean} ({server_clean}) confirmada após reconexão do canal IPC!"
-                            )
+                            logger.success(f"Login efetuado com sucesso na conta {login_clean} ({server_clean})!")
                             break
 
-                        time.sleep(1.5)
-                    else:
-                        self._reset_ipc_session(term_path, use_portable)
-                        final_info = mt5.account_info()
-                        if not self._is_account_authenticated(final_info, login_clean):
-                            err = mt5.last_error()
-                            if err and err[0] == -10005:
-                                self.last_connect_error = (
-                                    f"O MT5 na VPS não conseguiu conectar ao servidor '{server_clean}' para a conta {login_clean} (Erro: {err}). "
-                                    f"Causas prováveis: (1) O servidor '{server_clean}' ainda não foi buscado no MT5 da VPS "
-                                    f"(no MT5 da VPS, vá em File -> Open an Account -> digite 'Deriv' em Find your company para registrar o servidor Deriv-Demo), "
-                                    f"ou (2) A senha informada para a conta {login_clean} está incorreta."
+                        err = mt5.last_error()
+                        logger.warning(f"Tentativa {attempt}/{max_attempts} de login retornou {err}. Verificando estado da conta...")
+                        time.sleep(2.0)
+                        self._dismiss_mt5_dialogs()
+
+                        # IMPORTANTE: Não chama mt5.shutdown() aqui para não derrubar o pipe IPC (-10004)!
+                        info_after = mt5.account_info()
+                        if info_after is None:
+                            mt5.initialize(timeout=10000)
+                            info_after = mt5.account_info()
+
+                        if self._is_account_authenticated(info_after, login_clean, server_clean):
+                            holder_after = (getattr(info_after, "name", "") or "").strip()
+                            bal_after = float(getattr(info_after, "balance", 0.0) or 0.0)
+                            if holder_after or bal_after > 0:
+                                logger.success(
+                                    f"Conta {login_clean}: {holder_after} ({server_clean}) confirmada ativa no MT5!"
                                 )
-                            else:
-                                self.last_connect_error = f"Falha de autenticação no MT5 para {login_clean}@{server_clean}: {err}"
+                                break
+                            elif attempt == max_attempts:
+                                logger.warning(
+                                    f"Conta {login_clean} posicionada em {server_clean}, porém sem resposta da corretora "
+                                    f"(ícone amarelo sem nome no MT5). Verifique em 'File -> Open an Account' no MT5 da VPS "
+                                    f"se a corretora Deriv ({server_clean}) está cadastrada no servers.dat e se a senha está correta."
+                                )
+                                break
+                    else:
+                        final_info = mt5.account_info()
+                        if not self._is_account_authenticated(final_info, login_clean, server_clean):
+                            err = mt5.last_error()
+                            self.last_connect_error = f"Falha ao autenticar conta {login_clean} em {server_clean}: {err}"
                             logger.error(self.last_connect_error)
                             return False
 
-                self._wait_for_broker_sync(login_clean, timeout_sec=8.0)
+                self._wait_for_broker_sync(login_clean, timeout_sec=5.0)
 
             self.connected_account = account_id
             self.last_connect_error = None
