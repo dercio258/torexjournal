@@ -161,7 +161,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 if (task.status === 'IN_PROGRESS' || task.status === 'RECEIVED') {
                     setStatus({
                         type: 'info',
-                        message: task.message || `Worker processando conexão para ${targetLogin}...`
+                        message: task.message || `Conectando à conta ${targetLogin}...`
                     });
                 } else if (task.status === 'SUCCESS') {
                     clearInterval(pollTimerRef.current);
@@ -202,7 +202,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         setRequestFeedback(null);
         setStatus({
             type: 'info',
-            message: 'Enviando solicitação de conexão ao Torex Cloud MT5...'
+            message: 'Iniciando conexão com a sua conta...'
         });
 
         try {
@@ -218,7 +218,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             }
 
             const confirmationMsg =
-                'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.';
+                'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
             setRequestFeedback(confirmationMsg);
             setStatus({
                 type: 'info',
@@ -249,12 +249,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         if (!targetLogin) return;
 
         setIsSyncing(true);
-        const syncMsg = 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.';
+        const syncMsg = 'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
         setRequestFeedback(syncMsg);
         setStatus({
             type: 'info',
             message: forceFull
-                ? 'Solicitando sincronização completa de histórico na nuvem...'
+                ? 'Atualizando todo o histórico de operações da sua conta...'
                 : syncMsg
         });
 
@@ -292,7 +292,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             setRequestFeedback(null);
             setStatus({
                 type: 'info',
-                message: `Monitoramento da conta ${targetLogin} desconectado.`
+                message: `Conta ${targetLogin} desconectada.`
             });
             await fetchCloudStatus(targetLogin);
             if (refreshAccounts) await refreshAccounts();
@@ -329,7 +329,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         }
         if (state === 'AUTH_FAILED') {
             return {
-                label: 'FALHA DE AUTENTICAÇÃO',
+                label: 'SENHA OU SERVIDOR INVÁLIDO',
                 className: 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
             };
         }
@@ -341,7 +341,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
     const connectionBadge = getConnectionBadge();
 
-    // Cálculo das 4 etapas visuais de comunicação bidirecional
+    // Cálculo das 4 etapas visuais
     const taskStatus = activeTask?.status;
     const step1Done = !!requestFeedback || !!activeTask || isAccConnected;
     const step2Done = taskStatus === 'IN_PROGRESS' || taskStatus === 'SUCCESS' || taskStatus === 'FAILED' || isAccConnected;
@@ -360,7 +360,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     Voltar às opções
                 </button>
 
-                {/* Status da Sincronização em Nuvem */}
+                {/* Status da Sincronização */}
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
                     worker?.isOnline
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -369,8 +369,8 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     {worker?.isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
                     <span>
                         {worker?.isOnline
-                            ? 'Torex Cloud MT5 Online'
-                            : 'Conectando ao Torex Cloud MT5...'}
+                            ? 'Sincronização Automática Online'
+                            : 'Conectando ao serviço...'}
                     </span>
                 </div>
             </div>
@@ -384,7 +384,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     <div>
                         <h2 className="text-xl font-bold text-[#F3F4F6]">Conectar {brokerName}</h2>
                         <p className="text-sm text-[#9CA3AF]">
-                            Insira as credenciais da sua conta para autenticar e sincronizar em tempo real.
+                            Insira os dados da sua conta para importar suas operações automaticamente.
                         </p>
                     </div>
                 </div>
@@ -408,7 +408,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     />
                     <p className="text-xs text-[#6B7280] -mt-4 flex items-center gap-1.5">
                         <ShieldCheck size={14} className="text-emerald-400" />
-                        Suas credenciais são protegidas com criptografia de ponta a ponta (AES-256) para sincronização segura.
+                        Seus dados são protegidos com segurança e usados exclusivamente para sincronizar seus trades.
                     </p>
 
                     {/* Campo Híbrido: Servidor da Corretora (Campo Livre + Dropdown com Busca de Corretoras) */}
@@ -732,7 +732,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         </div>
                     </div>
 
-                    {/* Banner de Confirmação Exata Solicitação Enviada */}
+                    {/* Banner de Confirmação Solicitação Enviada */}
                     {requestFeedback && (
                         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3">
                             <CheckCircle size={20} className="text-emerald-400 shrink-0 mt-0.5" />
@@ -741,13 +741,13 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     {requestFeedback}
                                 </p>
                                 <p className="text-xs text-emerald-200/80">
-                                    Comunicação bidirecional ativa {lastUpdatedAt ? `(última leitura: ${lastUpdatedAt})` : ''}
+                                    Sincronização automática ativa {lastUpdatedAt ? `(atualizado às ${lastUpdatedAt})` : ''}
                                 </p>
                             </div>
                         </div>
                     )}
 
-                    {/* Status Dinâmico em Tempo Real do Worker */}
+                    {/* Status Dinâmico em Tempo Real */}
                     {status && (
                         <div className={`p-4 rounded-xl flex items-center justify-between gap-3 text-sm ${
                             status.type === 'success'
@@ -772,29 +772,29 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         </div>
                     )}
 
-                    {/* Pipeline Visual Bidirecional de 4 Etapas */}
+                    {/* Pipeline Visual de 4 Etapas */}
                     {(requestFeedback || activeTask || acc?.mt5Id) && (
                         <div className="p-4 rounded-xl bg-[#08090C] border border-white/[0.06] space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-400">
-                                <span className="font-semibold text-slate-200">Progresso da Sincronização em Tempo Real</span>
-                                <span>Status: {worker?.isOnline ? 'ONLINE' : 'CONECTANDO'}</span>
+                                <span className="font-semibold text-slate-200">Progresso da Conexão</span>
+                                <span>{worker?.isOnline ? 'Serviço Online' : 'Conectando...'}</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
                                 <div className={`p-2.5 rounded-lg border ${step1Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
                                     <span className="font-bold block">1. Solicitação</span>
-                                    <span>{step1Done ? 'Solicitação registrada' : 'Aguardando envio'}</span>
+                                    <span>{step1Done ? 'Recebida' : 'Aguardando envio'}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step2Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step1Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
-                                    <span className="font-bold block">2. Torex Cloud</span>
-                                    <span>{step2Done ? 'Sincronizador ativo' : 'Iniciando...'}</span>
+                                    <span className="font-bold block">2. Processamento</span>
+                                    <span>{step2Done ? 'Em andamento' : 'Iniciando...'}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step3Failed ? 'bg-rose-500/15 border-rose-500/30 text-rose-300' : step3Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step2Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
-                                    <span className="font-bold block">3. Login no MT5</span>
-                                    <span>{step3Failed ? 'Falha de login' : step3Done ? 'Conta autenticada' : 'Autenticando...'}</span>
+                                    <span className="font-bold block">3. Conta MT5</span>
+                                    <span>{step3Failed ? 'Dados incorretos' : step3Done ? 'Conta conectada' : 'Verificando...'}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step4Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step3Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
-                                    <span className="font-bold block">4. Dados &amp; Trades</span>
-                                    <span>{step4Done ? `${totalTradesCount} trade(s) no histórico` : 'Sincronizando...'}</span>
+                                    <span className="font-bold block">4. Operações</span>
+                                    <span>{step4Done ? `${totalTradesCount} trade(s) importado(s)` : 'Importando...'}</span>
                                 </div>
                             </div>
                         </div>
@@ -808,7 +808,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         disabled={!login || !password || !server || isLoading || !!activeTaskId}
                         icon={<Power size={18} />}
                     >
-                        {activeTaskId ? 'Autenticando e Sincronizando na Nuvem...' : 'Conectar e Sincronizar Agora'}
+                        {activeTaskId ? 'Conectando e Importando Operações...' : 'Conectar e Sincronizar Agora'}
                     </Button>
                 </div>
             </Card>
@@ -828,7 +828,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             <div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <h3 className="font-bold text-slate-100">
-                                        MT5 #{acc.mt5Id}
+                                        Conta #{acc.mt5Id}
                                     </h3>
                                     <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${connectionBadge.className}`}>
                                         {connectionBadge.label}
@@ -842,11 +842,10 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 <p className="text-xs text-slate-400 mt-0.5">
                                     {acc.company || acc.server || acc.broker}
                                     {acc.accountHolderName ? ` • ${acc.accountHolderName}` : ''}
-                                    {acc.pingMs ? ` • Ping: ${acc.pingMs} ms` : ''}
                                 </p>
                                 {acc.statusMessage && (
                                     <p className="text-xs text-indigo-300 mt-1">
-                                        Status: {acc.statusMessage}
+                                        {acc.statusMessage}
                                     </p>
                                 )}
                             </div>
@@ -860,7 +859,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 isLoading={isSyncing}
                                 icon={<RefreshCw size={14} />}
                             >
-                                Sincronizar Agora
+                                Atualizar Agora
                             </Button>
                             {isAccConnected && (
                                 <Button
@@ -877,7 +876,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
-                            <span className="text-xs text-slate-400 block">Saldo (Balance)</span>
+                            <span className="text-xs text-slate-400 block">Saldo</span>
                             <span className="font-bold text-slate-100 text-base">
                                 {acc.currency || 'USD'} {Number(acc.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </span>
@@ -895,7 +894,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
-                            <span className="text-xs text-slate-400 block">Posições Abertas</span>
+                            <span className="text-xs text-slate-400 block">Posições em Aberto</span>
                             <span className="font-bold text-slate-100 text-base">
                                 {acc.openPositionsCount ?? 0} ativas
                             </span>
@@ -904,12 +903,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
                     {acc.lastSyncAt && (
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                            <span>Última sincronização: {new Date(acc.lastSyncAt).toLocaleString()}</span>
+                            <span>Última atualização: {new Date(acc.lastSyncAt).toLocaleString()}</span>
                             <button
                                 onClick={() => handleForceSync(true)}
                                 className="text-indigo-400 hover:underline"
                             >
-                                Forçar reimportação completa de histórico
+                                Reimportar histórico completo
                             </button>
                         </div>
                     )}
@@ -923,17 +922,17 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         <div className="flex items-center gap-2.5">
                             <FileCheck size={18} className="text-emerald-400" />
                             <h3 className="text-base font-bold text-slate-100">
-                                Trades Importados ({totalTradesCount})
+                                Operações Sincronizadas ({totalTradesCount})
                             </h3>
                         </div>
                         <span className="text-xs text-slate-400">
-                            Conta MT5 #{acc.mt5Id}
+                            Conta #{acc.mt5Id}
                         </span>
                     </div>
 
                     {recentTrades.length === 0 ? (
                         <div className="p-6 text-center rounded-xl bg-[#08090C] border border-white/[0.05] text-slate-400 text-sm">
-                            Nenhum trade fechado encontrado no histórico desta conta MT5 até o momento. Assim que novas operações forem realizadas no MT5, elas serão importadas automaticamente.
+                            Nenhuma operação fechada encontrada nesta conta até o momento. Assim que novas operações forem encerradas, elas aparecerão aqui automaticamente.
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -946,7 +945,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                         <th className="py-2.5 px-3">Volume</th>
                                         <th className="py-2.5 px-3">Preço</th>
                                         <th className="py-2.5 px-3">Data Fechamento</th>
-                                        <th className="py-2.5 px-3 text-right">Resultado (P&amp;L)</th>
+                                        <th className="py-2.5 px-3 text-right">Resultado</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/[0.04]">
@@ -1003,18 +1002,18 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 </Card>
             )}
 
-            {/* Logs de Auditoria de Conexão e Sincronização (Backend Audit Trail) */}
+            {/* Histórico de Sincronização (Sem termos técnicos) */}
             {(auditLogs.length > 0 || recentEvents.length > 0) && (
                 <Card className="p-6 bg-[#111319] border-white/[0.08] shadow-xl">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2.5">
                             <Clock size={18} className="text-indigo-400" />
                             <h3 className="text-base font-bold text-slate-100">
-                                Logs de Auditoria da Conexão MT5
+                                Histórico de Sincronização
                             </h3>
                         </div>
                         <span className="text-xs text-slate-400">
-                            Registros do Backend &amp; Worker
+                            Atividades recentes
                         </span>
                     </div>
 
@@ -1029,12 +1028,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                         <span className={`px-2 py-0.5 rounded font-semibold text-[10px] ${
                                             ev.severity === 'ERROR'
                                                 ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                                : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                                                : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                                         }`}>
-                                            {ev.eventType}
-                                        </span>
-                                        <span className="text-slate-500 font-mono text-[11px]">
-                                            [{ev.workerId}]
+                                            {ev.severity === 'ERROR' ? 'Atenção' : 'Conectado'}
                                         </span>
                                     </div>
                                     <p className="text-slate-300 mt-1">{ev.message}</p>
@@ -1057,14 +1053,16 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                                                 : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                                         }`}>
-                                            AUDITORIA DB • {log.status === 'SUCCESS' ? 'SUCESSO' : 'FALHA'}
+                                            {log.status === 'SUCCESS' ? 'Sincronizado' : 'Falha'}
                                         </span>
-                                        <span className="text-slate-400 font-medium">
-                                            {log.tradesCount} novos trades
-                                        </span>
+                                        {log.tradesCount > 0 && (
+                                            <span className="text-slate-400 font-medium">
+                                                {log.tradesCount} {log.tradesCount === 1 ? 'nova operação' : 'novas operações'}
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="text-slate-300 mt-1">
-                                        {log.details || log.errorDetails || log.fileName || `Sincronização automática (${log.method})`}
+                                        {log.details || log.errorDetails || log.fileName || 'Sincronização automática concluída'}
                                     </p>
                                 </div>
                                 <span className="text-slate-500 shrink-0 text-[11px]">

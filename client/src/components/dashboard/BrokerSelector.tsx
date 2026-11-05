@@ -23,31 +23,31 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
     const mainMethods: Broker[] = [
         {
             id: 'deriv',
-            name: 'Deriv Autosync (API Token)',
+            name: 'Deriv Autosync',
             type: 'AUTO_SYNC',
             icon: <img src="https://deriv.com/static/deriv-logo-c97b819f.svg" className="w-10 h-10" alt="Deriv" />,
-            description: 'Sincronização direta via Token API Deriv'
+            description: 'Sincronização automática da sua conta Deriv'
         },
         {
             id: 'mt5',
-            name: 'Connect MetaTrader 5',
+            name: 'Conectar MetaTrader 5',
             type: 'AUTO_SYNC',
             icon: <Monitor className="w-10 h-10 text-emerald-500" />,
-            description: 'Conectar qualquer corretora via Nuvem VPS ou EA'
+            description: 'Sincronizar qualquer corretora automaticamente'
         },
         {
             id: 'mt4',
-            name: 'Connect MetaTrader 4',
+            name: 'Conectar MetaTrader 4',
             type: 'AUTO_SYNC',
             icon: <Monitor className="w-10 h-10 text-cyan-500" />,
-            description: 'Conectar via EA local ou Nuvem'
+            description: 'Sincronização automática para contas MT4'
         },
         {
             id: 'manual_csv',
             name: 'Importar Relatório (CSV / Excel / HTML / PDF)',
             type: 'MANUAL',
             icon: <Upload className="w-10 h-10 text-slate-400" />,
-            description: 'Importar relatórios manuais multi-formato'
+            description: 'Importar histórico de operações por arquivo'
         }
     ];
 
