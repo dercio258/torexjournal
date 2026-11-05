@@ -202,7 +202,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         setRequestFeedback(null);
         setStatus({
             type: 'info',
-            message: 'Enviando solicitação de conexão ao servidor Windows MT5...'
+            message: 'Enviando solicitação de conexão ao Torex Cloud MT5...'
         });
 
         try {
@@ -254,7 +254,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         setStatus({
             type: 'info',
             message: forceFull
-                ? 'Solicitando sincronização completa de histórico ao servidor Windows...'
+                ? 'Solicitando sincronização completa de histórico na nuvem...'
                 : syncMsg
         });
 
@@ -360,7 +360,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     Voltar às opções
                 </button>
 
-                {/* Status do Worker Windows em Tempo Real */}
+                {/* Status da Sincronização em Nuvem */}
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
                     worker?.isOnline
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
@@ -369,8 +369,8 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     {worker?.isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
                     <span>
                         {worker?.isOnline
-                            ? `Servidor MT5 Online (${worker.workerId || 'VPS'} • CPU ${worker.cpuPercent ?? 0}%)`
-                            : 'Aguardando Servidor Windows MT5...'}
+                            ? 'Torex Cloud MT5 Online'
+                            : 'Conectando ao Torex Cloud MT5...'}
                     </span>
                 </div>
             </div>
@@ -384,7 +384,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     <div>
                         <h2 className="text-xl font-bold text-[#F3F4F6]">Conectar {brokerName}</h2>
                         <p className="text-sm text-[#9CA3AF]">
-                            Insira as credenciais para o servidor Windows MT5 autenticar e sincronizar em tempo real.
+                            Insira as credenciais da sua conta para autenticar e sincronizar em tempo real.
                         </p>
                     </div>
                 </div>
@@ -408,7 +408,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     />
                     <p className="text-xs text-[#6B7280] -mt-4 flex items-center gap-1.5">
                         <ShieldCheck size={14} className="text-emerald-400" />
-                        Suas credenciais são transmitidas via token único temporário e criptografadas no cofre da VPS.
+                        Suas credenciais são protegidas com criptografia de ponta a ponta (AES-256) para sincronização segura.
                     </p>
 
                     {/* Campo Híbrido: Servidor da Corretora (Campo Livre + Dropdown com Busca de Corretoras) */}
@@ -776,17 +776,17 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     {(requestFeedback || activeTask || acc?.mt5Id) && (
                         <div className="p-4 rounded-xl bg-[#08090C] border border-white/[0.06] space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-400">
-                                <span className="font-semibold text-slate-200">Progresso da Comunicação Bidirecional</span>
-                                <span>Worker: {worker?.isOnline ? 'CONECTADO' : 'AGUARDANDO VPS'}</span>
+                                <span className="font-semibold text-slate-200">Progresso da Sincronização em Tempo Real</span>
+                                <span>Status: {worker?.isOnline ? 'ONLINE' : 'CONECTANDO'}</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
                                 <div className={`p-2.5 rounded-lg border ${step1Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
-                                    <span className="font-bold block">1. Backend Linux</span>
+                                    <span className="font-bold block">1. Solicitação</span>
                                     <span>{step1Done ? 'Solicitação registrada' : 'Aguardando envio'}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step2Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step1Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
-                                    <span className="font-bold block">2. Worker Windows</span>
-                                    <span>{step2Done ? 'Tarefa recebida' : 'Aguardando Worker...'}</span>
+                                    <span className="font-bold block">2. Torex Cloud</span>
+                                    <span>{step2Done ? 'Sincronizador ativo' : 'Iniciando...'}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step3Failed ? 'bg-rose-500/15 border-rose-500/30 text-rose-300' : step3Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step2Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
                                     <span className="font-bold block">3. Login no MT5</span>
@@ -808,7 +808,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         disabled={!login || !password || !server || isLoading || !!activeTaskId}
                         icon={<Power size={18} />}
                     >
-                        {activeTaskId ? 'Autenticando e Sincronizando na VPS...' : 'Conectar e Sincronizar Agora'}
+                        {activeTaskId ? 'Autenticando e Sincronizando na Nuvem...' : 'Conectar e Sincronizar Agora'}
                     </Button>
                 </div>
             </Card>
@@ -904,7 +904,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
                     {acc.lastSyncAt && (
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                            <span>Última sincronização com a VPS: {new Date(acc.lastSyncAt).toLocaleString()}</span>
+                            <span>Última sincronização: {new Date(acc.lastSyncAt).toLocaleString()}</span>
                             <button
                                 onClick={() => handleForceSync(true)}
                                 className="text-indigo-400 hover:underline"
