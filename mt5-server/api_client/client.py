@@ -28,13 +28,25 @@ class BackendApiClient:
         })
         self.timeout = 10  # 10s timeout default
 
+    @staticmethod
+    def _format_error_body(status_code: int, text: str) -> str:
+        raw = (text or "").strip()
+        if "<!doctype html" in raw.lower() or "<html" in raw.lower():
+            if status_code == 502:
+                return "502 Bad Gateway (Cloudflare -> Backend Linux offline ou reiniciando no PM2)"
+            if status_code in (503, 504):
+                return f"{status_code} Gateway Unavailable/Timeout (Backend Linux ocupado ou offline)"
+            return f"Página HTML de erro (HTTP {status_code})"
+        return raw[:300]
+
     def _post(self, endpoint: str, json_data: Any) -> Optional[requests.Response]:
         url = f"{self.base_url}{endpoint}"
         with self._http_lock:
             try:
                 response = self.session.post(url, json=json_data, timeout=self.timeout)
                 if not response.ok:
-                    logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {response.text}")
+                    summary = self._format_error_body(response.status_code, response.text)
+                    logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {summary}")
                 return response
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Erro na comunicação POST {endpoint}: {e}")
@@ -46,7 +58,8 @@ class BackendApiClient:
             try:
                 response = self.session.get(url, params=params, timeout=self.timeout)
                 if not response.ok:
-                    logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {response.text}")
+                    summary = self._format_error_body(response.status_code, response.text)
+                    logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {summary}")
                 return response
             except requests.exceptions.RequestException as e:
                 logger.warning(f"Erro na comunicação GET {endpoint}: {e}")
