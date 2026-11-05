@@ -52,13 +52,37 @@ export class ImportController {
             }
 
             const userPlan = await this.planPermissionService.getUserPlan(userId);
+            const fileNameLower = (file.originalname || '').toLowerCase();
+            const mimeLower = (file.mimetype || '').toLowerCase();
 
-            if (file.mimetype?.includes('html') || file.originalname?.endsWith('.html') || file.originalname?.endsWith('.htm')) {
+            if (
+                mimeLower.includes('html') ||
+                fileNameLower.endsWith('.html') ||
+                fileNameLower.endsWith('.htm')
+            ) {
                 trades = this.reportParser.parseHtml(content);
-            } else if (file.mimetype?.includes('csv') || file.originalname?.endsWith('.csv')) {
+            } else if (
+                mimeLower.includes('csv') ||
+                fileNameLower.endsWith('.csv')
+            ) {
                 trades = this.reportParser.parseCsv(content);
+            } else if (
+                fileNameLower.endsWith('.xls') ||
+                fileNameLower.endsWith('.xlsx') ||
+                fileNameLower.endsWith('.xml') ||
+                mimeLower.includes('excel') ||
+                mimeLower.includes('spreadsheet')
+            ) {
+                trades = this.reportParser.parseExcel(buffer, content);
+            } else if (
+                fileNameLower.endsWith('.pdf') ||
+                mimeLower.includes('pdf')
+            ) {
+                trades = this.reportParser.parsePdf(buffer, content);
             } else {
-                throw new BadRequestException('Formato de arquivo não suportado. Por favor envie .html ou .csv');
+                throw new BadRequestException(
+                    'Formato de arquivo não suportado. Envie documentos .csv, .html, .xls, .xlsx ou .pdf'
+                );
             }
 
             if (trades.length === 0) {

@@ -1,3 +1,7 @@
-Ticket,Open Time,Type,Size,Symbol,Open Price,S / L,T / P,Close Time,Close Price,Commission,Taxes,Swap,Profit
-123456,2023.10.01 10:00:00,buy,0.10,EURUSD,1.05000,1.04000,1.06000,2023.10.01 12:00:00,1.05500,-0.50,0.00,0.00,50.00
-654321,2023.10.02 14:30:00,sell,1.00,GBPUSD,1.22000,1.23000,1.21000,2023.10.02 15:00:00,1.21500,-5.00,0.00,-1.20,500.00
+# TOREX JOURNAL — DEMONSTRATIVO OFICIAL DE AUDITORIA E OPERACOES
+# Plataforma,https://torexjournal.com,Logo Oficial,https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790957899791_0521d2dc46a60392_touro_design_1.jpeg
+# Formato,CSV Oficial Compatível com MT4 / MT5 / Deriv / TorexJournal
+Ticket,Open Time,Type,Size,Symbol,Open Price,S / L,T / P,Close Time,Close Price,Commission,Taxes,Swap,Profit,Net PnL,Session,Account
+100245801,2026.11.01 09:15:00,buy,0.50,EURUSD,1.08450,1.08150,1.09100,2026.11.01 13:40:00,1.08950,-2.50,0.00,0.00,250.00,247.50,London / New York,Conta Principal MT5
+100245802,2026.11.02 14:20:00,sell,0.20,XAUUSD,2745.50000,2755.00000,2725.00000,2026.11.02 16:05:00,2732.00000,-1.40,0.00,-0.60,270.00,268.00,New York,Conta Principal MT5
+100245803,2026.11.03 08:30:00,buy,0.30,GBPUSD,1.29600,1.29250,1.30200,2026.11.03 10:15:00,1.29300,-1.50,0.00,0.00,-90.00,-91.50,London,Conta Principal MT5

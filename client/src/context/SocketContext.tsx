@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { browser } from '../proto/browser_packet';
 import { useAuth } from './AuthContext';
 import api from '../api';
 
 interface SocketContextType {
-    socket: WebSocket | null;
+    socket: Socket | null;
     isConnected: boolean;
     mt5Status: 'connected' | 'disconnected';
 }
@@ -13,105 +14,129 @@ const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 export const SocketProvider = ({ children }: { children: ReactNode }) => {
     const { token } = useAuth();
-    const [socket, setSocket] = useState<WebSocket | null>(null);
+    const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [mt5Status, setMt5Status] = useState<'connected' | 'disconnected'>('disconnected');
 
     useEffect(() => {
         if (!token) {
             if (socket) {
-                socket.close();
+                socket.disconnect();
                 setSocket(null);
             }
             return;
         }
 
-        // Connect to Backend WebSocket
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}`;
-        const newSocket = new WebSocket(wsUrl);
-        newSocket.binaryType = 'arraybuffer';
+        const ioSocket = io('/', {
+            path: '/socket.io',
+            auth: { token },
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 3000,
+        });
 
-        let pingInterval: NodeJS.Timeout | null = null;
+        let pingInterval: ReturnType<typeof setInterval> | null = null;
 
-        newSocket.onopen = () => {
-            console.log('✅ Native WebSocket Connected');
+        ioSocket.on('connect', () => {
             setIsConnected(true);
+            ioSocket.emit('mt5_auth', { token });
 
-            // Send Auth Packet immediately
-            const authPacket = browser.BrowserPacket.create({
-                type: browser.PacketType.AUTH,
-                auth: { token }
-            });
-            const buffer = browser.BrowserPacket.encode(authPacket).finish();
-            newSocket.send(buffer);
+            try {
+                const authPacket = browser.BrowserPacket.create({
+                    type: browser.PacketType.AUTH,
+                    auth: { token },
+                });
+                const buffer = browser.BrowserPacket.encode(authPacket).finish();
+                ioSocket.emit('mt5_packet', buffer);
+            } catch {
+                // Protobuf optional fallback
+            }
 
-            // Start Ping Interval
             pingInterval = setInterval(() => {
-                if (newSocket.readyState === WebSocket.OPEN) {
-                    const ping = browser.BrowserPacket.create({ type: browser.PacketType.PING });
-                    newSocket.send(browser.BrowserPacket.encode(ping).finish());
+                if (ioSocket.connected) {
+                    ioSocket.emit('mt5_ping');
                 }
-            }, 30000); // 30s Heartbeat
-        };
+            }, 30000);
+        });
 
-        newSocket.onclose = () => {
-            console.warn('❌ Native WebSocket Disconnected');
+        ioSocket.on('disconnect', () => {
             setIsConnected(false);
-            setMt5Status('disconnected');
             if (pingInterval) {
                 clearInterval(pingInterval);
                 pingInterval = null;
             }
-            // Implement reconnection logic here if needed (e.g. setTimeout)
-        };
+        });
 
-        newSocket.onerror = (error) => {
-            console.error('WebSocket Error:', error);
-        };
+        ioSocket.on('connect_error', () => {
+            // Silencia erros transitórios de reconexão (ex: 502 durante restart do PM2)
+            setIsConnected(false);
+        });
 
-        newSocket.onmessage = (event) => {
+        ioSocket.on('mt5_account_update', (data: any) => {
+            if (data) {
+                setMt5Status('connected');
+                window.dispatchEvent(new CustomEvent('mt5_account_update', { detail: data }));
+            }
+        });
+
+        ioSocket.on('mt5_history_update', (data: any) => {
+            if (data) {
+                window.dispatchEvent(new CustomEvent('mt5_history_update', { detail: data }));
+            }
+        });
+
+        ioSocket.on('mt5_connection_status', (data: any) => {
+            if (data && typeof data.isConnected === 'boolean') {
+                setMt5Status(data.isConnected ? 'connected' : 'disconnected');
+            }
+        });
+
+        ioSocket.on('mt5_packet', (rawPayload: ArrayBuffer | Uint8Array) => {
             try {
-                const buffer = new Uint8Array(event.data as ArrayBuffer);
+                const buffer =
+                    rawPayload instanceof Uint8Array
+                        ? rawPayload
+                        : new Uint8Array(rawPayload as ArrayBuffer);
                 const packet = browser.BrowserPacket.decode(buffer);
 
                 switch (packet.type) {
                     case browser.PacketType.PONG:
-                        // Server is alive
                         break;
-
                     case browser.PacketType.ACCOUNT_UPDATE:
                         if (packet.accountUpdate) {
                             setMt5Status('connected');
-                            window.dispatchEvent(new CustomEvent('mt5_account_update', { detail: packet.accountUpdate }));
+                            window.dispatchEvent(
+                                new CustomEvent('mt5_account_update', { detail: packet.accountUpdate })
+                            );
                         }
                         break;
-
                     case browser.PacketType.HISTORY_UPDATE:
                         if (packet.historyUpdate) {
-                            window.dispatchEvent(new CustomEvent('mt5_history_update', { detail: packet.historyUpdate }));
+                            window.dispatchEvent(
+                                new CustomEvent('mt5_history_update', { detail: packet.historyUpdate })
+                            );
                         }
                         break;
-
                     case browser.PacketType.CONNECTION_STATUS:
                         if (packet.connectionStatus) {
                             setMt5Status(packet.connectionStatus.isConnected ? 'connected' : 'disconnected');
                         }
                         break;
-
                     default:
-                        console.log('Unknown packet type:', packet.type);
+                        break;
                 }
-            } catch (err) {
-                console.error('Failed to decode protobuf message:', err);
+            } catch {
+                // Ignore malformed binary frame
             }
-        };
+        });
 
-        setSocket(newSocket);
+        setSocket(ioSocket);
         checkInitialStatus();
 
         return () => {
-            newSocket.close();
+            if (pingInterval) clearInterval(pingInterval);
+            ioSocket.disconnect();
         };
     }, [token]);
 
@@ -126,8 +151,8 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
             } else {
                 setMt5Status('disconnected');
             }
-        } catch (e) {
-            // console.error('Failed to check initial status', e);
+        } catch {
+            // Ignore initial status error
         }
     };
 

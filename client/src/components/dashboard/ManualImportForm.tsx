@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Upload, Download, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, Wallet, BarChart2 } from 'lucide-react';
+import { Upload, Download, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, Wallet, BarChart2, FileSpreadsheet, FileCode, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { downloadImportTemplate, TOREX_LOGO_URL } from '../../utils/documentExporter';
 
 interface ManualImportFormProps {
     onBack: () => void;
@@ -118,12 +119,19 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
 
             <Card className="p-8 bg-[#111319] border-white/[0.08] shadow-2xl">
                 <div className="flex items-center gap-4 mb-8">
-                    <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-                        <Upload size={24} />
-                    </div>
+                    <img
+                        src={TOREX_LOGO_URL}
+                        alt="Torex Journal Logo"
+                        className="w-12 h-12 rounded-2xl object-cover border border-emerald-500/30 shadow-lg shadow-emerald-500/10 shrink-0"
+                    />
                     <div>
-                        <h2 className="text-xl font-bold text-[#F3F4F6]">Importação Manual de Histórico</h2>
-                        <p className="text-sm text-[#9CA3AF]">Envie relatórios em formato HTML (MT4/MT5) ou CSV para sincronizar suas operações.</p>
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 block">
+                            TOREX JOURNAL • CENTRAL DE DOCUMENTOS
+                        </span>
+                        <h2 className="text-xl font-bold text-[#F3F4F6]">Importação Multi-Formato de Histórico</h2>
+                        <p className="text-sm text-[#9CA3AF]">
+                            Suporte completo para documentos <strong>CSV</strong>, <strong>HTML</strong> (MT4/MT5), <strong>Excel (.xls/.xlsx)</strong> e <strong>PDF</strong>.
+                        </p>
                     </div>
                 </div>
 
@@ -194,7 +202,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                             type="file"
                             id="report-upload"
                             className="hidden"
-                            accept=".html,.htm,.csv,.xlsx"
+                            accept=".html,.htm,.csv,.xls,.xlsx,.xml,.pdf"
                             onChange={handleFileSelect}
                         />
                         <label htmlFor="report-upload" className="cursor-pointer flex flex-col items-center gap-4 w-full h-full">
@@ -203,27 +211,101 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                             </div>
                             <div>
                                 <p className="text-[#F3F4F6] font-bold text-base">
-                                    {selectedFile ? selectedFile.name : 'Clique para selecionar o relatório'}
+                                    {selectedFile ? selectedFile.name : 'Clique para selecionar o documento de operações'}
                                 </p>
                                 <p className="text-xs text-[#9CA3AF] mt-1.5">
-                                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB pronto para envio` : 'Formatos aceitos: Relatório HTML do MetaTrader 4/5 ou CSV'}
+                                    {selectedFile
+                                        ? `${(selectedFile.size / 1024).toFixed(1)} KB pronto para importação`
+                                        : 'Formatos suportados: CSV, HTML (MT4/MT5/Torex), Excel (.xls / .xlsx) e PDF'}
                                 </p>
+                                <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">CSV</span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">HTML / MT5</span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/20">EXCEL (.XLS / .XLSX)</span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">PDF</span>
+                                </div>
                             </div>
                         </label>
                     </div>
 
-                    <div className="bg-[#08090C]/60 p-4 rounded-xl border border-white/[0.06] flex items-center justify-between">
-                        <div>
-                            <h4 className="text-xs font-bold text-[#9CA3AF] uppercase tracking-wider">Modelo Padrão</h4>
-                            <p className="text-[11px] text-[#6B7280] mt-0.5">Baixe a planilha modelo caso deseje preencher manualmente.</p>
+                    {/* Branded Official Document Templates */}
+                    <div className="bg-[#08090C]/80 p-4 rounded-2xl border border-white/[0.08] space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                                <img
+                                    src={TOREX_LOGO_URL}
+                                    alt="Logo"
+                                    className="w-7 h-7 rounded-lg object-cover border border-emerald-500/30"
+                                />
+                                <div>
+                                    <h4 className="text-xs font-bold text-[#F3F4F6] uppercase tracking-wider">
+                                        Modelos Oficiais com Logo TorexJournal
+                                    </h4>
+                                    <p className="text-[11px] text-[#9CA3AF]">
+                                        Baixe o documento estruturado no formato de sua preferência para preenchimento ou auditoria:
+                                    </p>
+                                </div>
+                            </div>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => window.open('/template.csv')}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-[#161822] hover:bg-[#1C1F2C] text-indigo-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer border border-white/[0.08]"
-                        >
-                            <Download size={14} /> Download CSV
-                        </button>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    downloadImportTemplate(
+                                        'csv',
+                                        selectedTargetAccount?.name,
+                                        selectedTargetAccount?.broker,
+                                        selectedTargetAccount?.currency
+                                    )
+                                }
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-[#161822] hover:bg-[#1C1F2C] text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-white/[0.08]"
+                            >
+                                <Download size={13} className="text-emerald-400" /> Modelo CSV
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    downloadImportTemplate(
+                                        'excel',
+                                        selectedTargetAccount?.name,
+                                        selectedTargetAccount?.broker,
+                                        selectedTargetAccount?.currency
+                                    )
+                                }
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-emerald-500/25"
+                            >
+                                <FileSpreadsheet size={13} /> Modelo Excel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    downloadImportTemplate(
+                                        'html',
+                                        selectedTargetAccount?.name,
+                                        selectedTargetAccount?.broker,
+                                        selectedTargetAccount?.currency
+                                    )
+                                }
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-indigo-500/25"
+                            >
+                                <FileCode size={13} /> Modelo HTML
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    downloadImportTemplate(
+                                        'pdf',
+                                        selectedTargetAccount?.name,
+                                        selectedTargetAccount?.broker,
+                                        selectedTargetAccount?.currency
+                                    )
+                                }
+                                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-amber-500/25"
+                            >
+                                <FileText size={13} /> Modelo PDF
+                            </button>
+                        </div>
                     </div>
 
                     {status && (

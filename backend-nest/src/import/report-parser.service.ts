@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as zlib from 'zlib';
 
 @Injectable()
 export class ReportParserService {
@@ -226,22 +227,26 @@ export class ReportParserService {
 
     parseCsv(content: string): any[] {
         this.logger.log('Parsing CSV Report...');
+        const cleanContent = (content || '').replace(/^\uFEFF/, '');
 
         // 1. Detect Journal Log (tradinglog format)
-        if (content.includes('ticket_id,message,event_type') || content.includes('ticket_id;message;event_type')) {
-            return this.parseJournalLog(content);
+        if (cleanContent.includes('ticket_id,message,event_type') || cleanContent.includes('ticket_id;message;event_type')) {
+            return this.parseJournalLog(cleanContent);
         }
 
         // 2. Detect History Format (standard CSV export)
-        if (content.includes('ticket,opening_time_utc') || content.includes('ticket;opening_time_utc')) {
-            return this.parseHistoryCsv(content);
+        if (cleanContent.includes('ticket,opening_time_utc') || cleanContent.includes('ticket;opening_time_utc')) {
+            return this.parseHistoryCsv(cleanContent);
         }
 
-        // 3. Robust Parsing Logic
-        const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+        // 3. Robust Parsing Logic (ignores # metadata lines from TorexJournal Branded CSV)
+        const lines = cleanContent
+            .split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('#') && !l.startsWith('"#'));
         if (lines.length === 0) return [];
 
-        // Delimiter detection: check first 5 lines
+        // Delimiter detection: check first 5 non-comment lines
         const sampleLines = lines.slice(0, 5);
         let commas = 0;
         let semicolons = 0;
@@ -266,10 +271,20 @@ export class ReportParserService {
             const line = lines[i].replace(/"/g, '').replace(/\r/g, '');
             const cols = line.split(delimiter).map(c => c.trim());
 
-            // Try to detect header in first 2 lines
-            if (i < 2 && (cols.includes('Ticket') || cols.includes('Symbol') || cols.includes('Login'))) {
+            // Detect header row (English or Portuguese)
+            if (
+                i < 25 &&
+                cols.some(c => {
+                    const norm = c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+                    return ['ticket', 'symbol', 'simbolo', 'ativo', 'login', 'opentime', 'dataabertura'].includes(norm);
+                })
+            ) {
                 cols.forEach((col, idx) => {
-                    const normalized = col.toLowerCase().replace(/[^a-z]/g, '');
+                    const normalized = col
+                        .toLowerCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/[^a-z]/g, '');
                     headerMap[normalized] = idx;
                 });
                 this.logger.log(`Detected CSV header: ${JSON.stringify(headerMap)}`);
@@ -278,12 +293,25 @@ export class ReportParserService {
 
             if (cols.length < 5) continue; // Minimum columns to be valid
 
-            const ticket = parseInt(cols[headerMap['ticket'] ?? 0]);
+            const ticketIdx = headerMap['ticket'] ?? 0;
+            const ticket = parseInt(cols[ticketIdx]);
             if (isNaN(ticket) || ticket <= 0) continue;
 
-            // Date mapping (heuristic or header-based)
-            const openTimeStr = cols[headerMap['opentime'] ?? headerMap['time'] ?? 1];
-            const closeTimeStr = cols[headerMap['closetime'] ?? 8];
+            // Date mapping (heuristic or header-based, English + Portuguese)
+            const openTimeIdx =
+                headerMap['opentime'] ??
+                headerMap['dataabertura'] ??
+                headerMap['abertura'] ??
+                headerMap['time'] ??
+                1;
+            const closeTimeIdx =
+                headerMap['closetime'] ??
+                headerMap['datafechamento'] ??
+                headerMap['fechamento'] ??
+                8;
+
+            const openTimeStr = cols[openTimeIdx];
+            const closeTimeStr = cols[closeTimeIdx];
 
             const openTime = this.normalizeDate(openTimeStr);
             if (!openTime) {
@@ -291,22 +319,36 @@ export class ReportParserService {
                 continue;
             }
 
-            const typeStr = (cols[headerMap['type'] ?? 2] || '').toLowerCase();
+            const typeIdx = headerMap['type'] ?? headerMap['tipo'] ?? 2;
+            const typeStr = (cols[typeIdx] || '').toLowerCase();
             const validTypes = ['buy', 'sell', 'buy limit', 'sell limit', 'buy stop', 'sell stop', 'balance', 'credit', 'correction'];
             if (!validTypes.some(v => typeStr.includes(v))) continue;
 
             // Remove uncommon broker suffixes from symbol (.x, .y, _ecn, m, etc.)
-            const rawSymbol = cols[headerMap['symbol'] ?? headerMap['item'] ?? 4];
+            const symbolIdx = headerMap['symbol'] ?? headerMap['simbolo'] ?? headerMap['ativo'] ?? headerMap['item'] ?? 4;
+            const rawSymbol = cols[symbolIdx];
             const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
 
             const slCol = headerMap['sl'] ?? headerMap['stoploss'] ?? headerMap['s/l'];
             const tpCol = headerMap['tp'] ?? headerMap['takeprofit'] ?? headerMap['t/p'];
 
-            const parsedClosePrice = parseNum(cols[headerMap['closeprice'] ?? 9]);
-            const parsedProfit = parseNum(cols[headerMap['profit'] ?? 13]);
+            const closePriceIdx = headerMap['closeprice'] ?? headerMap['precofechamento'] ?? 9;
+            const profitIdx =
+                headerMap['profit'] ??
+                headerMap['lucroliquido'] ??
+                headerMap['netpnl'] ??
+                headerMap['resultado'] ??
+                13;
+
+            const parsedClosePrice = parseNum(cols[closePriceIdx]);
+            const parsedProfit = parseNum(cols[profitIdx]);
             const parsedCloseTime = this.normalizeDate(closeTimeStr);
             const isClosed = !!parsedCloseTime || parsedClosePrice > 0 || parsedProfit !== 0;
             const finalCloseTime = parsedCloseTime || (isClosed && openTime ? new Date(openTime.getTime() + 5 * 60 * 1000) : null);
+
+            const volIdx = headerMap['size'] ?? headerMap['volume'] ?? headerMap['lote'] ?? 3;
+            const openPriceIdx = headerMap['price'] ?? headerMap['openprice'] ?? headerMap['precoabertura'] ?? 5;
+            const commIdx = headerMap['commission'] ?? headerMap['comissao'] ?? 10;
 
             trades.push({
                 ticket: ticket,
@@ -314,11 +356,11 @@ export class ReportParserService {
                 close_time: finalCloseTime,
                 status: isClosed ? 'CLOSED' : 'OPEN',
                 type: typeStr,
-                volume: parseNum(cols[headerMap['size'] ?? headerMap['volume'] ?? 3]),
+                volume: parseNum(cols[volIdx]),
                 symbol: cleanSymbol,
-                open_price: parseNum(cols[headerMap['price'] ?? headerMap['openprice'] ?? 5]),
+                open_price: parseNum(cols[openPriceIdx]),
                 close_price: parsedClosePrice,
-                commission: parseNum(cols[headerMap['commission'] ?? 10]),
+                commission: parseNum(cols[commIdx]),
                 swap: parseNum(cols[headerMap['swap'] ?? 12]),
                 profit: parsedProfit,
                 sl: slCol !== undefined ? parseNum(cols[slCol]) : 0,
@@ -530,5 +572,233 @@ export class ReportParserService {
 
         this.logger.log(`Parsed ${trades.length} trades from History CSV.`);
         return trades;
+    }
+
+    /**
+     * Suporte multi-formato para planilhas Excel (.xls HTML, XML Spreadsheet 2003 e .xlsx OpenXML ZIP)
+     */
+    parseExcel(buffer: Buffer, textContent: string): any[] {
+        this.logger.log('Parsing Excel (.xls / .xlsx / .xml) Report...');
+
+        // 1. Se for HTML-Excel (.xls exportado pelo TorexJournal ou MT4/MT5)
+        if (textContent.includes('<table') || textContent.includes('<tr')) {
+            const htmlTrades = this.parseHtml(textContent);
+            if (htmlTrades.length > 0) return htmlTrades;
+        }
+
+        // 2. Se for XML Spreadsheet 2003 (<Row><Cell><Data>...</Data></Cell></Row>)
+        if (textContent.includes('<Row') && textContent.includes('<Cell')) {
+            const csvLines: string[] = [];
+            const rowRegex = /<Row[^>]*>([\s\S]*?)<\/Row>/gi;
+            let rMatch;
+            while ((rMatch = rowRegex.exec(textContent)) !== null) {
+                const cellRegex = /<Data[^>]*>([\s\S]*?)<\/Data>/gi;
+                const cells: string[] = [];
+                let cMatch;
+                while ((cMatch = cellRegex.exec(rMatch[1])) !== null) {
+                    cells.push(cMatch[1].replace(/<[^>]+>/g, '').trim());
+                }
+                if (cells.length > 0) {
+                    csvLines.push(cells.join(','));
+                }
+            }
+            if (csvLines.length > 0) {
+                const xmlTrades = this.parseCsv(csvLines.join('\n'));
+                if (xmlTrades.length > 0) return xmlTrades;
+            }
+        }
+
+        // 3. Se for arquivo .xlsx nativo (ZIP com assinatura PK\x03\x04)
+        if (buffer && buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4b) {
+            try {
+                const xlsxCsv = this.extractXlsxAsCsv(buffer);
+                if (xlsxCsv) {
+                    const xlsxTrades = this.parseCsv(xlsxCsv);
+                    if (xlsxTrades.length > 0) return xlsxTrades;
+                }
+            } catch (e) {
+                this.logger.warn(`Fallback na descompactação XLSX: ${e.message}`);
+            }
+        }
+
+        // 4. Fallback CSV / TSV
+        return this.parseCsv(textContent.replace(/\t/g, ','));
+    }
+
+    private extractXlsxAsCsv(zipBuffer: Buffer): string {
+        const entries = new Map<string, string>();
+        let offset = 0;
+
+        while (offset + 30 <= zipBuffer.length) {
+            const sig = zipBuffer.readUInt32LE(offset);
+            if (sig !== 0x04034b50) break;
+
+            const compression = zipBuffer.readUInt16LE(offset + 8);
+            const compressedSize = zipBuffer.readUInt32LE(offset + 18);
+            const fileNameLen = zipBuffer.readUInt16LE(offset + 26);
+            const extraLen = zipBuffer.readUInt16LE(offset + 28);
+
+            const fileName = zipBuffer.toString('utf8', offset + 30, offset + 30 + fileNameLen);
+            const dataStart = offset + 30 + fileNameLen + extraLen;
+            const dataEnd = dataStart + compressedSize;
+            if (dataEnd > zipBuffer.length) break;
+
+            if (
+                fileName === 'xl/sharedStrings.xml' ||
+                fileName.startsWith('xl/worksheets/sheet')
+            ) {
+                const slice = zipBuffer.subarray(dataStart, dataEnd);
+                const rawXml =
+                    compression === 0
+                        ? slice.toString('utf8')
+                        : zlib.inflateRawSync(slice).toString('utf8');
+                entries.set(fileName, rawXml);
+            }
+
+            offset = dataEnd;
+        }
+
+        const sharedStrings: string[] = [];
+        const ssXml = entries.get('xl/sharedStrings.xml') || '';
+        if (ssXml) {
+            const siRegex = /<si[^>]*>([\s\S]*?)<\/si>/gi;
+            let siMatch;
+            while ((siMatch = siRegex.exec(ssXml)) !== null) {
+                const tMatches = siMatch[1].match(/<t[^>]*>([\s\S]*?)<\/t>/gi) || [];
+                const text = tMatches
+                    .map(t => t.replace(/<[^>]+>/g, ''))
+                    .join('');
+                sharedStrings.push(text);
+            }
+        }
+
+        const sheetXml =
+            entries.get('xl/worksheets/sheet1.xml') ||
+            Array.from(entries.entries()).find(([k]) => k.startsWith('xl/worksheets/sheet'))?.[1] ||
+            '';
+        if (!sheetXml) return '';
+
+        const csvRows: string[] = [];
+        const rowRegex = /<row[^>]*>([\s\S]*?)<\/row>/gi;
+        let rMatch;
+        while ((rMatch = rowRegex.exec(sheetXml)) !== null) {
+            const cellRegex = /<c([^>]*)>([\s\S]*?)<\/c>/gi;
+            const rowCells: string[] = [];
+            let cMatch;
+            while ((cMatch = cellRegex.exec(rMatch[1])) !== null) {
+                const attrs = cMatch[1];
+                const body = cMatch[2];
+                const isShared = /t="s"/i.test(attrs);
+                const isInline = /t="inlineStr"/i.test(attrs);
+                let val = '';
+                if (isInline) {
+                    const tM = body.match(/<t[^>]*>([\s\S]*?)<\/t>/i);
+                    val = tM ? tM[1] : '';
+                } else {
+                    const vM = body.match(/<v[^>]*>([\s\S]*?)<\/v>/i);
+                    const rawVal = vM ? vM[1].trim() : '';
+                    if (isShared) {
+                        const idx = parseInt(rawVal, 10);
+                        val = !isNaN(idx) && sharedStrings[idx] !== undefined ? sharedStrings[idx] : rawVal;
+                    } else {
+                        val = rawVal;
+                    }
+                }
+                rowCells.push(val.replace(/,/g, '.').trim());
+            }
+            if (rowCells.length > 0) {
+                csvRows.push(rowCells.join(','));
+            }
+        }
+
+        return csvRows.join('\n');
+    }
+
+    /**
+     * Suporte para relatórios de operações em PDF (.pdf)
+     */
+    parsePdf(buffer: Buffer, textContent: string): any[] {
+        this.logger.log('Parsing PDF Report...');
+        const extractedChunks: string[] = [textContent || ''];
+
+        if (buffer) {
+            const rawLatin = buffer.toString('latin1');
+            const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
+            let sMatch;
+            while ((sMatch = streamRegex.exec(rawLatin)) !== null) {
+                try {
+                    const subBuf = Buffer.from(sMatch[1], 'latin1');
+                    const inflated = zlib.inflateSync(subBuf).toString('utf8');
+                    extractedChunks.push(inflated);
+                } catch {
+                    // Stream não comprimido com FlateDecode ou binário de imagem
+                }
+            }
+        }
+
+        const fullText = extractedChunks.join('\n');
+        // Extrai strings literais de operadores PDF (...) Tj / TJ
+        const pdfTextTokens: string[] = [];
+        const tokenRegex = /\(([^()\\]*(?:\\.[^()\\]*)*)\)/g;
+        let tMatch;
+        while ((tMatch = tokenRegex.exec(fullText)) !== null) {
+            const cleaned = tMatch[1]
+                .replace(/\\([()\\])/g, '$1')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (cleaned) pdfTextTokens.push(cleaned);
+        }
+
+        const combinedLines = [
+            ...fullText.split(/\r?\n/),
+            pdfTextTokens.join(' '),
+        ];
+
+        const trades = [];
+        const rowPattern =
+            /(\d{5,12})\s+(\d{4}[./-]\d{2}[./-]\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s+(buy|sell)\s+([0-9.,]+)\s+([A-Za-z0-9._-]+)\s+([0-9.,]+)(?:\s+[0-9.,]+\s+[0-9.,]+)?\s+(\d{4}[./-]\d{2}[./-]\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s+([0-9.,]+).*?([+-]?[0-9]+[.,][0-9]{2})/gi;
+
+        for (const chunk of combinedLines) {
+            let m;
+            while ((m = rowPattern.exec(chunk)) !== null) {
+                const ticket = parseInt(m[1], 10);
+                const openTime = this.normalizeDate(m[2]);
+                const type = m[3].toLowerCase();
+                const volume = parseFloat(m[4].replace(',', '.')) || 0.01;
+                const symbol = m[5].replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '');
+                const openPrice = parseFloat(m[6].replace(',', '.')) || 0;
+                const closeTime = this.normalizeDate(m[7]);
+                const closePrice = parseFloat(m[8].replace(',', '.')) || 0;
+                const profit = parseFloat(m[9].replace(',', '.')) || 0;
+
+                if (ticket > 0 && openTime) {
+                    trades.push({
+                        ticket,
+                        open_time: openTime,
+                        close_time: closeTime || new Date(openTime.getTime() + 60000),
+                        status: 'CLOSED',
+                        type,
+                        volume,
+                        symbol,
+                        open_price: openPrice,
+                        close_price: closePrice,
+                        commission: 0,
+                        swap: 0,
+                        profit,
+                        sl: 0,
+                        tp: 0,
+                        magic: 0,
+                        comment: 'Imported via PDF',
+                    });
+                }
+            }
+        }
+
+        if (trades.length > 0) {
+            this.logger.log(`Parsed ${trades.length} trades from PDF report.`);
+            return trades;
+        }
+
+        return this.parseCsv(fullText);
     }
 }

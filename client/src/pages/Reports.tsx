@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     Calendar, Download, Printer, Briefcase, TrendingUp, 
     TrendingDown, Percent, Activity, ShieldAlert,
-    ChevronLeft, ChevronRight, Search
+    ChevronLeft, ChevronRight, Search, FileSpreadsheet, FileCode
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { Button } from '../components/ui/Button';
 import { OperationalRadars } from '../components/dashboard/charts/OperationalRadars';
 import { TradingCalendarView } from '../components/reports/TradingCalendarView';
+import { exportTradingDocument, DocumentFormat, TOREX_LOGO_URL } from '../utils/documentExporter';
 import api from '../api';
 import {
     Chart as ChartJS,
@@ -112,37 +113,25 @@ export const Reports = () => {
         }
     };
 
-    // Export CSV
-    const handleExportCSV = () => {
+    const handleExportDocument = (format: DocumentFormat) => {
         if (!reportData || !reportData.trades || reportData.trades.length === 0) return;
 
-        const headers = ['Ticket', 'Conta', 'Símbolo', 'Tipo', 'Volume', 'Preço Abertura', 'Preço Fechamento', 'Lucro Líquido', 'Data Abertura', 'Data Fechamento', 'Sessão'];
-        const rows = reportData.trades.map((t: any) => [
-            t.ticket,
-            t.accountName || '',
-            t.symbol,
-            t.type,
-            t.volume,
-            t.openPrice,
-            t.closePrice,
-            t.netPnl,
-            t.openTime ? new Date(t.openTime).toLocaleString('pt-BR') : '',
-            t.closeTime ? new Date(t.closeTime).toLocaleString('pt-BR') : '',
-            t.session || ''
-        ]);
+        const periodLabel =
+            startDate && endDate
+                ? `${new Date(startDate + 'T12:00:00').toLocaleDateString('pt-BR')} — ${new Date(endDate + 'T12:00:00').toLocaleDateString('pt-BR')}`
+                : 'Todo o Histórico';
 
-        const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement('a');
-        link.setAttribute('href', encodedUri);
-        link.setAttribute('download', `relatorio_trading_${selectedAccount?.name || 'consolidado'}_${new Date().toISOString().split('T')[0]}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    };
-
-    const handlePrint = () => {
-        window.print();
+        exportTradingDocument(format, {
+            accountName:
+                reportData?.accountInfo?.name ||
+                (isConsolidated ? 'Todas as Contas (Consolidado)' : selectedAccount?.name || 'Conta Trading'),
+            accountType: reportData?.accountInfo?.type || selectedAccount?.type || 'TRADING',
+            broker: reportData?.accountInfo?.broker || selectedAccount?.broker || 'MetaTrader 5',
+            currency: reportData?.accountInfo?.currency || selectedAccount?.currency || 'USD',
+            periodLabel,
+            kpis: reportData?.kpis,
+            trades: reportData.trades,
+        });
     };
 
     // Filter trades for the ledger
@@ -373,24 +362,43 @@ export const Reports = () => {
                     </div>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2.5">
+                {/* Action Buttons — Multi-Format Document Export (CSV, Excel, HTML, PDF) */}
+                <div className="flex flex-wrap items-center gap-2">
                     <Button
-                        onClick={handleExportCSV}
+                        onClick={() => handleExportDocument('csv')}
                         variant="secondary"
-                        icon={<Download size={15} />}
+                        icon={<Download size={14} />}
                         className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs py-2 px-3"
                         disabled={!reportData?.trades?.length}
                     >
-                        Exportar CSV
+                        CSV
                     </Button>
                     <Button
-                        onClick={handlePrint}
-                        variant="gradient"
-                        icon={<Printer size={15} />}
-                        className="font-semibold shadow-md shadow-emerald-500/10 text-xs py-2 px-3"
+                        onClick={() => handleExportDocument('excel')}
+                        variant="secondary"
+                        icon={<FileSpreadsheet size={14} />}
+                        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-semibold text-xs py-2 px-3"
+                        disabled={!reportData?.trades?.length}
                     >
-                        Imprimir / PDF
+                        Excel (.xls)
+                    </Button>
+                    <Button
+                        onClick={() => handleExportDocument('html')}
+                        variant="secondary"
+                        icon={<FileCode size={14} />}
+                        className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 font-semibold text-xs py-2 px-3"
+                        disabled={!reportData?.trades?.length}
+                    >
+                        HTML
+                    </Button>
+                    <Button
+                        onClick={() => handleExportDocument('pdf')}
+                        variant="gradient"
+                        icon={<Printer size={14} />}
+                        className="font-semibold shadow-md shadow-emerald-500/10 text-xs py-2 px-3"
+                        disabled={!reportData?.trades?.length}
+                    >
+                        PDF Executivo
                     </Button>
                 </div>
             </header>
@@ -477,11 +485,18 @@ export const Reports = () => {
             <div ref={printRef} className="bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-2xl p-6 relative overflow-hidden shadow-sm dark:shadow-xl text-slate-900 dark:text-[#F3F4F6]">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 dark:border-white/[0.06] pb-5 mb-6">
                     <div className="flex items-center gap-3.5">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-                            <Briefcase size={24} />
-                        </div>
+                        <img
+                            src={TOREX_LOGO_URL}
+                            alt="Torex Journal Logo"
+                            className="w-12 h-12 rounded-xl object-cover border border-emerald-500/30 shadow-lg shadow-emerald-500/10 shrink-0"
+                        />
                         <div>
                             <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                                    TOREX JOURNAL • AUDITORIA OFICIAL
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
                                 <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                                     {accountInfo?.name || (isConsolidated ? 'Todas as Contas (Consolidado)' : (selectedAccount?.name || 'Conta Trading'))}
                                 </h2>

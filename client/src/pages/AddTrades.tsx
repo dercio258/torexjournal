@@ -232,8 +232,8 @@ export const AddTrades = () => {
                                     <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <FileText size={32} />
                                     </div>
-                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Importar Arquivo</h3>
-                                    <p className="text-slate-400 text-sm">Exporte o histórico do seu MT{mtVersion} em formato HTML ou CSV e faça o upload para sincronização das operações.</p>
+                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Importar Documento</h3>
+                                    <p className="text-slate-400 text-sm">Envie relatórios ou modelos oficiais em formato CSV, HTML, Excel (.xls/.xlsx) ou PDF para sincronizar suas operações.</p>
                                 </Card>
                             </div>
                         </div>
