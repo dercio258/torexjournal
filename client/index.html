@@ -19,6 +19,30 @@
 
 <body>
   <div id="root"></div>
+  <script>
+    window.addEventListener('error', function (e) {
+      var t = e && e.target;
+      if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+        var url = t.src || t.href || '';
+        if (url.indexOf('/assets/') !== -1) {
+          var key = 'torex_asset_recover';
+          var last = Number(sessionStorage.getItem(key) || '0');
+          if (Date.now() - last > 15000) {
+            sessionStorage.setItem(key, String(Date.now()));
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              }).finally(function () {
+                window.location.reload();
+              });
+            } else {
+              window.location.reload();
+            }
+          }
+        }
+      }
+    }, true);
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

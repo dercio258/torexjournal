@@ -51,11 +51,41 @@ async function bootstrap() {
   const clientDist = candidateClientPaths.find(p => fs.existsSync(p));
 
   if (clientDist) {
+    const assetsDir = join(clientDist, 'assets');
+    if (!fs.existsSync(assetsDir)) {
+      fs.mkdirSync(assetsDir, { recursive: true });
+    }
+
+    // Serve /assets/* dynamically from disk (wildcard: true) so new Vite build hashes work immediately without restart
+    await app.register(fastifyStatic, {
+      root: assetsDir,
+      prefix: '/assets/',
+      wildcard: true,
+      decorateReply: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
+
+    // Serve root static files (index.html, sw.js, manifest, icons) with no-cache on entrypoints
     await app.register(fastifyStatic, {
       root: clientDist,
       prefix: '/',
       wildcard: false,
-      decorateReply: false
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        if (
+          filePath.endsWith('.html') ||
+          filePath.endsWith('sw.js') ||
+          filePath.endsWith('registerSW.js') ||
+          filePath.endsWith('.webmanifest') ||
+          /workbox-[a-zA-Z0-9_-]+\.js$/.test(filePath)
+        ) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        }
+      },
     });
     console.log(`✅ Frontend SPA static files served from: ${clientDist}`);
   } else {
