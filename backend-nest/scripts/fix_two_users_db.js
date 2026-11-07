@@ -26,26 +26,23 @@ async function runFix() {
     console.log(' Timestamp:', new Date().toISOString());
     console.log('================================================================================\n');
 
-    const pgConfig = process.env.DATABASE_URL
-        ? { connectionString: process.env.DATABASE_URL, ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false }
-        : {
-              host: process.env.DB_HOST || 'localhost',
-              port: parseInt(process.env.DB_PORT || '5432', 10),
-              user: process.env.DB_USERNAME || 'postgres',
-              password: process.env.DB_PASSWORD || 'postgres',
-              database: process.env.DB_DATABASE || 'torex_journal',
-              ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-          };
+    const pgConfig = {
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        user: process.env.DB_USER || process.env.DB_USERNAME || 'postgres',
+        password: process.env.DB_PASS || process.env.DB_PASSWORD || 'postgres',
+        database: process.env.DB_NAME || process.env.DB_DATABASE || 'trading_cossa',
+    };
 
     const pg = new Client(pgConfig);
     await pg.connect();
-    console.log(`[OK] Conectado ao PostgreSQL: ${pgConfig.host || 'DATABASE_URL'}:${pgConfig.port || ''}/${pgConfig.database || ''}`);
+    console.log(`[OK] Conectado ao PostgreSQL: ${pgConfig.host}:${pgConfig.port}/${pgConfig.database}`);
 
     let ch = null;
     const chHost = process.env.CLICKHOUSE_HOST || 'http://localhost:8123';
     const chUser = process.env.CLICKHOUSE_USER || 'default';
     const chPassword = process.env.CLICKHOUSE_PASSWORD || '';
-    const chDatabase = process.env.CLICKHOUSE_DB || 'default';
+    const chDatabase = process.env.CLICKHOUSE_DATABASE || process.env.CLICKHOUSE_DB || 'default';
 
     try {
         ch = createClient({
