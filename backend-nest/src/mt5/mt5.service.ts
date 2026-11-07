@@ -83,8 +83,9 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     account.isConnected = false;
                     await this.accountRepo.save(account);
 
-                    // Send Disconnected Email
+                    // Send Disconnected Email & Scoped WS Broadcast
                     if (account.userId) {
+                        this.mt5Gateway.broadcastConnectionStatus({ isConnected: false }, account.userId);
                         const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: account.userId } });
                         if (user && user.email) {
                             await this.emailQueue.add('mt5-disconnected', {
@@ -95,8 +96,6 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         }
                     }
                 }
-
-                this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
             }
         } catch (err) {
             this.logger.error(`Disconnection check failed: ${err.message}`);
@@ -251,15 +250,17 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
 
             await queryRunner.commitTransaction();
 
-            // Broadcast Update
-            this.mt5Gateway.broadcastAccountUpdate({
-                balance: stats.balance,
-                equity: stats.equity,
-                margin: stats.margin,
-                marginFree: stats.margin_free,
-                marginLevel: stats.margin_level,
-                positions: positions // Assuming positions match IPosition interface (verify below if needed)
-            });
+            // Broadcast Update (scoped to account.userId)
+            if (account.userId) {
+                this.mt5Gateway.broadcastAccountUpdate({
+                    balance: stats.balance,
+                    equity: stats.equity,
+                    margin: stats.margin,
+                    marginFree: stats.margin_free,
+                    marginLevel: stats.margin_level,
+                    positions: positions // Assuming positions match IPosition interface (verify below if needed)
+                }, account.userId);
+            }
 
             return { success: true };
 
@@ -504,10 +505,12 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                         comment: t.comment
                     }));
 
-                    this.mt5Gateway.broadcastHistoryUpdate({
-                        count: tradesToSave.length,
-                        trades: protoTrades
-                    });
+                    if (targetUserId) {
+                        this.mt5Gateway.broadcastHistoryUpdate({
+                            count: tradesToSave.length,
+                            trades: protoTrades
+                        }, targetUserId);
+                    }
                 } catch (e) {
                     this.logger.warn(`Broadcast failed: ${e.message}`);
                 }
@@ -662,7 +665,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         // Invalidate Dashboard Cache
         await this.dashboardService.invalidateUserCache(userId);
 
-        // Broadcast manual trade as history update
+        // Broadcast manual trade as history update (scoped to userId)
         this.mt5Gateway.broadcastHistoryUpdate({
             count: 1,
             trades: [{
@@ -679,7 +682,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 swap: saved.swap,
                 comment: saved.comment
             }]
-        });
+        }, userId);
 
         return saved;
     }
@@ -761,8 +764,8 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             await this.dashboardService.invalidateUserCache(userId);
         }
 
-        // 5. Broadcast history update to connected WebSocket clients
-        this.mt5Gateway.broadcastHistoryUpdate({ count: 0, trades: [] });
+        // 5. Broadcast history update to connected WebSocket clients (scoped to userId)
+        this.mt5Gateway.broadcastHistoryUpdate({ count: 0, trades: [] }, userId);
 
         return { success: true, message: 'Importação revertida e trades excluídos com sucesso de todas as bases' };
     }

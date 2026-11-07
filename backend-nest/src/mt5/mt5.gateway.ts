@@ -1,4 +1,3 @@
-
 import {
     WebSocketGateway,
     WebSocketServer,
@@ -144,12 +143,27 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         }
     }
 
-    private broadcast(packet: browser.IBrowserPacket, eventName?: string, jsonPayload?: any) {
+    private broadcast(packet: browser.IBrowserPacket, eventName?: string, jsonPayload?: any, userId?: string) {
+        if (!userId) {
+            this.logger.warn(`Blocked unscoped WS broadcast (${eventName || packet.type}): userId is required to prevent cross-user data leakage.`);
+            return;
+        }
+
         const message = browser.BrowserPacket.create(packet);
         const buffer = browser.BrowserPacket.encode(message).finish();
+        const roomName = `mt5_user:${userId}`;
+
+        if (this.server && typeof this.server.to === 'function') {
+            const room = this.server.to(roomName);
+            room.emit('mt5_packet', buffer);
+            if (eventName && jsonPayload !== undefined) {
+                room.emit(eventName, jsonPayload);
+            }
+            return;
+        }
 
         this.clients.forEach((clientData, client) => {
-            if (!clientData?.authenticated) return;
+            if (!clientData?.authenticated || clientData.userId !== userId) return;
             try {
                 if (typeof client.emit === 'function') {
                     client.emit('mt5_packet', buffer);
@@ -165,7 +179,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         });
     }
 
-    broadcastAccountUpdate(data: browser.IAccountUpdate) {
+    broadcastAccountUpdate(data: browser.IAccountUpdate, userId?: string) {
         this.broadcast(
             {
                 type: browser.PacketType.ACCOUNT_UPDATE,
@@ -173,10 +187,11 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
             },
             'mt5_account_update',
             data,
+            userId,
         );
     }
 
-    broadcastHistoryUpdate(data: browser.IHistoryUpdate) {
+    broadcastHistoryUpdate(data: browser.IHistoryUpdate, userId?: string) {
         this.broadcast(
             {
                 type: browser.PacketType.HISTORY_UPDATE,
@@ -184,10 +199,11 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
             },
             'mt5_history_update',
             data,
+            userId,
         );
     }
 
-    broadcastConnectionStatus(data: { isConnected: boolean }) {
+    broadcastConnectionStatus(data: { isConnected: boolean }, userId?: string) {
         this.broadcast(
             {
                 type: browser.PacketType.CONNECTION_STATUS,
@@ -195,6 +211,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
             },
             'mt5_connection_status',
             data,
+            userId,
         );
     }
 }

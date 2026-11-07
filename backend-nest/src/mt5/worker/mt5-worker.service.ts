@@ -487,7 +487,7 @@ export class Mt5WorkerService {
                 acc.isConnected = false;
                 await this.accountRepo.save(acc);
                 try {
-                    this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
+                    this.mt5Gateway.broadcastConnectionStatus({ isConnected: false }, acc.userId);
                 } catch { }
             }
         }
@@ -655,16 +655,18 @@ export class Mt5WorkerService {
             lastSyncAt: new Date().toISOString(),
         });
 
-        // Broadcast to connected frontend clients via WebSocket
+        // Broadcast to connected frontend clients via WebSocket (strictly scoped to account.userId)
         try {
-            this.mt5Gateway.broadcastAccountUpdate({
-                balance: account.balance,
-                equity: account.equity,
-                margin: account.margin,
-                marginFree: account.marginFree,
-                marginLevel: account.marginLevel
-            });
-            this.mt5Gateway.broadcastConnectionStatus({ isConnected: account.isConnected });
+            if (account.userId) {
+                this.mt5Gateway.broadcastAccountUpdate({
+                    balance: account.balance,
+                    equity: account.equity,
+                    margin: account.margin,
+                    marginFree: account.marginFree,
+                    marginLevel: account.marginLevel
+                }, account.userId);
+                this.mt5Gateway.broadcastConnectionStatus({ isConnected: account.isConnected }, account.userId);
+            }
         } catch (err) {
             // Ignore socket broadcast errors
         }
@@ -875,7 +877,7 @@ export class Mt5WorkerService {
                     acc.isConnected = false;
                     await this.accountRepo.save(acc);
                     try {
-                        this.mt5Gateway.broadcastConnectionStatus({ isConnected: false });
+                        this.mt5Gateway.broadcastConnectionStatus({ isConnected: false }, acc.userId);
                     } catch { }
                 }
             }
