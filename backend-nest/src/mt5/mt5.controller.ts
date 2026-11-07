@@ -246,12 +246,14 @@ export class Mt5Controller {
             `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${account.id}, TaskID: ${task.id})`
         );
 
-        // 3. Optional local instance startup if configured
+        // 3. Optional local instance startup if running directly on Windows host
         let localInstance = null;
-        try {
-            localInstance = await this.mt5InstanceService.startInstance(req.user.id, cleanLogin, body.pass, task.server);
-        } catch (e) {
-            this.logger.log(`Mt5InstanceService local não ativo (${e.message}). Tarefa enviada ao MT5 Worker.`);
+        if (process.platform === 'win32') {
+            try {
+                localInstance = await this.mt5InstanceService.startInstance(req.user.id, cleanLogin, body.pass, task.server);
+            } catch (e) {
+                this.logger.log(`Mt5InstanceService local não ativo (${e.message}). Tarefa enviada ao MT5 Worker.`);
+            }
         }
 
         return {

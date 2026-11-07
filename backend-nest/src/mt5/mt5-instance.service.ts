@@ -24,12 +24,17 @@ export class Mt5InstanceService implements OnModuleInit {
         this.templatePath = this.configService.get<string>('MT5_TEMPLATE_PATH', 'C:\\MT5_TEMPLATE');
         this.instancesRoot = this.configService.get<string>('MT5_INSTANCES_ROOT', 'C:\\MT5_INSTANCES');
 
-        this.logger.log(`MT5 Manager Config: Template=${this.templatePath}, Instances=${this.instancesRoot}`);
+        if (process.platform !== 'win32') {
+            this.logger.log('Ambiente Linux detectado: execução MT5 delegada ao Worker Windows remoto (Mt5WorkerService).');
+            return;
+        }
 
+        this.logger.log(`MT5 Manager Config: Template=${this.templatePath}, Instances=${this.instancesRoot}`);
         this.ensureDirectories();
     }
 
     private ensureDirectories() {
+        if (process.platform !== 'win32') return;
         if (!fs.existsSync(this.instancesRoot)) {
             try {
                 fs.mkdirSync(this.instancesRoot, { recursive: true });
@@ -39,11 +44,15 @@ export class Mt5InstanceService implements OnModuleInit {
         }
     }
 
-    async startInstance(userId: string, login: string, password: string, server: string): Promise<CloudInstanceEntity> {
+    async startInstance(userId: string, login: string, password: string, server: string): Promise<CloudInstanceEntity | null> {
+        if (process.platform !== 'win32') {
+            return null;
+        }
+
         // Validation: Check if template exists
         if (!fs.existsSync(this.templatePath)) {
             const msg = `Base MT5 Template not found at ${this.templatePath}. Please configure MT5_TEMPLATE_PATH correctly.`;
-            this.logger.error(msg);
+            this.logger.warn(msg);
             throw new Error(msg);
         }
 
@@ -51,7 +60,7 @@ export class Mt5InstanceService implements OnModuleInit {
         const templateExe = path.join(this.templatePath, this.TERMINAL_EXE);
         if (!fs.existsSync(templateExe)) {
             const msg = `Invalid MT5 Template at ${this.templatePath}: ${this.TERMINAL_EXE} is missing. Please point MT5_TEMPLATE_PATH to a valid MT5 installation folder.`;
-            this.logger.error(msg);
+            this.logger.warn(msg);
             throw new Error(msg);
         }
 
@@ -91,12 +100,12 @@ export class Mt5InstanceService implements OnModuleInit {
         this.logger.log(`Spawning MT5 for ${login}...`);
         // /portable flag is critical to keep data in local folder
         const child = cp.spawn(exePath, [`/config:${configPath}`, '/portable'], {
-            detached: true, // Allow it to run if Node exits
-            stdio: 'ignore', // Don't pipe stdout/err
+            detached: true,
+            stdio: 'ignore',
             cwd: instanceDir
         });
 
-        child.unref(); // Don't wait for it
+        child.unref();
 
         // 5. Update DB
         if (!dbInstance) {
@@ -115,12 +124,13 @@ export class Mt5InstanceService implements OnModuleInit {
     }
 
     async stopInstance(userId: string, login: string): Promise<boolean> {
+        if (process.platform !== 'win32') return false;
         const dbInstance = await this.instanceRepo.findOne({ where: { userId, mt5Id: login } });
 
         if (!dbInstance || !dbInstance.pid) return false;
 
         try {
-            process.kill(dbInstance.pid); // SIGTERM
+            process.kill(dbInstance.pid);
         } catch (e) {
             this.logger.warn(`Failed to kill PID ${dbInstance.pid}: ${e.message}`);
         }
@@ -132,7 +142,6 @@ export class Mt5InstanceService implements OnModuleInit {
     }
 
     private createStartupConfig(filePath: string, login: string, pass: string, server: string) {
-        // Ensure directory exists
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -164,16 +173,12 @@ Profile=true
 
     private async copyDirectory(src: string, dest: string) {
         return new Promise<void>((resolve, reject) => {
-            // Using standard OS copy command for speed/simplicity on Windows (xcopy /E /I /Y)
-            // Or node recursive copy. Let's use cp -r equivalent if Node version allows, otherwise recursion.
-            // Node 16.7+ has fs.cp
             if (fs.cp) {
                 fs.cp(src, dest, { recursive: true }, (err) => {
                     if (err) reject(err);
                     else resolve();
                 });
             } else {
-                // Fallback for older node (less likely but safer)
                 this.copyDirRecursive(src, dest);
                 resolve();
             }
@@ -197,7 +202,6 @@ Profile=true
 
     private isPidRunning(pid: number): boolean {
         try {
-            // signal 0 tests existence
             process.kill(pid, 0);
             return true;
         } catch (e) {

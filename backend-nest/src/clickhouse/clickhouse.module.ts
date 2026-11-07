@@ -17,7 +17,7 @@ import { CLICKHOUSE_CLIENT } from './clickhouse.constants';
         const database = configService.get<string>('CLICKHOUSE_DATABASE') || 'default';
 
         return createClient({
-          host,
+          url: host,
           username,
           password,
           database,
