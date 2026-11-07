@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
 
 @Injectable()
 export class WorkerAuthGuard implements CanActivate, OnModuleInit {
@@ -12,11 +13,11 @@ export class WorkerAuthGuard implements CanActivate, OnModuleInit {
             || this.configService.get<string>('MT5_WORKER_KEY');
         if (!configuredKey || configuredKey === 'secret_worker_key_change_me') {
             this.logger.warn(
-                'SECURITY WARNING: WORKER_KEY não está definida com um segredo forte no .env! ' +
-                'Defina WORKER_KEY no backend-nest/.env e no mt5-server/.env.'
+                'SECURITY WARNING: WORKER_KEY está usando o valor padrão! ' +
+                'Defina uma WORKER_KEY forte (64 hex) em backend-nest/.env e mt5-server/.env e ative STRICT_WORKER_KEY=true.'
             );
             if (this.configService.get<string>('STRICT_WORKER_KEY') === 'true') {
-                throw new Error('FATAL: WORKER_KEY deve estar configurada quando STRICT_WORKER_KEY=true.');
+                throw new Error('FATAL: WORKER_KEY segura é obrigatória quando STRICT_WORKER_KEY=true.');
             }
         }
     }
@@ -28,16 +29,20 @@ export class WorkerAuthGuard implements CanActivate, OnModuleInit {
         const workerId = headers['x-worker-id'];
         const workerKey = headers['x-worker-key'];
 
+        const strictMode = this.configService.get<string>('STRICT_WORKER_KEY') === 'true';
         const configuredKey = this.configService.get<string>('WORKER_KEY')
             || this.configService.get<string>('MT5_WORKER_KEY');
 
-        const expectedKey = configuredKey || (
-            this.configService.get<string>('STRICT_WORKER_KEY') === 'true'
-                ? null
-                : 'secret_worker_key_change_me'
-        );
+        const expectedKey = configuredKey || (strictMode ? null : 'secret_worker_key_change_me');
+        if (!expectedKey || (strictMode && expectedKey === 'secret_worker_key_change_me') || !workerKey) {
+            this.logger.warn(`Tentativa de acesso não autorizada ao MT5 Worker (chave ausente/inválida). ID: ${workerId}`);
+            throw new UnauthorizedException('Invalid or missing X-Worker-Key');
+        }
 
-        if (!expectedKey || !workerKey || workerKey !== expectedKey) {
+        const bufProvided = Buffer.from(String(workerKey), 'utf8');
+        const bufExpected = Buffer.from(String(expectedKey), 'utf8');
+
+        if (bufProvided.length !== bufExpected.length || !timingSafeEqual(bufProvided, bufExpected)) {
             this.logger.warn(`Tentativa de acesso não autorizada ao MT5 Worker. ID: ${workerId}`);
             throw new UnauthorizedException('Invalid or missing X-Worker-Key');
         }

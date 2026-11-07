@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, UseGuards, Req, Headers, Logger } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, UseGuards, Req, Headers, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { randomUUID } from 'crypto';
@@ -15,7 +15,7 @@ import { Mt5TcpServer } from '../mt5-tcp.server';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AccountEntity, AccountType } from '../account/account.entity';
-import { Mt5WorkerService, WorkerTaskType } from './worker/mt5-worker.service';
+import { Mt5WorkerService, WorkerTask, WorkerTaskType } from './worker/mt5-worker.service';
 
 @Controller('mt5')
 export class Mt5Controller {
@@ -33,6 +33,12 @@ export class Mt5Controller {
 
     private isValidUuid(id?: string): boolean {
         return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+    }
+
+    private sanitizeTaskForClient(task: WorkerTask | null) {
+        if (!task) return null;
+        const { credentialToken, ...safeTask } = task;
+        return safeTask;
     }
 
     @Get('import-history')
@@ -80,12 +86,22 @@ export class Mt5Controller {
 
     @Post(':id/command')
     @UseGuards(JwtAuthGuard)
-    async sendCommand(@Param('id') id: string, @Body() body: { type: number, payload?: string }) {
-        const success = this.mt5TcpServer.sendCommand(id, body.type, body.payload);
+    async sendCommand(@Param('id') id: string, @Body() body: { type: number, payload?: string }, @Req() req) {
+        const cleanId = (id || '').trim();
+        const whereConds: any[] = [{ mt5Id: cleanId, userId: req.user.id }];
+        if (this.isValidUuid(cleanId)) {
+            whereConds.push({ id: cleanId, userId: req.user.id });
+        }
+        const ownedAccount = await this.accountRepo.findOne({ where: whereConds });
+        if (!ownedAccount) {
+            throw new ForbiddenException('Acesso negado: conta MT5 não pertence a este usuário.');
+        }
+
+        const success = this.mt5TcpServer.sendCommand(cleanId, body.type, body.payload);
         if (!success) {
             return { success: false, message: 'MT5 not connected or send failed' };
         }
-        return { success: true, message: `Command ${body.type} sent to ${id}` };
+        return { success: true, message: `Command ${body.type} sent to ${cleanId}` };
     }
 
     @Post('journal/:ticket')
@@ -134,13 +150,16 @@ export class Mt5Controller {
     @UseGuards(JwtAuthGuard)
     async getCloudTaskStatus(@Param('taskId') taskId: string, @Req() req) {
         const task = this.mt5WorkerService.getTaskById(taskId);
+        if (task && task.options?.userId && task.options.userId !== req.user.id) {
+            throw new NotFoundException('Tarefa não encontrada.');
+        }
         const cloudStatus = await this.mt5WorkerService.getCloudConnectionStatus(
             req.user.id,
-            undefined,
+            task?.options?.accountUuid,
             task?.login
         );
         return {
-            task,
+            task: this.sanitizeTaskForClient(task),
             account: cloudStatus.account,
             worker: cloudStatus.worker,
             recentTrades: cloudStatus.recentTrades,
@@ -157,16 +176,11 @@ export class Mt5Controller {
         const cleanLogin = (body.login || '').toString().trim();
         const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().trim());
 
-        // 1. Isolamento estrito 1-para-1 por (userId, mt5Id):
-        // Cada login MT5 tem sua própria Conta de Trading exclusiva, sem sobrescrever nem juntar com outra conta!
-        let account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
-
-        if (!account) {
-            const orphanByMt5 = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
-            if (orphanByMt5 && (!orphanByMt5.userId || orphanByMt5.userId === req.user.id)) {
-                account = orphanByMt5;
-            }
-        }
+        // 1. Isolamento estrito multi-tenant por (userId, mt5Id):
+        // NUNCA busca mt5Id sem userId e NUNCA transfere userId de outra conta!
+        const account = await this.accountRepo.findOne({
+            where: { mt5Id: cleanLogin, userId: req.user.id }
+        });
 
         const lowerSrv = cleanServer.toLowerCase();
         const isDemoServer = lowerSrv.includes('demo') || lowerSrv.includes('trial');
@@ -190,8 +204,9 @@ export class Mt5Controller {
 
         const activeUserAccountsCount = await this.accountRepo.count({ where: { userId: req.user.id, isArchived: false } });
 
+        let targetAccount: AccountEntity;
         if (!account) {
-            account = this.accountRepo.create({
+            const created = this.accountRepo.create({
                 userId: req.user.id,
                 mt5Id: cleanLogin,
                 broker: cleanServer || 'MetaTrader 5',
@@ -207,11 +222,9 @@ export class Mt5Controller {
                 equity: 0,
                 appToken: randomUUID().replace(/-/g, '').toUpperCase()
             });
-            account = await this.accountRepo.save(account);
-            this.logger.log(`Nova Conta de Trading criada automaticamente para conexão MT5: ${account.name} (ID: ${account.id}, User: ${req.user.id})`);
+            targetAccount = await this.accountRepo.save(created);
+            this.logger.log(`Nova Conta de Trading criada automaticamente para conexão MT5: ${targetAccount.name} (ID: ${targetAccount.id}, User: ${req.user.id})`);
         } else {
-            // Garante que a conta pertença ao usuário autenticado, esteja visível (não arquivada) e tenha nome identificável
-            account.userId = req.user.id;
             account.isArchived = false;
             account.archivedAt = null;
             if (cleanServer) account.broker = cleanServer;
@@ -221,7 +234,7 @@ export class Mt5Controller {
             if (!account.appToken) {
                 account.appToken = randomUUID().replace(/-/g, '').toUpperCase();
             }
-            account = await this.accountRepo.save(account);
+            targetAccount = await this.accountRepo.save(account);
         }
 
         // 2. Dispatch task for the Python Worker on Windows Server
@@ -232,11 +245,11 @@ export class Mt5Controller {
             cleanServer,
             body.pass,
             numId,
-            { userId: req.user.id, accountUuid: account.id }
+            { userId: req.user.id, accountUuid: targetAccount.id }
         );
 
         this.logger.log(
-            `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${account.id}, TaskID: ${task.id})`
+            `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${targetAccount.id}, TaskID: ${task.id})`
         );
 
         // 3. Optional local instance startup if running directly on Windows host
@@ -253,9 +266,9 @@ export class Mt5Controller {
             success: true,
             message: 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.',
             taskId: task.id,
-            task,
-            accountId: account.id,
-            account,
+            task: this.sanitizeTaskForClient(task),
+            accountId: targetAccount.id,
+            account: targetAccount,
             server: task.server,
             instance: localInstance
         };
@@ -271,34 +284,6 @@ export class Mt5Controller {
         if (body.login && body.login.trim()) {
             const targetLogin = body.login.trim();
             account = await this.accountRepo.findOne({ where: { mt5Id: targetLogin, userId: req.user.id } });
-            if (!account) {
-                const existingByMt5 = await this.accountRepo.findOne({ where: { mt5Id: targetLogin } });
-                if (existingByMt5 && (!existingByMt5.userId || existingByMt5.userId === req.user.id)) {
-                    existingByMt5.userId = req.user.id;
-                    existingByMt5.isArchived = false;
-                    if (!existingByMt5.name || existingByMt5.name === 'Conta Principal') {
-                        existingByMt5.name = `MT5 ${targetLogin}`;
-                    }
-                    account = await this.accountRepo.save(existingByMt5);
-                } else if (!existingByMt5) {
-                    const created = this.accountRepo.create({
-                        userId: req.user.id,
-                        mt5Id: targetLogin,
-                        name: `MT5 ${targetLogin}`,
-                        broker: 'MetaTrader 5',
-                        type: AccountType.LIVE,
-                        currency: 'USD',
-                        isPrimary: false,
-                        isArchived: false,
-                        isConnected: false,
-                        initialBalance: 0,
-                        balance: 0,
-                        equity: 0,
-                        appToken: randomUUID().replace(/-/g, '').toUpperCase()
-                    });
-                    account = await this.accountRepo.save(created);
-                }
-            }
         } else if (validAccountId) {
             const byId = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
             if (byId && byId.mt5Id) {
@@ -315,8 +300,8 @@ export class Mt5Controller {
                 .orderBy('acc.updatedAt', 'DESC')
                 .getOne();
         }
-        const cleanLogin = (body.login || account?.mt5Id || '').toString().trim();
-        if (!cleanLogin) {
+        const cleanLogin = (account?.mt5Id || '').toString().trim();
+        if (!account || !cleanLogin) {
             return { success: false, message: 'Nenhuma conta MT5 vinculada para sincronizar.' };
         }
         const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
@@ -324,17 +309,17 @@ export class Mt5Controller {
         const task = this.mt5WorkerService.createAccountTask(
             taskType,
             cleanLogin,
-            account?.broker || '',
+            account.broker || '',
             undefined,
             numId,
-            { userId: req.user.id, accountUuid: account?.id }
+            { userId: req.user.id, accountUuid: account.id }
         );
         return {
             success: true,
             message: 'Sincronização solicitada ao servidor Windows MT5!',
             taskId: task.id,
-            task,
-            accountId: account?.id
+            task: this.sanitizeTaskForClient(task),
+            accountId: account.id
         };
     }
 
@@ -343,25 +328,35 @@ export class Mt5Controller {
     @RequirePlan(PlanTier.PREMIUM)
     async disconnectCloud(@Body() body: { login: string; accountId?: string }, @Req() req) {
         const cleanLogin = (body.login || '').toString().trim();
-        const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
-        const task = this.mt5WorkerService.createAccountTask(
-            WorkerTaskType.STOP_ACCOUNT,
-            cleanLogin,
-            '',
-            undefined,
-            numId
-        );
+        const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
 
+        let acc: AccountEntity | null = null;
         if (cleanLogin) {
-            const acc = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
-            if (acc) {
-                acc.isConnected = false;
-                await this.accountRepo.save(acc);
-            }
+            acc = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
+        } else if (validAccountId) {
+            acc = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
         }
 
+        if (!acc) {
+            throw new ForbiddenException('Acesso negado: conta MT5 não encontrada para este usuário.');
+        }
+
+        const targetLogin = (acc.mt5Id || cleanLogin).trim();
+        const numId = parseInt(targetLogin.replace(/\D/g, ''), 10) || 1;
+        const task = this.mt5WorkerService.createAccountTask(
+            WorkerTaskType.STOP_ACCOUNT,
+            targetLogin,
+            acc.broker || '',
+            undefined,
+            numId,
+            { userId: req.user.id, accountUuid: acc.id }
+        );
+
+        acc.isConnected = false;
+        await this.accountRepo.save(acc);
+
         try {
-            await this.mt5InstanceService.stopInstance(req.user.id, cleanLogin);
+            await this.mt5InstanceService.stopInstance(req.user.id, targetLogin);
         } catch (e) {
             // ignore local error
         }

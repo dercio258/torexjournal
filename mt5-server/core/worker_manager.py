@@ -491,14 +491,15 @@ class WorkerManager:
                     if err_reason in (None, "NETWORK_ERROR"):
                         self.local_queue.enqueue("/sync/accounts", acc_info.model_dump(mode="json"))
 
-            # 2. Atualizar posições abertas
+            # 2. Atualizar posições abertas (apenas se o snapshot não foi ignorado por isolamento de sessão)
             positions_payload = self.sync_engine.fetch_positions(account_id, login=acc.login)
-            summary["openPositionsCount"] = len(positions_payload.positions)
-            pos_success = self.api_client.sync_positions(positions_payload)
-            if not pos_success:
-                err_reason = getattr(self.api_client, "last_error_reason", None)
-                if err_reason in (None, "NETWORK_ERROR"):
-                    self.local_queue.enqueue("/sync/positions", positions_payload.model_dump(mode="json"))
+            if not getattr(positions_payload, "skipped", False):
+                summary["openPositionsCount"] = len(positions_payload.positions)
+                pos_success = self.api_client.sync_positions(positions_payload)
+                if not pos_success:
+                    err_reason = getattr(self.api_client, "last_error_reason", None)
+                    if err_reason in (None, "NETWORK_ERROR"):
+                        self.local_queue.enqueue("/sync/positions", positions_payload.model_dump(mode="json"))
 
             # 3. Atualizar ordens pendentes
             orders_payload = self.sync_engine.fetch_orders(account_id, login=acc.login)

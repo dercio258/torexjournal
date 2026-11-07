@@ -750,28 +750,29 @@ class SyncEngine:
                             f"[ISOLAMENTO DE CONTA] Ignorando positions_get para {login}: "
                             f"terminal ativo em {getattr(info, 'login', 'None')}."
                         )
-                        return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
+                        return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list, skipped=True)
 
                 positions = mt5.positions_get()
-                if positions is not None:
-                    for pos in positions:
-                        positions_list.append(PositionData(
-                            ticket=pos.ticket,
-                            symbol=pos.symbol,
-                            type="POSITION_TYPE_BUY" if pos.type == mt5.POSITION_TYPE_BUY else "POSITION_TYPE_SELL",
-                            volume=pos.volume,
-                            priceOpen=pos.price_open,
-                            priceCurrent=pos.price_current,
-                            sl=pos.sl,
-                            tp=pos.tp,
-                            profit=pos.profit,
-                            swap=pos.swap,
-                            magic=pos.magic,
-                            comment=pos.comment,
-                            time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
-                        ))
+                if positions is None:
+                    return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list, skipped=True)
+                for pos in positions:
+                    positions_list.append(PositionData(
+                        ticket=pos.ticket,
+                        symbol=pos.symbol,
+                        type="POSITION_TYPE_BUY" if pos.type == mt5.POSITION_TYPE_BUY else "POSITION_TYPE_SELL",
+                        volume=pos.volume,
+                        priceOpen=pos.price_open,
+                        priceCurrent=pos.price_current,
+                        sl=pos.sl,
+                        tp=pos.tp,
+                        profit=pos.profit,
+                        swap=pos.swap,
+                        magic=pos.magic,
+                        comment=pos.comment,
+                        time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
+                    ))
 
-                return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
+                return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list, skipped=False)
             except MemoryError:
                 res = self.get_resource_snapshot()
                 err_msg = (

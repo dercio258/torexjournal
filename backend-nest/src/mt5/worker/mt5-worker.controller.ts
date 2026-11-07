@@ -59,7 +59,10 @@ export class Mt5WorkerController {
 
     @Post('sync/positions')
     @HttpCode(200)
-    async syncPositions(@Body() body: { accountId: number; login?: string; positions: any[] }) {
+    async syncPositions(@Body() body: { accountId: number; login?: string; positions: any[]; skipped?: boolean }) {
+        if (body?.skipped) {
+            return { success: true, skipped: true };
+        }
         const login = body.login || body.accountId?.toString();
         return this.workerService.syncPositions(body.accountId, login, body.positions);
     }

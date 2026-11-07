@@ -10,6 +10,54 @@ from loguru import logger
 from config.settings import settings
 
 
+import ctypes
+import ctypes.wintypes
+import os
+
+
+class _DATA_BLOB(ctypes.Structure):
+    _fields_ = [
+        ("cbData", ctypes.wintypes.DWORD),
+        ("pbData", ctypes.POINTER(ctypes.c_char)),
+    ]
+
+
+def _dpapi_encrypt(raw_bytes: bytes) -> Optional[bytes]:
+    if os.name != "nt":
+        return None
+    try:
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        buf = ctypes.create_string_buffer(raw_bytes, len(raw_bytes))
+        blob_in = _DATA_BLOB(len(raw_bytes), buf)
+        blob_out = _DATA_BLOB()
+        if crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+            encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+            kernel32.LocalFree(blob_out.pbData)
+            return encrypted
+    except Exception:
+        pass
+    return None
+
+
+def _dpapi_decrypt(enc_bytes: bytes) -> Optional[bytes]:
+    if os.name != "nt":
+        return None
+    try:
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        buf = ctypes.create_string_buffer(enc_bytes, len(enc_bytes))
+        blob_in = _DATA_BLOB(len(enc_bytes), buf)
+        blob_out = _DATA_BLOB()
+        if crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+            decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+            kernel32.LocalFree(blob_out.pbData)
+            return decrypted
+    except Exception:
+        pass
+    return None
+
+
 def _derive_key(secret: str) -> bytes:
     return hashlib.sha256((secret or "torex-default-key").encode("utf-8")).digest()
 
@@ -18,8 +66,11 @@ def _encrypt_secret(plain_text: Optional[str]) -> Optional[str]:
     if not plain_text:
         return None
     try:
-        key = _derive_key(settings.worker_key)
         raw = plain_text.encode("utf-8")
+        dpapi_bytes = _dpapi_encrypt(raw)
+        if dpapi_bytes is not None:
+            return "dpapi:" + base64.urlsafe_b64encode(dpapi_bytes).decode("ascii")
+        key = _derive_key(settings.worker_key)
         xored = bytes(b ^ key[i % len(key)] for i, b in enumerate(raw))
         return base64.urlsafe_b64encode(xored).decode("ascii")
     except Exception as e:
@@ -31,6 +82,10 @@ def _decrypt_secret(cipher_text: Optional[str]) -> Optional[str]:
     if not cipher_text:
         return None
     try:
+        if cipher_text.startswith("dpapi:"):
+            enc_bytes = base64.urlsafe_b64decode(cipher_text[6:].encode("ascii"))
+            dec_bytes = _dpapi_decrypt(enc_bytes)
+            return dec_bytes.decode("utf-8") if dec_bytes is not None else None
         key = _derive_key(settings.worker_key)
         xored = base64.urlsafe_b64decode(cipher_text.encode("ascii"))
         raw = bytes(b ^ key[i % len(key)] for i, b in enumerate(xored))

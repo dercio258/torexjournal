@@ -13,6 +13,7 @@ import { ClickHouseService } from '../clickhouse/clickhouse.service';
 @Injectable()
 export class DashboardService {
     private readonly logger = new Logger(DashboardService.name);
+    private readonly userCacheVersions = new Map<string, number>();
 
     constructor(
         @InjectRepository(TradeEntity)
@@ -28,6 +29,21 @@ export class DashboardService {
         @Inject(CACHE_MANAGER) private cacheManager: Cache,
         private clickHouseService: ClickHouseService
     ) { }
+
+    private isValidUuid(id?: string): boolean {
+        return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+    }
+
+    private async getUserCacheVersion(userId: string): Promise<number> {
+        try {
+            const cachedVer = await this.cacheManager.get<number>(`dashboard:ver:${userId}`);
+            if (typeof cachedVer === 'number' && cachedVer > 0) {
+                this.userCacheVersions.set(userId, cachedVer);
+                return cachedVer;
+            }
+        } catch { }
+        return this.userCacheVersions.get(userId) || 1;
+    }
 
     private async getPrimaryAccount(userId: string) {
         let account = await this.accountRepo.findOne({
@@ -46,9 +62,9 @@ export class DashboardService {
      * Validação de posse da conta para operações de Dashboard
      */
     public async validateUserAccount(userId: string, accountId?: string) {
-        if (accountId && accountId !== 'all') {
+        if (this.isValidUuid(accountId)) {
             const targetAccount = await this.accountRepo.findOne({
-                where: { id: accountId, userId }
+                where: { id: accountId!.trim(), userId }
             });
             if (!targetAccount) {
                 throw new ForbiddenException('Acesso negado: a conta informada não existe ou não pertence a este usuário');
@@ -73,7 +89,8 @@ export class DashboardService {
     }
 
     async getTrades(userId: string, accountId?: string, endDate?: string, limit = 100) {
-        const cacheKey = `dashboard:trades:${userId}:${accountId || 'all'}:${endDate || 'all'}:${limit}`;
+        const ver = await this.getUserCacheVersion(userId);
+        const cacheKey = `dashboard:trades:${userId}:v${ver}:${accountId || 'all'}:${endDate || 'all'}:${limit}`;
         try {
             const cached = await this.cacheManager.get<any[]>(cacheKey);
             if (cached) {
@@ -117,7 +134,8 @@ export class DashboardService {
     }
 
     async getPerformance(userId: string, accountId?: string, startDate?: string, endDate?: string) {
-        const cacheKey = `dashboard:performance:${userId}:${accountId || 'all'}:${startDate || 'all'}:${endDate || 'all'}`;
+        const ver = await this.getUserCacheVersion(userId);
+        const cacheKey = `dashboard:performance:${userId}:v${ver}:${accountId || 'all'}:${startDate || 'all'}:${endDate || 'all'}`;
         try {
             const cached = await this.cacheManager.get(cacheKey);
             if (cached) {
@@ -277,7 +295,7 @@ export class DashboardService {
             }
 
             const winRate = (wins / totalTrades) * 100;
-            const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? grossProfit : 0) : grossProfit / grossLoss;
+            const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 99.99 : 0) : grossProfit / grossLoss;
 
             // Real mathematical calculation for Radar Metrics (0-100 scale, no hardcoded fake values)
             const tradingDays = Array.from(dailyMap.values());
@@ -870,24 +888,10 @@ export class DashboardService {
 
     async invalidateUserCache(userId: string) {
         try {
-            const store = (this.cacheManager as any)?.store;
-            let keys: string[] = [];
-            if (store && typeof store.keys === 'function') {
-                keys = await store.keys(`*dashboard:*:${userId}:*`);
-            } else if (store?.getClient && typeof store.getClient === 'function') {
-                const redis = store.getClient();
-                if (typeof redis.keys === 'function') {
-                    keys = await redis.keys(`*dashboard:*:${userId}:*`);
-                }
-            }
-            if (keys && keys.length > 0) {
-                for (const key of keys) {
-                    await this.cacheManager.del(key);
-                }
-            }
-            if ((!keys || keys.length === 0) && store && typeof store.reset === 'function') {
-                await store.reset();
-            }
+            const currentVer = await this.getUserCacheVersion(userId);
+            const nextVer = currentVer + 1;
+            this.userCacheVersions.set(userId, nextVer);
+            await this.cacheManager.set(`dashboard:ver:${userId}`, nextVer, 86400000);
         } catch (e) {
             console.warn(`[DashboardService] Cache invalidation warning for user ${userId}:`, e.message);
         }
@@ -958,11 +962,20 @@ export class DashboardService {
         }
 
         const accMap = new Map(accounts.map(a => [a.id, a]));
-        const startBalance = isConsolidated 
-            ? accounts.reduce((sum, a) => sum + Number(a.initialBalance || a.balance || 0), 0)
-            : Number(targetAccount?.initialBalance || targetAccount?.balance || 0);
+        const totalTradesPnl = rawTrades.reduce((sum, t) => sum + (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0), 0);
+        const rawStartBalance = isConsolidated 
+            ? accounts.reduce((sum, a) => {
+                const initBal = Number(a.initialBalance) || 0;
+                return sum + (initBal > 0 ? initBal : Math.max(0, Number(a.balance || 0)));
+            }, 0)
+            : (Number(targetAccount?.initialBalance) > 0
+                ? Number(targetAccount?.initialBalance)
+                : Math.max(0, Number(targetAccount?.balance || 0) - totalTradesPnl));
+        const startBalance = Number(rawStartBalance.toFixed(2));
 
         let runningBalance = startBalance;
+        peakEquity = startBalance;
+        currentEquity = startBalance;
 
         for (const t of rawTrades) {
             const profit = Number(t.profit) || 0;
@@ -1050,12 +1063,12 @@ export class DashboardService {
 
         const totalTrades = rawTrades.length;
         const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 0;
-        const profitFactor = grossLoss === 0 ? Number(grossProfit.toFixed(2)) : Number((grossProfit / grossLoss).toFixed(2));
+        const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 99.99 : 0) : Number((grossProfit / grossLoss).toFixed(2));
         const averageWin = wins > 0 ? Number((grossProfit / wins).toFixed(2)) : 0;
         const averageLoss = losses > 0 ? Number((grossLoss / losses).toFixed(2)) : 0;
         const riskRewardRatio = averageLoss > 0 ? Number((averageWin / averageLoss).toFixed(2)) : 0;
         const expectancy = totalTrades > 0 ? Number((totalNetProfit / totalTrades).toFixed(2)) : 0;
-        const maxDrawdownPercent = (startBalance + peakEquity) > 0 ? Number(((maxDrawdown / (startBalance + peakEquity)) * 100).toFixed(1)) : 0;
+        const maxDrawdownPercent = peakEquity > 0 ? Number(((maxDrawdown / peakEquity) * 100).toFixed(1)) : 0;
 
         const kpis = {
             totalTrades,

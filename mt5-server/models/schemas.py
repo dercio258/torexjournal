@@ -141,12 +141,14 @@ class SyncOrdersPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
     orders: List[OrderData]
+    skipped: bool = False
 
 
 class SyncPositionsPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
     positions: List[PositionData]
+    skipped: bool = False
 
 
 class WorkerHeartbeat(BaseModel):

@@ -2,30 +2,38 @@ import { ITradeAdapter } from '../trade-adapter.interface';
 import { NormalizedTradeDto } from '../normalized-trade.dto';
 
 export class Mt5Adapter implements ITradeAdapter {
-
     normalize(rawData: any): NormalizedTradeDto | null {
         if (!rawData || !rawData.ticket) return null;
 
+        const rawType = (rawData.type || 'BUY').toString().trim().toLowerCase();
+        if (rawType.includes('limit') || rawType.includes('stop') || rawType.includes('balance') || rawType.includes('credit')) {
+            return null;
+        }
+        const normalizedType = rawType.includes('sell') || rawType.includes('put') ? 'SELL' : 'BUY';
+
         const openTime = this.safeDate(rawData.openTime || rawData.open_time);
-        if (!openTime) return null; // A valid trade must have an open time
+        if (!openTime) return null;
 
         const closeTime = this.safeDate(rawData.closeTime || rawData.close_time);
+        const slParsed = parseFloat(rawData.sl || rawData.stop_loss);
+        const tpParsed = parseFloat(rawData.tp || rawData.take_profit);
+        const ticketStr = rawData.ticket.toString().trim();
 
         return {
-            ticket: rawData.ticket.toString(),
-            contractId: rawData.ticket.toString(),
+            ticket: ticketStr,
+            contractId: (rawData.contractId || rawData.positionId || ticketStr).toString(),
             symbol: rawData.symbol || 'Unknown',
-            type: rawData.type || 'Buy',
+            type: normalizedType,
             volume: parseFloat(rawData.volume) || 0,
             openPrice: parseFloat(rawData.openPrice || rawData.open_price) || 0,
             closePrice: parseFloat(rawData.closePrice || rawData.close_price) || 0,
             profit: parseFloat(rawData.profit) || 0,
             commission: parseFloat(rawData.commission) || 0,
             swap: parseFloat(rawData.swap) || 0,
-            sl: parseFloat(rawData.sl || rawData.stop_loss) || 0,
-            tp: parseFloat(rawData.tp || rawData.take_profit) || 0,
-            openTime: openTime,
-            closeTime: closeTime,
+            sl: slParsed > 0 ? slParsed : undefined,
+            tp: tpParsed > 0 ? tpParsed : undefined,
+            openTime,
+            closeTime: closeTime || undefined,
             status: closeTime ? 'CLOSED' : 'OPEN',
             magic: rawData.magic || 0,
             comment: rawData.comment || '',
@@ -36,7 +44,6 @@ export class Mt5Adapter implements ITradeAdapter {
 
     private safeDate(dateInput: any): Date | null {
         if (!dateInput) return null;
-        // Handle numeric timestamps (seconds from MQL5)
         const timestamp = typeof dateInput === 'number' && dateInput < 10000000000 ? dateInput * 1000 : dateInput;
         const date = new Date(timestamp);
         return isNaN(date.getTime()) ? null : date;

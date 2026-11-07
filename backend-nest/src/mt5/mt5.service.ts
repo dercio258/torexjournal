@@ -139,38 +139,27 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         await queryRunner.startTransaction();
 
         try {
-            // 2. Validate Token & Find Account
+            // 2. Validate Token & Find Account (strictly require non-empty token)
+            if (!token || typeof token !== 'string' || !token.trim()) {
+                this.logger.error(`Authentication Failed: Missing appToken for MT5 ID ${mt5_id}.`);
+                throw new ConflictException('Invalid Token: Access Denied');
+            }
+
             let account = await queryRunner.manager.findOne(AccountEntity, {
-                where: { mt5Id: mt5_id.toString() },
+                where: { appToken: token.trim() },
             });
 
             if (!account) {
-                const tokenOwner = await queryRunner.manager.findOne(AccountEntity, {
-                    where: { appToken: token }
-                });
+                this.logger.error(`Authentication Failed: Token not found in any account.`);
+                throw new ConflictException('Invalid Token: Access Denied');
+            }
 
-                if (!tokenOwner) {
-                    this.logger.error(`Authentication Failed: Token '${token}' not found in any account.`);
-                    throw new ConflictException('Invalid Token: Access Denied');
-                }
-
-                if (tokenOwner.mt5Id === 'PENDING' || tokenOwner.mt5Id === 'PENDING_' + tokenOwner.userId.substring(0, 8)) {
-                    // First time connect or pending state! Bind this ID to the user.
-                    this.logger.log(`Binding Account: User ${tokenOwner.userId} linked to MT5 ID ${mt5_id}`);
-                    account = tokenOwner;
-                    account.mt5Id = mt5_id.toString();
-                } else if (tokenOwner.mt5Id !== mt5_id.toString()) {
-                    this.logger.warn(`Token/Account Mismatch: Token belongs to MT5 ID ${tokenOwner.mt5Id}, but request came from ${mt5_id}.`);
-                    throw new ConflictException('Token belongs to another MT5 account');
-                } else {
-                    account = tokenOwner;
-                }
-            } else {
-                // Account exists for this MT5 ID. check token.
-                if (account.appToken && account.appToken !== token) {
-                    this.logger.error(`Token Mismatch for MT5 ID ${mt5_id}: Expected '${account.appToken}', Got '${token}'`);
-                    throw new ConflictException('Invalid Token: Mismatch');
-                }
+            if (account.mt5Id === 'PENDING' || account.mt5Id === 'PENDING_' + (account.userId || '').substring(0, 8) || !account.mt5Id) {
+                this.logger.log(`Binding Account: User ${account.userId} linked to MT5 ID ${mt5_id}`);
+                account.mt5Id = mt5_id.toString();
+            } else if (account.mt5Id !== mt5_id.toString()) {
+                this.logger.warn(`Token/Account Mismatch: Token belongs to MT5 ID ${account.mt5Id}, but request came from ${mt5_id}.`);
+                throw new ConflictException('Token belongs to another MT5 account');
             }
 
             // 3. Update Account Stats
@@ -381,38 +370,46 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         await queryRunner.startTransaction();
 
         try {
+            if (!accountId) {
+                this.logger.warn(`processTradeImport called without accountId for user ${targetUserId || 'N/A'}. Aborting to prevent global ticket collision.`);
+                await queryRunner.rollbackTransaction();
+                return { count: 0 };
+            }
+
             const tradesToSave: TradeEntity[] = [];
             const tickets = trades.map(t => (t.ticket || t.contractId)?.toString()).filter(Boolean);
             const contractIds = trades.map(t => (t.contractId || t.ticket)?.toString()).filter(Boolean);
 
-            // Fetch existing tickets and contractIds in batch for this account
+            // Fetch existing tickets and contractIds in batch strictly scoped to this accountId
             const existingTrades = (tickets.length > 0 || contractIds.length > 0)
                 ? await queryRunner.manager.find(TradeEntity, {
-                    where: accountId
-                        ? [
-                            ...(tickets.length > 0 ? [{ ticket: In(tickets), accountId }] : []),
-                            ...(contractIds.length > 0 ? [{ contractId: In(contractIds), accountId }] : [])
-                          ]
-                        : [
-                            ...(tickets.length > 0 ? [{ ticket: In(tickets) }] : []),
-                            ...(contractIds.length > 0 ? [{ contractId: In(contractIds) }] : [])
-                          ]
+                    where: [
+                        ...(tickets.length > 0 ? [{ ticket: In(tickets), accountId }] : []),
+                        ...(contractIds.length > 0 ? [{ contractId: In(contractIds), accountId }] : [])
+                    ]
                   })
                 : [];
             const existingTickets = new Set(existingTrades.map(t => t.ticket?.toString()).filter(Boolean));
             const existingContracts = new Set(existingTrades.map(t => t.contractId?.toString()).filter(Boolean));
             const seenInBatch = new Set<string>();
+            const maxAllowedCloseMs = Date.now() + 2 * 24 * 60 * 60 * 1000;
 
             for (const t of trades) {
-                const ticket = t.ticket ? t.ticket.toString() : (t.contractId ? t.contractId.toString() : null);
-                const contractId = (t.contractId ? t.contractId.toString() : ticket) || `TR_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                const rawTypeStr = (t.type || '').toString().trim().toLowerCase();
+                if (rawTypeStr.includes('limit') || rawTypeStr.includes('stop') || rawTypeStr.includes('balance') || rawTypeStr.includes('credit')) {
+                    continue;
+                }
+                const normalizedType = rawTypeStr.includes('sell') || rawTypeStr.includes('put') ? 'SELL' : 'BUY';
 
-                // Deduping against DB
+                const ticket = t.ticket ? t.ticket.toString().trim() : (t.contractId ? t.contractId.toString().trim() : null);
+                const contractId = (t.contractId ? t.contractId.toString().trim() : ticket) || `TR_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+                // Deduping against DB (strictly within this account)
                 if (ticket && existingTickets.has(ticket)) continue;
                 if (contractId && existingContracts.has(contractId)) continue;
 
                 // Deduping against current batch
-                const batchKey = `${accountId || ''}:${contractId}`;
+                const batchKey = `${accountId}:${contractId}`;
                 if (seenInBatch.has(batchKey)) continue;
                 seenInBatch.add(batchKey);
 
@@ -420,22 +417,26 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 if (contractId) existingContracts.add(contractId);
 
                 if (!t.openTime) continue;
+                const parsedOpen = new Date(t.openTime);
+                if (isNaN(parsedOpen.getTime())) continue;
 
                 const isTradeClosed = t.status === 'CLOSED' || !!t.closeTime || t.closePrice > 0 || (t.profit !== undefined && t.profit !== null);
-                const hasExplicitCloseTime = Boolean(t.closeTime);
-                const finalCloseTime = hasExplicitCloseTime
-                    ? new Date(t.closeTime)
-                    : (isTradeClosed && t.openTime ? new Date(t.openTime) : null);
-                const computedDataQuality = t.dataQuality || (isTradeClosed && !hasExplicitCloseTime ? 'partial' : 'ok');
+                const parsedClose = t.closeTime ? new Date(t.closeTime) : null;
+                const hasValidCloseTime = Boolean(parsedClose && !isNaN(parsedClose.getTime()) && parsedClose.getTime() <= maxAllowedCloseMs);
+                const finalCloseTime = hasValidCloseTime
+                    ? parsedClose
+                    : (isTradeClosed ? parsedOpen : null);
+                const computedDataQuality = t.dataQuality || (isTradeClosed && !hasValidCloseTime ? 'partial' : 'ok');
 
                 const newTrade: TradeEntity = this.tradeRepo.create({
                     ...t,
+                    type: normalizedType,
                     ticket: ticket,
                     contractId: contractId,
                     accountId: accountId,
                     sl: t.sl !== undefined && t.sl !== null && Number(t.sl) > 0 ? Number(t.sl) : null,
                     tp: t.tp !== undefined && t.tp !== null && Number(t.tp) > 0 ? Number(t.tp) : null,
-                    openTime: t.openTime ? new Date(t.openTime) : null,
+                    openTime: parsedOpen,
                     closeTime: finalCloseTime,
                     status: isTradeClosed ? 'CLOSED' : (t.status || 'OPEN'),
                     netPnl: t.netPnl !== undefined ? t.netPnl : (Number(t.profit || 0) + Number(t.commission || 0) + Number(t.swap || 0)),
@@ -487,8 +488,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     }
                 }
 
-                // Upsert to handle any remaining race conditions or existing keys gracefully
-                await queryRunner.manager.getRepository(TradeEntity).upsert(tradesToSave, ['accountId', 'contractId']);
+                // Insert with ON CONFLICT DO NOTHING so concurrent syncs never overwrite user journal annotations
+                await queryRunner.manager
+                    .createQueryBuilder()
+                    .insert()
+                    .into(TradeEntity)
+                    .values(tradesToSave)
+                    .orIgnore()
+                    .execute();
                 
                 // Fetch saved records with generated IDs
                 const savedTrades = await queryRunner.manager.find(TradeEntity, {

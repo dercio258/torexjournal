@@ -616,7 +616,15 @@ export class Mt5WorkerService {
         account.leverage = Number(accountInfo.leverage) || 1;
         if (accountInfo.currency) account.currency = accountInfo.currency;
         if (Number(account.initialBalance) === 0 && balanceNum > 0) {
-            account.initialBalance = balanceNum;
+            const closedPnlRes = await this.tradeRepo
+                .createQueryBuilder('t')
+                .select('COALESCE(SUM(COALESCE(t.profit, 0) + COALESCE(t.commission, 0) + COALESCE(t.swap, 0)), 0)', 'closedPnl')
+                .where('t.accountId = :accountId', { accountId: account.id })
+                .andWhere('t.status = :status', { status: 'CLOSED' })
+                .getRawOne();
+            const closedPnl = Number(closedPnlRes?.closedPnl) || 0;
+            const derivedInitial = Number((balanceNum - closedPnl).toFixed(2));
+            account.initialBalance = derivedInitial > 0 ? derivedInitial : balanceNum;
         }
         if (accountInfo.server || accountInfo.company) {
             account.broker = accountInfo.server || accountInfo.company || account.broker;
@@ -945,21 +953,10 @@ export class Mt5WorkerService {
 
         let account: AccountEntity | null = null;
 
-        // 1. Se login explícito foi informado, busca ou vincula a conta correspondente ao login
+        // 1. Se login explícito foi informado, busca estritamente dentro do escopo de userId
         if (login && login.trim()) {
             const cleanLogin = login.trim();
             account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId } });
-            if (!account) {
-                const byMt5Only = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
-                if (byMt5Only && (!byMt5Only.userId || byMt5Only.userId === userId)) {
-                    byMt5Only.userId = userId;
-                    byMt5Only.isArchived = false;
-                    if (!byMt5Only.name || byMt5Only.name === 'Conta Principal') {
-                        byMt5Only.name = `MT5 ${cleanLogin}`;
-                    }
-                    account = await this.accountRepo.save(byMt5Only);
-                }
-            }
         }
 
         // 2. Se accountId válido foi informado, busca essa conta (mas se for "Conta Principal" sem mt5Id, prefere uma conta MT5 conectada do usuário)
@@ -1108,95 +1105,61 @@ export class Mt5WorkerService {
 
         const mappedOwner = this.loginToUserMap.get(loginStr);
 
-        // 0. Se houver accountUuid mapeado da tarefa, SÓ retorna se o mt5Id for EXATAMENTE o mesmo loginStr!
-        // NUNCA sobrescreve o mt5Id de outra conta existente!
+        // 1. Se houver accountUuid mapeado da tarefa, valida estritamente id + mt5Id + userId (sem nunca alterar userId!)
         if (mappedOwner?.accountUuid && this.isValidUuid(mappedOwner.accountUuid)) {
-            const byUuid = await this.accountRepo.findOne({ where: { id: mappedOwner.accountUuid } });
-            if (byUuid && byUuid.mt5Id === loginStr) {
+            const whereByUuid: any = { id: mappedOwner.accountUuid, mt5Id: loginStr };
+            if (mappedOwner.userId) whereByUuid.userId = mappedOwner.userId;
+            const byUuid = await this.accountRepo.findOne({ where: whereByUuid });
+            if (byUuid) {
                 let changed = false;
                 if (!byUuid.name || byUuid.name === 'Conta Principal') { byUuid.name = `MT5 ${loginStr}`; changed = true; }
                 if (byUuid.isArchived) { byUuid.isArchived = false; byUuid.archivedAt = null; changed = true; }
-                if (mappedOwner.userId && byUuid.userId !== mappedOwner.userId) { byUuid.userId = mappedOwner.userId; changed = true; }
                 if (changed) await this.accountRepo.save(byUuid);
                 return byUuid;
             }
         }
 
-        // 1. Busca exata e estrita por mt5Id (priorizando o usuário mapeado se existir)
+        // 2. Busca por (mt5Id, userId) se o usuário estiver mapeado na tarefa ativa
         let account: AccountEntity | null = null;
         if (mappedOwner?.userId) {
             account = await this.accountRepo.findOne({
                 where: { mt5Id: loginStr, userId: mappedOwner.userId }
             });
         }
+
+        // 3. Busca por (mt5Id, broker) quando o servidor da corretora foi informado
+        if (!account && fallbackServer) {
+            const matchesByServer = await this.accountRepo.find({
+                where: { mt5Id: loginStr, broker: fallbackServer }
+            });
+            if (matchesByServer.length === 1) {
+                account = matchesByServer[0];
+            }
+        }
+
+        // 4. Busca por mt5Id apenas se for único no banco (sem ambiguidade entre tenants)
         if (!account) {
-            account = await this.accountRepo.findOne({
+            const matchesByLogin = await this.accountRepo.find({
                 where: { mt5Id: loginStr }
             });
+            if (matchesByLogin.length === 1) {
+                account = matchesByLogin[0];
+            } else if (matchesByLogin.length > 1) {
+                this.logger.warn(
+                    `[ISOLAMENTO MULTI-TENANT] Múltiplas contas encontradas para mt5Id=${loginStr} sem escopo de tarefa/servidor. Ignorando sync ambíguo.`
+                );
+                return null;
+            }
         }
 
-        if (!account && accountIdNum && accountIdNum.toString().trim() !== loginStr) {
-            account = await this.accountRepo.findOne({
-                where: { mt5Id: accountIdNum.toString().trim() }
-            });
-        }
-
-        // 2. Se loginStr for UUID, busca por id da entidade
+        // 5. Se loginStr for um UUID válido da própria conta
         if (!account && this.isValidUuid(loginStr)) {
             account = await this.accountRepo.findOne({
                 where: { id: loginStr }
             });
         }
 
-        // 3. Busca exata por nome "MT5 <loginStr>" sem mt5Id preenchido
-        if (!account) {
-            const whereExactName: any = { name: `MT5 ${loginStr}` };
-            if (mappedOwner?.userId) whereExactName.userId = mappedOwner.userId;
-            const byExactName = await this.accountRepo.findOne({ where: whereExactName });
-            if (byExactName && (!byExactName.mt5Id || byExactName.mt5Id === loginStr)) {
-                byExactName.mt5Id = loginStr;
-                account = await this.accountRepo.save(byExactName);
-            }
-        }
-
-        // 4. Se não encontrar, descobre o userId dono deste loginStr e cria uma nova Conta de Trading isolada
-        if (!account) {
-            let ownerUserId = mappedOwner?.userId;
-            if (!ownerUserId) {
-                // Procura nos logs de importação ou instâncias cloud quem conectou este login específico
-                const logMatch = await this.importLogRepo
-                    .createQueryBuilder('log')
-                    .where('log.details LIKE :pat', { pat: `%${loginStr}@%` })
-                    .andWhere('log.userId IS NOT NULL')
-                    .orderBy('log.createdAt', 'DESC')
-                    .getOne();
-                if (logMatch?.userId) {
-                    ownerUserId = logMatch.userId;
-                }
-            }
-
-            if (ownerUserId) {
-                const srv = fallbackServer || mappedOwner?.server || 'MetaTrader 5';
-                const isDemo = srv.toLowerCase().includes('demo') || srv.toLowerCase().includes('trial');
-                const newAcc = this.accountRepo.create({
-                    userId: ownerUserId,
-                    mt5Id: loginStr,
-                    name: `MT5 ${loginStr}`,
-                    broker: srv,
-                    type: isDemo ? AccountType.DEMO : AccountType.LIVE,
-                    currency: 'USD',
-                    isPrimary: false,
-                    isArchived: false,
-                    isConnected: true,
-                    initialBalance: 0,
-                    balance: 0,
-                    equity: 0,
-                    appToken: randomUUID().replace(/-/g, '').toUpperCase()
-                });
-                account = await this.accountRepo.save(newAcc);
-                this.logger.log(`Criada automaticamente nova Conta de Trading isolada para MT5 ${loginStr} (ID: ${account.id}, User: ${ownerUserId})`);
-            }
-        } else {
+        if (account) {
             let changed = false;
             if (account.isArchived) {
                 account.isArchived = false;
@@ -1205,10 +1168,6 @@ export class Mt5WorkerService {
             }
             if (!account.name || account.name === 'Conta Principal') {
                 account.name = `MT5 ${loginStr}`;
-                changed = true;
-            }
-            if (mappedOwner?.userId && !account.userId) {
-                account.userId = mappedOwner.userId;
                 changed = true;
             }
             if (changed) {
