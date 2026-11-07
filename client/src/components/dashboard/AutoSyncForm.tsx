@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
-import { MT5_BROKERS_CATALOG, QUICK_POPULAR_SERVERS } from '../../constants/mt5ServersCatalog';
+import { MT5_BROKERS_CATALOG } from '../../constants/mt5ServersCatalog';
 
 interface AutoSyncFormProps {
     brokerName: string;
@@ -55,14 +56,15 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const pollTimerRef = useRef<any>(null);
 
     useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (serverDropdownRef.current && !serverDropdownRef.current.contains(event.target as Node)) {
+        if (!isServerDropdownOpen) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
                 setIsServerDropdownOpen(false);
             }
         };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isServerDropdownOpen]);
 
     const filteredBrokerGroups = useMemo(() => {
         const q = brokerSearchQuery.trim().toLowerCase();
@@ -431,18 +433,15 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         </div>
 
                         <div className="relative">
-                            <div className="flex items-stretch gap-2">
+                            <div className="flex flex-col sm:flex-row items-stretch gap-2">
                                 <div className="relative flex-1">
                                     <Server size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
                                     <input
                                         type="text"
-                                        placeholder="Digite o servidor ou escolha na lista (Ex: Deriv-Demo, Exness-MT5Real...)"
+                                        placeholder="Digite o servidor ou escolha no modal (Ex: Deriv-Demo, Exness-MT5Real...)"
                                         value={server}
-                                        onFocus={() => setIsServerDropdownOpen(true)}
                                         onChange={(e) => {
                                             setServer(e.target.value);
-                                            setBrokerSearchQuery(e.target.value);
-                                            if (!isServerDropdownOpen) setIsServerDropdownOpen(true);
                                         }}
                                         className="w-full bg-[#08090C] border border-white/[0.08] focus:border-emerald-500/60 rounded-xl py-3 pl-10 pr-9 text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none transition-all"
                                     />
@@ -464,271 +463,264 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        if (!isServerDropdownOpen) {
-                                            setBrokerSearchQuery('');
-                                        }
-                                        setIsServerDropdownOpen((prev) => !prev);
+                                        setBrokerSearchQuery('');
+                                        setIsServerDropdownOpen(true);
                                     }}
-                                    className={`px-3.5 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 shrink-0 transition-all ${
+                                    className={`px-4 py-3 sm:py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 shrink-0 transition-all shadow-lg ${
                                         isServerDropdownOpen
-                                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                                            : 'bg-[#08090C] border-white/[0.08] text-[#D1D5DB] hover:border-emerald-500/30 hover:text-white'
+                                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 ring-2 ring-emerald-500/20'
+                                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'
                                     }`}
                                 >
                                     <Building2 size={15} className="text-emerald-400" />
-                                    <span>Corretoras &amp; Servidores</span>
+                                    <span>Corretoras &amp; Servidores ({MT5_BROKERS_CATALOG.length})</span>
                                     <ChevronDown size={15} className={`transition-transform duration-200 ${isServerDropdownOpen ? 'rotate-180 text-emerald-400' : ''}`} />
                                 </button>
                             </div>
 
-                            {/* Dropdown Completo com Busca, Filtro por Corretora e Servidores Prontos */}
-                            {isServerDropdownOpen && (
-                                <div className="absolute z-50 left-0 right-0 mt-2 bg-[#0D0F14] border border-white/[0.12] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                                    {/* Barra de Busca e Filtros no Topo do Dropdown */}
-                                    <div className="p-3.5 bg-[#111319] border-b border-white/[0.08] space-y-3">
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            {/* Input de busca rápida */}
-                                            <div className="relative flex-1">
-                                                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" />
-                                                <input
-                                                    type="text"
-                                                    placeholder="Buscar corretora ou servidor (ex: Deriv, Exness, XM, FTMO, IC Markets)..."
-                                                    value={brokerSearchQuery}
-                                                    onChange={(e) => setBrokerSearchQuery(e.target.value)}
-                                                    className="w-full bg-[#08090C] border border-white/[0.08] focus:border-emerald-500/50 rounded-xl py-2 pl-9 pr-8 text-xs text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
-                                                />
-                                                {brokerSearchQuery && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setBrokerSearchQuery('')}
-                                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-white"
-                                                    >
-                                                        <X size={13} />
-                                                    </button>
-                                                )}
+                            {/* Modal Responsivo em Destaque Acima de Todas as Divs */}
+                            {isServerDropdownOpen && typeof document !== 'undefined' && createPortal(
+                                <div
+                                    className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
+                                    onClick={() => setIsServerDropdownOpen(false)}
+                                >
+                                    <div
+                                        className="relative w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] flex flex-col bg-[#0D0F14] border border-emerald-500/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.85)] overflow-hidden animate-in zoom-in-95 duration-150"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {/* Cabeçalho do Modal */}
+                                        <div className="px-4 sm:px-6 py-4 bg-gradient-to-r from-emerald-500/10 via-[#111319] to-[#111319] border-b border-white/[0.08] flex items-center justify-between gap-3 shrink-0">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                                                    <Building2 size={20} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <h3 className="text-sm sm:text-base font-bold text-slate-100 truncate">
+                                                        Selecionar Corretora &amp; Servidor MT5
+                                                    </h3>
+                                                    <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                                                        Escolha um servidor oficial abaixo ou pesquise pelo nome da sua corretora
+                                                    </p>
+                                                </div>
                                             </div>
-
-                                            {/* Select para listar todas as corretoras diretamente */}
-                                            <select
-                                                value={selectedBrokerFilter}
-                                                onChange={(e) => setSelectedBrokerFilter(e.target.value)}
-                                                className="bg-[#08090C] border border-white/[0.08] focus:border-emerald-500/50 rounded-xl py-2 px-3 text-xs text-[#F3F4F6] focus:outline-none sm:w-56"
-                                            >
-                                                <option value="ALL">Todas as Corretoras ({MT5_BROKERS_CATALOG.length})</option>
-                                                <optgroup label="Categorias">
-                                                    <option value="Deriv">Somente Deriv</option>
-                                                    <option value="Forex / ECN">Corretoras Forex / ECN</option>
-                                                    <option value="Prop Firm">Prop Firms (Mesas Proprietárias)</option>
-                                                    <option value="MetaQuotes">MetaQuotes Oficial</option>
-                                                </optgroup>
-                                                <optgroup label="Lista Completa de Corretoras">
-                                                    {MT5_BROKERS_CATALOG.map((b) => (
-                                                        <option key={b.id} value={b.id}>
-                                                            {b.broker} ({b.servers.length} servidores)
-                                                        </option>
-                                                    ))}
-                                                </optgroup>
-                                            </select>
-                                        </div>
-
-                                        {/* Pílulas de Filtro Rápido (Ambiente + Categorias) */}
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                                {[
-                                                    { id: 'ALL', label: 'Todas' },
-                                                    { id: 'Deriv', label: 'Deriv' },
-                                                    { id: 'Forex / ECN', label: 'Forex / ECN' },
-                                                    { id: 'Prop Firm', label: 'Prop Firms' },
-                                                ].map((tab) => (
-                                                    <button
-                                                        key={tab.id}
-                                                        type="button"
-                                                        onClick={() => setSelectedBrokerFilter(tab.id)}
-                                                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
-                                                            selectedBrokerFilter === tab.id
-                                                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                                                : 'bg-[#08090C] text-[#9CA3AF] hover:text-white border border-white/[0.06]'
-                                                        }`}
-                                                    >
-                                                        {tab.label}
-                                                    </button>
-                                                ))}
-                                            </div>
-
-                                            <div className="flex items-center gap-1 bg-[#08090C] p-0.5 rounded-lg border border-white/[0.06]">
-                                                {(['ALL', 'DEMO', 'REAL'] as const).map((env) => (
-                                                    <button
-                                                        key={env}
-                                                        type="button"
-                                                        onClick={() => setSelectedEnvFilter(env)}
-                                                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors ${
-                                                            selectedEnvFilter === env
-                                                                ? env === 'DEMO'
-                                                                    ? 'bg-cyan-500/20 text-cyan-300'
-                                                                    : env === 'REAL'
-                                                                        ? 'bg-emerald-500/20 text-emerald-300'
-                                                                        : 'bg-white/10 text-white'
-                                                                : 'text-[#6B7280] hover:text-slate-300'
-                                                        }`}
-                                                    >
-                                                        {env === 'ALL' ? 'DEMO + REAL' : env}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Opção de usar valor digitado manualmente caso seja customizado */}
-                                    {(brokerSearchQuery.trim() || server.trim()) && (
-                                        <div className="px-3.5 py-2 bg-indigo-500/10 border-b border-indigo-500/20 flex items-center justify-between gap-2">
-                                            <span className="text-xs text-indigo-200 truncate">
-                                                Campo livre: <strong>{(brokerSearchQuery.trim() || server.trim())}</strong>
-                                            </span>
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    const customVal = brokerSearchQuery.trim() || server.trim();
-                                                    setServer(customVal);
-                                                    setIsServerDropdownOpen(false);
-                                                }}
-                                                className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[11px] font-semibold shrink-0 transition-colors"
+                                                onClick={() => setIsServerDropdownOpen(false)}
+                                                className="p-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 hover:text-white border border-white/[0.08] transition-colors shrink-0"
+                                                title="Fechar modal"
                                             >
-                                                Usar este nome exato
+                                                <X size={18} />
                                             </button>
                                         </div>
-                                    )}
 
-                                    {/* Lista Agrupada de Corretoras e Servidores */}
-                                    <div className="max-h-72 overflow-y-auto divide-y divide-white/[0.05] custom-scrollbar">
-                                        {filteredBrokerGroups.length === 0 ? (
-                                            <div className="p-6 text-center space-y-2">
-                                                <p className="text-sm text-slate-300 font-medium">
-                                                    Nenhum servidor pré-cadastrado encontrado para &ldquo;{brokerSearchQuery}&rdquo;.
-                                                </p>
-                                                <p className="text-xs text-slate-500">
-                                                    Você pode digitar qualquer servidor manualmente no campo acima e clicar em conectar.
-                                                </p>
-                                                {brokerSearchQuery.trim() && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setServer(brokerSearchQuery.trim());
-                                                            setIsServerDropdownOpen(false);
-                                                        }}
-                                                        className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
-                                                    >
-                                                        <Check size={14} />
-                                                        Usar &ldquo;{brokerSearchQuery.trim()}&rdquo; como servidor
-                                                    </button>
-                                                )}
+                                        {/* Barra de Busca e Filtros no Topo do Modal */}
+                                        <div className="p-3.5 sm:p-4 bg-[#111319] border-b border-white/[0.08] space-y-3 shrink-0">
+                                            <div className="flex flex-col sm:flex-row gap-2">
+                                                {/* Input de busca rápida */}
+                                                <div className="relative flex-1">
+                                                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" />
+                                                    <input
+                                                        type="text"
+                                                        autoFocus
+                                                        placeholder="Buscar corretora ou servidor (ex: Deriv, Exness, XM, FTMO, IC Markets)..."
+                                                        value={brokerSearchQuery}
+                                                        onChange={(e) => setBrokerSearchQuery(e.target.value)}
+                                                        className="w-full bg-[#08090C] border border-white/[0.1] focus:border-emerald-500/60 rounded-xl py-2.5 pl-9 pr-8 text-xs sm:text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
+                                                    />
+                                                    {brokerSearchQuery && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setBrokerSearchQuery('')}
+                                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-white"
+                                                        >
+                                                            <X size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                {/* Select para listar todas as corretoras diretamente */}
+                                                <select
+                                                    value={selectedBrokerFilter}
+                                                    onChange={(e) => setSelectedBrokerFilter(e.target.value)}
+                                                    className="bg-[#08090C] border border-white/[0.1] focus:border-emerald-500/60 rounded-xl py-2.5 px-3 text-xs sm:text-sm text-[#F3F4F6] focus:outline-none sm:w-64"
+                                                >
+                                                    <option value="ALL">Todas as Corretoras ({MT5_BROKERS_CATALOG.length})</option>
+                                                    <optgroup label="Categorias">
+                                                        <option value="Deriv">Somente Deriv</option>
+                                                        <option value="Forex / ECN">Corretoras Forex / ECN</option>
+                                                        <option value="Prop Firm">Prop Firms (Mesas Proprietárias)</option>
+                                                        <option value="MetaQuotes">MetaQuotes Oficial</option>
+                                                    </optgroup>
+                                                    <optgroup label="Lista Completa de Corretoras">
+                                                        {MT5_BROKERS_CATALOG.map((b) => (
+                                                            <option key={b.id} value={b.id}>
+                                                                {b.broker} ({b.servers.length} servidores)
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                </select>
                                             </div>
-                                        ) : (
-                                            filteredBrokerGroups.map((group) => (
-                                                <div key={group.id} className="p-3 hover:bg-white/[0.01]">
-                                                    <div className="flex items-center justify-between mb-2 px-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <Building2 size={13} className="text-emerald-400" />
-                                                            <span className="text-xs font-bold text-slate-200">
-                                                                {group.broker}
-                                                            </span>
-                                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.05] text-slate-400">
-                                                                {group.category}
+
+                                            {/* Pílulas de Filtro Rápido (Ambiente + Categorias) */}
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                    {[
+                                                        { id: 'ALL', label: 'Todas' },
+                                                        { id: 'Deriv', label: 'Deriv' },
+                                                        { id: 'Forex / ECN', label: 'Forex / ECN' },
+                                                        { id: 'Prop Firm', label: 'Prop Firms' },
+                                                    ].map((tab) => (
+                                                        <button
+                                                            key={tab.id}
+                                                            type="button"
+                                                            onClick={() => setSelectedBrokerFilter(tab.id)}
+                                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+                                                                selectedBrokerFilter === tab.id
+                                                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                                    : 'bg-[#08090C] text-[#9CA3AF] hover:text-white border border-white/[0.06]'
+                                                            }`}
+                                                        >
+                                                            {tab.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div className="flex items-center gap-1 bg-[#08090C] p-0.5 rounded-lg border border-white/[0.06]">
+                                                    {(['ALL', 'DEMO', 'REAL'] as const).map((env) => (
+                                                        <button
+                                                            key={env}
+                                                            type="button"
+                                                            onClick={() => setSelectedEnvFilter(env)}
+                                                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors ${
+                                                                selectedEnvFilter === env
+                                                                    ? env === 'DEMO'
+                                                                        ? 'bg-cyan-500/20 text-cyan-300'
+                                                                        : env === 'REAL'
+                                                                            ? 'bg-emerald-500/20 text-emerald-300'
+                                                                            : 'bg-white/10 text-white'
+                                                                    : 'text-[#6B7280] hover:text-slate-300'
+                                                            }`}
+                                                        >
+                                                            {env === 'ALL' ? 'DEMO + REAL' : env}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Opção de usar valor digitado manualmente caso seja customizado */}
+                                        {(brokerSearchQuery.trim() || server.trim()) && (
+                                            <div className="px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20 flex items-center justify-between gap-2 shrink-0">
+                                                <span className="text-xs text-indigo-200 truncate">
+                                                    Campo livre: <strong>{(brokerSearchQuery.trim() || server.trim())}</strong>
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const customVal = brokerSearchQuery.trim() || server.trim();
+                                                        setServer(customVal);
+                                                        setIsServerDropdownOpen(false);
+                                                    }}
+                                                    className="px-3 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[11px] font-semibold shrink-0 transition-colors"
+                                                >
+                                                    Usar este nome exato
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Lista Agrupada de Corretoras e Servidores (Responsiva e em Destaque) */}
+                                        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-white/[0.05] custom-scrollbar">
+                                            {filteredBrokerGroups.length === 0 ? (
+                                                <div className="p-8 text-center space-y-2">
+                                                    <p className="text-sm text-slate-300 font-medium">
+                                                        Nenhum servidor pré-cadastrado encontrado para &ldquo;{brokerSearchQuery}&rdquo;.
+                                                    </p>
+                                                    <p className="text-xs text-slate-500">
+                                                        Você pode usar o nome digitado acima ou digitar qualquer servidor manualmente.
+                                                    </p>
+                                                    {brokerSearchQuery.trim() && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setServer(brokerSearchQuery.trim());
+                                                                setIsServerDropdownOpen(false);
+                                                            }}
+                                                            className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
+                                                        >
+                                                            <Check size={14} />
+                                                            Usar &ldquo;{brokerSearchQuery.trim()}&rdquo; como servidor
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                filteredBrokerGroups.map((group) => (
+                                                    <div key={group.id} className="p-3.5 sm:p-4 hover:bg-white/[0.01]">
+                                                        <div className="flex items-center justify-between mb-2.5 px-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <Building2 size={14} className="text-emerald-400" />
+                                                                <span className="text-xs sm:text-sm font-bold text-slate-200">
+                                                                    {group.broker}
+                                                                </span>
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.05] text-slate-400">
+                                                                    {group.category}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-[10px] sm:text-xs text-slate-500">
+                                                                {group.servers.length} servidor(es)
                                                             </span>
                                                         </div>
-                                                        <span className="text-[10px] text-slate-500">
-                                                            {group.servers.length} servidor(es)
-                                                        </span>
-                                                    </div>
 
-                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                                        {group.servers.map((srv) => {
-                                                            const isSelected = server.trim().toLowerCase() === srv.name.toLowerCase();
-                                                            return (
-                                                                <button
-                                                                    key={srv.name}
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        setServer(srv.name);
-                                                                        setIsServerDropdownOpen(false);
-                                                                    }}
-                                                                    className={`text-left px-3 py-2 rounded-xl border transition-all flex items-center justify-between gap-2 ${
-                                                                        isSelected
-                                                                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                                                                            : 'bg-[#111319] border-white/[0.05] hover:border-emerald-500/30 hover:bg-[#161922] text-slate-200'
-                                                                    }`}
-                                                                >
-                                                                    <div className="min-w-0">
-                                                                        <div className="flex items-center gap-1.5">
-                                                                            <span className="text-xs font-mono font-semibold truncate">
-                                                                                {srv.name}
-                                                                            </span>
-                                                                            {isSelected && <Check size={13} className="text-emerald-400 shrink-0" />}
-                                                                        </div>
-                                                                        {srv.description && (
-                                                                            <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                                                                                {srv.description}
-                                                                            </p>
-                                                                        )}
-                                                                    </div>
-                                                                    <span
-                                                                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                                                                            srv.env === 'DEMO'
-                                                                                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/25'
-                                                                                : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25'
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                            {group.servers.map((srv) => {
+                                                                const isSelected = server.trim().toLowerCase() === srv.name.toLowerCase();
+                                                                return (
+                                                                    <button
+                                                                        key={srv.name}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setServer(srv.name);
+                                                                            setIsServerDropdownOpen(false);
+                                                                        }}
+                                                                        className={`text-left px-3 py-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                                                                            isSelected
+                                                                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm'
+                                                                                : 'bg-[#111319] border-white/[0.05] hover:border-emerald-500/30 hover:bg-[#161922] text-slate-200'
                                                                         }`}
                                                                     >
-                                                                        {srv.env}
-                                                                    </span>
-                                                                </button>
-                                                            );
-                                                        })}
+                                                                        <div className="min-w-0">
+                                                                            <div className="flex items-center gap-1.5">
+                                                                                <span className="text-xs font-mono font-semibold truncate">
+                                                                                    {srv.name}
+                                                                                </span>
+                                                                                {isSelected && <Check size={13} className="text-emerald-400 shrink-0" />}
+                                                                            </div>
+                                                                            {srv.description && (
+                                                                                <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                                                                    {srv.description}
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                        <span
+                                                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                                                                                srv.env === 'DEMO'
+                                                                                    ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/25'
+                                                                                    : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25'
+                                                                            }`}
+                                                                        >
+                                                                            {srv.env}
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))
-                                        )}
+                                                ))
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                </div>,
+                                document.body
                             )}
-                        </div>
-
-                        {/* Atalhos Rápidos de Servidores Mais Usados */}
-                        <div className="pt-1">
-                            <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[11px] text-[#6B7280]">
-                                    Atalhos rápidos (clique para preencher):
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsServerDropdownOpen((prev) => !prev)}
-                                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium"
-                                >
-                                    {isServerDropdownOpen ? 'Fechar lista de corretoras' : `Ver todas as ${MT5_BROKERS_CATALOG.length} corretoras →`}
-                                </button>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {QUICK_POPULAR_SERVERS.map((item) => {
-                                    const active = server.trim().toLowerCase() === item.name.toLowerCase();
-                                    return (
-                                        <button
-                                            key={item.name}
-                                            type="button"
-                                            onClick={() => setServer(item.name)}
-                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition-all flex items-center gap-1.5 border ${
-                                                active
-                                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-semibold'
-                                                    : 'bg-[#08090C] border-white/[0.06] text-slate-400 hover:text-slate-200 hover:border-white/[0.15]'
-                                            }`}
-                                        >
-                                            <span>{item.name}</span>
-                                            <span className={`text-[9px] px-1 rounded ${
-                                                item.env === 'DEMO' ? 'bg-cyan-500/15 text-cyan-300' : 'bg-emerald-500/15 text-emerald-300'
-                                            }`}>
-                                                {item.env}
-                                            </span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
                         </div>
                     </div>
 
