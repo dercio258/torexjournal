@@ -664,6 +664,15 @@ class SyncEngine:
                     logger.warning(f"Não foi possível obter account_info(): {mt5.last_error()}")
                     return None
 
+                active_login_str = str(getattr(info, "login", "") or "").strip()
+                expected_login_str = str(login or account_id).strip()
+                if expected_login_str and active_login_str != expected_login_str:
+                    logger.error(
+                        f"[ISOLAMENTO DE CONTA] Abortando leitura de account_info: terminal está na conta "
+                        f"{active_login_str} ({getattr(info, 'server', '')}), mas a sincronização pediu {expected_login_str} ({server})."
+                    )
+                    return None
+
                 term = mt5.terminal_info()
                 ping_raw = getattr(term, "ping_last", 0) if term is not None else 0
                 ping_ms = round(float(ping_raw or 0) / 1000.0, 2) if isinstance(ping_raw, (int, float)) else 0.0
@@ -719,6 +728,15 @@ class SyncEngine:
                 return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
 
             try:
+                if login:
+                    info = mt5.account_info()
+                    if info is None or str(getattr(info, "login", "")).strip() != str(login).strip():
+                        logger.warning(
+                            f"[ISOLAMENTO DE CONTA] Ignorando positions_get para {login}: "
+                            f"terminal ativo em {getattr(info, 'login', 'None')}."
+                        )
+                        return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list)
+
                 positions = mt5.positions_get()
                 if positions is not None:
                     for pos in positions:
@@ -757,6 +775,11 @@ class SyncEngine:
                 return SyncOrdersPayload(accountId=account_id, login=login, orders=orders_list)
 
             try:
+                if login:
+                    info = mt5.account_info()
+                    if info is None or str(getattr(info, "login", "")).strip() != str(login).strip():
+                        return SyncOrdersPayload(accountId=account_id, login=login, orders=orders_list)
+
                 orders = mt5.orders_get()
                 if orders is not None:
                     for ord_item in orders:
@@ -848,6 +871,21 @@ class SyncEngine:
                 start_time = start_time.replace(tzinfo=None)
 
             try:
+                if login:
+                    info = mt5.account_info()
+                    if info is None or str(getattr(info, "login", "")).strip() != str(login).strip():
+                        logger.error(
+                            f"[ISOLAMENTO DE CONTA] Abortando history_deals_get para {login}: "
+                            f"terminal ativo em {getattr(info, 'login', 'None')}."
+                        )
+                        return SyncTradesPayload(
+                            accountId=account_id,
+                            login=login,
+                            server=server,
+                            lastDealTicket=last_deal_ticket,
+                            trades=[]
+                        )
+
                 deals = mt5.history_deals_get(start_time, end_time)
                 if deals is None:
                     start_ts = int(start_time.timestamp())

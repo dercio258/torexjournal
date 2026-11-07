@@ -113,8 +113,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const fetchCloudStatus = async (overrideLogin?: string) => {
         try {
             const params: Record<string, string> = {};
-            if (validSelectedAccountId) params.accountId = validSelectedAccountId;
-            if (overrideLogin || login) params.login = (overrideLogin || login).trim();
+            if (overrideLogin && overrideLogin.trim()) {
+                params.login = overrideLogin.trim();
+            } else if (validSelectedAccountId) {
+                params.accountId = validSelectedAccountId;
+            }
             const res = await api.get('/mt5/cloud/status', { params });
             setCloudState(res.data);
             setLastUpdatedAt(new Date().toLocaleTimeString());
@@ -136,6 +139,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     };
 
     useEffect(() => {
+        // Quando o usuário troca a conta selecionada no topo, sincroniza os campos com a conta selecionada (se for uma conta MT5)
+        if (validSelectedAccountId) {
+            const selAcc = accounts.find(a => a.id === validSelectedAccountId);
+            if (selAcc?.mt5Id) {
+                setLogin(selAcc.mt5Id);
+                if (selAcc.broker) setServer(selAcc.broker);
+            }
+        }
         fetchCloudStatus();
         const interval = setInterval(() => {
             fetchCloudStatus();
@@ -222,8 +233,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             const res = await api.post('/mt5/cloud/connect', {
                 login: login.trim(),
                 pass: password,
-                server: server.trim(),
-                accountId: validSelectedAccountId
+                server: server.trim()
             });
 
             if (res.data?.server) {

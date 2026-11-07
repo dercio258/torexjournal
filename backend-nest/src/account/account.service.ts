@@ -94,19 +94,34 @@ export class AccountService {
     }
 
     /**
-     * Reconcilia automaticamente contas MT5 sincronizadas para garantir que cada login MT5
-     * possua sua própria Conta de Trading visível para o usuário (sem limite de 3 contas).
+     * Reconcilia e desagrupa automaticamente contas MT5 que tenham sido sobrescritas ou juntadas,
+     * garantindo que:
+     * 1. A "Conta Principal" manual exista separada das contas MT5;
+     * 2. Cada login MT5 válido (ex: 408953138, 202658742) tenha sua própria Conta de Trading exclusiva;
+     * 3. Logs de importação de logins distintos não fiquem misturados na mesma conta;
+     * 4. Contas vazias geradas por erro de digitação (>10 dígitos sem trades e desconectadas) sejam limpas.
      */
     private async reconcileUserMt5Accounts(userId: string): Promise<void> {
         try {
-            // 1. Se houver contas deste usuário com mt5Id mas ainda com nome "Conta Principal" ou arquivadas após sync, corrige o nome
-            const userAllAccounts = await this.accountRepo.find({ where: { userId } });
-            const existingMt5Ids = new Set<string>();
+            let userAllAccounts = await this.accountRepo.find({ where: { userId } });
 
+            // 1. Remove contas vazias geradas por erro de digitação de login (>10 dígitos, desconectada, saldo 0, 0 trades)
+            for (const acc of [...userAllAccounts]) {
+                const cleanMt5 = (acc.mt5Id || '').trim();
+                if (cleanMt5.length >= 11 && !acc.isConnected && Number(acc.balance || 0) === 0) {
+                    const cnt = await this.tradeRepo.count({ where: { accountId: acc.id } });
+                    if (cnt === 0) {
+                        await this.accountRepo.delete({ id: acc.id });
+                        userAllAccounts = userAllAccounts.filter(a => a.id !== acc.id);
+                    }
+                }
+            }
+
+            const existingByMt5 = new Map<string, AccountEntity>();
             for (const acc of userAllAccounts) {
                 if (acc.mt5Id && acc.mt5Id.trim()) {
                     const cleanMt5 = acc.mt5Id.trim();
-                    existingMt5Ids.add(cleanMt5);
+                    existingByMt5.set(cleanMt5, acc);
                     if (!acc.name || acc.name === 'Conta Principal') {
                         acc.name = `MT5 ${cleanMt5}`;
                         await this.accountRepo.save(acc);
@@ -114,8 +129,7 @@ export class AccountService {
                 }
             }
 
-            // 2. Verifica logs de importação (import_logs) e instâncias cloud (cloud_instances) deste usuário
-            // para descobrir logins MT5 que foram sincronizados mas não têm Conta de Trading criada para este userId
+            // 2. Descobre logins MT5 válidos (5 a 10 dígitos) nos logs de importação e instâncias cloud deste usuário
             const discoveredLogins = new Map<string, string>(); // login -> server
 
             try {
@@ -124,49 +138,79 @@ export class AccountService {
                     [userId]
                 );
                 for (const r of cloudRows || []) {
-                    if (r.mt5Id) discoveredLogins.set(String(r.mt5Id).trim(), 'MetaTrader 5');
+                    const loginStr = String(r.mt5Id || '').trim();
+                    if (/^\d{5,10}$/.test(loginStr)) {
+                        discoveredLogins.set(loginStr, 'MetaTrader 5');
+                    }
                 }
             } catch { }
 
             try {
                 const logRows = await this.dataSource.query(
-                    `SELECT details, account_id FROM import_logs WHERE "userId" = $1 ORDER BY "createdAt" DESC LIMIT 50`,
+                    `SELECT id, details, account_id, status FROM import_logs WHERE "userId" = $1 ORDER BY "createdAt" ASC LIMIT 100`,
                     [userId]
                 );
                 for (const row of logRows || []) {
                     const detailsStr = String(row.details || '');
-                    const match = detailsStr.match(/(\d{5,12})@([A-Za-z0-9._-]+)/);
+                    const match = detailsStr.match(/\b(\d{5,10})@([A-Za-z0-9._-]+)/);
                     if (match) {
                         discoveredLogins.set(match[1], match[2]);
                     }
                 }
             } catch { }
 
-            // 3. Para cada login MT5 descoberto do usuário que ainda não esteja na lista dele, vincula ou cria a Conta de Trading
+            // 3. Garante que cada login MT5 descoberto tenha sua própria Conta de Trading separada e corrige o broker se foi sobrescrito
             for (const [mt5Login, serverName] of discoveredLogins.entries()) {
-                if (!mt5Login || existingMt5Ids.has(mt5Login)) continue;
+                const existingAcc = existingByMt5.get(mt5Login);
+                if (existingAcc) {
+                    let changed = false;
+                    if (serverName && serverName !== 'MetaTrader 5' && existingAcc.broker !== serverName) {
+                        existingAcc.broker = serverName;
+                        changed = true;
+                    }
+                    if (!existingAcc.name || existingAcc.name === 'Conta Principal') {
+                        existingAcc.name = `MT5 ${mt5Login}`;
+                        changed = true;
+                    }
+                    if (changed) {
+                        await this.accountRepo.save(existingAcc);
+                    }
+                    continue;
+                }
 
-                const orphanOrOther = await this.accountRepo.findOne({ where: { mt5Id: mt5Login } });
-                if (orphanOrOther && (!orphanOrOther.userId || orphanOrOther.userId === userId || orphanOrOther.name === 'Conta Principal')) {
-                    orphanOrOther.userId = userId;
-                    orphanOrOther.isArchived = false;
-                    orphanOrOther.archivedAt = null;
-                    if (!orphanOrOther.name || orphanOrOther.name === 'Conta Principal') {
-                        orphanOrOther.name = `MT5 ${mt5Login}`;
+                const orphanAcc = await this.accountRepo.findOne({ where: { mt5Id: mt5Login } });
+                if (orphanAcc && (!orphanAcc.userId || orphanAcc.userId === userId)) {
+                    orphanAcc.userId = userId;
+                    orphanAcc.isArchived = false;
+                    orphanAcc.archivedAt = null;
+                    orphanAcc.name = `MT5 ${mt5Login}`;
+                    if (serverName && serverName !== 'MetaTrader 5') {
+                        orphanAcc.broker = serverName;
                     }
-                    if (serverName && (!orphanOrOther.broker || orphanOrOther.broker === 'MetaTrader 5')) {
-                        orphanOrOther.broker = serverName;
-                    }
-                    await this.accountRepo.save(orphanOrOther);
-                    existingMt5Ids.add(mt5Login);
-                } else if (!orphanOrOther) {
-                    const isDemo = serverName.toLowerCase().includes('demo') || serverName.toLowerCase().includes('trial');
+                    const saved = await this.accountRepo.save(orphanAcc);
+                    existingByMt5.set(mt5Login, saved);
+                } else if (!orphanAcc) {
+                    const lowerSrv = (serverName || '').toLowerCase();
+                    const isDemo = lowerSrv.includes('demo') || lowerSrv.includes('trial');
+                    const isProp =
+                        lowerSrv.includes('ftmo') ||
+                        lowerSrv.includes('goatfunded') ||
+                        lowerSrv.includes('fundingpips') ||
+                        lowerSrv.includes('fundednext') ||
+                        lowerSrv.includes('fivepercent') ||
+                        lowerSrv.includes('alphacapital') ||
+                        lowerSrv.includes('maven') ||
+                        lowerSrv.includes('e8markets') ||
+                        lowerSrv.includes('blueguardian') ||
+                        lowerSrv.includes('fxify') ||
+                        lowerSrv.includes('thefundedtrader') ||
+                        lowerSrv.includes('topstep');
                     const newAcc = this.accountRepo.create({
                         userId,
                         mt5Id: mt5Login,
                         name: `MT5 ${mt5Login}`,
                         broker: serverName || 'MetaTrader 5',
-                        type: isDemo ? AccountType.DEMO : AccountType.LIVE,
+                        type: isProp ? AccountType.PROP_FIRM : (isDemo ? AccountType.DEMO : AccountType.LIVE),
                         currency: 'USD',
                         initialBalance: 0,
                         balance: 0,
@@ -175,10 +219,40 @@ export class AccountService {
                         isArchived: false,
                         appToken: this.generateToken()
                     });
-                    await this.accountRepo.save(newAcc);
-                    existingMt5Ids.add(mt5Login);
-                    this.logger.log(`Conta de Trading reconciliada automaticamente para MT5 ${mt5Login} (Usuário: ${userId})`);
+                    const saved = await this.accountRepo.save(newAcc);
+                    existingByMt5.set(mt5Login, saved);
+                    this.logger.log(`Conta de Trading desagrupada/criada automaticamente para MT5 ${mt5Login} (Usuário: ${userId})`);
                 }
+            }
+
+            // 4. Desagrupa import_logs que ficaram misturados em outra conta quando houve sobrescrição antiga
+            for (const [mt5Login, targetAcc] of existingByMt5.entries()) {
+                try {
+                    await this.dataSource.query(
+                        `UPDATE import_logs SET account_id = $1 WHERE "userId" = $2 AND details LIKE $3 AND (account_id IS NULL OR account_id != $1)`,
+                        [targetAcc.id, userId, `%${mt5Login}@%`]
+                    );
+                } catch { }
+            }
+
+            // 5. Se a "Conta Principal" original do usuário foi transformada em conta MT5 no passado,
+            // recria uma "Conta Principal" limpa (sem mt5Id) para manter a conta manual separada das contas MT5
+            const hasCleanManualAccount = userAllAccounts.some(a => !a.mt5Id && !a.isArchived);
+            if (!hasCleanManualAccount && existingByMt5.size > 0) {
+                const manualAcc = this.accountRepo.create({
+                    userId,
+                    name: 'Conta Principal',
+                    broker: 'MetaTrader 5',
+                    type: AccountType.LIVE,
+                    currency: 'USD',
+                    initialBalance: 0,
+                    balance: 0,
+                    equity: 0,
+                    isPrimary: false,
+                    isArchived: false,
+                    appToken: this.generateToken()
+                });
+                await this.accountRepo.save(manualAcc);
             }
         } catch (err: any) {
             this.logger.warn(`Aviso ao reconciliar contas MT5 do usuário ${userId}: ${err.message}`);

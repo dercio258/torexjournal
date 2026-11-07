@@ -157,12 +157,15 @@ export class Mt5Controller {
         const cleanLogin = (body.login || '').toString().trim();
         const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().trim());
 
-        // 1. A cada sincronização/conexão com uma conta MT5, garante uma Conta de Trading exclusiva para este login MT5
-        // (Não sobrescreve a "Conta Principal" nem outras contas existentes, e não é bloqueado por limite de 3 contas)
+        // 1. Isolamento estrito 1-para-1 por (userId, mt5Id):
+        // Cada login MT5 tem sua própria Conta de Trading exclusiva, sem sobrescrever nem juntar com outra conta!
         let account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
 
         if (!account) {
-            account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
+            const orphanByMt5 = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
+            if (orphanByMt5 && (!orphanByMt5.userId || orphanByMt5.userId === req.user.id)) {
+                account = orphanByMt5;
+            }
         }
 
         const lowerSrv = cleanServer.toLowerCase();
@@ -265,22 +268,23 @@ export class Mt5Controller {
         let account: AccountEntity | null = null;
         const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
 
-        if (body.login) {
-            account = await this.accountRepo.findOne({ where: { mt5Id: body.login.trim(), userId: req.user.id } });
+        if (body.login && body.login.trim()) {
+            const targetLogin = body.login.trim();
+            account = await this.accountRepo.findOne({ where: { mt5Id: targetLogin, userId: req.user.id } });
             if (!account) {
-                const existingByMt5 = await this.accountRepo.findOne({ where: { mt5Id: body.login.trim() } });
-                if (existingByMt5) {
+                const existingByMt5 = await this.accountRepo.findOne({ where: { mt5Id: targetLogin } });
+                if (existingByMt5 && (!existingByMt5.userId || existingByMt5.userId === req.user.id)) {
                     existingByMt5.userId = req.user.id;
                     existingByMt5.isArchived = false;
                     if (!existingByMt5.name || existingByMt5.name === 'Conta Principal') {
-                        existingByMt5.name = `MT5 ${body.login.trim()}`;
+                        existingByMt5.name = `MT5 ${targetLogin}`;
                     }
                     account = await this.accountRepo.save(existingByMt5);
-                } else {
+                } else if (!existingByMt5) {
                     const created = this.accountRepo.create({
                         userId: req.user.id,
-                        mt5Id: body.login.trim(),
-                        name: `MT5 ${body.login.trim()}`,
+                        mt5Id: targetLogin,
+                        name: `MT5 ${targetLogin}`,
                         broker: 'MetaTrader 5',
                         type: AccountType.LIVE,
                         currency: 'USD',
@@ -295,15 +299,21 @@ export class Mt5Controller {
                     account = await this.accountRepo.save(created);
                 }
             }
-        }
-        if (!account && validAccountId) {
-            account = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
+        } else if (validAccountId) {
+            const byId = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
+            if (byId && byId.mt5Id) {
+                account = byId;
+            }
         }
         if (!account) {
-            account = await this.accountRepo.findOne({
-                where: { userId: req.user.id, isArchived: false },
-                order: { updatedAt: 'DESC' }
-            });
+            account = await this.accountRepo
+                .createQueryBuilder('acc')
+                .where('acc.userId = :userId', { userId: req.user.id })
+                .andWhere('acc.isArchived = false')
+                .andWhere('acc.mt5Id IS NOT NULL')
+                .andWhere("acc.mt5Id != ''")
+                .orderBy('acc.updatedAt', 'DESC')
+                .getOne();
         }
         const cleanLogin = (body.login || account?.mt5Id || '').toString().trim();
         if (!cleanLogin) {
