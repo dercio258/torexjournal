@@ -162,6 +162,14 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         refreshAccounts();
     }, [refreshAccounts]);
 
+    useEffect(() => {
+        const handleAccountSyncEvent = () => {
+            refreshAccounts();
+        };
+        window.addEventListener('trade-imported', handleAccountSyncEvent);
+        return () => window.removeEventListener('trade-imported', handleAccountSyncEvent);
+    }, [refreshAccounts]);
+
     const selectAccount = (id: string) => {
         setSelectedAccountId(id);
         localStorage.setItem('torex_selected_account_id', id);
@@ -181,11 +189,12 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? null
         : accounts.find(a => a.id === selectedAccountId) || null;
 
-    const canCreateAccount = accounts.length < 3;
+    const activeAccountsCount = accounts.filter(a => !a.isArchived).length;
+    const canCreateAccount = activeAccountsCount < 50;
 
     const createAccount = async (data: Partial<TradingAccount>) => {
-        if (accounts.length >= 3) {
-            throw new Error('Limite de 3 contas atingido.');
+        if (activeAccountsCount >= 50) {
+            throw new Error('Limite máximo de contas de trading atingido.');
         }
         const res = await api.post('/accounts', data);
         const newAccount: TradingAccount = res.data;
@@ -251,7 +260,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     const openCreateModal = () => {
-        if (accounts.length >= 3) {
+        if (!canCreateAccount) {
             setEditingAccount(null);
             setActiveManagerTab('accounts');
             setIsManagerOpen(true);
@@ -263,7 +272,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     const openManageModal = (tab: 'accounts' | 'create' | 'transactions' = 'accounts') => {
-        if (tab === 'create' && accounts.length >= 3) {
+        if (tab === 'create' && !canCreateAccount) {
             tab = 'accounts';
         }
         setActiveManagerTab(tab);

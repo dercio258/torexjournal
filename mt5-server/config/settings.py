@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     sync_interval_seconds: int = Field(default=10, alias="SYNC_INTERVAL_SECONDS")
     
     # Capacity & Paths
-    max_accounts: int = Field(default=10, alias="MAX_ACCOUNTS")
+    max_accounts: int = Field(default=100, alias="MAX_ACCOUNTS")
     mt5_default_path: str = Field(default=r"C:\Program Files\MetaTrader 5\terminal64.exe", alias="MT5_DEFAULT_PATH")
     instances_dir: str = Field(default=str(BASE_DIR / "instances"), alias="INSTANCES_DIR")
     data_dir: str = Field(default=str(BASE_DIR / "data"), alias="DATA_DIR")

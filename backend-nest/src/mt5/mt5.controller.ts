@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, UseGuards, Req, Headers, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { randomUUID } from 'crypto';
 import { AppTokenGuard } from '../auth/app-token.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Mt5Service } from './mt5.service';
@@ -13,7 +14,7 @@ import { Mt5TcpServer } from '../mt5-tcp.server';
 
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AccountEntity } from '../account/account.entity';
+import { AccountEntity, AccountType } from '../account/account.entity';
 import { Mt5WorkerService, WorkerTaskType } from './worker/mt5-worker.service';
 
 @Controller('mt5')
@@ -29,6 +30,10 @@ export class Mt5Controller {
         @InjectRepository(AccountEntity)
         private readonly accountRepo: Repository<AccountEntity>,
     ) { }
+
+    private isValidUuid(id?: string): boolean {
+        return !!id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+    }
 
     @Get('import-history')
     @UseGuards(JwtAuthGuard, PlanGuard)
@@ -47,12 +52,11 @@ export class Mt5Controller {
     @Post('data')
     @HttpCode(200)
     async syncData(@Body() data: Mt5DataDto) {
-        // ... (rest same)
         await this.mt5Queue.add('sync-data', data, {
-            removeOnComplete: true, // Auto removal of completed jobs
-            removeOnFail: 100,      // Keep last 100 failed jobs
+            removeOnComplete: true,
+            removeOnFail: 100,
             attempts: 3,
-            backoff: 1000 // Retry delay
+            backoff: 1000
         });
         return { success: true, queued: true };
     }
@@ -75,7 +79,7 @@ export class Mt5Controller {
     }
 
     @Post(':id/command')
-    @UseGuards(JwtAuthGuard) // Protect with admin guard later
+    @UseGuards(JwtAuthGuard)
     async sendCommand(@Param('id') id: string, @Body() body: { type: number, payload?: string }) {
         const success = this.mt5TcpServer.sendCommand(id, body.type, body.payload);
         if (!success) {
@@ -84,7 +88,7 @@ export class Mt5Controller {
         return { success: true, message: `Command ${body.type} sent to ${id}` };
     }
 
-    @Post('journal/:ticket') // Using POST for simplicity or PATCH
+    @Post('journal/:ticket')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PREMIUM)
     async updateJournal(@Body() data: any, @Param('ticket') ticket: string, @Req() req) {
@@ -151,36 +155,80 @@ export class Mt5Controller {
     @RequirePlan(PlanTier.PREMIUM)
     async connectCloud(@Body() body: { login: string; pass: string; server: string; accountId?: string }, @Req() req) {
         const cleanLogin = (body.login || '').toString().trim();
-        const cleanServer = (body.server || '').toString().trim();
+        const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().trim());
+        const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
 
-        // 1. Ensure user has an account record in database
+        // 1. Ensure user has an active trading account record in database linked to this MT5 login
         let account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId: req.user.id } });
-        if (!account && body.accountId) {
-            const selectedAcc = await this.accountRepo.findOne({ where: { id: body.accountId, userId: req.user.id } });
+
+        // Se o usuário selecionou uma conta específica que ainda não tem mt5Id vinculado, vincula a ela
+        if (!account && validAccountId) {
+            const selectedAcc = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
             if (selectedAcc && (!selectedAcc.mt5Id || selectedAcc.mt5Id === cleanLogin)) {
                 selectedAcc.mt5Id = cleanLogin;
                 selectedAcc.broker = cleanServer || selectedAcc.broker;
+                selectedAcc.isArchived = false;
+                selectedAcc.archivedAt = null;
+                if (!selectedAcc.name || selectedAcc.name === 'Conta Principal') {
+                    selectedAcc.name = `MT5 ${cleanLogin}`;
+                }
                 account = await this.accountRepo.save(selectedAcc);
             }
         }
+
+        // Se ainda não encontrou, verifica se existe uma conta padrão ("Conta Principal") do usuário sem mt5Id vinculado
+        if (!account) {
+            const unboundAcc = await this.accountRepo.findOne({
+                where: { userId: req.user.id, isArchived: false },
+                order: { isPrimary: 'DESC', createdAt: 'ASC' }
+            });
+            if (unboundAcc && !unboundAcc.mt5Id) {
+                unboundAcc.mt5Id = cleanLogin;
+                unboundAcc.broker = cleanServer || unboundAcc.broker;
+                if (!unboundAcc.name || unboundAcc.name === 'Conta Principal') {
+                    unboundAcc.name = `MT5 ${cleanLogin}`;
+                }
+                account = await this.accountRepo.save(unboundAcc);
+            }
+        }
+
+        // Se não encontrou nas contas do usuário, verifica se esse mt5Id já existe na tabela
         if (!account) {
             account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin } });
         }
+
+        const isDemoServer = cleanServer.toLowerCase().includes('demo') || cleanServer.toLowerCase().includes('trial');
+        const activeUserAccountsCount = await this.accountRepo.count({ where: { userId: req.user.id, isArchived: false } });
+
         if (!account) {
             account = this.accountRepo.create({
                 userId: req.user.id,
                 mt5Id: cleanLogin,
-                broker: cleanServer,
+                broker: cleanServer || 'MetaTrader 5',
                 name: `MT5 ${cleanLogin}`,
+                type: isDemoServer ? AccountType.DEMO : AccountType.LIVE,
+                currency: 'USD',
+                isPrimary: activeUserAccountsCount === 0,
+                isArchived: false,
+                archivedAt: null,
                 isConnected: false,
+                initialBalance: 0,
                 balance: 0,
-                equity: 0
+                equity: 0,
+                appToken: randomUUID().replace(/-/g, '').toUpperCase()
             });
-            await this.accountRepo.save(account);
+            account = await this.accountRepo.save(account);
+            this.logger.log(`Nova Conta de Trading criada automaticamente para conexão MT5: ${account.name} (ID: ${account.id}, User: ${req.user.id})`);
         } else {
-            account.userId = account.userId || req.user.id;
+            // Garante que a conta pertença ao usuário autenticado e esteja ativa (não arquivada)
+            account.userId = req.user.id;
+            account.isArchived = false;
+            account.archivedAt = null;
             if (cleanServer) account.broker = cleanServer;
-            await this.accountRepo.save(account);
+            if (!account.appToken) {
+                account.appToken = randomUUID().replace(/-/g, '').toUpperCase();
+            }
+            account = await this.accountRepo.save(account);
         }
 
         // 2. Dispatch task for the Python Worker on Windows Server
@@ -190,7 +238,8 @@ export class Mt5Controller {
             cleanLogin,
             cleanServer,
             body.pass,
-            numId
+            numId,
+            { userId: req.user.id, accountUuid: account.id }
         );
 
         this.logger.log(
@@ -211,6 +260,7 @@ export class Mt5Controller {
             taskId: task.id,
             task,
             accountId: account.id,
+            account,
             server: task.server,
             instance: localInstance
         };
@@ -221,8 +271,9 @@ export class Mt5Controller {
     @RequirePlan(PlanTier.PREMIUM)
     async syncCloud(@Body() body: { login?: string; accountId?: string; forceFull?: boolean }, @Req() req) {
         let account: AccountEntity | null = null;
-        if (body.accountId) {
-            account = await this.accountRepo.findOne({ where: { id: body.accountId, userId: req.user.id } });
+        const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
+        if (validAccountId) {
+            account = await this.accountRepo.findOne({ where: { id: validAccountId, userId: req.user.id } });
         }
         if (!account && body.login) {
             account = await this.accountRepo.findOne({ where: { mt5Id: body.login.trim(), userId: req.user.id } });
@@ -244,13 +295,15 @@ export class Mt5Controller {
             cleanLogin,
             account?.broker || '',
             undefined,
-            numId
+            numId,
+            { userId: req.user.id, accountUuid: account?.id }
         );
         return {
             success: true,
             message: 'Sincronização solicitada ao servidor Windows MT5!',
             taskId: task.id,
-            task
+            task,
+            accountId: account?.id
         };
     }
 

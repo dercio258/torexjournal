@@ -38,7 +38,8 @@ interface AutoSyncFormProps {
 }
 
 export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFormProps) => {
-    const { selectedAccountId, refreshAccounts } = useAccount();
+    const { selectedAccountId, refreshAccounts, selectAccount } = useAccount();
+    const validSelectedAccountId = selectedAccountId && selectedAccountId !== 'all' ? selectedAccountId : undefined;
     const [login, setLogin] = useState('');
     const [password, setPassword] = useState('');
     const [server, setServer] = useState(serverName);
@@ -111,7 +112,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const fetchCloudStatus = async (overrideLogin?: string) => {
         try {
             const params: Record<string, string> = {};
-            if (selectedAccountId) params.accountId = selectedAccountId;
+            if (validSelectedAccountId) params.accountId = validSelectedAccountId;
             if (overrideLogin || login) params.login = (overrideLogin || login).trim();
             const res = await api.get('/mt5/cloud/status', { params });
             setCloudState(res.data);
@@ -178,6 +179,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     });
                     await fetchCloudStatus(targetLogin);
                     if (refreshAccounts) await refreshAccounts();
+                    if (res.data?.account?.id && selectAccount) {
+                        selectAccount(res.data.account.id);
+                    }
                     window.dispatchEvent(new Event('trade-imported'));
                 } else if (task.status === 'FAILED') {
                     clearInterval(pollTimerRef.current);
@@ -213,7 +217,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 login: login.trim(),
                 pass: password,
                 server: server.trim(),
-                accountId: selectedAccountId || undefined
+                accountId: validSelectedAccountId
             });
 
             if (res.data?.server) {
@@ -228,6 +232,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 message: confirmationMsg
             });
 
+            // Atualiza imediatamente a lista de Contas de Trading e seleciona a conta recém-vinculada/criada
+            if (refreshAccounts) {
+                await refreshAccounts();
+            }
+            if (res.data?.accountId && selectAccount) {
+                selectAccount(res.data.accountId);
+            }
+
             // Carrega imediatamente o estado inicial do backend
             await fetchCloudStatus(login.trim());
 
@@ -235,7 +247,6 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 startTaskPolling(res.data.taskId, login.trim());
             } else {
                 setIsLoading(false);
-                if (refreshAccounts) await refreshAccounts();
                 window.dispatchEvent(new Event('trade-imported'));
             }
         } catch (e: any) {
@@ -264,7 +275,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         try {
             const res = await api.post('/mt5/cloud/sync', {
                 login: targetLogin,
-                accountId: cloudState?.account?.id || selectedAccountId,
+                accountId: cloudState?.account?.id || validSelectedAccountId,
                 forceFull
             });
             await fetchCloudStatus(targetLogin);
@@ -290,7 +301,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         try {
             await api.post('/mt5/cloud/disconnect', {
                 login: targetLogin,
-                accountId: cloudState?.account?.id || selectedAccountId
+                accountId: cloudState?.account?.id || validSelectedAccountId
             });
             setRequestFeedback(null);
             setStatus({

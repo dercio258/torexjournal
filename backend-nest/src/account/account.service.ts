@@ -73,12 +73,7 @@ export class AccountService {
         }
 
         if (!account) {
-            const totalCount = await this.accountRepo.count({ where: { userId } });
-            if (totalCount >= 3) {
-                return this.accountRepo.findOne({ where: { userId }, order: { createdAt: 'ASC' } });
-            }
-
-            // Cria uma conta padrão inicial se o usuário ainda não possuir nenhuma
+            // Cria uma conta padrão inicial se o usuário ainda não possuir nenhuma conta ativa
             account = this.accountRepo.create({
                 userId,
                 name: 'Conta Principal',
@@ -168,13 +163,13 @@ export class AccountService {
      * Cria uma nova conta de trading independente
      */
     async createAccount(userId: string, dto: CreateAccountDto) {
-        const existingCount = await this.accountRepo.count({ where: { userId } });
-        if (existingCount >= 3) {
-            this.logger.warn(`Limite de 3 contas atingido para o usuário ${userId}.`);
-            throw new BadRequestException('Cada usuário só pode ter no máximo 3 contas de trading.');
+        const activeCount = await this.accountRepo.count({ where: { userId, isArchived: false } });
+        if (activeCount >= 50) {
+            this.logger.warn(`Limite de 50 contas ativas atingido para o usuário ${userId}.`);
+            throw new BadRequestException('Limite máximo de contas de trading ativas atingido.');
         }
 
-        const isFirstAccount = existingCount === 0;
+        const isFirstAccount = activeCount === 0;
         const initialBalance = dto.initialBalance ? Number(dto.initialBalance) : 0;
 
         const account = this.accountRepo.create({
@@ -439,8 +434,9 @@ export class AccountService {
      */
     async resetConnection(userId: string, accountId?: string) {
         let account: AccountEntity;
-        if (accountId) {
-            account = await this.validateAccountOwnership(accountId, userId);
+        const isUuid = !!accountId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId.trim());
+        if (isUuid) {
+            account = await this.validateAccountOwnership(accountId.trim(), userId);
         } else {
             account = await this.findOneByUserId(userId);
         }
