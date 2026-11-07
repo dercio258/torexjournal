@@ -825,6 +825,25 @@ class SyncEngine:
                 logger.critical(err_msg)
                 raise ResourceExhaustionError(err_msg, res, operation="fetch_orders", account_id=account_id)
 
+    def _get_broker_utc_offset_seconds(self) -> int:
+        """
+        Estima o offset do fuso horário do servidor da corretora (em segundos) em relação ao UTC
+        arredondado para múltiplos de 30 minutos (1800s), evitando deslocamento de 2-3h nos deals MT5.
+        """
+        if not MT5_AVAILABLE:
+            return 0
+        try:
+            now_utc_ts = time.time()
+            for sym in ("EURUSD", "XAUUSD", "BTCUSD", "GBPUSD", "USDJPY"):
+                tick = mt5.symbol_info_tick(sym)
+                if tick and getattr(tick, "time", 0) > 0:
+                    diff = float(tick.time) - now_utc_ts
+                    if abs(diff) <= 14 * 3600:
+                        return int(round(diff / 1800.0) * 1800)
+        except Exception:
+            pass
+        return 0
+
     def _find_entry_deal(self, position_id: int, cached_entries: Dict[int, Any]) -> Optional[Any]:
         """Localiza o deal de abertura (DEAL_ENTRY_IN) de uma posição para reconstruir preço/hora de entrada."""
         if not position_id:
@@ -930,6 +949,8 @@ class SyncEngine:
                     elif d.entry in (1, 2, 3) and d.position_id:
                         out_count_by_position[d.position_id] = out_count_by_position.get(d.position_id, 0) + 1
 
+                broker_offset_sec = self._get_broker_utc_offset_seconds()
+
                 for d in deals:
                     if d.ticket <= last_deal_ticket:
                         continue
@@ -942,9 +963,9 @@ class SyncEngine:
                     entry_type = DEAL_ENTRY_MAP.get(d.entry, "DEAL_ENTRY_OUT")
                     raw_deal_type = DEAL_TYPE_MAP.get(d.type, "DEAL_TYPE_BALANCE")
 
-                    close_time = datetime.datetime.fromtimestamp(d.time, tz=datetime.timezone.utc)
+                    close_time = datetime.datetime.fromtimestamp(max(0, d.time - broker_offset_sec), tz=datetime.timezone.utc)
                     open_price = d.price
-                    open_time = close_time - datetime.timedelta(seconds=60)
+                    open_time = None
                     total_commission = float(d.commission or 0.0) + float(getattr(d, "fee", 0.0) or 0.0)
                     trade_direction = raw_deal_type
 
@@ -952,7 +973,7 @@ class SyncEngine:
                         entry_deal = self._find_entry_deal(d.position_id, entry_by_position)
                         if entry_deal is not None:
                             open_price = float(entry_deal.price)
-                            open_time = datetime.datetime.fromtimestamp(entry_deal.time, tz=datetime.timezone.utc)
+                            open_time = datetime.datetime.fromtimestamp(max(0, entry_deal.time - broker_offset_sec), tz=datetime.timezone.utc)
                             # Soma a comissão cobrada na abertura quando não houver múltiplas saídas parciais
                             if out_count_by_position.get(d.position_id, 1) <= 1:
                                 total_commission += float(entry_deal.commission or 0.0) + float(getattr(entry_deal, "fee", 0.0) or 0.0)

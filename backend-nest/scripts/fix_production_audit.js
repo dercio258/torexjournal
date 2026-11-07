@@ -1,6 +1,6 @@
 /**
- * Script de Correcao Completa da Auditoria Tecnica (PostgreSQL)
- * Corrige em producao os itens identificados em docs/AUDITORIA_MT5_SYNC_2026-11-08.md:
+ * Script de Correcao Completa da Auditoria Tecnica (PostgreSQL + ClickHouse)
+ * Corrige em producao todos os itens de dados identificados em docs/AUDITORIA_MT5_SYNC_2026-11-08.md:
  *  - A7: Remove ordens pendentes importadas por engano (buy limit / ticket='2026')
  *  - A7: Normaliza 100% de trades.type para 'BUY' | 'SELL' (corrige 97% dos trades que apareciam como SELL na UI)
  *  - A7: Corrige close_time invalido no futuro (ano 4179) para open_time com dataQuality='partial'
@@ -8,6 +8,7 @@
  *  - C2: Corrige import_logs onde userId divergia do dono real da conta
  *  - A4: Corrige initial_balance = 0 nas contas com saldo/trades
  *  - C2/M3: Cria indice unico uq_accounts_user_mt5_server e idx_import_logs_user_account
+ *  - A5: Faz backfill completo dos 228+ trades faltantes e atualizados do PostgreSQL para o ClickHouse (TOREXJ)
  *
  * Uso na VPS Linux:
  *   node backend-nest/scripts/fix_production_audit.js
@@ -17,13 +18,21 @@ const path = require('path');
 const crypto = require('crypto');
 const dotenv = require('dotenv');
 const { Client } = require('pg');
+const { createClient } = require('@clickhouse/client');
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+function formatClickHouseDate(d) {
+    if (!d) return null;
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return null;
+    return dt.toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
+}
+
 async function runAuditFixes() {
     console.log('================================================================================');
-    console.log(' CORRECAO COMPLETA DA AUDITORIA DE PRODUCAO (POSTGRESQL)');
+    console.log(' CORRECAO COMPLETA DA AUDITORIA DE PRODUCAO (POSTGRESQL + CLICKHOUSE)');
     console.log(' Timestamp:', new Date().toISOString());
     console.log('================================================================================\n');
 
@@ -37,7 +46,27 @@ async function runAuditFixes() {
 
     const pg = new Client(pgConfig);
     await pg.connect();
-    console.log(`[OK] Conectado ao PostgreSQL: ${pgConfig.host}:${pgConfig.port}/${pgConfig.database}\n`);
+    console.log(`[OK] Conectado ao PostgreSQL: ${pgConfig.host}:${pgConfig.port}/${pgConfig.database}`);
+
+    let ch = null;
+    const chHost = process.env.CLICKHOUSE_HOST || 'http://localhost:8123';
+    const chUser = process.env.CLICKHOUSE_USER || 'default';
+    const chPassword = process.env.CLICKHOUSE_PASSWORD || '';
+    const chDatabase = process.env.CLICKHOUSE_DATABASE || process.env.CLICKHOUSE_DB || 'default';
+
+    try {
+        ch = createClient({
+            url: chHost,
+            username: chUser,
+            password: chPassword,
+            database: chDatabase,
+        });
+        await ch.query({ query: 'SELECT 1', format: 'JSONEachRow' });
+        console.log(`[OK] Conectado ao ClickHouse: ${chHost} (db=${chDatabase})\n`);
+    } catch (err) {
+        console.warn(`[AVISO] ClickHouse indisponivel (${chHost}): ${err.message}\n`);
+        ch = null;
+    }
 
     try {
         await pg.query('BEGIN');
@@ -50,7 +79,7 @@ async function runAuditFixes() {
                 OR ticket = '2026'
              RETURNING id, account_id, ticket, symbol, type`
         );
-        console.log(`[1/7] Ordens pendentes/invalidas removidas de trades: ${delPending.rowCount}`, delPending.rows);
+        console.log(`[1/8] Ordens pendentes/invalidas removidas de trades: ${delPending.rowCount}`, delPending.rows);
 
         // 2. A7: Normalizar todos os trades.type para 'BUY' ou 'SELL'
         const normTypes = await pg.query(
@@ -61,7 +90,7 @@ async function runAuditFixes() {
              END
              WHERE type NOT IN ('BUY', 'SELL')`
         );
-        console.log(`[2/7] Trades com coluna 'type' padronizada para 'BUY' | 'SELL': ${normTypes.rowCount} linhas atualizadas.`);
+        console.log(`[2/8] Trades com coluna 'type' padronizada para 'BUY' | 'SELL': ${normTypes.rowCount} linhas atualizadas.`);
 
         // 3. A7: Corrigir close_time invalido no futuro (ex: 4179-05-01)
         const fixFutureClose = await pg.query(
@@ -71,7 +100,7 @@ async function runAuditFixes() {
              WHERE close_time > NOW() + INTERVAL '2 days'
              RETURNING id, ticket, symbol, open_time, close_time`
         );
-        console.log(`[3/7] Trades com close_time no futuro corrigidos: ${fixFutureClose.rowCount}`, fixFutureClose.rows);
+        console.log(`[3/8] Trades com close_time no futuro corrigidos: ${fixFutureClose.rowCount}`, fixFutureClose.rows);
 
         // 4. C3: Preencher app_token nas contas onde esta NULL ou vazio
         const nullTokenAccs = await pg.query(
@@ -81,7 +110,7 @@ async function runAuditFixes() {
             const newToken = crypto.randomUUID().replace(/-/g, '').toUpperCase();
             await pg.query(`UPDATE accounts SET app_token = $1 WHERE id = $2`, [newToken, acc.id]);
         }
-        console.log(`[4/7] Contas com app_token NULL protegidas com novo token: ${nullTokenAccs.rowCount}`);
+        console.log(`[4/8] Contas com app_token NULL protegidas com novo token: ${nullTokenAccs.rowCount}`);
 
         // 5. C2: Alinhar userId residual em import_logs com o dono real da conta (accounts.user_id)
         const fixImportLogsOwner = await pg.query(
@@ -92,7 +121,7 @@ async function runAuditFixes() {
                AND i."userId"::text <> a.user_id::text
              RETURNING i.id, i.account_id, i."userId"`
         );
-        console.log(`[5/7] Registros de import_logs realinhados ao dono real da conta: ${fixImportLogsOwner.rowCount}`, fixImportLogsOwner.rows);
+        console.log(`[5/8] Registros de import_logs realinhados ao dono real da conta: ${fixImportLogsOwner.rowCount}`, fixImportLogsOwner.rows);
 
         // 6. A4: Ajustar initial_balance onde initial_balance = 0 e ha saldo positivo (ex: GoatFunded 419096791)
         const fixInitialBal = await pg.query(
@@ -119,10 +148,10 @@ async function runAuditFixes() {
                AND COALESCE(balance, 0) > 0
              RETURNING id, name, initial_balance, balance`
         );
-        console.log(`[6/7] Contas com initial_balance recalculado: ${fixInitialBal.rowCount + fixZeroTradeInitialBal.rowCount}`);
+        console.log(`[6/8] Contas com initial_balance recalculado: ${fixInitialBal.rowCount + fixZeroTradeInitialBal.rowCount}`);
 
         await pg.query('COMMIT');
-        console.log('[OK] Transacao de saneamento concluida com sucesso!\n');
+        console.log('[OK] Transacao PostgreSQL concluida com sucesso!\n');
 
         // 7. C2 & M3: Criar indices no PostgreSQL
         const indexStatements = [
@@ -137,7 +166,64 @@ async function runAuditFixes() {
 
         for (const sql of indexStatements) {
             await pg.query(sql);
-            console.log(`[7/7 OK] ${sql}`);
+            console.log(`[7/8 OK] ${sql}`);
+        }
+
+        // 8. A5: Backfill e sincronizacao completa PostgreSQL -> ClickHouse (TOREXJ.trades)
+        if (ch) {
+            if (delPending.rows.length > 0) {
+                const delIds = delPending.rows.map(r => String(r.id));
+                await ch.command({
+                    query: `ALTER TABLE trades DELETE WHERE id IN ({delIds:Array(String)})`,
+                    query_params: { delIds }
+                }).catch(() => {});
+            }
+
+            const allPgTrades = await pg.query(`SELECT * FROM trades`);
+            const nowStr = formatClickHouseDate(new Date());
+            const chRows = allPgTrades.rows.map(t => ({
+                id: String(t.id),
+                accountId: String(t.account_id || ''),
+                ticket: String(t.ticket || t.contractId || t.id || ''),
+                contractId: t.contractId ? String(t.contractId) : null,
+                symbol: String(t.symbol || ''),
+                type: String(t.type || 'BUY'),
+                volume: Number(t.volume || 0),
+                openPrice: Number(t.open_price || 0),
+                closePrice: Number(t.close_price || 0),
+                profit: Number(t.profit || 0),
+                sl: t.sl !== null && t.sl !== undefined ? Number(t.sl) : null,
+                tp: t.tp !== null && t.tp !== undefined ? Number(t.tp) : null,
+                commission: Number(t.commission || 0),
+                swap: Number(t.swap || 0),
+                openTime: formatClickHouseDate(t.open_time) || nowStr,
+                closeTime: formatClickHouseDate(t.close_time),
+                status: String(t.status || 'CLOSED'),
+                magic: t.magic !== null && t.magic !== undefined ? Number(t.magic) : null,
+                comment: t.comment ? String(t.comment) : null,
+                session: t.session ? String(t.session) : null,
+                mood: t.mood ? String(t.mood) : null,
+                rating: t.rating !== null && t.rating !== undefined ? Number(t.rating) : null,
+                setup: t.setup ? String(t.setup) : null,
+                lesson: t.lesson ? String(t.lesson) : null,
+                tags: Array.isArray(t.tags) ? t.tags.map(String) : [],
+                dataQuality: String(t.dataQuality || 'OK'),
+                importLogId: t.import_log_id !== null && t.import_log_id !== undefined ? Number(t.import_log_id) : null,
+                updatedAt: nowStr,
+            }));
+
+            const batchSize = 500;
+            for (let i = 0; i < chRows.length; i += batchSize) {
+                await ch.insert({
+                    table: 'trades',
+                    values: chRows.slice(i, i + batchSize),
+                    format: 'JSONEachRow',
+                });
+            }
+            await ch.command({ query: 'OPTIMIZE TABLE trades FINAL' }).catch(() => {});
+            const chCountRes = await ch.query({ query: 'SELECT count() AS total FROM trades FINAL', format: 'JSONEachRow' });
+            const chCountData = await chCountRes.json();
+            console.log(`\n[8/8 OK] Backfill ClickHouse concluido! Total PG: ${chRows.length} | Total ClickHouse FINAL: ${chCountData[0]?.total}`);
         }
 
         // Verificacao final de distribuicao de tipos de trades
@@ -150,6 +236,7 @@ async function runAuditFixes() {
         console.error('\n[ERRO NA CORRECAO DA AUDITORIA]:', err);
     } finally {
         await pg.end();
+        if (ch) await ch.close();
     }
 }
 

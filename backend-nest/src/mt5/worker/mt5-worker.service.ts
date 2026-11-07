@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -102,11 +102,11 @@ export interface WorkerEventRecord {
 }
 
 @Injectable()
-export class Mt5WorkerService {
+export class Mt5WorkerService implements OnModuleInit {
     private readonly logger = new Logger(Mt5WorkerService.name);
     private readonly auditLogger = new Logger('MT5AuditTrail');
 
-    // In-memory queues & telemetry state
+    // In-memory queues & telemetry state (hydrated from PostgreSQL on startup)
     private pendingTasks: Map<string, WorkerTask> = new Map();
     private credentialsStore: Map<string, TemporaryCredential> = new Map();
     private workers: Map<string, WorkerNodeState> = new Map();
@@ -126,6 +126,50 @@ export class Mt5WorkerService {
         private readonly mt5Service: Mt5Service,
         private readonly mt5Gateway: Mt5Gateway,
     ) { }
+
+    async onModuleInit() {
+        try {
+            const mt5Accounts = await this.accountRepo.find({
+                where: { isArchived: false }
+            });
+            let hydratedCount = 0;
+            for (const acc of mt5Accounts) {
+                const cleanLogin = (acc.mt5Id || '').toString().trim();
+                if (!cleanLogin || !acc.userId) continue;
+                this.loginToUserMap.set(cleanLogin, {
+                    userId: acc.userId,
+                    accountUuid: acc.id,
+                    server: acc.broker || '',
+                });
+                if (!this.accountTelemetry.has(cleanLogin)) {
+                    this.accountTelemetry.set(cleanLogin, {
+                        login: cleanLogin,
+                        server: acc.broker || '',
+                        connected: Boolean(acc.isConnected),
+                        connectionState: acc.isConnected ? 'CONNECTED' : 'DISCONNECTED',
+                        lastSyncAt: acc.lastSeen ? new Date(acc.lastSeen).toISOString() : undefined,
+                    });
+                }
+                hydratedCount++;
+            }
+            this.logger.log(`Hydrated ${hydratedCount} MT5 account mappings from PostgreSQL on startup.`);
+        } catch (err) {
+            this.logger.warn(`Failed to hydrate MT5 account mappings on startup: ${err.message}`);
+        }
+    }
+
+    public deriveNumericAccountId(login: string, fallback?: number): number {
+        if (fallback && fallback > 0) return fallback;
+        const digitsOnly = (login || '').replace(/\D/g, '');
+        const parsed = parseInt(digitsOnly, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+        let hash = 5381;
+        for (let i = 0; i < (login || '').length; i++) {
+            hash = ((hash << 5) + hash) + login.charCodeAt(i);
+            hash = hash & 0x7fffffff;
+        }
+        return hash > 0 ? hash : 1;
+    }
 
     public normalizeBrokerServer(server: string): string {
         const s = (server || '').trim();
@@ -280,7 +324,7 @@ export class Mt5WorkerService {
         }
 
         const taskId = randomUUID();
-        const numericAccId = accountIdNum || parseInt(cleanLogin.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000000);
+        const numericAccId = this.deriveNumericAccountId(cleanLogin, accountIdNum);
 
         let credentialToken: string | undefined = undefined;
         if (password) {
@@ -951,46 +995,27 @@ export class Mt5WorkerService {
         const workersList = this.getWorkerStatus() as WorkerNodeState[];
         const primaryWorker = Array.isArray(workersList) && workersList.length > 0 ? workersList[0] : null;
 
-        let account: AccountEntity | null = null;
-
-        // 1. Se login explícito foi informado, busca estritamente dentro do escopo de userId
-        if (login && login.trim()) {
-            const cleanLogin = login.trim();
-            account = await this.accountRepo.findOne({ where: { mt5Id: cleanLogin, userId } });
-        }
-
-        // 2. Se accountId válido foi informado, busca essa conta (mas se for "Conta Principal" sem mt5Id, prefere uma conta MT5 conectada do usuário)
-        if (!account && this.isValidUuid(accountId)) {
-            const byId = await this.accountRepo.findOne({ where: { id: accountId!.trim(), userId } });
-            if (byId && byId.mt5Id) {
-                account = byId;
-            } else if (byId) {
-                // Verifica se o usuário possui alguma conta MT5 já sincronizada antes de cair na "Conta Principal" vazia
-                const mt5Candidate = await this.accountRepo.findOne({
-                    where: { userId, isArchived: false, isConnected: true },
-                    order: { updatedAt: 'DESC' }
-                });
-                if (mt5Candidate && mt5Candidate.mt5Id) {
-                    account = mt5Candidate;
-                } else {
-                    const anyMt5 = await this.accountRepo
-                        .createQueryBuilder('acc')
-                        .where('acc.userId = :userId', { userId })
-                        .andWhere('acc.isArchived = false')
-                        .andWhere('acc.mt5Id IS NOT NULL')
-                        .andWhere("acc.mt5Id != ''")
-                        .orderBy('acc.updatedAt', 'DESC')
-                        .getOne();
-                    account = anyMt5 || byId;
-                }
-            }
-        }
-
-        // 3. Fallback: procura qualquer conta MT5 do usuário
+        // 1. Carrega todas as contas não arquivadas do usuário em 1 única query e resolve em memória (M7)
         const userAccounts = await this.accountRepo.find({
             where: { userId, isArchived: false },
             order: { updatedAt: 'DESC' }
         });
+
+        let account: AccountEntity | null = null;
+        if (login && login.trim()) {
+            const cleanLogin = login.trim();
+            account = userAccounts.find(a => a.mt5Id === cleanLogin) || null;
+        }
+        if (!account && this.isValidUuid(accountId)) {
+            const byId = userAccounts.find(a => a.id === accountId!.trim()) || null;
+            if (byId && byId.mt5Id) {
+                account = byId;
+            } else if (byId) {
+                account = userAccounts.find(a => !!a.mt5Id && a.isConnected)
+                    || userAccounts.find(a => !!a.mt5Id)
+                    || byId;
+            }
+        }
         if (!account) {
             account = userAccounts.find(a => !!a.mt5Id && a.isConnected)
                 || userAccounts.find(a => !!a.mt5Id)
@@ -1020,25 +1045,29 @@ export class Mt5WorkerService {
         // Usa estritamente o mt5Id da própria conta encontrada para evitar misturar telemetria/eventos de logins diferentes
         const mt5Login = account?.mt5Id || (login && !account ? login.trim() : '');
         const telemetry = mt5Login ? this.accountTelemetry.get(mt5Login) || null : null;
-        const activeTask = mt5Login ? this.getLatestTaskForLogin(mt5Login) : null;
-        const positions = account ? await this.positionRepo.find({ where: { accountId: account.id } }) : [];
-        const totalTradesCount = account
-            ? await this.tradeRepo.count({ where: { accountId: account.id } })
-            : 0;
-        const recentTrades = account
-            ? await this.tradeRepo.find({
-                where: { accountId: account.id },
-                order: { closeTime: 'DESC', openTime: 'DESC' },
-                take: 15,
-            })
-            : [];
-        const auditLogs = account
-            ? await this.importLogRepo.find({
-                where: { accountId: account.id },
-                order: { createdAt: 'DESC' },
-                take: 10,
-            })
-            : [];
+        const rawActiveTask = mt5Login ? this.getLatestTaskForLogin(mt5Login) : null;
+        const activeTask = rawActiveTask ? (() => {
+            const { credentialToken, ...safeTask } = rawActiveTask;
+            return safeTask;
+        })() : null;
+
+        const [positions, totalTradesCount, recentTrades, auditLogs] = account
+            ? await Promise.all([
+                this.positionRepo.find({ where: { accountId: account.id } }),
+                this.tradeRepo.count({ where: { accountId: account.id } }),
+                this.tradeRepo.find({
+                    where: { accountId: account.id },
+                    order: { closeTime: 'DESC', openTime: 'DESC' },
+                    take: 15,
+                }),
+                this.importLogRepo.find({
+                    where: { accountId: account.id },
+                    order: { createdAt: 'DESC' },
+                    take: 10,
+                }),
+            ])
+            : [[], 0, [], []];
+
         const accountEvents = mt5Login
             ? this.recentEvents.filter(e => e.login === mt5Login || (e.accountId && e.accountId.toString() === mt5Login)).slice(0, 12)
             : this.recentEvents.slice(0, 6);

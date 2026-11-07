@@ -216,14 +216,8 @@ export class ClickHouseService implements OnModuleInit {
     async syncAccountTrades(accountIds: string[], validTrades: any[]) {
         if (!accountIds || accountIds.length === 0) return;
         try {
-            this.logger.log(`Syncing/healing ClickHouse trades for accounts: ${accountIds.join(', ')}`);
-            await this.client.command({
-                query: `ALTER TABLE trades DELETE WHERE accountId IN ({accountIds:Array(String)})`,
-                query_params: { accountIds }
-            });
             if (validTrades && validTrades.length > 0) {
-                // Short wait to ensure partition mutation order
-                await new Promise(res => setTimeout(res, 200));
+                this.logger.log(`Upserting ${validTrades.length} trades into ClickHouse (ReplacingMergeTree) for accounts: ${accountIds.join(', ')}`);
                 await this.saveTrades(validTrades);
             }
         } catch (e) {
