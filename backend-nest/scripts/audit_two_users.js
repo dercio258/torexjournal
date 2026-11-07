@@ -64,27 +64,21 @@ async function runAudit() {
         console.log('--------------------------------------------------------------------------------');
         console.log(' 1. USUARIOS ENCONTRADOS');
         console.log('--------------------------------------------------------------------------------');
-        if (usersRes.rows.length === 0) {
-            console.log('Nenhum dos emails alvo foi encontrado exatamente. Listando todos os usuarios cadastrados:');
-            const allUsers = await pgClient.query(`SELECT id::text as id, email, username, name, "createdAt" FROM users ORDER BY "createdAt" DESC LIMIT 30`);
-            console.table(allUsers.rows);
-        } else {
-            console.table(usersRes.rows);
-        }
+        console.table(usersRes.rows);
 
         const targetUserIds = usersRes.rows.map(u => String(u.id));
 
-        // 2. Buscar TODAS as contas desses usuários + qualquer conta no banco que tenha mt5_id preenchido (para detectar associações cruzadas)
+        // 2. Buscar TODAS as contas desses usuários + qualquer conta no banco que tenha mt5_id preenchido
         const accountsRes = await pgClient.query(
             `SELECT a.id::text as id, a.user_id::text as user_id, u.email as owner_email, a.name, a.broker, a.type, a.mt5_id,
                     a.currency, a.initial_balance, a.balance, a.equity, a.margin, a.margin_free,
-                    a.is_primary, a.is_archived, a.is_connected, a.last_seen, a.created_at, a.updated_at
+                    a.is_primary, a.is_archived, a.is_connected, a.last_seen, a."createdAt", a."updatedAt"
              FROM accounts a
              LEFT JOIN users u ON u.id::text = a.user_id::text
              WHERE a.user_id::text = ANY($1::text[])
                 OR (a.mt5_id IS NOT NULL AND a.mt5_id != '')
-             ORDER BY a.updated_at DESC`,
-            [targetUserIds.length > 0 ? targetUserIds : ['00000000-0000-0000-0000-000000000000']]
+             ORDER BY a."updatedAt" DESC`,
+            [targetUserIds]
         );
 
         console.log('\n--------------------------------------------------------------------------------');
@@ -120,33 +114,37 @@ async function runAudit() {
             console.log(`    Dono: ${acc.owner_email || acc.user_id} | Saldo DB: $${Number(acc.balance).toFixed(2)} | Equity DB: $${Number(acc.equity).toFixed(2)} | InitialBal: $${Number(acc.initial_balance).toFixed(2)} | Conectada: ${acc.is_connected} | Arquivada: ${acc.is_archived}`);
 
             // 3.1 Estatísticas no PostgreSQL
-            const pgStats = await pgClient.query(
-                `SELECT
-                    COUNT(*) as total_rows,
-                    COUNT(*) FILTER (WHERE status = 'CLOSED') as closed_rows,
-                    COUNT(*) FILTER (WHERE status = 'OPEN') as open_rows,
-                    COUNT(DISTINCT ticket) as distinct_tickets,
-                    COUNT(DISTINCT contract_id) as distinct_contracts,
-                    COALESCE(SUM(profit) FILTER (WHERE status = 'CLOSED'), 0) as sum_profit,
-                    COALESCE(SUM(commission) FILTER (WHERE status = 'CLOSED'), 0) as sum_commission,
-                    COALESCE(SUM(swap) FILTER (WHERE status = 'CLOSED'), 0) as sum_swap,
-                    COALESCE(SUM(profit + commission + swap) FILTER (WHERE status = 'CLOSED'), 0) as calc_net_pnl,
-                    COALESCE(SUM(net_pnl) FILTER (WHERE status = 'CLOSED'), 0) as col_net_pnl,
-                    COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) > 0) as wins_calc,
-                    COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) < 0) as losses_calc,
-                    COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) = 0) as zero_pnl_closed,
-                    MIN(open_time) as first_trade,
-                    MAX(close_time) as last_trade
-                 FROM trades
-                 WHERE account_id::text = $1`,
-                [String(acc.id)]
-            );
-            const st = pgStats.rows[0];
-            const closedCnt = parseInt(st.closed_rows, 10) || 0;
-            const winRatePg = closedCnt > 0 ? ((parseInt(st.wins_calc, 10) / closedCnt) * 100).toFixed(1) : '0.0';
+            try {
+                const pgStats = await pgClient.query(
+                    `SELECT
+                        COUNT(*) as total_rows,
+                        COUNT(*) FILTER (WHERE status = 'CLOSED') as closed_rows,
+                        COUNT(*) FILTER (WHERE status = 'OPEN') as open_rows,
+                        COUNT(DISTINCT ticket) as distinct_tickets,
+                        COUNT(DISTINCT "contractId") as distinct_contracts,
+                        COALESCE(SUM(profit) FILTER (WHERE status = 'CLOSED'), 0) as sum_profit,
+                        COALESCE(SUM(commission) FILTER (WHERE status = 'CLOSED'), 0) as sum_commission,
+                        COALESCE(SUM(swap) FILTER (WHERE status = 'CLOSED'), 0) as sum_swap,
+                        COALESCE(SUM(profit + commission + swap) FILTER (WHERE status = 'CLOSED'), 0) as calc_net_pnl,
+                        COALESCE(SUM("netPnl") FILTER (WHERE status = 'CLOSED'), 0) as col_net_pnl,
+                        COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) > 0) as wins_calc,
+                        COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) < 0) as losses_calc,
+                        COUNT(*) FILTER (WHERE status = 'CLOSED' AND (profit + commission + swap) = 0) as zero_pnl_closed,
+                        MIN(open_time) as first_trade,
+                        MAX(close_time) as last_trade
+                     FROM trades
+                     WHERE account_id::text = $1`,
+                    [String(acc.id)]
+                );
+                const st = pgStats.rows[0];
+                const closedCnt = parseInt(st.closed_rows, 10) || 0;
+                const winRatePg = closedCnt > 0 ? ((parseInt(st.wins_calc, 10) / closedCnt) * 100).toFixed(1) : '0.0';
 
-            console.log(`    [PostgreSQL] Total=${st.total_rows} (CLOSED=${st.closed_rows}, OPEN=${st.open_rows}, ZeroPnL_Closed=${st.zero_pnl_closed}) | Tickets Unicos=${st.distinct_tickets} | Contracts Unicos=${st.distinct_contracts}`);
-            console.log(`    [PostgreSQL] Profit=$${Number(st.sum_profit).toFixed(2)} | Comm=$${Number(st.sum_commission).toFixed(2)} | Swap=$${Number(st.sum_swap).toFixed(2)} | NetPnL(calc)=$${Number(st.calc_net_pnl).toFixed(2)} | NetPnL(col)=$${Number(st.col_net_pnl).toFixed(2)} | WinRate=${winRatePg}% (${st.wins_calc}W / ${st.losses_calc}L)`);
+                console.log(`    [PostgreSQL] Total=${st.total_rows} (CLOSED=${st.closed_rows}, OPEN=${st.open_rows}, ZeroPnL_Closed=${st.zero_pnl_closed}) | Tickets Unicos=${st.distinct_tickets} | Contracts Unicos=${st.distinct_contracts}`);
+                console.log(`    [PostgreSQL] Profit=$${Number(st.sum_profit).toFixed(2)} | Comm=$${Number(st.sum_commission).toFixed(2)} | Swap=$${Number(st.sum_swap).toFixed(2)} | NetPnL(calc)=$${Number(st.calc_net_pnl).toFixed(2)} | NetPnL(col)=$${Number(st.col_net_pnl).toFixed(2)} | WinRate=${winRatePg}% (${st.wins_calc}W / ${st.losses_calc}L)`);
+            } catch (pgErr) {
+                console.log(`    [PostgreSQL Stats ERRO] ${pgErr.message}`);
+            }
 
             // 3.2 Estatísticas no ClickHouse (SEM FINAL vs COM FINAL)
             if (chClient) {
@@ -203,36 +201,40 @@ async function runAudit() {
             }
 
             // 3.3 Amostra dos últimos 10 trades desta conta no PostgreSQL
-            const sampleTrades = await pgClient.query(
-                `SELECT id::text as id, ticket, contract_id, symbol, type, volume, open_price, close_price,
-                        profit, commission, swap, net_pnl, status, open_time, close_time, comment, import_log_id
-                 FROM trades
-                 WHERE account_id::text = $1
-                 ORDER BY COALESCE(close_time, open_time) DESC
-                 LIMIT 10`,
-                [String(acc.id)]
-            );
-            if (sampleTrades.rows.length > 0) {
-                console.log(`    Ultimos ${sampleTrades.rows.length} trades no PostgreSQL:`);
-                console.table(
-                    sampleTrades.rows.map(t => ({
-                        ticket: t.ticket,
-                        contract_id: t.contract_id,
-                        symbol: t.symbol,
-                        type: t.type,
-                        vol: Number(t.volume),
-                        open: Number(t.open_price),
-                        close: Number(t.close_price),
-                        profit: Number(t.profit),
-                        comm: Number(t.commission),
-                        swap: Number(t.swap),
-                        net_pnl: Number(t.net_pnl),
-                        status: t.status,
-                        open_time: t.open_time ? new Date(t.open_time).toISOString() : null,
-                        close_time: t.close_time ? new Date(t.close_time).toISOString() : null,
-                        log_id: t.import_log_id,
-                    }))
+            try {
+                const sampleTrades = await pgClient.query(
+                    `SELECT id::text as id, ticket, "contractId" as contract_id, symbol, type, volume, open_price, close_price,
+                            profit, commission, swap, "netPnl" as net_pnl, status, open_time, close_time, comment, import_log_id
+                     FROM trades
+                     WHERE account_id::text = $1
+                     ORDER BY COALESCE(close_time, open_time) DESC
+                     LIMIT 10`,
+                    [String(acc.id)]
                 );
+                if (sampleTrades.rows.length > 0) {
+                    console.log(`    Ultimos ${sampleTrades.rows.length} trades no PostgreSQL:`);
+                    console.table(
+                        sampleTrades.rows.map(t => ({
+                            ticket: t.ticket,
+                            contract_id: t.contract_id,
+                            symbol: t.symbol,
+                            type: t.type,
+                            vol: Number(t.volume),
+                            open: Number(t.open_price),
+                            close: Number(t.close_price),
+                            profit: Number(t.profit),
+                            comm: Number(t.commission),
+                            swap: Number(t.swap),
+                            net_pnl: Number(t.net_pnl),
+                            status: t.status,
+                            open_time: t.open_time ? new Date(t.open_time).toISOString() : null,
+                            close_time: t.close_time ? new Date(t.close_time).toISOString() : null,
+                            log_id: t.import_log_id,
+                        }))
+                    );
+                }
+            } catch (sampleErr) {
+                console.log(`    [Sample Trades ERRO] ${sampleErr.message}`);
             }
 
             // 3.4 Posições em aberto no PostgreSQL
@@ -276,58 +278,54 @@ async function runAudit() {
             }
         }
 
-        // 5. Logs de Importação (import_logs) e Cloud Instances dos 2 usuários
+        // 5. Logs de Importação (import_logs) dos 2 usuários
         console.log('\n--------------------------------------------------------------------------------');
         console.log(' 5. ULTIMOS 30 LOGS DE IMPORTACAO / SINCRONIZACAO (import_logs)');
         console.log('--------------------------------------------------------------------------------');
-        const logsRes = await pgClient.query(
-            `SELECT l.id, u.email as user_email, l.account_id::text as account_id, a.name as acc_name, a.mt5_id,
-                    l.method, l.status, l."tradesCount", l.details, l."createdAt"
-             FROM import_logs l
-             LEFT JOIN users u ON u.id::text = l."userId"::text
-             LEFT JOIN accounts a ON a.id::text = l.account_id::text
-             WHERE l."userId"::text = ANY($1::text[])
-                OR l.account_id::text = ANY($2::text[])
-                OR l.details LIKE '%408953138%'
-                OR l.details LIKE '%202658742%'
-             ORDER BY l."createdAt" DESC
-             LIMIT 30`,
-            [
-                targetUserIds.length > 0 ? targetUserIds : ['00000000-0000-0000-0000-000000000000'],
-                auditedAccountIds.length > 0 ? auditedAccountIds : ['00000000-0000-0000-0000-000000000000'],
-            ]
-        );
-        console.table(
-            logsRes.rows.map(l => ({
-                id: l.id,
-                email: l.user_email,
-                acc_id: l.account_id ? l.account_id.substring(0, 8) + '...' : null,
-                acc_name: l.acc_name,
-                mt5_id: l.mt5_id,
-                method: l.method,
-                status: l.status,
-                trades: l.tradesCount,
-                details: (l.details || '').substring(0, 90),
-                created_at: l.createdAt ? new Date(l.createdAt).toISOString() : null,
-            }))
-        );
-
-        // 6. Transações manuais (account_transactions) se houverem
         try {
-            const txRes = await pgClient.query(
-                `SELECT t.id::text as id, t.account_id::text as account_id, a.name as acc_name, t.type, t.amount, t.balance_after, t.description, t.date
-                 FROM account_transactions t
-                 LEFT JOIN accounts a ON a.id::text = t.account_id::text
-                 WHERE t.account_id::text = ANY($1::text[])
-                 ORDER BY t.date DESC
-                 LIMIT 20`,
-                [auditedAccountIds.length > 0 ? auditedAccountIds : ['00000000-0000-0000-0000-000000000000']]
+            const logsRes = await pgClient.query(
+                `SELECT l.id, u.email as user_email, l.account_id::text as account_id, a.name as acc_name, a.mt5_id,
+                        l.method, l.status, l."tradesCount", l.details, l."createdAt"
+                 FROM import_logs l
+                 LEFT JOIN users u ON u.id::text = l."userId"::text
+                 LEFT JOIN accounts a ON a.id::text = l.account_id::text
+                 WHERE l."userId"::text = ANY($1::text[])
+                    OR l.account_id::text = ANY($2::text[])
+                    OR l.details LIKE '%408953138%'
+                    OR l.details LIKE '%202658742%'
+                 ORDER BY l."createdAt" DESC
+                 LIMIT 30`,
+                [
+                    targetUserIds,
+                    auditedAccountIds.length > 0 ? auditedAccountIds : ['00000000-0000-0000-0000-000000000000'],
+                ]
             );
-            if (txRes.rows.length > 0) {
+            console.table(
+                logsRes.rows.map(l => ({
+                    id: l.id,
+                    email: l.user_email,
+                    acc_id: l.account_id ? l.account_id.substring(0, 8) + '...' : null,
+                    acc_name: l.acc_name,
+                    mt5_id: l.mt5_id,
+                    method: l.method,
+                    status: l.status,
+                    trades: l.tradesCount,
+                    details: (l.details || '').substring(0, 90),
+                    created_at: l.createdAt ? new Date(l.createdAt).toISOString() : null,
+                }))
+            );
+        } catch (logErr) {
+            console.log('Erro ao consultar import_logs:', logErr.message);
+        }
+
+        // 6. Instâncias Cloud (cloud_instances)
+        try {
+            const ciRes = await pgClient.query(`SELECT * FROM cloud_instances ORDER BY "updatedAt" DESC LIMIT 20`);
+            if (ciRes.rows.length > 0) {
                 console.log('\n--------------------------------------------------------------------------------');
-                console.log(' 6. TRANSACOES DE CONTA (account_transactions)');
+                console.log(' 6. INSTANCIAS CLOUD (cloud_instances)');
                 console.log('--------------------------------------------------------------------------------');
-                console.table(txRes.rows);
+                console.table(ciRes.rows);
             }
         } catch { }
 
