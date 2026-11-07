@@ -32,7 +32,7 @@ async function applyIndexes() {
         `CREATE INDEX IF NOT EXISTS idx_trades_import_log_id ON trades (import_log_id)`,
         `CREATE INDEX IF NOT EXISTS idx_positions_account_id ON positions (account_id)`,
         `CREATE INDEX IF NOT EXISTS idx_accounts_user_mt5_id ON accounts (user_id, mt5_id)`,
-        `CREATE INDEX IF NOT EXISTS idx_import_logs_user_account ON import_logs ("userId", "accountId")`,
+        `CREATE INDEX IF NOT EXISTS idx_import_logs_user_account ON import_logs ("userId", account_id)`,
     ];
 
     try {
