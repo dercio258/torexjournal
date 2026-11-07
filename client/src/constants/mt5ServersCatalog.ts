@@ -8,6 +8,10 @@ export interface Mt5BrokerGroup {
     id: string;
     broker: string;
     category: 'Deriv' | 'Forex / ECN' | 'Prop Firm' | 'MetaQuotes';
+    domain: string;
+    logoUrl: string;
+    brandColor: string;
+    shortMark: string;
     countryOrRegion?: string;
     popular?: boolean;
     servers: Mt5ServerOption[];
@@ -18,6 +22,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'deriv',
         broker: 'Deriv',
         category: 'Deriv',
+        domain: 'deriv.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=deriv.com&sz=128',
+        brandColor: '#FF444F',
+        shortMark: 'D',
         popular: true,
         servers: [
             { name: 'Deriv-Demo', env: 'DEMO', description: 'Servidor Demo Global Deriv (Sintéticos & Forex)' },
@@ -43,6 +51,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'exness',
         broker: 'Exness',
         category: 'Forex / ECN',
+        domain: 'exness.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=exness.com&sz=128',
+        brandColor: '#FFCF01',
+        shortMark: 'EX',
         popular: true,
         servers: [
             { name: 'Exness-MT5Trial', env: 'DEMO', description: 'Exness Trial / Demo 1' },
@@ -76,6 +88,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'xm',
         broker: 'XM Global',
         category: 'Forex / ECN',
+        domain: 'xm.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=xm.com&sz=128',
+        brandColor: '#E31E24',
+        shortMark: 'XM',
         popular: true,
         servers: [
             { name: 'XMGlobal-MT5', env: 'REAL', description: 'XM Global MT5 Real 1 / Demo' },
@@ -91,6 +107,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'icmarkets',
         broker: 'IC Markets',
         category: 'Forex / ECN',
+        domain: 'icmarkets.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=icmarkets.com&sz=128',
+        brandColor: '#22C55E',
+        shortMark: 'IC',
         popular: true,
         servers: [
             { name: 'ICMarketsSC-Demo', env: 'DEMO', description: 'IC Markets Global (SC) Demo' },
@@ -107,6 +127,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'ftmo',
         broker: 'FTMO',
         category: 'Prop Firm',
+        domain: 'ftmo.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=ftmo.com&sz=128',
+        brandColor: '#00C2FF',
+        shortMark: 'FT',
         popular: true,
         servers: [
             { name: 'FTMO-Demo', env: 'DEMO', description: 'FTMO Challenge / Verification / Free Trial 1' },
@@ -121,6 +145,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'fundednext',
         broker: 'FundedNext',
         category: 'Prop Firm',
+        domain: 'fundednext.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=fundednext.com&sz=128',
+        brandColor: '#635BFF',
+        shortMark: 'FN',
         popular: true,
         servers: [
             { name: 'FundedNext-Trial', env: 'DEMO', description: 'FundedNext Challenge / Evaluation' },
@@ -133,6 +161,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'the5ers',
         broker: 'The5%ers (Five Percent Online)',
         category: 'Prop Firm',
+        domain: 'the5ers.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=the5ers.com&sz=128',
+        brandColor: '#F59E0B',
+        shortMark: '5%',
         popular: true,
         servers: [
             { name: 'FivePercentOnline-Real', env: 'REAL', description: 'The5ers Official MT5 Server (Evaluation & Funded)' },
@@ -143,6 +175,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'pepperstone',
         broker: 'Pepperstone',
         category: 'Forex / ECN',
+        domain: 'pepperstone.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=pepperstone.com&sz=128',
+        brandColor: '#FF5722',
+        shortMark: 'PS',
         popular: true,
         servers: [
             { name: 'Pepperstone-Demo', env: 'DEMO', description: 'Pepperstone Global Demo' },
@@ -155,6 +191,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'vantage',
         broker: 'Vantage Markets',
         category: 'Forex / ECN',
+        domain: 'vantagemarkets.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=vantagemarkets.com&sz=128',
+        brandColor: '#E11D48',
+        shortMark: 'VM',
         popular: true,
         servers: [
             { name: 'VantageInternational-Demo', env: 'DEMO', description: 'Vantage International Demo' },
@@ -167,6 +207,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'hfm',
         broker: 'HFM (HF Markets / HotForex)',
         category: 'Forex / ECN',
+        domain: 'hfm.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=hfm.com&sz=128',
+        brandColor: '#DC2626',
+        shortMark: 'HF',
         popular: true,
         servers: [
             { name: 'HFMarketsSV-Demo', env: 'DEMO', description: 'HFM Global (SV) Demo' },
@@ -180,6 +224,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'fbs',
         broker: 'FBS',
         category: 'Forex / ECN',
+        domain: 'fbs.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=fbs.com&sz=128',
+        brandColor: '#16A34A',
+        shortMark: 'FB',
         servers: [
             { name: 'FBS-Demo', env: 'DEMO', description: 'FBS MT5 Demo' },
             { name: 'FBS-Real', env: 'REAL', description: 'FBS MT5 Real' },
@@ -189,6 +237,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'justmarkets',
         broker: 'JustMarkets',
         category: 'Forex / ECN',
+        domain: 'justmarkets.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=justmarkets.com&sz=128',
+        brandColor: '#2563EB',
+        shortMark: 'JM',
         servers: [
             { name: 'JustMarkets-Demo', env: 'DEMO', description: 'JustMarkets Demo 1' },
             { name: 'JustMarkets-Demo2', env: 'DEMO', description: 'JustMarkets Demo 2' },
@@ -200,6 +252,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'octafx',
         broker: 'Octa (OctaFX)',
         category: 'Forex / ECN',
+        domain: 'octafx.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=octafx.com&sz=128',
+        brandColor: '#3B82F6',
+        shortMark: 'OC',
         servers: [
             { name: 'OctaFX-Demo', env: 'DEMO', description: 'OctaFX MT5 Demo' },
             { name: 'OctaFX-Real', env: 'REAL', description: 'OctaFX MT5 Real 1' },
@@ -210,6 +266,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'tickmill',
         broker: 'Tickmill',
         category: 'Forex / ECN',
+        domain: 'tickmill.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=tickmill.com&sz=128',
+        brandColor: '#EF4444',
+        shortMark: 'TM',
         servers: [
             { name: 'Tickmill-Demo', env: 'DEMO', description: 'Tickmill Global Demo' },
             { name: 'Tickmill-Live', env: 'REAL', description: 'Tickmill Global Live' },
@@ -221,6 +281,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'roboforex',
         broker: 'RoboForex',
         category: 'Forex / ECN',
+        domain: 'roboforex.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=roboforex.com&sz=128',
+        brandColor: '#0284C7',
+        shortMark: 'RF',
         servers: [
             { name: 'RoboForex-ECN', env: 'REAL', description: 'RoboForex ECN / Demo' },
             { name: 'RoboForex-Pro', env: 'REAL', description: 'RoboForex Pro / Standard' },
@@ -230,6 +294,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'eightcap',
         broker: 'Eightcap',
         category: 'Forex / ECN',
+        domain: 'eightcap.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=eightcap.com&sz=128',
+        brandColor: '#10B981',
+        shortMark: '8C',
         servers: [
             { name: 'Eightcap-Demo', env: 'DEMO', description: 'Eightcap Global Demo' },
             { name: 'Eightcap-Real', env: 'REAL', description: 'Eightcap Global Real' },
@@ -239,6 +307,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'fxpro',
         broker: 'FxPro',
         category: 'Forex / ECN',
+        domain: 'fxpro.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=fxpro.com&sz=128',
+        brandColor: '#E11D48',
+        shortMark: 'FX',
         servers: [
             { name: 'FxPro-MT5 Demo', env: 'DEMO', description: 'FxPro MT5 Demo' },
             { name: 'FxPro-MT5', env: 'REAL', description: 'FxPro MT5 Live' },
@@ -248,6 +320,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'avatrade',
         broker: 'AvaTrade',
         category: 'Forex / ECN',
+        domain: 'avatrade.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=avatrade.com&sz=128',
+        brandColor: '#2563EB',
+        shortMark: 'AV',
         servers: [
             { name: 'AvaTrade-Demo', env: 'DEMO', description: 'AvaTrade MT5 Demo' },
             { name: 'AvaTrade-Real', env: 'REAL', description: 'AvaTrade MT5 Real' },
@@ -257,6 +333,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'oanda',
         broker: 'OANDA',
         category: 'Forex / ECN',
+        domain: 'oanda.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=oanda.com&sz=128',
+        brandColor: '#14B8A6',
+        shortMark: 'OA',
         servers: [
             { name: 'OANDA-Demo-1', env: 'DEMO', description: 'OANDA MT5 Demo' },
             { name: 'OANDA-Live-1', env: 'REAL', description: 'OANDA MT5 Live' },
@@ -266,6 +346,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'fpmarkets',
         broker: 'FP Markets',
         category: 'Forex / ECN',
+        domain: 'fpmarkets.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=fpmarkets.com&sz=128',
+        brandColor: '#0EA5E9',
+        shortMark: 'FP',
         servers: [
             { name: 'FPMarketsLLC-Demo', env: 'DEMO', description: 'FP Markets Demo' },
             { name: 'FPMarketsLLC-Live', env: 'REAL', description: 'FP Markets Live' },
@@ -275,6 +359,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'puprime',
         broker: 'PU Prime',
         category: 'Forex / ECN',
+        domain: 'puprime.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=puprime.com&sz=128',
+        brandColor: '#6366F1',
+        shortMark: 'PU',
         servers: [
             { name: 'PUPrime-Demo', env: 'DEMO', description: 'PU Prime Demo' },
             { name: 'PUPrime-Live', env: 'REAL', description: 'PU Prime Live' },
@@ -284,6 +372,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'weltrade',
         broker: 'Weltrade',
         category: 'Forex / ECN',
+        domain: 'weltrade.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=weltrade.com&sz=128',
+        brandColor: '#F97316',
+        shortMark: 'WT',
         servers: [
             { name: 'Weltrade-Demo', env: 'DEMO', description: 'Weltrade MT5 Demo (SyntX & Forex)' },
             { name: 'Weltrade-Real', env: 'REAL', description: 'Weltrade MT5 Real' },
@@ -293,6 +385,10 @@ export const MT5_BROKERS_CATALOG: Mt5BrokerGroup[] = [
         id: 'metaquotes',
         broker: 'MetaQuotes (Oficial MT5)',
         category: 'MetaQuotes',
+        domain: 'metatrader5.com',
+        logoUrl: 'https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128',
+        brandColor: '#3B82F6',
+        shortMark: 'MT5',
         popular: true,
         servers: [
             { name: 'MetaQuotes-Demo', env: 'DEMO', description: 'Servidor Demo Nativo MetaQuotes Software Corp.' },

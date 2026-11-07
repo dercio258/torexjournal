@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import { Monitor, Upload, Search, Lock, Building2, Server, ChevronRight } from 'lucide-react';
+import { Monitor, Upload, Search, Lock, Building2, ChevronRight } from 'lucide-react';
 import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
+import { BrokerLogo } from '../ui/BrokerLogo';
 
 export interface Broker {
     id: string;
@@ -84,7 +85,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             id: 'mt5_broker_direct',
             name: `${group.broker} (MT5)`,
             type: 'AUTO_SYNC',
-            icon: <Building2 className="w-10 h-10 text-emerald-400" />,
+            icon: <BrokerLogo broker={group} size="lg" />,
             description: `Servidor: ${defaultSrv}`,
             defaultServer: defaultSrv,
             brokerCatalogId: group.id,
@@ -198,9 +199,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                     className="flex items-start justify-between gap-2 cursor-pointer"
                                 >
                                     <div className="flex items-center gap-2.5">
-                                        <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-                                            <Server size={18} />
-                                        </div>
+                                        <BrokerLogo broker={group} size="lg" />
                                         <div>
                                             <h3 className="font-bold text-sm text-[#F3F4F6] group-hover:text-emerald-400 transition-colors">
                                                 {group.broker}

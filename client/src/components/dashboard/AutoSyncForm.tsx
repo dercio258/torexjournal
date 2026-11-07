@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { BrokerLogo } from '../ui/BrokerLogo';
 import {
     Cloud,
     Power,
@@ -101,7 +102,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         for (const group of MT5_BROKERS_CATALOG) {
             const found = group.servers.find((s) => s.name.toLowerCase() === clean);
             if (found) {
-                return { broker: group.broker, server: found };
+                return { group, broker: group.broker, server: found };
             }
         }
         return null;
@@ -421,7 +422,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             </label>
                             {matchedBrokerForCurrentServer ? (
                                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                                    <Building2 size={12} />
+                                    <BrokerLogo broker={matchedBrokerForCurrentServer.group} size="xs" />
                                     {matchedBrokerForCurrentServer.broker} • {matchedBrokerForCurrentServer.server.env}
                                 </span>
                             ) : server.trim() ? (
@@ -435,7 +436,13 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         <div className="relative">
                             <div className="flex flex-col sm:flex-row items-stretch gap-2">
                                 <div className="relative flex-1">
-                                    <Server size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
+                                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center">
+                                        {matchedBrokerForCurrentServer ? (
+                                            <BrokerLogo broker={matchedBrokerForCurrentServer.group} size="sm" />
+                                        ) : (
+                                            <Server size={16} className="text-[#6B7280] ml-0.5" />
+                                        )}
+                                    </div>
                                     <input
                                         type="text"
                                         placeholder="Digite o servidor ou escolha no modal (Ex: Deriv-Demo, Exness-MT5Real...)"
@@ -443,7 +450,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                         onChange={(e) => {
                                             setServer(e.target.value);
                                         }}
-                                        className="w-full bg-[#08090C] border border-white/[0.08] focus:border-emerald-500/60 rounded-xl py-3 pl-10 pr-9 text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none transition-all"
+                                        className="w-full bg-[#08090C] border border-white/[0.08] focus:border-emerald-500/60 rounded-xl py-3 pl-11 pr-9 text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none transition-all"
                                     />
                                     {server && (
                                         <button
@@ -655,17 +662,24 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                             ) : (
                                                 filteredBrokerGroups.map((group) => (
                                                     <div key={group.id} className="p-3.5 sm:p-4 hover:bg-white/[0.01]">
-                                                        <div className="flex items-center justify-between mb-2.5 px-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <Building2 size={14} className="text-emerald-400" />
-                                                                <span className="text-xs sm:text-sm font-bold text-slate-200">
-                                                                    {group.broker}
-                                                                </span>
-                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.05] text-slate-400">
-                                                                    {group.category}
-                                                                </span>
+                                                        <div className="flex items-center justify-between mb-3 px-1">
+                                                            <div className="flex items-center gap-2.5">
+                                                                <BrokerLogo broker={group} size="md" />
+                                                                <div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-xs sm:text-sm font-bold text-slate-100">
+                                                                            {group.broker}
+                                                                        </span>
+                                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.05] text-slate-400">
+                                                                            {group.category}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className="text-[10px] text-slate-500">
+                                                                        {group.domain}
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                            <span className="text-[10px] sm:text-xs text-slate-500">
+                                                            <span className="text-[10px] sm:text-xs font-medium text-slate-400 bg-white/[0.03] px-2.5 py-1 rounded-lg border border-white/[0.05]">
                                                                 {group.servers.length} servidor(es)
                                                             </span>
                                                         </div>
@@ -681,24 +695,27 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                                             setServer(srv.name);
                                                                             setIsServerDropdownOpen(false);
                                                                         }}
-                                                                        className={`text-left px-3 py-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                                                                        className={`text-left px-3 py-2.5 rounded-xl border transition-all flex items-center justify-between gap-2.5 ${
                                                                             isSelected
                                                                                 ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm'
                                                                                 : 'bg-[#111319] border-white/[0.05] hover:border-emerald-500/30 hover:bg-[#161922] text-slate-200'
                                                                         }`}
                                                                     >
-                                                                        <div className="min-w-0">
-                                                                            <div className="flex items-center gap-1.5">
-                                                                                <span className="text-xs font-mono font-semibold truncate">
-                                                                                    {srv.name}
-                                                                                </span>
-                                                                                {isSelected && <Check size={13} className="text-emerald-400 shrink-0" />}
+                                                                        <div className="flex items-center gap-2.5 min-w-0">
+                                                                            <BrokerLogo broker={group} size="sm" />
+                                                                            <div className="min-w-0">
+                                                                                <div className="flex items-center gap-1.5">
+                                                                                    <span className="text-xs font-mono font-semibold truncate">
+                                                                                        {srv.name}
+                                                                                    </span>
+                                                                                    {isSelected && <Check size={13} className="text-emerald-400 shrink-0" />}
+                                                                                </div>
+                                                                                {srv.description && (
+                                                                                    <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                                                                        {srv.description}
+                                                                                    </p>
+                                                                                )}
                                                                             </div>
-                                                                            {srv.description && (
-                                                                                <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                                                                                    {srv.description}
-                                                                                </p>
-                                                                            )}
                                                                         </div>
                                                                         <span
                                                                             className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
