@@ -231,7 +231,11 @@ class WorkerManager:
             )
             if cred_response:
                 password = cred_response.password
-                logger.info(f"Credencial resgatada com sucesso para conta {task.accountId}")
+                pwd_diag = self.sync_engine._mask_password_diagnostic(password)
+                logger.info(
+                    f"Credencial resgatada com sucesso para conta {task.accountId} "
+                    f"(Login: {task.login} @ {normalized_server} | Senha: {pwd_diag})"
+                )
             else:
                 err_msg = "Falha na troca de credentialToken (token expirado ou inválido)"
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, err_msg, details={"error": err_msg})
@@ -308,6 +312,9 @@ class WorkerManager:
             err_detail = getattr(self.sync_engine, "last_connect_error", None) or (
                 "Não foi possível conectar o terminal MT5 e autenticar a conta. Verifique login, senha e servidor."
             )
+            is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
+            if self.account_manager.get_account(task.accountId):
+                self.account_manager.mark_error(task.accountId, err_detail, is_auth_error=is_auth_err)
             self.api_client.ack_task(
                 task.id,
                 TaskStatus.FAILED,
@@ -420,8 +427,9 @@ class WorkerManager:
         try:
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
+                is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")
-                self.account_manager.mark_error(account_id, err_detail)
+                self.account_manager.mark_error(account_id, err_detail, is_auth_error=is_auth_err)
                 self.api_client.send_event(WorkerEvent(
                     workerId=settings.worker_id,
                     accountId=account_id,

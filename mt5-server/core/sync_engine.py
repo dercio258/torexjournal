@@ -56,17 +56,39 @@ class SyncEngine:
     def __init__(self):
         self._ipc_lock = threading.RLock()
         self.connected_account: Optional[int] = None
+        self.last_connect_error: Optional[str] = None
+        self.last_error_code: Optional[int] = None
 
     @staticmethod
-    def _dismiss_mt5_dialogs():
+    def _mask_password_diagnostic(password: Optional[str]) -> str:
+        """Retorna resumo seguro da senha para diagnóstico nos logs (tamanho + primeiros/últimos caracteres)."""
+        pwd = str(password or "").strip()
+        if not pwd:
+            return "VAZIA/AUSENTE (tentando cofre interno do MT5)"
+        length = len(pwd)
+        if length <= 4:
+            masked = pwd[0] + ("*" * (length - 1))
+        else:
+            masked = f"{pwd[:2]}{'*' * (length - 4)}{pwd[-2:]}"
+        return f"DEFINIDA [tam={length}, preview='{masked}']"
+
+    @staticmethod
+    def inspect_mt5_ui_state(close_modals: bool = False) -> Dict[str, Any]:
         """
-        Detecta e fecha automaticamente janelas modais/popups padrão do MT5 no Windows
-        (ex: wizard 'Abrir Conta Demo', prompt de login manual ou avisos bloqueantes - classe Win32 '#32770').
+        Inspeciona em tempo real as janelas visíveis do processo terminal64.exe no Windows:
+        - Captura o título da janela principal do MT5 (mostra qual conta e servidor estão ativos na GUI).
+        - Captura qualquer modal/popup aberto (classe Win32 '#32770'), seu título e os textos/campos internos.
+        - Se close_modals=True, fecha os modais bloqueantes automaticamente após registrar no log.
         """
+        state: Dict[str, Any] = {
+            "pids": [],
+            "main_windows": [],
+            "modals": [],
+        }
         try:
             import sys
             if sys.platform != "win32":
-                return
+                return state
             import ctypes
             from ctypes import wintypes
 
@@ -82,10 +104,33 @@ class SyncEngine:
                 except Exception:
                     pass
 
+            state["pids"] = sorted(list(mt5_pids))
             if not mt5_pids:
-                return
+                return state
 
             WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+            def _get_child_texts(parent_hwnd) -> List[str]:
+                texts: List[str] = []
+
+                def enum_child_cb(child_hwnd, _lparam):
+                    try:
+                        c_class = ctypes.create_unicode_buffer(64)
+                        user32.GetClassNameW(child_hwnd, c_class, 64)
+                        c_text = ctypes.create_unicode_buffer(512)
+                        user32.GetWindowTextW(child_hwnd, c_text, 512)
+                        val = (c_text.value or "").strip()
+                        if val and len(val) < 200:
+                            texts.append(f"{c_class.value}:'{val}'")
+                    except Exception:
+                        pass
+                    return True
+
+                try:
+                    user32.EnumChildWindows(parent_hwnd, WNDENUMPROC(enum_child_cb), 0)
+                except Exception:
+                    pass
+                return texts[:10]
 
             def enum_windows_callback(hwnd, lparam):
                 try:
@@ -98,19 +143,49 @@ class SyncEngine:
 
                     class_buf = ctypes.create_unicode_buffer(64)
                     user32.GetClassNameW(hwnd, class_buf, 64)
+                    title_buf = ctypes.create_unicode_buffer(256)
+                    user32.GetWindowTextW(hwnd, title_buf, 256)
+                    win_class = class_buf.value or ""
+                    win_title = (title_buf.value or "").strip()
+
                     # '#32770' é a classe padrão de Dialog/Popup modal do Windows usada pelo MT5 para prompts
-                    if class_buf.value == "#32770":
-                        title_buf = ctypes.create_unicode_buffer(256)
-                        user32.GetWindowTextW(hwnd, title_buf, 256)
-                        logger.info(f"Fechando popup modal padrão do MT5 automaticamente (Título: '{title_buf.value}')...")
-                        user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                    if win_class == "#32770":
+                        child_items = _get_child_texts(hwnd)
+                        modal_info = {
+                            "pid": pid.value,
+                            "title": win_title or "(Sem Título)",
+                            "controls": child_items,
+                        }
+                        state["modals"].append(modal_info)
+                        if close_modals:
+                            controls_str = ", ".join(child_items) if child_items else "sem textos filhos"
+                            logger.warning(
+                                f"[MODAL MT5 DETECTADO E FECHADO] PID={pid.value} | "
+                                f"Título='{win_title}' | Conteúdo=[{controls_str}]"
+                            )
+                            user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                    elif win_title and ("metatrader" in win_title.lower() or "metaquotes" in win_title.lower() or "-" in win_title):
+                        state["main_windows"].append({
+                            "pid": pid.value,
+                            "class": win_class,
+                            "title": win_title,
+                        })
                 except Exception:
                     pass
                 return True
 
             user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
         except Exception as e:
-            logger.debug(f"Verificação de popups Win32 ignorada: {e}")
+            logger.debug(f"Inspeção Win32 de janelas MT5 ignorada: {e}")
+        return state
+
+    @staticmethod
+    def _dismiss_mt5_dialogs():
+        """
+        Detecta, registra detalhes no log e fecha automaticamente janelas modais/popups padrão do MT5 no Windows
+        (ex: wizard 'Abrir Conta Demo', prompt de login manual ou avisos bloqueantes - classe Win32 '#32770').
+        """
+        SyncEngine.inspect_mt5_ui_state(close_modals=True)
 
     @staticmethod
     def _clean_pending_liveupdate():
@@ -154,7 +229,7 @@ class SyncEngine:
     def _wait_for_broker_sync(self, expected_login: int, timeout_sec: float = 12.0) -> bool:
         """
         Aguarda até que o terminal MT5 finalize o handshake de rede com a corretora (terminal_info.connected)
-        para evitar ler saldo 0.0 ou histórico vazio imediatamente após o login.
+        e carregue os dados reais da conta (evita ler Saldo $0.00 e Ping 10000.0ms logo após abrir o terminal).
         """
         if not MT5_AVAILABLE:
             return True
@@ -164,7 +239,13 @@ class SyncEngine:
             info = mt5.account_info()
             term = mt5.terminal_info()
             if info is not None and (not expected_login or int(info.login) == int(expected_login)):
-                if term is None or getattr(term, "connected", True):
+                is_conn = term is None or bool(getattr(term, "connected", False))
+                ping_raw = int(getattr(term, "ping_last", 0) or 0) if term is not None else 0
+                bal = float(getattr(info, "balance", 0.0) or 0.0)
+                holder = (getattr(info, "name", "") or "").strip()
+                # Ping 10000000 (10000.0ms) com saldo 0.0 significa que o handshake TCP ainda não concluiu
+                handshake_ready = is_conn and (bal > 0 or bool(holder) or (0 < ping_raw < 9999000))
+                if handshake_ready:
                     return True
             time.sleep(0.5)
         info = mt5.account_info()
@@ -368,16 +449,32 @@ class SyncEngine:
                 return False
 
             # Passo 3: Verifica se já está na conta correta (evita chamar mt5.login desnecessariamente!)
+            self.last_error_code = None
             if login_clean:
+                ui_before = self.inspect_mt5_ui_state(close_modals=True)
                 info = mt5.account_info()
+                term_now = mt5.terminal_info()
+                curr_login = getattr(info, "login", None) if info else None
+                curr_srv = getattr(info, "server", None) if info else None
+                curr_name = (getattr(info, "name", "") or "").strip() if info else ""
+                curr_bal = float(getattr(info, "balance", 0.0) or 0.0) if info else 0.0
+                curr_conn = getattr(term_now, "connected", False) if term_now else False
+                main_titles = [w["title"] for w in ui_before.get("main_windows", [])]
+                modal_titles = [f"{m['title']} ({', '.join(m['controls'])})" for m in ui_before.get("modals", [])]
+
                 if self._is_account_authenticated(info, login_clean, server_clean):
-                    holder_name = (getattr(info, "name", "") or "").strip()
-                    bal = float(getattr(info, "balance", 0.0) or 0.0)
-                    if holder_name or bal > 0:
+                    if not (curr_name or curr_bal > 0):
+                        # Aguarda até 6s caso o MT5 tenha acabado de abrir na conta padrão e ainda esteja sincronizando
+                        self._wait_for_broker_sync(login_clean, timeout_sec=6.0)
+                        info = mt5.account_info()
+                        curr_name = (getattr(info, "name", "") or "").strip() if info else ""
+                        curr_bal = float(getattr(info, "balance", 0.0) or 0.0) if info else 0.0
+
+                    if curr_name or curr_bal > 0:
                         logger.success(
-                            f"Sessão MT5 já autenticada na conta {login_clean}: {holder_name} ({getattr(info, 'server', server_clean)})!"
+                            f"Sessão MT5 já autenticada na conta {login_clean}: {curr_name or 'Ativa'} "
+                            f"({getattr(info, 'server', server_clean)} | Saldo: ${curr_bal:.2f})!"
                         )
-                        self._wait_for_broker_sync(login_clean, timeout_sec=4.0)
                         self.connected_account = account_id
                         self.last_connect_error = None
                         return True
@@ -388,6 +485,14 @@ class SyncEngine:
                         )
 
                 if server_clean:
+                    pwd_diag = self._mask_password_diagnostic(pass_clean)
+                    logger.info(
+                        f"[DIAGNÓSTICO DE LOGIN MT5] "
+                        f"Alvo: login={login_clean} @ servidor='{server_clean}' | Senha={pwd_diag} | "
+                        f"Estado Atual no MT5: login_atual={curr_login} @ '{curr_srv}' (nome='{curr_name}', saldo=${curr_bal:.2f}, conectado={curr_conn}) | "
+                        f"Janela MT5={main_titles or ['(oculta/background)']} | Modais={modal_titles or ['nenhum']}"
+                    )
+
                     max_attempts = 2
                     for attempt in range(1, max_attempts + 1):
                         self._dismiss_mt5_dialogs()
@@ -397,10 +502,13 @@ class SyncEngine:
                                 logger.success(f"Conta {login_clean} ({server_clean}) ativa e autenticada no MT5!")
                                 break
 
-                        msg_step = f"Tentativa {attempt}/{max_attempts}: Autenticando conta {login_clean} no servidor {server_clean}..."
+                        msg_step = (
+                            f"Tentativa {attempt}/{max_attempts}: Autenticando conta {login_clean} "
+                            f"no servidor {server_clean} (Senha: {pwd_diag})..."
+                        )
                         logger.info(msg_step)
                         if progress_callback:
-                            progress_callback(msg_step)
+                            progress_callback(f"Tentativa {attempt}/{max_attempts}: Autenticando conta {login_clean} no servidor {server_clean}...")
 
                         if pass_clean:
                             login_ok = self._run_with_dialog_watchdog(
@@ -427,7 +535,29 @@ class SyncEngine:
                             break
 
                         err = mt5.last_error()
-                        logger.warning(f"Tentativa {attempt}/{max_attempts} de login retornou {err}. Verificando estado da conta...")
+                        err_code = err[0] if isinstance(err, (tuple, list)) and len(err) > 0 else None
+                        self.last_error_code = err_code
+                        ui_after_err = self.inspect_mt5_ui_state(close_modals=True)
+                        after_titles = [w["title"] for w in ui_after_err.get("main_windows", [])]
+                        after_modals = [f"{m['title']} ({', '.join(m['controls'])})" for m in ui_after_err.get("modals", [])]
+
+                        logger.warning(
+                            f"Tentativa {attempt}/{max_attempts} de login para {login_clean}@{server_clean} retornou {err}. "
+                            f"Janela MT5={after_titles or ['(background)']} | Modais={after_modals or ['nenhum']}"
+                        )
+
+                        # Se o erro for -6 (Terminal: Authorization failed), o canal IPC está saudável!
+                        # Significa que a senha/login está incorreta para esse servidor OU o servidor não existe no servers.dat do MT5.
+                        # Não devemos repetir nem derrubar o IPC para não interromper as outras contas ativas!
+                        if err_code == -6:
+                            self.last_connect_error = (
+                                f"Falha de autorização (-6) no MT5 para a conta {login_clean} no servidor '{server_clean}' "
+                                f"(Senha enviada: {pwd_diag}). Verifique se o número da conta e a senha pertencem a '{server_clean}' "
+                                f"e se o servidor '{server_clean}' já foi buscado em 'File -> Open an Account' no MT5 da VPS."
+                            )
+                            logger.error(self.last_connect_error)
+                            return False
+
                         time.sleep(2.0)
                         self._dismiss_mt5_dialogs()
 
@@ -449,7 +579,7 @@ class SyncEngine:
                                 logger.warning(
                                     f"Conta {login_clean} posicionada em {server_clean}, porém sem resposta da corretora "
                                     f"(ícone amarelo sem nome no MT5). Verifique em 'File -> Open an Account' no MT5 da VPS "
-                                    f"se a corretora Deriv ({server_clean}) está cadastrada no servers.dat e se a senha está correta."
+                                    f"se o servidor '{server_clean}' está cadastrado no servers.dat e se a senha está correta."
                                 )
                                 break
                     else:
@@ -460,7 +590,7 @@ class SyncEngine:
                             logger.error(self.last_connect_error)
                             return False
 
-                self._wait_for_broker_sync(login_clean, timeout_sec=5.0)
+                self._wait_for_broker_sync(login_clean, timeout_sec=6.0)
 
             self.connected_account = account_id
             self.last_connect_error = None

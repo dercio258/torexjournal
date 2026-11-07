@@ -79,6 +79,9 @@ class AccountManager:
                             last_sync_dt = datetime.fromisoformat(last_sync_str) if last_sync_str else None
                             last_deal_dt = datetime.fromisoformat(last_deal_str) if last_deal_str else None
 
+                            saved_status = str(item.get("status", "ONLINE") or "ONLINE").upper()
+                            initial_status = "FAILED" if saved_status in ("FAILED", "AUTH_FAILED") else "ONLINE"
+
                             session = AccountSession(
                                 account_id=acc_id,
                                 login=str(item["login"]),
@@ -87,10 +90,17 @@ class AccountManager:
                                 last_deal_ticket=int(item.get("last_deal_ticket", 0)),
                                 last_deal_time=last_deal_dt,
                                 last_sync_time=last_sync_dt,
-                                status="ONLINE"
+                                status=initial_status,
+                                error_count=int(item.get("error_count", 0) or 0),
+                                last_error=item.get("last_error"),
                             )
                             self.accounts[acc_id] = session
-                    logger.info(f"Carregadas {len(self.accounts)} contas persistidas do cofre local ({self.pool_file})")
+                    active_cnt = len([a for a in self.accounts.values() if a.status not in ("FAILED", "AUTH_FAILED")])
+                    quarantined_cnt = len(self.accounts) - active_cnt
+                    logger.info(
+                        f"Carregadas {len(self.accounts)} contas do cofre local ({self.pool_file}) "
+                        f"[Ativas: {active_cnt} | Em quarentena por falha de login: {quarantined_cnt}]"
+                    )
             except Exception as e:
                 logger.warning(f"Não foi possível carregar pool de contas salvas: {e}")
 
@@ -110,6 +120,8 @@ class AccountManager:
                         "last_deal_time": acc.last_deal_time.isoformat() if acc.last_deal_time else None,
                         "last_sync_time": acc.last_sync_time.isoformat() if acc.last_sync_time else None,
                         "status": acc.status,
+                        "error_count": acc.error_count,
+                        "last_error": acc.last_error,
                     })
                 temp_file = self.pool_file.with_suffix(".tmp")
                 with open(temp_file, "w", encoding="utf-8") as f:
@@ -178,8 +190,13 @@ class AccountManager:
                 self._save_pool()
 
     def get_active_account_ids(self) -> List[int]:
+        """Retorna apenas contas operacionais (ignora contas em quarentena por falha de autenticação -6)."""
         with self._lock:
-            return list(self.accounts.keys())
+            return [
+                acc_id
+                for acc_id, acc in self.accounts.items()
+                if acc.status not in ("FAILED", "AUTH_FAILED")
+            ]
 
     def update_checkpoint(
         self,
@@ -200,14 +217,21 @@ class AccountManager:
                 acc.status = "ONLINE"
                 self._save_pool()
 
-    def mark_error(self, account_id: int, error_message: str):
+    def mark_error(self, account_id: int, error_message: str, is_auth_error: bool = False):
         with self._lock:
             acc = self.accounts.get(account_id)
             if acc:
                 acc.error_count += 1
                 acc.last_error = error_message
-                if acc.error_count >= 3:
+                if is_auth_error or "Authorization failed" in (error_message or "") or acc.error_count >= 2:
+                    prev_status = acc.status
                     acc.status = "FAILED"
+                    if prev_status != "FAILED":
+                        logger.error(
+                            f"[QUARENTENA] Conta {acc.login}@{acc.server} (ID: {account_id}) pausada do ciclo automático "
+                            f"após falha de autenticação/conexão ({error_message}). "
+                            f"Ela não derrubará a sessão das demais contas até que novas credenciais sejam enviadas."
+                        )
                 else:
                     acc.status = "OFFLINE"
                 self._save_pool()
