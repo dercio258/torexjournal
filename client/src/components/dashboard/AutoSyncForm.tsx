@@ -56,6 +56,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
     const pollTimerRef = useRef<any>(null);
+    const hasPrefilledRef = useRef<boolean>(false);
 
     useEffect(() => {
         if (!isServerDropdownOpen) return;
@@ -118,11 +119,16 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             setCloudState(res.data);
             setLastUpdatedAt(new Date().toLocaleTimeString());
 
-            if (res.data?.account?.mt5Id && !login) {
-                setLogin(res.data.account.mt5Id);
-            }
-            if (res.data?.account?.server && !server) {
-                setServer(res.data.account.server);
+            if (!hasPrefilledRef.current) {
+                if (res.data?.account?.mt5Id && !login) {
+                    setLogin(res.data.account.mt5Id);
+                }
+                if (res.data?.account?.server && !server) {
+                    setServer(res.data.account.server);
+                }
+                if (res.data?.account?.mt5Id || res.data?.account?.server) {
+                    hasPrefilledRef.current = true;
+                }
             }
         } catch (err) {
             // Ignore initial status errors
