@@ -3,7 +3,7 @@
  * Foco: derciomatsope9@gmail.com e helidiobusiness@gmail.com (+ contas MT5 associadas)
  *
  * Uso no servidor Linux:
- *   cd /var/www/torexjournal.com/backend-nest && node scripts/audit_two_users.js
+ *   cd /var/www/torexjournal.com && git pull origin main && node backend-nest/scripts/audit_two_users.js
  */
 
 const path = require('path');
@@ -55,7 +55,7 @@ async function runAudit() {
     try {
         // 1. Buscar usuários alvo
         const usersRes = await pgClient.query(
-            `SELECT id, email, username, name, "createdAt", "updatedAt"
+            `SELECT id::text as id, email, username, name, "createdAt", "updatedAt"
              FROM users
              WHERE LOWER(email) = ANY($1::text[])`,
             [TARGET_EMAILS.map(e => e.toLowerCase())]
@@ -66,23 +66,22 @@ async function runAudit() {
         console.log('--------------------------------------------------------------------------------');
         if (usersRes.rows.length === 0) {
             console.log('Nenhum dos emails alvo foi encontrado exatamente. Listando todos os usuarios cadastrados:');
-            const allUsers = await pgClient.query(`SELECT id, email, username, name, "createdAt" FROM users ORDER BY "createdAt" DESC LIMIT 30`);
+            const allUsers = await pgClient.query(`SELECT id::text as id, email, username, name, "createdAt" FROM users ORDER BY "createdAt" DESC LIMIT 30`);
             console.table(allUsers.rows);
         } else {
             console.table(usersRes.rows);
         }
 
-        const targetUserIds = usersRes.rows.map(u => u.id);
-        const userById = new Map(usersRes.rows.map(u => [u.id, u]));
+        const targetUserIds = usersRes.rows.map(u => String(u.id));
 
         // 2. Buscar TODAS as contas desses usuários + qualquer conta no banco que tenha mt5_id preenchido (para detectar associações cruzadas)
         const accountsRes = await pgClient.query(
-            `SELECT a.id, a.user_id, u.email as owner_email, a.name, a.broker, a.type, a.mt5_id,
+            `SELECT a.id::text as id, a.user_id::text as user_id, u.email as owner_email, a.name, a.broker, a.type, a.mt5_id,
                     a.currency, a.initial_balance, a.balance, a.equity, a.margin, a.margin_free,
                     a.is_primary, a.is_archived, a.is_connected, a.last_seen, a.created_at, a.updated_at
              FROM accounts a
-             LEFT JOIN users u ON u.id = a.user_id
-             WHERE a.user_id = ANY($1::uuid[])
+             LEFT JOIN users u ON u.id::text = a.user_id::text
+             WHERE a.user_id::text = ANY($1::text[])
                 OR (a.mt5_id IS NOT NULL AND a.mt5_id != '')
              ORDER BY a.updated_at DESC`,
             [targetUserIds.length > 0 ? targetUserIds : ['00000000-0000-0000-0000-000000000000']]
@@ -109,7 +108,7 @@ async function runAudit() {
             }))
         );
 
-        const auditedAccountIds = accountsRes.rows.map(a => a.id);
+        const auditedAccountIds = accountsRes.rows.map(a => String(a.id));
 
         // 3. Resumo de Trades no PostgreSQL vs ClickHouse por Conta
         console.log('\n--------------------------------------------------------------------------------');
@@ -139,8 +138,8 @@ async function runAudit() {
                     MIN(open_time) as first_trade,
                     MAX(close_time) as last_trade
                  FROM trades
-                 WHERE account_id = $1`,
-                [acc.id]
+                 WHERE account_id::text = $1`,
+                [String(acc.id)]
             );
             const st = pgStats.rows[0];
             const closedCnt = parseInt(st.closed_rows, 10) || 0;
@@ -169,7 +168,7 @@ async function runAudit() {
                             FROM trades
                             WHERE accountId = {accId:String}
                         `,
-                        query_params: { accId: acc.id },
+                        query_params: { accId: String(acc.id) },
                         format: 'JSONEachRow',
                     });
                     const chRaw = (await chRawRes.json())[0] || {};
@@ -191,7 +190,7 @@ async function runAudit() {
                             FROM trades FINAL
                             WHERE accountId = {accId:String}
                         `,
-                        query_params: { accId: acc.id },
+                        query_params: { accId: String(acc.id) },
                         format: 'JSONEachRow',
                     });
                     const chFinal = (await chFinalRes.json())[0] || {};
@@ -205,13 +204,13 @@ async function runAudit() {
 
             // 3.3 Amostra dos últimos 10 trades desta conta no PostgreSQL
             const sampleTrades = await pgClient.query(
-                `SELECT id, ticket, contract_id, symbol, type, volume, open_price, close_price,
+                `SELECT id::text as id, ticket, contract_id, symbol, type, volume, open_price, close_price,
                         profit, commission, swap, net_pnl, status, open_time, close_time, comment, import_log_id
                  FROM trades
-                 WHERE account_id = $1
+                 WHERE account_id::text = $1
                  ORDER BY COALESCE(close_time, open_time) DESC
                  LIMIT 10`,
-                [acc.id]
+                [String(acc.id)]
             );
             if (sampleTrades.rows.length > 0) {
                 console.log(`    Ultimos ${sampleTrades.rows.length} trades no PostgreSQL:`);
@@ -237,16 +236,18 @@ async function runAudit() {
             }
 
             // 3.4 Posições em aberto no PostgreSQL
-            const posRes = await pgClient.query(
-                `SELECT ticket, symbol, type, volume, "openPrice", "currentPrice", profit, "openTime"
-                 FROM positions
-                 WHERE "accountId" = $1`,
-                [acc.id]
-            );
-            if (posRes.rows.length > 0) {
-                console.log(`    Posicoes Abertas (${posRes.rows.length}):`);
-                console.table(posRes.rows);
-            }
+            try {
+                const posRes = await pgClient.query(
+                    `SELECT ticket, symbol, type, volume, "openPrice", "currentPrice", profit, "openTime"
+                     FROM positions
+                     WHERE "accountId"::text = $1`,
+                    [String(acc.id)]
+                );
+                if (posRes.rows.length > 0) {
+                    console.log(`    Posicoes Abertas (${posRes.rows.length}):`);
+                    console.table(posRes.rows);
+                }
+            } catch { }
         }
 
         // 4. Verificar se existem trades órfãos no ClickHouse cujos accountId não batem com PostgreSQL
@@ -280,13 +281,13 @@ async function runAudit() {
         console.log(' 5. ULTIMOS 30 LOGS DE IMPORTACAO / SINCRONIZACAO (import_logs)');
         console.log('--------------------------------------------------------------------------------');
         const logsRes = await pgClient.query(
-            `SELECT l.id, u.email as user_email, l.account_id, a.name as acc_name, a.mt5_id,
+            `SELECT l.id, u.email as user_email, l.account_id::text as account_id, a.name as acc_name, a.mt5_id,
                     l.method, l.status, l."tradesCount", l.details, l."createdAt"
              FROM import_logs l
-             LEFT JOIN users u ON u.id = l."userId"
-             LEFT JOIN accounts a ON a.id = l.account_id
-             WHERE l."userId" = ANY($1::uuid[])
-                OR l.account_id = ANY($2::uuid[])
+             LEFT JOIN users u ON u.id::text = l."userId"::text
+             LEFT JOIN accounts a ON a.id::text = l.account_id::text
+             WHERE l."userId"::text = ANY($1::text[])
+                OR l.account_id::text = ANY($2::text[])
                 OR l.details LIKE '%408953138%'
                 OR l.details LIKE '%202658742%'
              ORDER BY l."createdAt" DESC
@@ -314,10 +315,10 @@ async function runAudit() {
         // 6. Transações manuais (account_transactions) se houverem
         try {
             const txRes = await pgClient.query(
-                `SELECT t.id, t.account_id, a.name as acc_name, t.type, t.amount, t.balance_after, t.description, t.date
+                `SELECT t.id::text as id, t.account_id::text as account_id, a.name as acc_name, t.type, t.amount, t.balance_after, t.description, t.date
                  FROM account_transactions t
-                 LEFT JOIN accounts a ON a.id = t.account_id
-                 WHERE t.account_id = ANY($1::uuid[])
+                 LEFT JOIN accounts a ON a.id::text = t.account_id::text
+                 WHERE t.account_id::text = ANY($1::text[])
                  ORDER BY t.date DESC
                  LIMIT 20`,
                 [auditedAccountIds.length > 0 ? auditedAccountIds : ['00000000-0000-0000-0000-000000000000']]
