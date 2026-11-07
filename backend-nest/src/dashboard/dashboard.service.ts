@@ -171,7 +171,7 @@ export class DashboardService {
                         commission, swap, openTime, closeTime, status, 
                         magic, comment, session, mood, rating, setup, 
                         lesson, tags, dataQuality, importLogId, updatedAt
-                    FROM trades 
+                    FROM trades FINAL
                     WHERE accountId IN ({accountIds:Array(String)}) AND status = 'CLOSED'
                 `;
                 const params: any = { accountIds };
@@ -332,14 +332,43 @@ export class DashboardService {
             }
 
             const winRate = (wins / totalTrades) * 100;
-            const profitFactor = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
+            const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? grossProfit : 0) : grossProfit / grossLoss;
+
+            // Real mathematical calculation for Radar Metrics (0-100 scale, no hardcoded fake values)
+            const tradingDays = Array.from(dailyMap.values());
+            const winningDays = tradingDays.filter(dPnl => dPnl > 0).length;
+            const consistencyScore = tradingDays.length > 0
+                ? Math.round((winningDays / tradingDays.length) * 100)
+                : 0;
+
+            const avgWin = wins > 0 ? grossProfit / wins : 0;
+            const avgLoss = losses > 0 ? grossLoss / losses : 0;
+            const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : (avgWin > 0 ? 2 : 0);
+            const tradesWithSl = trades.filter(t => Number(t.sl) > 0).length;
+            const slUsageRatio = totalTrades > 0 ? (tradesWithSl / totalTrades) * 100 : 0;
+            const payoffComponent = Math.min(100, (payoffRatio / 2.0) * 100);
+            const riskManagementScore = Math.round(Math.min(100, (payoffComponent * 0.6) + (slUsageRatio * 0.4)));
+
+            // Volume sizing stability (Discipline): penalize erratic lot size spikes (revenge trading / martingale)
+            const volumes = trades.map(t => Number(t.volume) || 0).filter(v => v > 0);
+            let disciplineScore = 0;
+            if (volumes.length > 0) {
+                const meanVol = volumes.reduce((s, v) => s + v, 0) / volumes.length;
+                const varianceVol = volumes.reduce((s, v) => s + Math.pow(v - meanVol, 2), 0) / volumes.length;
+                const cvVol = meanVol > 0 ? Math.sqrt(varianceVol) / meanVol : 0; // Coefficient of variation
+                disciplineScore = Math.max(0, Math.min(100, Math.round((1 - Math.min(cvVol, 1)) * 100)));
+            }
+
+            const profitabilityScore = grossLoss === 0
+                ? (grossProfit > 0 ? 100 : 0)
+                : Math.max(0, Math.min(100, Math.round((profitFactor / 2.5) * 100)));
 
             const radarMetrics = {
-                consistency: 75,
-                riskManagement: profitFactor > 1.5 ? 90 : 60,
-                discipline: 80,
-                profitability: totalPnL > 0 ? 85 : 40,
-                winRate: winRate
+                consistency: consistencyScore,
+                riskManagement: riskManagementScore,
+                discipline: disciplineScore,
+                profitability: profitabilityScore,
+                winRate: Number(winRate.toFixed(1))
             };
 
             // Currencies and Account Breakdown for consolidated view

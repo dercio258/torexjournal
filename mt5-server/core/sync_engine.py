@@ -596,17 +596,32 @@ class SyncEngine:
                                 )
                                 break
                             elif attempt == max_attempts:
-                                logger.warning(
-                                    f"Conta {login_clean} posicionada em {server_clean}, porém sem resposta da corretora "
-                                    f"(ícone amarelo sem nome no MT5). Verifique em 'File -> Open an Account' no MT5 da VPS "
-                                    f"se o servidor '{server_clean}' está cadastrado no servers.dat e se a senha está correta."
+                                self._wait_for_broker_sync(login_clean, timeout_sec=5.0)
+                                info_after = mt5.account_info()
+                                holder_after = (getattr(info_after, "name", "") or "").strip() if info_after else ""
+                                bal_after = float(getattr(info_after, "balance", 0.0) or 0.0) if info_after else 0.0
+                                if holder_after or bal_after > 0:
+                                    logger.success(
+                                        f"Conta {login_clean}: {holder_after} ({server_clean}) sincronizada após espera!"
+                                    )
+                                    break
+                                self.last_connect_error = (
+                                    f"Conta {login_clean} posicionada em '{server_clean}', porém sem autenticação/resposta da corretora "
+                                    f"(ícone amarelo sem titular no MT5 e saldo $0.00). Verifique se o número da conta e a senha pertencem a '{server_clean}' "
+                                    f"e se o servidor '{server_clean}' está cadastrado em 'File -> Open an Account' no MT5 da VPS."
                                 )
-                                break
+                                logger.error(self.last_connect_error)
+                                return False
                     else:
                         final_info = mt5.account_info()
-                        if not self._is_account_authenticated(final_info, login_clean, server_clean):
+                        holder_final = (getattr(final_info, "name", "") or "").strip() if final_info else ""
+                        bal_final = float(getattr(final_info, "balance", 0.0) or 0.0) if final_info else 0.0
+                        if not self._is_account_authenticated(final_info, login_clean, server_clean) or not (holder_final or bal_final > 0):
                             err = mt5.last_error()
-                            self.last_connect_error = f"Falha ao autenticar conta {login_clean} em {server_clean}: {err}"
+                            self.last_connect_error = (
+                                f"Falha ao autenticar conta {login_clean} em '{server_clean}': {err}. "
+                                f"Verifique o número da conta, a senha e o servidor."
+                            )
                             logger.error(self.last_connect_error)
                             return False
 
