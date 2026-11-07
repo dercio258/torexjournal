@@ -486,18 +486,33 @@ export const Profile: React.FC = () => {
                                         {/* Top Header Card */}
                                         <div className="flex items-start justify-between gap-2 mb-2">
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap">
                                                     <h3 className="font-bold text-slate-100 text-base truncate">
                                                         {account.name}
                                                     </h3>
+                                                    {account.mt5Id && (
+                                                        <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded-md font-bold shrink-0">
+                                                            MT5 #{account.mt5Id}
+                                                        </span>
+                                                    )}
                                                     {account.isPrimary && (
                                                         <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">
                                                             Principal
                                                         </span>
                                                     )}
                                                 </div>
-                                                <p className="text-xs text-slate-400 mt-0.5">
-                                                    {account.broker} • {account.currency}
+                                                <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                                    <span>{account.broker}</span>
+                                                    <span>•</span>
+                                                    <span>{account.currency}</span>
+                                                    {(account.mt5Id || Number(account.balance) > 0) && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span className="font-mono text-slate-200 font-semibold">
+                                                                Saldo: {formatMoney(Number(account.balance) || 0, account.currency)}
+                                                            </span>
+                                                        </>
+                                                    )}
                                                 </p>
                                             </div>
 
@@ -511,6 +526,12 @@ export const Profile: React.FC = () => {
                                                 }`}>
                                                     {account.type.toUpperCase()}
                                                 </span>
+
+                                                {account.isConnected && (
+                                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                                        MT5 ONLINE
+                                                    </span>
+                                                )}
 
                                                 {isSelected && (
                                                     <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">

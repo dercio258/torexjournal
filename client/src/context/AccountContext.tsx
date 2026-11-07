@@ -189,13 +189,9 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ? null
         : accounts.find(a => a.id === selectedAccountId) || null;
 
-    const activeAccountsCount = accounts.filter(a => !a.isArchived).length;
-    const canCreateAccount = activeAccountsCount < 50;
+    const canCreateAccount = true;
 
     const createAccount = async (data: Partial<TradingAccount>) => {
-        if (activeAccountsCount >= 50) {
-            throw new Error('Limite máximo de contas de trading atingido.');
-        }
         const res = await api.post('/accounts', data);
         const newAccount: TradingAccount = res.data;
         await refreshAccounts();

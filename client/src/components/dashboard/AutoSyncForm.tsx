@@ -38,7 +38,7 @@ interface AutoSyncFormProps {
 }
 
 export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFormProps) => {
-    const { selectedAccountId, refreshAccounts, selectAccount } = useAccount();
+    const { accounts, selectedAccountId, refreshAccounts, selectAccount } = useAccount();
     const validSelectedAccountId = selectedAccountId && selectedAccountId !== 'all' ? selectedAccountId : undefined;
     const [login, setLogin] = useState('');
     const [password, setPassword] = useState('');
@@ -327,6 +327,21 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const recentEvents: any[] = cloudState?.recentEvents || [];
     const isAccConnected = acc?.isConnected || acc?.connectionState === 'CONNECTED';
 
+    const syncedMt5Accounts = useMemo(() => {
+        const fromCloud: any[] = Array.isArray(cloudState?.mt5Accounts) ? cloudState.mt5Accounts : [];
+        const fromContext = accounts.filter(a => !a.isArchived && !!a.mt5Id);
+        const mergedMap = new Map<string, any>();
+        for (const item of fromContext) {
+            if (item.mt5Id) mergedMap.set(item.mt5Id, item);
+        }
+        for (const item of fromCloud) {
+            if (item.mt5Id) {
+                mergedMap.set(item.mt5Id, { ...(mergedMap.get(item.mt5Id) || {}), ...item });
+            }
+        }
+        return Array.from(mergedMap.values());
+    }, [cloudState?.mt5Accounts, accounts]);
+
     const getConnectionBadge = () => {
         const state = acc?.connectionState || (isAccConnected ? 'CONNECTED' : 'DISCONNECTED');
         if (activeTaskId || state === 'CONNECTING' || state === 'SYNCING') {
@@ -388,6 +403,79 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     </span>
                 </div>
             </div>
+
+            {/* Barra de Contas Trader MT5 Sincronizadas (Permite alternar ou adicionar ilimitadas contas MT5) */}
+            {syncedMt5Accounts.length > 0 && (
+                <div className="p-4 rounded-2xl bg-[#111319] border border-white/[0.08] shadow-xl space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
+                                Contas Trader MT5 ({syncedMt5Accounts.length})
+                            </span>
+                            <span className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+                                Sem limite de contas
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setLogin('');
+                                setPassword('');
+                                setStatus({
+                                    type: 'info',
+                                    message: 'Preencha o login, senha e servidor abaixo para sincronizar uma nova conta MT5 (uma nova Conta Trader será criada automaticamente).'
+                                });
+                            }}
+                            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 px-3 py-1.5 rounded-xl transition-all"
+                        >
+                            + Sincronizar Outra Conta MT5
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 overflow-x-auto pb-1">
+                        {syncedMt5Accounts.map((mt5Acc) => {
+                            const isCurrent = acc?.mt5Id === mt5Acc.mt5Id || selectedAccountId === mt5Acc.id;
+                            const isOnline = mt5Acc.isConnected || mt5Acc.connectionState === 'CONNECTED';
+                            return (
+                                <button
+                                    key={mt5Acc.id || mt5Acc.mt5Id}
+                                    type="button"
+                                    onClick={() => {
+                                        if (mt5Acc.id && selectAccount) {
+                                            selectAccount(mt5Acc.id);
+                                        }
+                                        if (mt5Acc.mt5Id) {
+                                            setLogin(mt5Acc.mt5Id);
+                                            if (mt5Acc.broker) setServer(mt5Acc.broker);
+                                            fetchCloudStatus(mt5Acc.mt5Id);
+                                        }
+                                    }}
+                                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-left transition-all shrink-0 ${
+                                        isCurrent
+                                            ? 'bg-emerald-500/10 border-emerald-500/40 text-[#F3F4F6] shadow-md'
+                                            : 'bg-[#08090C]/80 border-white/[0.07] text-[#9CA3AF] hover:text-[#F3F4F6] hover:border-white/[0.15]'
+                                    }`}
+                                >
+                                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                                    <div>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-xs font-bold text-[#F3F4F6]">
+                                                {mt5Acc.name || `MT5 ${mt5Acc.mt5Id}`}
+                                            </span>
+                                            <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/15 px-1.5 py-0.2 rounded">
+                                                #{mt5Acc.mt5Id}
+                                            </span>
+                                        </div>
+                                        <div className="text-[11px] text-[#9CA3AF] font-mono mt-0.5">
+                                            {mt5Acc.broker} • ${Number(mt5Acc.balance || 0).toFixed(2)}
+                                        </div>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Formulário de Conexão / Atualização de Credenciais MT5 */}
             <Card className="p-8 bg-[#111319] border-white/[0.08] shadow-2xl">

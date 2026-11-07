@@ -285,10 +285,15 @@ export const AccountManagerModal: React.FC = () => {
                                     >
                                         <div>
                                             <div className="flex items-start justify-between mb-2">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap">
                                                     <h3 className="font-bold text-[#F3F4F6] text-sm">
                                                         {account.name}
                                                     </h3>
+                                                    {account.mt5Id && (
+                                                        <span className="text-[10px] font-mono bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded font-bold">
+                                                            #{account.mt5Id}
+                                                        </span>
+                                                    )}
                                                     {account.isPrimary && (
                                                         <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-semibold">
                                                             Principal
@@ -307,10 +312,18 @@ export const AccountManagerModal: React.FC = () => {
                                                 </span>
                                             </div>
 
-                                            <div className="text-xs text-[#9CA3AF] flex items-center gap-2 mb-3">
+                                            <div className="text-xs text-[#9CA3AF] flex items-center gap-2 mb-3 flex-wrap">
                                                 <span>{account.broker}</span>
                                                 <span>•</span>
                                                 <span>{account.currency}</span>
+                                                {(account.mt5Id || Number(account.balance) > 0) && (
+                                                    <>
+                                                        <span>•</span>
+                                                        <span className="font-mono text-[#F3F4F6] font-semibold">
+                                                            Saldo: {formatMoney(Number(account.balance) || 0, account.currency)}
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
 
                                             {/* Métricas Reais do Trading */}
