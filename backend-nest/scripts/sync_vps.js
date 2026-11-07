@@ -15,7 +15,7 @@ async function syncDatabase() {
         username: process.env.DB_USER || 'postgres',
         password: process.env.DB_PASS || 'postgres',
         database: process.env.DB_NAME || 'trading_cossa',
-        synchronize: true, // Força a atualização da estrutura (cria tabelas/colunas que faltam)
+        synchronize: process.env.DB_SYNCHRONIZE === 'true', // Desativado por padrão em produção para proteger dados; use migrations
         logging: true,
         // Usa as entidades compiladas na pasta dist porque na VPS teremos JavaScript
         entities: [path.join(__dirname, '../dist/**/*.entity.js')],

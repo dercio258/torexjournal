@@ -203,7 +203,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 }
             }
 
-            // 4. Batch Upsert Positions
+            // 4. Batch Upsert & Prune Closed Positions Atomically
             if (positions && positions.length > 0) {
                 const existingPositions = await queryRunner.manager.find(PositionEntity, {
                     where: { accountId: account.id }
@@ -213,9 +213,11 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 existingPositions.forEach(p => positionMap.set(p.ticket.toString(), p));
 
                 const positionsToSave: PositionEntity[] = [];
+                const incomingTickets: string[] = [];
 
                 for (const pos of positions) {
                     const ticketStr = pos.ticket.toString();
+                    incomingTickets.push(ticketStr);
                     let entity = positionMap.get(ticketStr);
 
                     if (entity) {
@@ -246,6 +248,18 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 if (positionsToSave.length > 0) {
                     await queryRunner.manager.save(positionsToSave);
                 }
+
+                if (incomingTickets.length > 0) {
+                    await queryRunner.manager
+                        .createQueryBuilder()
+                        .delete()
+                        .from(PositionEntity)
+                        .where('account_id = :accountId', { accountId: account.id })
+                        .andWhere('ticket NOT IN (:...tickets)', { tickets: incomingTickets })
+                        .execute();
+                }
+            } else {
+                await queryRunner.manager.delete(PositionEntity, { accountId: account.id });
             }
 
             await queryRunner.commitTransaction();
@@ -408,20 +422,24 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 if (!t.openTime) continue;
 
                 const isTradeClosed = t.status === 'CLOSED' || !!t.closeTime || t.closePrice > 0 || (t.profit !== undefined && t.profit !== null);
-                const finalCloseTime = t.closeTime 
-                    ? new Date(t.closeTime) 
-                    : (isTradeClosed && t.openTime ? new Date(new Date(t.openTime).getTime() + 5 * 60 * 1000) : null);
+                const hasExplicitCloseTime = Boolean(t.closeTime);
+                const finalCloseTime = hasExplicitCloseTime
+                    ? new Date(t.closeTime)
+                    : (isTradeClosed && t.openTime ? new Date(t.openTime) : null);
+                const computedDataQuality = t.dataQuality || (isTradeClosed && !hasExplicitCloseTime ? 'partial' : 'ok');
 
                 const newTrade: TradeEntity = this.tradeRepo.create({
                     ...t,
                     ticket: ticket,
                     contractId: contractId,
                     accountId: accountId,
+                    sl: t.sl !== undefined && t.sl !== null && Number(t.sl) > 0 ? Number(t.sl) : null,
+                    tp: t.tp !== undefined && t.tp !== null && Number(t.tp) > 0 ? Number(t.tp) : null,
                     openTime: t.openTime ? new Date(t.openTime) : null,
                     closeTime: finalCloseTime,
                     status: isTradeClosed ? 'CLOSED' : (t.status || 'OPEN'),
                     netPnl: t.netPnl !== undefined ? t.netPnl : (Number(t.profit || 0) + Number(t.commission || 0) + Number(t.swap || 0)),
-                    dataQuality: t.dataQuality || 'ok'
+                    dataQuality: computedDataQuality
                 } as any) as unknown as TradeEntity;
 
                 // Ensure entity type is correctly cast
@@ -429,6 +447,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             }
 
             let finalLogId = null;
+            let tradesForDownstream: TradeEntity[] = [];
             if (tradesToSave.length > 0) {
                 // Update Account balance with net PnL of new trades ONLY for manual/file imports.
                 // For AUTO_SYNC, syncAccountMetrics already sets the authoritative real-time MT5 balance & equity.
@@ -479,13 +498,17 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     }
                 });
 
-                const tradesForDownstream = savedTrades.length > 0 ? savedTrades : tradesToSave;
-
-                // Sync trades to ClickHouse
-                await this.clickHouseService.saveTrades(tradesForDownstream);
+                tradesForDownstream = savedTrades.length > 0 ? savedTrades : tradesToSave;
             }
 
             await queryRunner.commitTransaction();
+
+            // Replicate to ClickHouse AFTER PostgreSQL transaction commits
+            if (tradesForDownstream.length > 0) {
+                this.clickHouseService.saveTrades(tradesForDownstream).catch(err => {
+                    this.logger.warn(`ClickHouse async trade replication warning: ${err.message}`);
+                });
+            }
 
             if (tradesToSave.length > 0) {
                 // Broadcast updates
@@ -609,9 +632,15 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         let trade: TradeEntity | null = null;
 
         if (userId) {
-            const account = await this.accountRepo.findOne({ where: { userId } });
-            if (account) {
-                trade = await this.tradeRepo.findOne({ where: { ticket: ticketStr, accountId: account.id } });
+            const accounts = await this.accountRepo.find({ where: { userId } });
+            const accountIds = accounts.map(a => a.id);
+            if (accountIds.length > 0) {
+                trade = await this.tradeRepo.findOne({
+                    where: [
+                        { ticket: ticketStr, accountId: In(accountIds) },
+                        { contractId: ticketStr, accountId: In(accountIds) }
+                    ]
+                });
             }
         } else {
             trade = await this.tradeRepo.findOne({ where: { ticket: ticketStr } });
@@ -628,21 +657,32 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         trade.tags = journalData.tags;
 
         const saved = await this.tradeRepo.save(trade);
-        await this.clickHouseService.saveTrade(saved);
+        this.clickHouseService.saveTrade(saved).catch(() => {});
         return saved;
     }
 
     async createManualTrade(data: any, userId: string): Promise<TradeEntity> {
-        const account = await this.accountRepo.findOne({ where: { userId } });
+        let account: AccountEntity | null = null;
+        if (data?.accountId && data.accountId !== 'all') {
+            account = await this.accountRepo.findOne({ where: { id: data.accountId, userId, isArchived: false } });
+        }
         if (!account) {
-            throw new Error('Conta de trading nÃ£o encontrada para este usuÃ¡rio.');
+            account = await this.accountRepo.findOne({ where: { userId, isArchived: false, isPrimary: true } })
+                || await this.accountRepo.findOne({ where: { userId, isArchived: false }, order: { lastSeen: 'DESC' } });
+        }
+        if (!account) {
+            throw new Error('Conta de trading não encontrada para este usuário.');
         }
 
-        const ticket = data.ticket || Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 1000);
+        const ticket = (data.ticket || Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 1000)).toString();
+        const profit = Number(data.profit) || 0;
+        const commission = Number(data.commission) || 0;
+        const swap = Number(data.swap) || 0;
 
         const newTrade = this.tradeRepo.create({
             accountId: account.id,
             ticket,
+            contractId: ticket,
             symbol: data.symbol,
             type: data.type,
             volume: data.volume,
@@ -650,7 +690,10 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             closePrice: data.closePrice,
             openTime: new Date(data.openTime),
             closeTime: new Date(data.closeTime),
-            profit: data.profit,
+            profit,
+            commission,
+            swap,
+            netPnl: profit + commission + swap,
             magic: 0,
             comment: 'Manual Trade',
             session: this.calculateSession(new Date(data.openTime)),
@@ -660,7 +703,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         });
 
         const saved = await this.tradeRepo.save(newTrade);
-        await this.clickHouseService.saveTrade(saved);
+        this.clickHouseService.saveTrade(saved).catch(() => {});
 
         // Invalidate Dashboard Cache
         await this.dashboardService.invalidateUserCache(userId);
@@ -730,41 +773,59 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             throw new Error('Import log not found');
         }
 
-        // Find associated trades to get IDs and account references before deletion
+        // Find associated trades to get IDs, PnL and account references before deletion
         const tradesToDelete = await this.tradeRepo.find({
             where: { importLogId: logId },
-            select: ['id', 'accountId']
+            select: ['id', 'accountId', 'profit', 'commission', 'swap']
         });
         const tradeIds = tradesToDelete.map(t => t.id);
 
         this.logger.log(`Reverting import log ${logId} for user ${userId}. Found ${tradeIds.length} trades to delete.`);
 
-        // 1. Delete associated trades from ClickHouse completely
-        await this.clickHouseService.deleteTradesByImportLogId(logId);
+        // 1. Delete associated trades, reverse manual/file balance delta, and delete log in a PostgreSQL transaction FIRST
+        await this.dataSource.transaction(async (manager) => {
+            if (log.method !== ImportMethod.AUTO_SYNC && tradesToDelete.length > 0) {
+                const pnlByAcc = new Map<string, number>();
+                for (const tr of tradesToDelete) {
+                    if (!tr.accountId) continue;
+                    const trPnl = (Number(tr.profit) || 0) + (Number(tr.commission) || 0) + (Number(tr.swap) || 0);
+                    pnlByAcc.set(tr.accountId, (pnlByAcc.get(tr.accountId) || 0) + trPnl);
+                }
+                for (const [accId, pnlDelta] of pnlByAcc.entries()) {
+                    const acc = await manager.findOne(AccountEntity, { where: { id: accId, userId } });
+                    if (acc) {
+                        acc.balance = Number((Number(acc.balance || 0) - pnlDelta).toFixed(2));
+                        acc.equity = Number((Number(acc.equity || acc.balance) - pnlDelta).toFixed(2));
+                        await manager.save(AccountEntity, acc);
+                    }
+                }
+            }
+
+            await manager.createQueryBuilder()
+                .delete()
+                .from(TradeEntity)
+                .where('import_log_id = :logId', { logId })
+                .execute();
+
+            if (tradeIds.length > 0) {
+                await manager.delete(TradeEntity, tradeIds);
+            }
+
+            await manager.delete(ImportLog, logId);
+        });
+
+        // 2. Delete associated trades from ClickHouse AFTER PostgreSQL transaction commits
+        this.clickHouseService.deleteTradesByImportLogId(logId).catch(() => {});
         if (tradeIds.length > 0) {
-            await this.clickHouseService.deleteTradesByIds(tradeIds);
+            this.clickHouseService.deleteTradesByIds(tradeIds).catch(() => {});
         }
 
-        // 2. Delete associated trades from PostgreSQL
-        await this.tradeRepo.createQueryBuilder()
-            .delete()
-            .from(TradeEntity)
-            .where('import_log_id = :logId', { logId })
-            .execute();
-
-        if (tradeIds.length > 0) {
-            await this.tradeRepo.delete(tradeIds);
-        }
-
-        // 3. Remove the import log entry
-        await this.importLogRepo.delete(logId);
-
-        // 4. Invalidate dashboard cache so deleted trades disappear immediately
+        // 3. Invalidate dashboard cache so deleted trades disappear immediately
         if (userId) {
             await this.dashboardService.invalidateUserCache(userId);
         }
 
-        // 5. Broadcast history update to connected WebSocket clients (scoped to userId)
+        // 4. Broadcast history update to connected WebSocket clients (scoped to userId)
         this.mt5Gateway.broadcastHistoryUpdate({ count: 0, trades: [] }, userId);
 
         return { success: true, message: 'Importação revertida e trades excluídos com sucesso de todas as bases' };

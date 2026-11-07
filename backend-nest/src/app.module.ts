@@ -80,7 +80,7 @@ const appImports: any[] = [
       password: configService.get<string>('DB_PASS', 'postgres'),
       database: configService.get<string>('DB_NAME', 'trading_cossa'),
       autoLoadEntities: true,
-      synchronize: true,
+      synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
       logging: false,
     }),
     inject: [ConfigService],

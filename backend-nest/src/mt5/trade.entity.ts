@@ -1,7 +1,24 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index, ValueTransformer } from 'typeorm';
+
+export class ColumnNumericTransformer implements ValueTransformer {
+    to(data?: number | null): number | null {
+        if (data === null || data === undefined) return null;
+        return Number(data);
+    }
+    from(data?: string | number | null): number | null {
+        if (data === null || data === undefined) return null;
+        const parsed = parseFloat(String(data));
+        return isNaN(parsed) ? null : parsed;
+    }
+}
+
+const numericTransformer = new ColumnNumericTransformer();
 
 @Entity('trades')
 @Index(['accountId', 'contractId'], { unique: true })
+@Index(['accountId', 'closeTime'])
+@Index(['accountId', 'status'])
+@Index(['importLogId'])
 export class TradeEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -13,7 +30,7 @@ export class TradeEntity {
     ticket: string;
 
     @Column({ nullable: true })
-    contractId: string; // Deriv contract_id or MT5 ticket
+    contractId: string; // Deriv contract_id or MT5 positionId/ticket
 
     @Column({ nullable: true })
     buyTransactionId: string;
@@ -27,37 +44,37 @@ export class TradeEntity {
     @Column()
     type: string;
 
-    @Column('decimal', { precision: 18, scale: 2 })
+    @Column('decimal', { precision: 18, scale: 4, transformer: numericTransformer })
     volume: number;
 
-    @Column('decimal', { precision: 18, scale: 5, name: 'open_price' })
+    @Column('decimal', { precision: 18, scale: 5, name: 'open_price', transformer: numericTransformer })
     openPrice: number;
 
-    @Column('decimal', { precision: 18, scale: 5, name: 'close_price' })
+    @Column('decimal', { precision: 18, scale: 5, name: 'close_price', transformer: numericTransformer })
     closePrice: number;
 
-    @Column('decimal', { precision: 18, scale: 2 })
+    @Column('decimal', { precision: 18, scale: 2, transformer: numericTransformer })
     profit: number;
 
-    @Column('decimal', { precision: 18, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: numericTransformer })
     sl: number;
 
-    @Column('decimal', { precision: 18, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: numericTransformer })
     tp: number;
 
-    @Column('decimal', { precision: 18, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0, transformer: numericTransformer })
     commission: number;
 
-    @Column('decimal', { precision: 18, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0, transformer: numericTransformer })
     swap: number;
 
-    @Column('decimal', { precision: 20, scale: 2, nullable: true })
+    @Column('decimal', { precision: 20, scale: 2, nullable: true, transformer: numericTransformer })
     grossResult: number;
 
-    @Column('decimal', { precision: 20, scale: 2, nullable: true })
+    @Column('decimal', { precision: 20, scale: 2, nullable: true, transformer: numericTransformer })
     netPnl: number;
 
-    @Column('decimal', { precision: 18, scale: 2, default: 0 })
+    @Column('decimal', { precision: 18, scale: 2, default: 0, transformer: numericTransformer })
     fees: number;
 
     @Column({ length: 10, nullable: true })
@@ -97,21 +114,21 @@ export class TradeEntity {
     tags: string[];
 
     @Column({ type: 'jsonb', nullable: true })
-    qualityFlags: any; // e.g., { missing_sell: true, inconsistent_pnl: true }
+    qualityFlags: any;
 
-    @Column('decimal', { precision: 18, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: numericTransformer })
     entrySpot: number;
 
-    @Column('decimal', { precision: 18, scale: 5, nullable: true })
+    @Column('decimal', { precision: 18, scale: 5, nullable: true, transformer: numericTransformer })
     exitSpot: number;
 
-    @Column('decimal', { precision: 18, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true, transformer: numericTransformer })
     buyPrice: number;
 
-    @Column('decimal', { precision: 18, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true, transformer: numericTransformer })
     sellPrice: number;
 
-    @Column('decimal', { precision: 18, scale: 2, nullable: true })
+    @Column('decimal', { precision: 18, scale: 2, nullable: true, transformer: numericTransformer })
     payout: number;
 
     @Column({ type: 'enum', enum: ['ok', 'partial', 'broken'], default: 'ok' })

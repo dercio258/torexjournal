@@ -162,66 +162,11 @@ export class DashboardService {
             // FILTER: Only consider CLOSED trades for performance metrics
             whereClause.status = 'CLOSED';
 
-            let trades: any[] = [];
-            try {
-                let clickhouseQuery = `
-                    SELECT 
-                        id, accountId, ticket, contractId, symbol, type, 
-                        volume, openPrice, closePrice, profit, sl, tp, 
-                        commission, swap, openTime, closeTime, status, 
-                        magic, comment, session, mood, rating, setup, 
-                        lesson, tags, dataQuality, importLogId, updatedAt
-                    FROM trades FINAL
-                    WHERE accountId IN ({accountIds:Array(String)}) AND status = 'CLOSED'
-                `;
-                const params: any = { accountIds };
-
-                if (startDate && endDate) {
-                    clickhouseQuery += ` AND closeTime BETWEEN {startDate:DateTime} AND {endDate:DateTime}`;
-                    params.startDate = new Date(startDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
-                    params.endDate = new Date(endDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
-                } else if (startDate) {
-                    clickhouseQuery += ` AND closeTime >= {startDate:DateTime}`;
-                    params.startDate = new Date(startDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
-                } else if (endDate) {
-                    clickhouseQuery += ` AND closeTime <= {endDate:DateTime}`;
-                    params.endDate = new Date(endDate).toISOString().replace('T', ' ').replace('Z', '').split('.')[0];
-                }
-
-                clickhouseQuery += ` ORDER BY closeTime ASC`;
-                trades = await this.clickHouseService.query(clickhouseQuery, params);
-            } catch (clickhouseErr) {
-                this.logger.warn(`ClickHouse query failed, falling back to PostgreSQL: ${clickhouseErr.message}`);
-                trades = await this.tradeRepo.find({
-                    where: whereClause,
-                    order: { closeTime: 'ASC' }
-                });
-            }
-
-            // Consistency check with PostgreSQL (authoritative transactional source of truth):
-            const pgTradeCount = await this.tradeRepo.count({ where: whereClause });
-            if (trades.length !== pgTradeCount) {
-                this.logger.log(`[DashboardService] Discrepancy detected: ClickHouse had ${trades.length} trades, PostgreSQL has ${pgTradeCount}. Using PostgreSQL as source of truth.`);
-                const previousChLength = trades.length;
-                const pgTrades = await this.tradeRepo.find({
-                    where: whereClause,
-                    order: { closeTime: 'ASC' }
-                });
-                trades = pgTrades;
-
-                if (previousChLength > pgTradeCount) {
-                    // ClickHouse had ghost / reverted / deleted trades!
-                    // Heal ClickHouse for these accounts by replacing with pgTrades
-                    this.clickHouseService.syncAccountTrades(accountIds, pgTrades).catch(err => {
-                        this.logger.warn(`Failed to heal ClickHouse ghost trades: ${err.message}`);
-                    });
-                } else {
-                    // ClickHouse was missing trades
-                    this.clickHouseService.saveTrades(pgTrades).catch(err => {
-                        this.logger.warn(`Failed to sync trades to ClickHouse: ${err.message}`);
-                    });
-                }
-            }
+            // Query PostgreSQL directly as the single authoritative transactional source of truth
+            const trades: any[] = await this.tradeRepo.find({
+                where: whereClause,
+                order: { closeTime: 'ASC' }
+            });
 
             const dailyMap = new Map<string, number>();
             const moodMap = new Map<string, { count: number; pnl: number }>();

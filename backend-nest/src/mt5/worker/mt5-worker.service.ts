@@ -688,26 +688,72 @@ export class Mt5WorkerService {
             return { success: false, message: 'Account not found' };
         }
 
-        await this.positionRepo.delete({ accountId: account.id });
+        await this.positionRepo.manager.transaction(async (manager) => {
+            if (!positions || positions.length === 0) {
+                await manager.delete(PositionEntity, { accountId: account.id });
+                return;
+            }
 
-        if (positions && positions.length > 0) {
-            const newPositions = positions.map((p) => {
-                return this.positionRepo.create({
-                    accountId: account.id,
-                    ticket: (p.ticket || '').toString(),
-                    symbol: p.symbol || 'Unknown',
-                    type: p.type || 'BUY',
-                    volume: Number(p.volume) || 0,
-                    openPrice: Number(p.priceOpen) || 0,
-                    currentPrice: Number(p.priceCurrent) || 0,
-                    profit: Number(p.profit) || 0,
-                    sl: Number(p.sl) || 0,
-                    tp: Number(p.tp) || 0,
-                    openTime: p.time ? new Date(p.time) : new Date()
-                });
+            const existingPositions = await manager.find(PositionEntity, {
+                where: { accountId: account.id }
             });
-            await this.positionRepo.save(newPositions);
-        }
+            const existingMap = new Map<string, PositionEntity>();
+            existingPositions.forEach(p => existingMap.set((p.ticket || '').toString(), p));
+
+            const incomingTickets: string[] = [];
+            const positionsToSave: PositionEntity[] = [];
+
+            for (const p of positions) {
+                const ticketStr = (p.ticket || '').toString();
+                if (!ticketStr) continue;
+                incomingTickets.push(ticketStr);
+
+                let entity = existingMap.get(ticketStr);
+                if (entity) {
+                    entity.symbol = p.symbol || entity.symbol || 'Unknown';
+                    entity.type = p.type || entity.type || 'BUY';
+                    entity.volume = Number(p.volume) || 0;
+                    entity.openPrice = Number(p.priceOpen ?? p.openPrice) || entity.openPrice || 0;
+                    entity.currentPrice = Number(p.priceCurrent ?? p.currentPrice) || 0;
+                    entity.profit = Number(p.profit) || 0;
+                    entity.sl = Number(p.sl) > 0 ? Number(p.sl) : 0;
+                    entity.tp = Number(p.tp) > 0 ? Number(p.tp) : 0;
+                    positionsToSave.push(entity);
+                } else {
+                    positionsToSave.push(
+                        this.positionRepo.create({
+                            accountId: account.id,
+                            ticket: ticketStr,
+                            symbol: p.symbol || 'Unknown',
+                            type: p.type || 'BUY',
+                            volume: Number(p.volume) || 0,
+                            openPrice: Number(p.priceOpen ?? p.openPrice) || 0,
+                            currentPrice: Number(p.priceCurrent ?? p.currentPrice) || 0,
+                            profit: Number(p.profit) || 0,
+                            sl: Number(p.sl) > 0 ? Number(p.sl) : 0,
+                            tp: Number(p.tp) > 0 ? Number(p.tp) : 0,
+                            openTime: p.time ? new Date(p.time) : new Date()
+                        })
+                    );
+                }
+            }
+
+            if (positionsToSave.length > 0) {
+                await manager.save(PositionEntity, positionsToSave);
+            }
+
+            if (incomingTickets.length > 0) {
+                await manager
+                    .createQueryBuilder()
+                    .delete()
+                    .from(PositionEntity)
+                    .where('account_id = :accountId', { accountId: account.id })
+                    .andWhere('ticket NOT IN (:...tickets)', { tickets: incomingTickets })
+                    .execute();
+            } else {
+                await manager.delete(PositionEntity, { accountId: account.id });
+            }
+        });
 
         const existingTel = this.accountTelemetry.get(cleanLogin);
         if (existingTel) {
@@ -761,18 +807,19 @@ export class Mt5WorkerService {
             const positionId = (deal.positionId || deal.orderTicket || deal.ticket || '').toString();
             const dealTime = deal.time ? new Date(deal.time) : new Date();
             const parsedOpenTime = deal.openTime ? new Date(deal.openTime) : null;
+            const hasValidOpenTime = Boolean(parsedOpenTime && !isNaN(parsedOpenTime.getTime()));
 
             const isOut = (deal.entry || '').toUpperCase().includes('OUT');
             const profit = Number(deal.profit) || 0;
             const commission = Number(deal.commission) || 0;
             const swap = Number(deal.swap) || 0;
             const closePrice = Number(deal.price) || 0;
-            const openPrice = deal.openPrice !== undefined && deal.openPrice !== null
-                ? Number(deal.openPrice) || closePrice
-                : closePrice;
+            const hasExplicitOpenPrice = deal.openPrice !== undefined && deal.openPrice !== null && Number(deal.openPrice) > 0;
+            const openPrice = hasExplicitOpenPrice ? Number(deal.openPrice) : closePrice;
 
             return {
                 ticket: ticket,
+                positionId: positionId || ticket,
                 contractId: positionId || ticket,
                 symbol: deal.symbol || 'Unknown',
                 type: (deal.type || '').toUpperCase().includes('BUY') ? 'BUY' : 'SELL',
@@ -783,11 +830,12 @@ export class Mt5WorkerService {
                 commission: commission,
                 swap: swap,
                 netPnl: profit + commission + swap,
-                openTime: parsedOpenTime && !isNaN(parsedOpenTime.getTime())
-                    ? parsedOpenTime
-                    : (isOut ? new Date(dealTime.getTime() - 60000) : dealTime),
+                sl: Number(deal.sl) > 0 ? Number(deal.sl) : null,
+                tp: Number(deal.tp) > 0 ? Number(deal.tp) : null,
+                openTime: hasValidOpenTime ? parsedOpenTime : dealTime,
                 closeTime: isOut || profit !== 0 ? dealTime : null,
                 status: isOut || profit !== 0 ? 'CLOSED' : 'OPEN',
+                dataQuality: hasValidOpenTime && (!isOut || hasExplicitOpenPrice) ? 'ok' : 'partial',
                 comment: deal.comment || '',
                 magic: Number(deal.magic) || 0
             };

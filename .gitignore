@@ -129,3 +129,8 @@ env/
 
 /torexjournal/
 
+
+# WhatsApp Baileys Auth Sessions (Critical Security)
+backend-nest/wa_auth/
+wa_auth/
+C:\MT5_INSTANCES/
