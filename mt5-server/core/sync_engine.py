@@ -547,9 +547,29 @@ class SyncEngine:
                         )
 
                         # Se o erro for -6 (Terminal: Authorization failed), o canal IPC está saudável!
-                        # Significa que a senha/login está incorreta para esse servidor OU o servidor não existe no servers.dat do MT5.
-                        # Não devemos repetir nem derrubar o IPC para não interromper as outras contas ativas!
+                        # Antes de abortar, se enviamos pass_clean e falhou, tentamos um fallback sem senha
+                        # para aproveitar o 'Save password' (Quick Login) nativo do MT5 caso o usuário tenha salvo no terminal.
                         if err_code == -6:
+                            if pass_clean:
+                                logger.info(
+                                    f"Tentando fallback via 'Save Password' (Quick Login interno do MT5) "
+                                    f"para {login_clean}@{server_clean}..."
+                                )
+                                quick_ok = self._run_with_dialog_watchdog(
+                                    lambda: mt5.login(
+                                        login=login_clean,
+                                        server=server_clean,
+                                        timeout=15000,
+                                    ),
+                                    initial_delay=2.5,
+                                )
+                                if quick_ok:
+                                    logger.success(
+                                        f"Login efetuado via Quick Login ('Save password' do MT5) "
+                                        f"na conta {login_clean} ({server_clean})!"
+                                    )
+                                    break
+
                             self.last_connect_error = (
                                 f"Falha de autorização (-6) no MT5 para a conta {login_clean} no servidor '{server_clean}' "
                                 f"(Senha enviada: {pwd_diag}). Verifique se o número da conta e a senha pertencem a '{server_clean}' "

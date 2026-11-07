@@ -215,7 +215,8 @@ class WorkerManager:
             self.api_client.ack_task(task.id, TaskStatus.FAILED, message=tech_error, details=res_metrics)
 
     def _handle_start_account(self, task: Task):
-        password = None
+        existing_acc = self.account_manager.get_account(task.accountId)
+        password = existing_acc.password if existing_acc else None
         normalized_server = self.sync_engine._normalize_broker_server(task.server)
         if task.credentialToken:
             self.api_client.ack_task(
@@ -235,6 +236,13 @@ class WorkerManager:
                 logger.info(
                     f"Credencial resgatada com sucesso para conta {task.accountId} "
                     f"(Login: {task.login} @ {normalized_server} | Senha: {pwd_diag})"
+                )
+                # Salva imediatamente no cofre local (accounts_pool.json) para nunca perder a senha de uso único
+                self.account_manager.add_or_update_account(
+                    account_id=task.accountId,
+                    login=task.login,
+                    server=normalized_server,
+                    password=password,
                 )
             else:
                 err_msg = "Falha na troca de credentialToken (token expirado ou inválido)"
