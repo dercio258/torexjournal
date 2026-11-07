@@ -529,7 +529,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     <input
                                                         type="text"
                                                         autoFocus
-                                                        placeholder="Buscar corretora ou servidor (ex: Deriv, Exness, XM, FTMO, IC Markets)..."
+                                                        placeholder="Buscar corretora, mesa proprietária ou servidor (ex: GoatFunded-Server2, FundingPips, FTMO, Deriv, Exness)..."
                                                         value={brokerSearchQuery}
                                                         onChange={(e) => setBrokerSearchQuery(e.target.value)}
                                                         className="w-full bg-[#08090C] border border-white/[0.1] focus:border-emerald-500/60 rounded-xl py-2.5 pl-9 pr-8 text-xs sm:text-sm text-[#F3F4F6] placeholder:text-[#6B7280] focus:outline-none"
