@@ -87,8 +87,17 @@ async function main() {
         const logCols = await getTableColumns(client, 'import_logs');
         const logAccCol = logCols.has('account_id') ? 'account_id' : (logCols.has('accountId') ? '"accountId"' : 'account_id');
 
-        for (const acc of accRes.rows) {
-            const mt5Login = acc.mt5_id || acc.mt5Id || 'Manual';
+        // Ordena para que a conta alvo (419096791) apareça POR ÚLTIMO no terminal (sem rolar para fora da tela)
+        // e limita a listagem de outras contas secundárias com centenas de trades a apenas um resumo.
+        const sortedAccounts = [...accRes.rows].sort((a, b) => {
+            const aIsTarget = String(a.mt5_id || a.mt5Id || '') === targetMt5Id ? 1 : 0;
+            const bIsTarget = String(b.mt5_id || b.mt5Id || '') === targetMt5Id ? 1 : 0;
+            return aIsTarget - bIsTarget;
+        });
+
+        for (const acc of sortedAccounts) {
+            const mt5Login = String(acc.mt5_id || acc.mt5Id || 'Manual');
+            const isTargetAccount = mt5Login === targetMt5Id || sortedAccounts.length === 1;
             const posRes = await client.query(
                 `SELECT * FROM positions WHERE ${posAccCol}::text = $1`,
                 [String(acc.id)]
@@ -100,10 +109,15 @@ async function main() {
 
             tradesRes.rows.sort((a, b) => new Date(b.close_time || b.closeTime || b.open_time || b.openTime || 0) - new Date(a.close_time || a.closeTime || a.open_time || a.openTime || 0));
 
-            console.log(`\n----------------------------------------------------------------------------------------`);
-            console.log(`📊 CONTA: ${acc.name} (MT5 #${mt5Login} | UUID: ${acc.id})`);
-            console.log(`   Posições Abertas: ${posRes.rows.length} | Trades Fechados: ${tradesRes.rows.length}`);
-            console.log(`----------------------------------------------------------------------------------------`);
+            console.log(`\n========================================================================================`);
+            console.log(`📊 CONTA: ${acc.name} (MT5 #${mt5Login} | Servidor: ${acc.broker || 'N/A'} | UUID: ${acc.id})`);
+            console.log(`   Saldo: $${Number(acc.balance || 0).toFixed(2)} | Equity: $${Number(acc.equity || 0).toFixed(2)} | Posições Abertas: ${posRes.rows.length} | Trades Fechados: ${tradesRes.rows.length}`);
+            console.log(`========================================================================================`);
+
+            if (!isTargetAccount && tradesRes.rows.length > 10) {
+                console.log(`   ℹ️ Conta secundária com ${tradesRes.rows.length} trades (ocultando lista individual para focar na conta #${targetMt5Id}).`);
+                continue;
+            }
 
             if (posRes.rows.length > 0) {
                 console.log(`\n🟢 POSIÇÕES ABERTAS (${posRes.rows.length}):`);
