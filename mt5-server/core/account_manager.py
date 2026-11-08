@@ -135,7 +135,15 @@ class AccountManager:
                             last_deal_dt = datetime.fromisoformat(last_deal_str) if last_deal_str else None
 
                             saved_status = str(item.get("status", "ONLINE") or "ONLINE").upper()
-                            initial_status = "FAILED" if saved_status in ("FAILED", "AUTH_FAILED") else "ONLINE"
+                            last_err_str = str(item.get("last_error") or "")
+                            # Só mantém em quarentena no boot se foi erro real de senha/autorização (-6).
+                            # Erros transitórios de IPC (-10005 / timeout) voltam para ONLINE automaticamente.
+                            is_real_auth_fail = (
+                                saved_status in ("FAILED", "AUTH_FAILED")
+                                and ("-6" in last_err_str or "autoriza" in last_err_str.lower() or "authorization" in last_err_str.lower())
+                            )
+                            initial_status = "FAILED" if is_real_auth_fail else "ONLINE"
+                            initial_err_cnt = int(item.get("error_count", 0) or 0) if is_real_auth_fail else 0
 
                             session = AccountSession(
                                 account_id=acc_id,
@@ -146,8 +154,8 @@ class AccountManager:
                                 last_deal_time=last_deal_dt,
                                 last_sync_time=last_sync_dt,
                                 status=initial_status,
-                                error_count=int(item.get("error_count", 0) or 0),
-                                last_error=item.get("last_error"),
+                                error_count=initial_err_cnt,
+                                last_error=item.get("last_error") if is_real_auth_fail else None,
                             )
                             self.accounts[acc_id] = session
                     active_cnt = len([a for a in self.accounts.values() if a.status not in ("FAILED", "AUTH_FAILED")])
@@ -278,16 +286,23 @@ class AccountManager:
             if acc:
                 acc.error_count += 1
                 acc.last_error = error_message
-                if is_auth_error or "Authorization failed" in (error_message or "") or acc.error_count >= 2:
+                err_lower = (error_message or "").lower()
+                is_strict_auth_fail = (
+                    is_auth_error
+                    or "authorization failed" in err_lower
+                    or "falha de autorização (-6)" in err_lower
+                    or "(-6," in err_lower
+                )
+                if is_strict_auth_fail:
                     prev_status = acc.status
                     acc.status = "FAILED"
                     if prev_status != "FAILED":
                         logger.error(
                             f"[QUARENTENA] Conta {acc.login}@{acc.server} (ID: {account_id}) pausada do ciclo automático "
-                            f"após falha de autenticação/conexão ({error_message}). "
-                            f"Ela não derrubará a sessão das demais contas até que novas credenciais sejam enviadas."
+                            f"após falha de senha/autorização (-6): {error_message}."
                         )
                 else:
-                    acc.status = "OFFLINE"
+                    # Erros de IPC (-10005) não devem colocar a conta em quarentena permanente
+                    acc.status = "ONLINE"
                 self._save_pool()
 

@@ -225,16 +225,27 @@ class SyncEngine:
         import os
         norm_keep = os.path.normcase(os.path.abspath(keep_path)) if keep_path else None
         running_procs = []
-        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'cwd', 'cmdline']):
             try:
                 name = (proc.info.get('name') or '').lower()
                 if 'terminal64' not in name:
                     continue
                 exe_path = proc.info.get('exe') or ''
+                cwd_path = proc.info.get('cwd') or ''
+                cmdline_list = proc.info.get('cmdline') or []
+                cmdline_str = " ".join(str(x) for x in cmdline_list).lower()
                 norm_exe = os.path.normcase(os.path.abspath(exe_path)) if exe_path else ''
-                if 'instances' in norm_exe or (norm_keep and norm_exe and norm_exe != norm_keep):
+                norm_cwd = os.path.normcase(os.path.abspath(cwd_path)) if cwd_path else ''
+                is_instance_proc = (
+                    'instances' in norm_exe
+                    or 'instances' in norm_cwd
+                    or 'instances' in cmdline_str
+                    or '/portable' in cmdline_str
+                    or (norm_keep and norm_exe and norm_exe != norm_keep)
+                )
+                if is_instance_proc:
                     logger.warning(
-                        f"Encerrando instância secundária terminal64.exe (PID: {proc.info['pid']}, Path: {exe_path}) "
+                        f"Encerrando instância secundária/portable terminal64.exe (PID: {proc.info['pid']}, CWD: {cwd_path}) "
                         f"para liberar a porta IPC 127.0.0.1:22346 e memória RAM..."
                     )
                     proc.kill()
@@ -483,6 +494,22 @@ class SyncEngine:
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
 
+            def _init_with_or_without_creds(timeout_ms: int = 25000) -> bool:
+                if login_clean and pass_clean and server_clean and term_path:
+                    ok = mt5.initialize(
+                        path=term_path,
+                        login=login_clean,
+                        password=pass_clean,
+                        server=server_clean,
+                        portable=use_portable,
+                        timeout=timeout_ms,
+                    )
+                    if ok:
+                        return True
+                if term_path:
+                    return bool(mt5.initialize(path=term_path, portable=use_portable, timeout=timeout_ms))
+                return bool(mt5.initialize(timeout=timeout_ms))
+
             # Passo 1: Verifica se o IPC já está ativo no terminal principal ou anexa a ele (SEM matar o MT5 já aberto!)
             init_ok = False
             try:
@@ -492,55 +519,53 @@ class SyncEngine:
                 else:
                     if progress_callback:
                         progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
-                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000), initial_delay=0.3)
+                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=12000), initial_delay=0.3)
                     if not init_ok:
                         self._dismiss_mt5_dialogs()
-                        if term_path:
-                            init_ok = self._run_with_dialog_watchdog(
-                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000),
-                                initial_delay=0.3,
-                            )
+                        init_ok = self._run_with_dialog_watchdog(
+                            lambda: _init_with_or_without_creds(20000),
+                            initial_delay=0.3,
+                        )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se o MT5 ainda não respondeu, verifica primeiro se a janela já está aberta (apenas bloqueada por modal)
-            # NUNCA fecha o MT5 já aberto se ele tiver janela principal visível!
+            # Passo 2: Se o MT5 ainda não respondeu, tenta reconectar fechando modais; se o pipe IPC do processo
+            # estiver morto (ex: janela órfã "MetaTrader 5 - Netting" sem conta logada), reinicia o terminal64.exe!
             if not init_ok:
                 self._dismiss_mt5_dialogs()
                 ui_check = self.inspect_mt5_ui_state(close_modals=True)
-                has_open_mt5_window = len(ui_check.get("main_windows", [])) > 0 or len(ui_check.get("pids", [])) > 0
+                win_titles = [w.get("title", "") for w in ui_check.get("main_windows", [])]
+                # Se a janela aberta for um "MetaTrader 5 - Netting" vazio (sem número de conta no título), o pipe IPC está inativo
+                is_blank_unlogged_window = any(t.strip().lower() in ("metatrader 5", "metatrader 5 - netting") for t in win_titles)
+                has_healthy_window = len(win_titles) > 0 and not is_blank_unlogged_window
 
-                if has_open_mt5_window:
+                if has_healthy_window:
                     logger.info(
-                        f"Terminal MT5 já está aberto (PIDs={ui_check.get('pids')}). "
-                        f"Mantendo terminal aberto e reconectando IPC após fechar modais..."
+                        f"Terminal MT5 já está aberto ({win_titles}). "
+                        f"Reconectando IPC após fechar modais..."
                     )
                     time.sleep(1.0)
                     self._dismiss_mt5_dialogs()
                     try:
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: mt5.initialize(timeout=20000),
+                            lambda: _init_with_or_without_creds(15000),
                             initial_delay=0.3,
                         )
-                        if not init_ok and term_path:
-                            init_ok = self._run_with_dialog_watchdog(
-                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000),
-                                initial_delay=0.3,
-                            )
                     except Exception as e:
                         logger.warning(f"Tentativa de reconexão IPC no terminal aberto falhou: {e}")
 
+                # Se mesmo assim init_ok for False, o processo atual (ex: PID 4436) está com o pipe IPC travado/morto
+                # e PRECISA ser encerrado para abrir o terminal principal limpo com as credenciais da conta!
                 if not init_ok:
-                    logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 via: {term_path}")
+                    logger.info(f"Reiniciando processo MT5 limpo via: {term_path}")
                     if progress_callback:
                         progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
-                    if not has_open_mt5_window:
-                        self._kill_stuck_terminals()
+                    self._kill_stuck_terminals()
                     self._clean_pending_liveupdate()
-                    time.sleep(1.5)
+                    time.sleep(2.0)
                     try:
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=45000),
+                            lambda: _init_with_or_without_creds(45000),
                             initial_delay=0.5,
                         )
                     except Exception as e:
