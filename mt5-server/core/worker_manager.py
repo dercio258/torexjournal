@@ -281,12 +281,18 @@ class WorkerManager:
             except Exception:
                 pass
 
+        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+            task.accountId,
+            login=task.login,
+            server=normalized_server,
+            password=password,
+        )
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
             server=normalized_server,
             password=password,
-            path=settings.mt5_default_path,
+            path=isolated_path,
             progress_callback=_report_progress,
         )
 
@@ -374,12 +380,18 @@ class WorkerManager:
 
         self.process_manager.stop_terminal(task.accountId)
         time.sleep(2)
+        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+            acc.account_id,
+            login=acc.login,
+            server=acc.server,
+            password=acc.password,
+        )
         restarted = self.sync_engine.connect_account(
             account_id=acc.account_id,
             login=acc.login,
             server=acc.server,
             password=acc.password,
-            path=settings.mt5_default_path,
+            path=isolated_path,
         )
         if restarted:
             summary = self._sync_single_account(acc.account_id) or {}
@@ -451,7 +463,13 @@ class WorkerManager:
 
         try:
             self._account_last_sync_ts[account_id] = time.time()
-            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
+            isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+                account_id,
+                login=acc.login,
+                server=acc.server,
+                password=acc.password,
+            )
+            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")

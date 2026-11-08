@@ -22,10 +22,17 @@ class MT5ProcessManager:
         instance_dir.mkdir(parents=True, exist_ok=True)
         return instance_dir
 
-    def get_or_prepare_isolated_terminal_exe(self, account_id: int) -> str:
+    def get_or_prepare_isolated_terminal_exe(
+        self,
+        account_id: int,
+        login: Optional[str] = None,
+        server: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> str:
         """
         Prepara um diretório portátil exclusivo para a conta (instances/acc_<account_id>/terminal64.exe)
-        copiando/linkando o executável base e a lista de servidores de corretoras (servers.dat).
+        copiando o executável base (cópia real, sem hardlink os.link) e todos os arquivos de configuração
+        de corretoras (servers.dat, accounts.dat, common.ini) do AppData principal.
         Assim cada conta roda em sua própria janela terminal64.exe sem deslogar outras contas!
         """
         if not self.terminal_path or not os.path.exists(self.terminal_path):
@@ -37,40 +44,90 @@ class MT5ProcessManager:
         base_dir = base_exe.parent
 
         try:
-            if not isolated_exe.exists():
+            # Se existia um hardlink antigo (nlink > 1), substitui por cópia independente do executável
+            need_copy_exe = not isolated_exe.exists()
+            if not need_copy_exe:
                 try:
-                    os.link(str(base_exe), str(isolated_exe))
+                    if os.stat(isolated_exe).st_nlink > 1:
+                        isolated_exe.unlink()
+                        need_copy_exe = True
                 except Exception:
-                    shutil.copy2(str(base_exe), str(isolated_exe))
-                logger.info(f"[ISOLAMENTO MT5] Executável isolado preparado para conta {account_id}: {isolated_exe}")
+                    pass
 
-            # Copia arquivos de suporte essenciais (servers.dat / Config) para que o modo /portable reconheça todas as corretoras
-            isolated_cfg_dir = instance_dir / "Config"
+            if need_copy_exe:
+                shutil.copy2(str(base_exe), str(isolated_exe))
+                logger.info(f"[ISOLAMENTO MT5] Executável exclusivo copiado para conta {account_id}: {isolated_exe}")
+
+            # Copia arquivos de suporte essenciais (servers.dat, accounts.dat, cert/bases) para que o modo /portable
+            # reconheça imediatamente todas as corretoras (Deriv-Demo, Exness-MT5Real10, GoatFunded-Server2, etc.)
+            isolated_cfg_dir = instance_dir / "config"
             isolated_cfg_dir.mkdir(parents=True, exist_ok=True)
-            isolated_servers_dat = isolated_cfg_dir / "servers.dat"
+            isolated_cfg_upper = instance_dir / "Config"
+            isolated_cfg_upper.mkdir(parents=True, exist_ok=True)
 
-            if not isolated_servers_dat.exists():
-                candidate_servers = [
-                    base_dir / "Config" / "servers.dat",
-                    base_dir / "config" / "servers.dat",
+            # Localiza a pasta de dados ativa do MT5 em %APPDATA%\MetaQuotes\Terminal\<HASH>
+            appdata = os.environ.get("APPDATA")
+            source_data_dirs = []
+            if appdata:
+                mq_dir = Path(appdata) / "MetaQuotes" / "Terminal"
+                if mq_dir.exists():
+                    for sub in mq_dir.iterdir():
+                        if sub.is_dir() and sub.name.lower() not in ("common", "community", "help"):
+                            if (sub / "config").exists() or (sub / "Config").exists():
+                                source_data_dirs.append(sub)
+
+            for s_dir in source_data_dirs:
+                src_cfg = s_dir / "config" if (s_dir / "config").exists() else (s_dir / "Config")
+                if src_cfg.exists():
+                    for fname in ("servers.dat", "accounts.dat", "common.ini", "terminal.ini", "charts.ini"):
+                        src_file = src_cfg / fname
+                        if src_file.exists():
+                            dst_lower = isolated_cfg_dir / fname
+                            dst_upper = isolated_cfg_upper / fname
+                            if not dst_lower.exists() or fname == "servers.dat":
+                                try:
+                                    shutil.copy2(str(src_file), str(dst_lower))
+                                except Exception:
+                                    pass
+                            if not dst_upper.exists() or fname == "servers.dat":
+                                try:
+                                    shutil.copy2(str(src_file), str(dst_upper))
+                                except Exception:
+                                    pass
+                    break
+
+            # Fallback caso servers.dat esteja na pasta de instalação em Program Files
+            for pf_cfg in (base_dir / "Config" / "servers.dat", base_dir / "config" / "servers.dat"):
+                if pf_cfg.exists():
+                    if not (isolated_cfg_dir / "servers.dat").exists():
+                        shutil.copy2(str(pf_cfg), str(isolated_cfg_dir / "servers.dat"))
+                    if not (isolated_cfg_upper / "servers.dat").exists():
+                        shutil.copy2(str(pf_cfg), str(isolated_cfg_upper / "servers.dat"))
+
+            # Prepara startup.ini / common.ini com Login, Password e Server da conta
+            if login and server:
+                self.create_startup_config(account_id, login, server, password)
+                common_lines = [
+                    "[Common]",
+                    f"Login={str(login).strip()}",
                 ]
-                appdata = os.environ.get("APPDATA")
-                if appdata:
-                    mq_dir = Path(appdata) / "MetaQuotes" / "Terminal"
-                    if mq_dir.exists():
-                        for sub in mq_dir.iterdir():
-                            if sub.is_dir():
-                                s_dat = sub / "config" / "servers.dat"
-                                if s_dat.exists():
-                                    candidate_servers.insert(0, s_dat)
-                                s_dat_upper = sub / "Config" / "servers.dat"
-                                if s_dat_upper.exists():
-                                    candidate_servers.insert(0, s_dat_upper)
-
-                for src_servers in candidate_servers:
-                    if src_servers.exists():
-                        shutil.copy2(str(src_servers), str(isolated_servers_dat))
-                        break
+                if password:
+                    common_lines.append(f"Password={str(password).strip()}")
+                common_lines.extend([
+                    f"Server={str(server).strip()}",
+                    "NewsEnable=0",
+                    "CertInstall=0",
+                    "ProxyEnable=0",
+                    "KeepPrivate=1",
+                    "MCPServer=0",
+                ])
+                common_content = "\r\n".join(common_lines) + "\r\n"
+                for cfg_target in (isolated_cfg_dir / "common.ini", isolated_cfg_upper / "common.ini"):
+                    try:
+                        with open(cfg_target, "w", encoding="utf-8-sig", newline="\r\n") as f:
+                            f.write(common_content)
+                    except Exception:
+                        pass
 
             return str(isolated_exe)
         except Exception as e:

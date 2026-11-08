@@ -264,12 +264,23 @@ class SyncEngine:
 
     @staticmethod
     def _kill_stuck_terminals(target_path: Optional[str] = None):
-        """Encerra processos terminal64.exe presos que possam estar bloqueando a porta IPC 127.0.0.1:22346."""
-        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+        """
+        Encerra apenas o processo terminal64.exe da instância alvo (target_path) ou terminais não-isolados
+        sem derrubar as janelas isoladas das demais contas!
+        """
+        import os
+        norm_target = os.path.normcase(os.path.abspath(target_path)) if target_path else None
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'cwd']):
             try:
                 name = proc.info.get('name') or ''
                 if 'terminal64' in name.lower():
-                    logger.warning(f"Encerrando processo terminal64 (PID: {proc.info['pid']}) para liberar porta 127.0.0.1:22346...")
+                    exe_path = proc.info.get('exe') or ''
+                    norm_exe = os.path.normcase(os.path.abspath(exe_path)) if exe_path else ''
+                    if norm_target and norm_exe:
+                        # Mata apenas o terminal da conta alvo (ou o terminal padrão global em Program Files se estiver aberto)
+                        if norm_exe != norm_target and "program files" not in norm_exe:
+                            continue
+                    logger.warning(f"Encerrando processo terminal64 (PID: {proc.info['pid']}, Path: {exe_path}) para reinicialização limpa...")
                     proc.kill()
             except Exception:
                 pass
@@ -431,25 +442,29 @@ class SyncEngine:
         path: Optional[str] = None,
         progress_callback: Optional[Any] = None,
     ) -> bool:
-        """Garante que a sessão IPC com o terminal MT5 está ativa e na conta correta antes da sincronização."""
+        """Garante que a sessão IPC com o terminal MT5 isolado da conta está ativa sem deslogar outras contas."""
         with self._ipc_lock:
             if not MT5_AVAILABLE:
                 self.connected_account = account_id
                 return True
 
-            from config.settings import settings
-            self._kill_duplicate_or_instance_terminals(keep_path=settings.mt5_default_path or path)
+            import os
             self._dismiss_mt5_dialogs()
             login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
             server_clean = self._normalize_broker_server(server)
 
-            try:
-                info = mt5.account_info()
-                if self._is_account_authenticated(info, login_clean, server_clean):
-                    self.connected_account = account_id
-                    return True
-            except Exception:
-                pass
+            same_terminal = True
+            if path and self.active_terminal_path:
+                same_terminal = os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(self.active_terminal_path))
+
+            if same_terminal:
+                try:
+                    info = mt5.account_info()
+                    if self._is_account_authenticated(info, login_clean, server_clean):
+                        self.connected_account = account_id
+                        return True
+                except Exception:
+                    pass
 
             return self.connect_account(
                 account_id,
@@ -469,7 +484,13 @@ class SyncEngine:
         path: Optional[str] = None,
         progress_callback: Optional[Any] = None,
     ) -> bool:
-        """Conecta ao terminal MT5 isolado da conta reutilizando a instância ativa sem derrubar outras contas."""
+        """
+        Conecta ao terminal MT5 isolado da conta (instances/acc_<id>/terminal64.exe).
+        CRÍTICO: Quando alternamos o cliente Python entre duas janelas terminal64.exe abertas,
+        PRECISAMOS chamar mt5.shutdown() antes de mt5.initialize(path=term_path, ...).
+        mt5.shutdown() fecha APENAS o pipe cliente do Python (NÃO fecha a janela do MT5!)
+        e permite que mt5.initialize(path=term_path) anexe à janela isolada da próxima conta!
+        """
         with self._ipc_lock:
             if not MT5_AVAILABLE:
                 logger.warning(f"[Mock] Conectando mock MT5 para conta {account_id}")
@@ -483,16 +504,22 @@ class SyncEngine:
                 logger.info(f"Servidor da corretora normalizado automaticamente: '{server}' -> '{server_clean}'")
             pass_clean = str(password).strip() if password else ""
             from config.settings import settings
-            term_path = settings.mt5_default_path or path
+            term_path = path or settings.mt5_default_path
 
-            # Se o executável estiver em C:\Program Files, portable=True exige UAC para gravar na pasta.
+            # Se o executável estiver em instances/acc_<id>, usa portable=True para isolar dados e sessão
             use_portable = "program files" not in (term_path or "").lower()
 
-            # Encerra qualquer instância secundária (instances/acc_*) que cause conflito na porta 127.0.0.1:22346 (erro 10048)
-            self._kill_duplicate_or_instance_terminals(keep_path=term_path)
             # Remove qualquer atualização automática pendente que trave o Pipe Server (-10003) e fecha popups
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
+
+            switching_terminal = bool(
+                term_path
+                and (
+                    not self.active_terminal_path
+                    or os.path.normcase(os.path.abspath(term_path)) != os.path.normcase(os.path.abspath(self.active_terminal_path))
+                )
+            )
 
             def _init_with_or_without_creds(timeout_ms: int = 25000) -> bool:
                 if login_clean and pass_clean and server_clean and term_path:
@@ -510,66 +537,52 @@ class SyncEngine:
                     return bool(mt5.initialize(path=term_path, portable=use_portable, timeout=timeout_ms))
                 return bool(mt5.initialize(timeout=timeout_ms))
 
-            # Passo 1: Verifica se o IPC já está ativo no terminal principal ou anexa a ele (SEM matar o MT5 já aberto!)
+            # Passo 1: Se estamos trocando de instância de terminal (ex: acc_408953138 -> acc_6371945),
+            # desconecta o handle IPC do Python da janela anterior (sem fechar a janela!) e anexa à janela de term_path!
             init_ok = False
             try:
-                term_info = mt5.terminal_info()
-                if term_info is not None and isinstance(getattr(term_info, "name", None), str):
-                    init_ok = True
+                if switching_terminal:
+                    try:
+                        mt5.shutdown()
+                    except Exception:
+                        pass
+                    init_ok = self._run_with_dialog_watchdog(
+                        lambda: _init_with_or_without_creds(30000),
+                        initial_delay=0.3,
+                    )
                 else:
-                    if progress_callback:
-                        progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
-                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=12000), initial_delay=0.3)
-                    if not init_ok:
-                        self._dismiss_mt5_dialogs()
+                    term_info = mt5.terminal_info()
+                    if term_info is not None and isinstance(getattr(term_info, "name", None), str):
+                        init_ok = True
+                    else:
+                        if progress_callback:
+                            progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: _init_with_or_without_creds(20000),
+                            lambda: _init_with_or_without_creds(25000),
                             initial_delay=0.3,
                         )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se o MT5 ainda não respondeu, tenta reconectar fechando modais; se o pipe IPC do processo
-            # estiver morto (ex: janela órfã "MetaTrader 5 - Netting" sem conta logada), reinicia o terminal64.exe!
+            # Passo 2: Se a instância isolada da conta não respondeu, reinicia apenas o processo dela
             if not init_ok:
-                self._dismiss_mt5_dialogs()
-                ui_check = self.inspect_mt5_ui_state(close_modals=True)
-                win_titles = [w.get("title", "") for w in ui_check.get("main_windows", [])]
-                # Se a janela aberta for um "MetaTrader 5 - Netting" vazio (sem número de conta no título), o pipe IPC está inativo
-                is_blank_unlogged_window = any(t.strip().lower() in ("metatrader 5", "metatrader 5 - netting") for t in win_titles)
-                has_healthy_window = len(win_titles) > 0 and not is_blank_unlogged_window
-
-                if has_healthy_window:
-                    logger.info(
-                        f"Terminal MT5 já está aberto ({win_titles}). "
-                        f"Reconectando IPC após fechar modais..."
+                logger.info(f"Reiniciando processo MT5 isolado da conta {login_clean} via: {term_path}")
+                if progress_callback:
+                    progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+                self._kill_stuck_terminals(target_path=term_path)
+                self._clean_pending_liveupdate()
+                time.sleep(2.0)
+                try:
+                    init_ok = self._run_with_dialog_watchdog(
+                        lambda: _init_with_or_without_creds(45000),
+                        initial_delay=0.5,
                     )
-                    time.sleep(1.0)
-                    self._dismiss_mt5_dialogs()
-                    try:
-                        init_ok = self._run_with_dialog_watchdog(
-                            lambda: _init_with_or_without_creds(15000),
-                            initial_delay=0.3,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Tentativa de reconexão IPC no terminal aberto falhou: {e}")
-
-                # Se mesmo assim init_ok for False, o processo atual (ex: PID 4436) está com o pipe IPC travado/morto
-                # e PRECISA ser encerrado para abrir o terminal principal limpo com as credenciais da conta!
-                if not init_ok:
-                    logger.info(f"Reiniciando processo MT5 limpo via: {term_path}")
-                    if progress_callback:
-                        progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
-                    self._kill_stuck_terminals()
-                    self._clean_pending_liveupdate()
-                    time.sleep(2.0)
-                    try:
-                        init_ok = self._run_with_dialog_watchdog(
-                            lambda: _init_with_or_without_creds(45000),
-                            initial_delay=0.5,
-                        )
-                    except Exception as e:
-                        logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
+                except Exception as e:
+                    logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
 
             self._dismiss_mt5_dialogs()
 
