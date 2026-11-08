@@ -354,28 +354,62 @@ class SyncEngine:
                 return False
         return True
 
-    def _run_with_dialog_watchdog(self, fn, initial_delay: float = 2.5):
+    def _run_with_dialog_watchdog(self, fn, initial_delay: float = 0.5):
         """
         Executa uma chamada IPC bloqueante (mt5.initialize / mt5.login) monitorando e fechando
-        em background qualquer popup modal Win32 ('#32770', ex: 'Login') que trave a thread UI do MT5.
+        qualquer popup modal Win32 ('#32770', ex: 'Login') que trave a thread UI do MT5.
+        IMPORTANTE: Como a extensão C++ MetaTrader5 (_core.pyd) retém o GIL do Python durante todo
+        o mt5.initialize(), uma threading.Thread ficaria congelada até o timeout de 60s (-10005).
+        Por isso lançamos um subprocesso OS independente (sem compartilhar o GIL) que fecha o modal '#32770'
+        em tempo real (< 0.4s) enquanto o mt5.initialize() aguarda a resposta do pipe IPC!
         """
-        stop_evt = threading.Event()
+        import sys
+        import subprocess
 
-        def _watchdog():
-            if stop_evt.wait(initial_delay):
-                return
-            while not stop_evt.wait(1.0):
-                try:
-                    self._dismiss_mt5_dialogs()
-                except Exception:
-                    pass
+        watchdog_proc = None
+        if sys.platform == "win32":
+            killer_code = (
+                "import time, ctypes\n"
+                "from ctypes import wintypes\n"
+                "user32 = ctypes.windll.user32\n"
+                "WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)\n"
+                "def cb(hwnd, _):\n"
+                "    if user32.IsWindowVisible(hwnd):\n"
+                "        cbuf = ctypes.create_unicode_buffer(64)\n"
+                "        user32.GetClassNameW(hwnd, cbuf, 64)\n"
+                "        if cbuf.value == '#32770':\n"
+                "            tbuf = ctypes.create_unicode_buffer(256)\n"
+                "            user32.GetWindowTextW(hwnd, tbuf, 256)\n"
+                "            title = (tbuf.value or '').lower()\n"
+                "            if title in ('login', 'metatrader 5', '') or 'account' in title or 'demo' in title or 'password' in title:\n"
+                "                user32.PostMessageW(hwnd, 0x0010, 0, 0)\n"
+                "                user32.PostMessageW(hwnd, 0x0111, 2, 0)\n"
+                "    return True\n"
+                "c_cb = WNDENUMPROC(cb)\n"
+                f"time.sleep({max(0.1, float(initial_delay))})\n"
+                "for _ in range(160):\n"
+                "    user32.EnumWindows(c_cb, 0)\n"
+                "    time.sleep(0.4)\n"
+            )
+            try:
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                watchdog_proc = subprocess.Popen(
+                    [sys.executable, "-c", killer_code],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+            except Exception as e:
+                logger.debug(f"Não foi possível iniciar subprocesso watchdog Win32: {e}")
 
-        t = threading.Thread(target=_watchdog, daemon=True)
-        t.start()
         try:
             return fn()
         finally:
-            stop_evt.set()
+            if watchdog_proc is not None:
+                try:
+                    watchdog_proc.terminate()
+                except Exception:
+                    pass
 
     def ensure_connected(
         self,
@@ -449,7 +483,7 @@ class SyncEngine:
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
 
-            # Passo 1: Verifica se o IPC já está ativo no terminal principal ou anexa a ele (SEM chamar mt5.shutdown()!)
+            # Passo 1: Verifica se o IPC já está ativo no terminal principal ou anexa a ele (SEM matar o MT5 já aberto!)
             init_ok = False
             try:
                 term_info = mt5.terminal_info()
@@ -458,29 +492,59 @@ class SyncEngine:
                 else:
                     if progress_callback:
                         progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
-                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000))
-                    if not init_ok and term_path:
-                        init_ok = self._run_with_dialog_watchdog(
-                            lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
-                        )
+                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000), initial_delay=0.3)
+                    if not init_ok:
+                        self._dismiss_mt5_dialogs()
+                        if term_path:
+                            init_ok = self._run_with_dialog_watchdog(
+                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000),
+                                initial_delay=0.3,
+                            )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se o terminal principal não responder, reinicia o processo terminal64.exe
+            # Passo 2: Se o MT5 ainda não respondeu, verifica primeiro se a janela já está aberta (apenas bloqueada por modal)
+            # NUNCA fecha o MT5 já aberto se ele tiver janela principal visível!
             if not init_ok:
-                logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 via: {term_path}")
-                if progress_callback:
-                    progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
-                self._kill_stuck_terminals()
-                self._clean_pending_liveupdate()
-                time.sleep(2.0)
-                try:
-                    init_ok = self._run_with_dialog_watchdog(
-                        lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=60000),
-                        initial_delay=4.0,
+                self._dismiss_mt5_dialogs()
+                ui_check = self.inspect_mt5_ui_state(close_modals=True)
+                has_open_mt5_window = len(ui_check.get("main_windows", [])) > 0 or len(ui_check.get("pids", [])) > 0
+
+                if has_open_mt5_window:
+                    logger.info(
+                        f"Terminal MT5 já está aberto (PIDs={ui_check.get('pids')}). "
+                        f"Mantendo terminal aberto e reconectando IPC após fechar modais..."
                     )
-                except Exception as e:
-                    logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
+                    time.sleep(1.0)
+                    self._dismiss_mt5_dialogs()
+                    try:
+                        init_ok = self._run_with_dialog_watchdog(
+                            lambda: mt5.initialize(timeout=20000),
+                            initial_delay=0.3,
+                        )
+                        if not init_ok and term_path:
+                            init_ok = self._run_with_dialog_watchdog(
+                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000),
+                                initial_delay=0.3,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Tentativa de reconexão IPC no terminal aberto falhou: {e}")
+
+                if not init_ok:
+                    logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 via: {term_path}")
+                    if progress_callback:
+                        progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
+                    if not has_open_mt5_window:
+                        self._kill_stuck_terminals()
+                    self._clean_pending_liveupdate()
+                    time.sleep(1.5)
+                    try:
+                        init_ok = self._run_with_dialog_watchdog(
+                            lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=45000),
+                            initial_delay=0.5,
+                        )
+                    except Exception as e:
+                        logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
 
             self._dismiss_mt5_dialogs()
 

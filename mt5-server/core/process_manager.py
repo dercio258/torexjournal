@@ -164,35 +164,14 @@ class MT5ProcessManager:
             return False
 
     def is_running(self, account_id: Optional[int] = None) -> bool:
-        """Verifica se o processo terminal64.exe exclusivo da conta está ativo."""
-        if account_id is not None and account_id in self.pids:
-            pid = self.pids[account_id]
-            if psutil.pid_exists(pid):
-                try:
-                    p = psutil.Process(pid)
-                    if p.status() != psutil.STATUS_ZOMBIE and 'terminal64' in (p.name() or '').lower():
-                        return True
-                except Exception:
-                    pass
-
-        target_exe_norm = None
-        if account_id is not None:
-            try:
-                target_exe_norm = os.path.normcase(os.path.abspath(str(self.get_account_instance_dir(account_id) / "terminal64.exe")))
-            except Exception:
-                target_exe_norm = None
-
-        for proc in psutil.process_iter(['pid', 'name', 'status', 'exe']):
+        """Verifica se o processo terminal64.exe principal está ativo."""
+        for proc in psutil.process_iter(['pid', 'name', 'status']):
             try:
                 name = proc.info.get('name') or ''
                 if 'terminal64' in name.lower() and proc.info.get('status') != psutil.STATUS_ZOMBIE:
-                    if target_exe_norm:
-                        proc_exe = proc.info.get('exe') or ''
-                        if proc_exe and os.path.normcase(os.path.abspath(proc_exe)) == target_exe_norm:
-                            self.pids[account_id] = proc.info['pid']
-                            return True
-                    else:
-                        return True
+                    if account_id is not None:
+                        self.pids[account_id] = proc.info['pid']
+                    return True
             except Exception:
                 pass
         return False
