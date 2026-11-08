@@ -113,6 +113,7 @@ export class Mt5WorkerService implements OnModuleInit {
     private accountTelemetry: Map<string, AccountLiveTelemetry> = new Map();
     private loginToUserMap: Map<string, { userId: string; accountUuid?: string; server?: string }> = new Map();
     private recentEvents: WorkerEventRecord[] = [];
+    private initialFullSyncDispatched: Set<string> = new Set();
 
     constructor(
         @InjectRepository(AccountEntity)
@@ -707,6 +708,25 @@ export class Mt5WorkerService implements OnModuleInit {
             lastSyncAt: new Date().toISOString(),
         });
 
+        // Garante reconciliação completa (FORCE_FULL_SYNC -> last_deal_ticket=0) no primeiro sync após reinício do backend
+        // para recuperar quaisquer trades fechados que tenham sido pulados anteriormente pelo watermark do worker.
+        if (cleanLogin && !this.initialFullSyncDispatched.has(cleanLogin)) {
+            this.initialFullSyncDispatched.add(cleanLogin);
+            const activeForLogin = Array.from(this.pendingTasks.values()).some(
+                t => t.login === cleanLogin && (t.status === WorkerTaskStatus.RECEIVED || t.status === WorkerTaskStatus.IN_PROGRESS)
+            );
+            if (!activeForLogin) {
+                this.enqueueTask({
+                    type: WorkerTaskType.FORCE_FULL_SYNC,
+                    accountId: this.deriveNumericAccountId(cleanLogin, accountInfo.accountId),
+                    login: cleanLogin,
+                    server: accountInfo.server || account.broker || '',
+                    priority: 2,
+                });
+                this.logger.log(`[AUTO-RECONCILE] Enfileirado FORCE_FULL_SYNC automático para recuperar todo o histórico da conta ${cleanLogin}.`);
+            }
+        }
+
         // Broadcast to connected frontend clients via WebSocket (strictly scoped to account.userId)
         try {
             if (account.userId) {
@@ -855,8 +875,12 @@ export class Mt5WorkerService implements OnModuleInit {
         }
 
         const normalizedTrades = tradingDeals.map((deal) => {
-            const ticket = (deal.ticket || '').toString();
-            const positionId = (deal.positionId || deal.orderTicket || deal.ticket || '').toString();
+            const rawDealTicket = (deal.ticket || '').toString().trim();
+            const positionId = (deal.positionId || deal.orderTicket || deal.ticket || '').toString().trim();
+            // No MT5, o Ticket exibido na aba "Posições" e em "Histórico -> Posições" é o position_id (positionId).
+            // O deal.ticket é apenas o ID interno do evento de saída (DEAL_ENTRY_OUT).
+            // Usamos positionId como ticket principal para que o número do Ticket no Torex seja idêntico ao do MT5!
+            const ticket = positionId || rawDealTicket;
             const dealTime = deal.time ? new Date(deal.time) : new Date();
             const parsedOpenTime = deal.openTime ? new Date(deal.openTime) : null;
             const hasValidOpenTime = Boolean(parsedOpenTime && !isNaN(parsedOpenTime.getTime()));
@@ -871,6 +895,7 @@ export class Mt5WorkerService implements OnModuleInit {
 
             return {
                 ticket: ticket,
+                dealTicket: rawDealTicket,
                 positionId: positionId || ticket,
                 contractId: positionId || ticket,
                 symbol: deal.symbol || 'Unknown',
@@ -908,8 +933,8 @@ export class Mt5WorkerService implements OnModuleInit {
             for (const tr of normalizedTrades) {
                 try {
                     const existing = await this.accountRepo.manager.query(
-                        `SELECT id FROM trades WHERE account_id::text = $1 AND (ticket = $2 OR "contractId" = $3) LIMIT 1`,
-                        [account.id, tr.ticket, tr.contractId]
+                        `SELECT id, ticket, "contractId" FROM trades WHERE account_id::text = $1 AND (ticket IN ($2, $3, $4) OR "contractId" IN ($2, $3, $4)) LIMIT 1`,
+                        [account.id, tr.ticket, tr.contractId, tr.dealTicket || tr.ticket]
                     );
                     if (!existing || existing.length === 0) {
                         const rawMagic = Number(tr.magic) || 0;
@@ -949,6 +974,11 @@ export class Mt5WorkerService implements OnModuleInit {
                             ]
                         );
                         savedCount++;
+                    } else if (existing[0] && existing[0].ticket !== tr.ticket && tr.ticket) {
+                        await this.accountRepo.manager.query(
+                            `UPDATE trades SET ticket = $1 WHERE id = $2`,
+                            [tr.ticket, existing[0].id]
+                        ).catch(() => {});
                     }
                 } catch (innerErr) {
                     this.logger.warn(`[FALLBACK SQL] Falha ao inserir trade ${tr.ticket} na conta ${cleanLogin}: ${innerErr.message}`);

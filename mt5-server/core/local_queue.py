@@ -56,6 +56,16 @@ class LocalQueue:
                 cursor.execute(
                     "DELETE FROM offline_buffer WHERE status = 'PENDING' AND payload LIKE '%10013466931%'"
                 )
+                # Reativa lotes de /sync/trades que caíram em DEAD_LETTER por erro temporário HTTP 500 no backend
+                cursor.execute(
+                    """
+                    UPDATE offline_buffer
+                    SET status = 'PENDING', attempts = 0, next_retry_at = 0
+                    WHERE endpoint = '/sync/trades'
+                      AND status = 'DEAD_LETTER'
+                      AND (last_error LIKE '%500%' OR last_error LIKE '%502%' OR last_error LIKE '%Falha%')
+                    """
+                )
                 conn.commit()
 
     def purge_account_items(self, account_id: Any):
@@ -89,7 +99,7 @@ class LocalQueue:
                     if acc_key:
                         cursor.execute(
                             """
-                            SELECT id FROM offline_buffer
+                            SELECT id, payload FROM offline_buffer
                             WHERE endpoint = ?
                               AND (status IS NULL OR status = 'PENDING')
                               AND payload LIKE ?
@@ -100,13 +110,34 @@ class LocalQueue:
                         )
                         existing = cursor.fetchone()
                         if existing:
+                            merged_json = payload_json
+                            if endpoint == "/sync/trades" and isinstance(payload, dict):
+                                try:
+                                    old_data = json.loads(existing[1] or "{}")
+                                    old_trades = old_data.get("trades") or []
+                                    new_trades = payload.get("trades") or []
+                                    by_ticket: Dict[str, Any] = {}
+                                    for tr in old_trades + new_trades:
+                                        if isinstance(tr, dict):
+                                            k = str(tr.get("ticket") or tr.get("positionId") or id(tr))
+                                            by_ticket[k] = tr
+                                    merged_payload = dict(payload)
+                                    merged_payload["trades"] = list(by_ticket.values())
+                                    merged_payload["lastDealTicket"] = max(
+                                        int(old_data.get("lastDealTicket") or 0),
+                                        int(payload.get("lastDealTicket") or 0),
+                                    )
+                                    merged_json = json.dumps(merged_payload)
+                                except Exception:
+                                    merged_json = payload_json
+
                             cursor.execute(
                                 """
                                 UPDATE offline_buffer
                                 SET payload = ?, attempts = 0, next_retry_at = 0
                                 WHERE id = ?
                                 """,
-                                (payload_json, existing[0])
+                                (merged_json, existing[0])
                             )
                             conn.commit()
                             logger.info(f"Payload atualizado no buffer offline (deduplicado ID {existing[0]}): {endpoint} [conta={acc_key}]")

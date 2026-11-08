@@ -48,6 +48,8 @@ class WorkerManager:
         # Controle de cooldown individual por conta (evita thrashing e reduz frequência de contas $0.00 ociosas)
         self._account_last_sync_ts: dict[int, float] = {}
         self._account_idle_map: dict[int, bool] = {}
+        # Garante que na primeira sincronização após iniciar o worker seja feita reconciliação completa (last_ticket=0)
+        self._initial_full_synced: set[int] = set()
 
     def _ensure_registered(self) -> bool:
         if self.is_registered:
@@ -517,8 +519,10 @@ class WorkerManager:
                 self.local_queue.enqueue("/sync/orders", orders_payload.model_dump(mode="json"))
 
             # 4. Sincronização incremental de histórico de Deals com Watermark
-            last_ticket = 0 if force_full else acc.last_deal_ticket
-            last_deal_time = None if force_full else acc.last_deal_time
+            # Na primeira rodada da sessão do worker para a conta, força last_ticket=0 para recuperar qualquer deal perdido
+            effective_full = force_full or (account_id not in self._initial_full_synced)
+            last_ticket = 0 if effective_full else acc.last_deal_ticket
+            last_deal_time = None if effective_full else acc.last_deal_time
             deals_payload = self.sync_engine.fetch_incremental_deals(
                 account_id=account_id,
                 login=acc.login,
@@ -535,6 +539,7 @@ class WorkerManager:
                 logger.info(f"[SYNC] Sincronizando {len(deals_payload.trades)} novos negócios da conta {acc.login}...")
                 deal_success = self.api_client.sync_trades(deals_payload)
                 if deal_success:
+                    self._initial_full_synced.add(account_id)
                     self.account_manager.update_checkpoint(
                         account_id,
                         deals_payload.lastDealTicket,
@@ -545,6 +550,7 @@ class WorkerManager:
                     if err_reason in (None, "NETWORK_ERROR"):
                         self.local_queue.enqueue("/sync/trades", deals_payload.model_dump(mode="json"))
             else:
+                self._initial_full_synced.add(account_id)
                 self.account_manager.update_checkpoint(
                     account_id,
                     max(acc.last_deal_ticket, deals_payload.lastDealTicket),

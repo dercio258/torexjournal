@@ -377,8 +377,20 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             }
 
             const tradesToSave: TradeEntity[] = [];
-            const tickets = trades.map(t => (t.ticket || t.contractId)?.toString()).filter(Boolean);
-            const contractIds = trades.map(t => (t.contractId || t.ticket)?.toString()).filter(Boolean);
+            const tickets = Array.from(new Set(
+                trades.flatMap(t => [
+                    (t.ticket || t.contractId)?.toString(),
+                    t.dealTicket?.toString(),
+                    t.positionId?.toString(),
+                ]).filter(Boolean)
+            ));
+            const contractIds = Array.from(new Set(
+                trades.flatMap(t => [
+                    (t.contractId || t.ticket)?.toString(),
+                    t.dealTicket?.toString(),
+                    t.positionId?.toString(),
+                ]).filter(Boolean)
+            ));
 
             // Fetch existing tickets and contractIds in batch strictly scoped to this accountId
             let existingTrades: Array<{ ticket?: string; contractId?: string }> = [];
@@ -414,11 +426,17 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                 const normalizedType = rawTypeStr.includes('sell') || rawTypeStr.includes('put') ? 'SELL' : 'BUY';
 
                 const ticket = t.ticket ? t.ticket.toString().trim() : (t.contractId ? t.contractId.toString().trim() : null);
+                const dealTicket = t.dealTicket ? t.dealTicket.toString().trim() : null;
                 const contractId = (t.contractId ? t.contractId.toString().trim() : ticket) || `TR_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-                // Deduping against DB (strictly within this account)
-                if (ticket && existingTickets.has(ticket)) continue;
-                if (contractId && existingContracts.has(contractId)) continue;
+                // Deduping against DB (strictly within this account, checking both Position Ticket and Deal Ticket)
+                if (
+                    (ticket && (existingTickets.has(ticket) || existingContracts.has(ticket))) ||
+                    (contractId && (existingContracts.has(contractId) || existingTickets.has(contractId))) ||
+                    (dealTicket && (existingTickets.has(dealTicket) || existingContracts.has(dealTicket)))
+                ) {
+                    continue;
+                }
 
                 // Deduping against current batch
                 const batchKey = `${accountId}:${contractId}`;
