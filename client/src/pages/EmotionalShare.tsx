@@ -22,24 +22,24 @@ export const EmotionalShare = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 p-8 flex flex-col items-center">
+        <div className="min-h-screen bg-canvas p-8 flex flex-col items-center">
             <header className="w-full max-w-4xl flex justify-between items-center mb-8">
                 <button
                     onClick={() => navigate('/emotional')}
-                    className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
+                    className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors"
                 >
                     <ArrowLeft size={20} />
                     Voltar
                 </button>
-                <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-fg flex items-center gap-2">
                     <Share2 className="text-purple-400" />
                     Compartilhar Registro
                 </h1>
                 <div className="w-20"></div> {/* Spacer */}
             </header>
 
-            <div className="w-full max-w-4xl bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-2xl flex flex-col items-center">
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 mb-6">
+            <div className="w-full max-w-4xl bg-surface/50 p-6 rounded-2xl border border-line shadow-2xl flex flex-col items-center">
+                <div className="bg-canvas p-4 rounded-xl border border-line mb-6">
                     <img src={image} alt="Mental Log Capture" className="max-w-full rounded-lg shadow-lg" />
                 </div>
 

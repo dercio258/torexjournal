@@ -29,9 +29,9 @@ export const AuthCallback = () => {
     }, [login, navigate, searchParams]);
 
     return (
-        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <div className="min-h-screen bg-canvas flex flex-col items-center justify-center space-y-4">
             <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
-            <p className="text-slate-400 font-medium">Autenticando...</p>
+            <p className="text-fg-muted font-medium">Autenticando...</p>
         </div>
     );
 };

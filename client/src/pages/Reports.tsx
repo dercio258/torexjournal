@@ -24,6 +24,7 @@ import {
     Filler
 } from 'chart.js';
 import { Bar, Line } from 'react-chartjs-2';
+import { useChartTheme } from '../hooks/useChartTheme';
 
 ChartJS.register(
     CategoryScale,
@@ -39,6 +40,7 @@ ChartJS.register(
 );
 
 export const Reports = () => {
+    const ct = useChartTheme();
     const { selectedAccountId, selectedAccount, accounts, isConsolidated, selectAccount } = useAccount();
     const printRef = useRef<HTMLDivElement>(null);
 
@@ -257,10 +259,10 @@ export const Reports = () => {
                 display: false
             },
             tooltip: {
-                backgroundColor: '#090d16',
-                titleColor: '#e2e8f0',
-                bodyColor: '#cbd5e1',
-                borderColor: '#1e293b',
+                backgroundColor: ct.tooltipBg,
+                titleColor: ct.tooltipTitle,
+                bodyColor: ct.tooltipBody,
+                borderColor: ct.tooltipBorder,
                 borderWidth: 1,
                 padding: 10,
                 displayColors: false,
@@ -279,7 +281,7 @@ export const Reports = () => {
                     display: false
                 },
                 ticks: {
-                    color: '#64748b',
+                    color: ct.tick,
                     font: { size: 10 },
                     maxRotation: 0,
                     autoSkip: true,
@@ -290,9 +292,9 @@ export const Reports = () => {
                 grid: {
                     color: (context: any) => {
                         if (context.tick?.value === 0) {
-                            return 'rgba(255, 255, 255, 0.45)'; // Linha do zero destacada
+                            return ct.label; // Linha do zero destacada
                         }
-                        return 'rgba(51, 65, 85, 0.2)';
+                        return ct.grid;
                     },
                     lineWidth: (context: any) => {
                         if (context.tick?.value === 0) return 2;
@@ -301,8 +303,8 @@ export const Reports = () => {
                 },
                 ticks: {
                     color: (context: any) => {
-                        if (context.tick?.value === 0) return '#ffffff';
-                        return '#64748b';
+                        if (context.tick?.value === 0) return ct.tooltipTitle;
+                        return ct.tick;
                     },
                     font: { size: 10 },
                     callback: (val: any) => {
@@ -313,7 +315,7 @@ export const Reports = () => {
                 }
             }
         }
-    }), []);
+    }), [ct]);
 
 
 
@@ -325,8 +327,8 @@ export const Reports = () => {
             {/* Top Bar / Toolbar */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-200 dark:border-slate-800/80 pb-4 print:hidden">
                 {/* Account Selector Toolbar */}
-                <div className="flex items-center gap-2 bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-xs dark:shadow-lg">
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <div className="flex items-center gap-2 bg-white dark:bg-slate-900/70 border border-line p-1.5 rounded-xl shadow-xs dark:shadow-lg">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-fg-muted ">
                         <Briefcase size={14} className="text-indigo-600 dark:text-indigo-400" />
                         <span>Conta:</span>
                     </div>
@@ -334,10 +336,10 @@ export const Reports = () => {
                         <button
                             onClick={() => selectAccount('all')}
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                                isConsolidated
-                                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                            }`}
+ isConsolidated
+ ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+ : 'text-fg-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800/60'
+ }`}
                         >
                             Todas
                         </button>
@@ -346,10 +348,10 @@ export const Reports = () => {
                                 key={acc.id}
                                 onClick={() => selectAccount(acc.id)}
                                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                                    selectedAccountId === acc.id
-                                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                                }`}
+ selectedAccountId === acc.id
+ ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+ : 'text-fg-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800/60'
+ }`}
                             >
                                 <span>{acc.name}</span>
                                 <span className={`text-[9px] px-1 py-0.2 rounded font-mono uppercase ${
@@ -368,7 +370,7 @@ export const Reports = () => {
                         onClick={() => handleExportDocument('csv')}
                         variant="secondary"
                         icon={<Download size={14} />}
-                        className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs py-2 px-3"
+                        className="bg-surface-2 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs py-2 px-3"
                         disabled={!reportData?.trades?.length}
                     >
                         CSV
@@ -404,10 +406,10 @@ export const Reports = () => {
             </header>
 
             {/* Filter Bar */}
-            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xs dark:shadow-none print:hidden">
+            <div className="bg-white dark:bg-slate-900/60 backdrop-blur-xl border border-line rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xs dark:shadow-none print:hidden">
                 {/* Period Pills */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 mr-2 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold uppercase text-fg-subtle dark:text-slate-400 mr-2 flex items-center gap-1.5">
                         <Calendar size={13} /> Período:
                     </span>
                     {(['today', '7d', '30d', 'this_month', 'all', 'custom'] as const).map((p) => (
@@ -415,10 +417,10 @@ export const Reports = () => {
                             key={p}
                             onClick={() => setPeriod(p)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                                period === p
-                                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm shadow-emerald-500/30'
-                                    : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700/50'
-                            }`}
+ period === p
+ ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm shadow-emerald-500/30'
+ : 'bg-slate-100 dark:bg-slate-800/80 text-fg-muted hover:text-fg hover:bg-slate-200 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700/50'
+ }`}
                         >
                             {p === 'today' && 'Hoje'}
                             {p === '7d' && '7 Dias'}
@@ -438,25 +440,25 @@ export const Reports = () => {
                                 type="date"
                                 value={startDate}
                                 onChange={(e) => setStartDate(e.target.value)}
-                                className="bg-transparent text-xs text-slate-800 dark:text-slate-200 px-2 py-1 focus:outline-none"
+                                className="bg-transparent text-xs text-fg px-2 py-1 focus:outline-none"
                             />
-                            <span className="text-slate-500 text-xs">até</span>
+                            <span className="text-fg-subtle text-xs">até</span>
                             <input
                                 type="date"
                                 value={endDate}
                                 onChange={(e) => setEndDate(e.target.value)}
-                                className="bg-transparent text-xs text-slate-800 dark:text-slate-200 px-2 py-1 focus:outline-none"
+                                className="bg-transparent text-xs text-fg px-2 py-1 focus:outline-none"
                             />
                         </div>
                     )}
 
                     {/* Symbol Filter */}
                     <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Par:</span>
+                        <span className="text-xs text-fg-subtle dark:text-slate-400 font-medium">Par:</span>
                         <select
                             value={symbolFilter}
                             onChange={(e) => setSymbolFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-fg text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         >
                             <option value="ALL">Todos os Pares</option>
                             {availableSymbols.map((sym: string) => (
@@ -467,11 +469,11 @@ export const Reports = () => {
 
                     {/* Type Filter */}
                     <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Ordem:</span>
+                        <span className="text-xs text-fg-subtle dark:text-slate-400 font-medium">Ordem:</span>
                         <select
                             value={typeFilter}
                             onChange={(e) => setTypeFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-fg text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         >
                             <option value="ALL">BUY & SELL</option>
                             <option value="BUY">BUY Apenas</option>
@@ -482,8 +484,8 @@ export const Reports = () => {
             </div>
 
             {/* Printable Header - Visible in Print or Screen */}
-            <div ref={printRef} className="bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-2xl p-6 relative overflow-hidden shadow-sm dark:shadow-xl text-slate-900 dark:text-[#F3F4F6]">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 dark:border-white/[0.06] pb-5 mb-6">
+            <div ref={printRef} className="bg-surface border border-line rounded-2xl p-6 relative overflow-hidden shadow-sm dark:shadow-xl text-fg ">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-line pb-5 mb-6">
                     <div className="flex items-center gap-3.5">
                         <img
                             src={TOREX_LOGO_URL}
@@ -497,7 +499,7 @@ export const Reports = () => {
                                 </span>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+                                <h2 className="text-xl font-bold text-fg tracking-tight">
                                     {accountInfo?.name || (isConsolidated ? 'Todas as Contas (Consolidado)' : (selectedAccount?.name || 'Conta Trading'))}
                                 </h2>
                                 {accountInfo?.type && (
@@ -508,20 +510,20 @@ export const Reports = () => {
                                     </span>
                                 )}
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            <p className="text-xs text-fg-subtle dark:text-slate-400 mt-0.5">
                                 Corretora: <span className="text-slate-700 dark:text-slate-200 font-medium">{accountInfo?.broker || 'N/A'}</span> • Moeda: <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{accountInfo?.currency || 'USD'}</span>
                             </p>
                         </div>
                     </div>
 
                     <div className="text-right">
-                        <p className="text-xs text-slate-400 dark:text-slate-500 uppercase tracking-wider font-semibold">Período Selecionado</p>
-                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                        <p className="text-xs text-fg-muted dark:text-slate-500 uppercase tracking-wider font-semibold">Período Selecionado</p>
+                        <p className="text-sm font-bold text-fg ">
                             {startDate && endDate 
                                 ? `${new Date(startDate + 'T12:00:00').toLocaleDateString('pt-BR')} — ${new Date(endDate + 'T12:00:00').toLocaleDateString('pt-BR')}`
                                 : 'Todo o Histórico'}
                         </p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
+                        <p className="text-[11px] text-fg-muted mt-0.5">
                             Emitido em: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                     </div>
@@ -529,12 +531,12 @@ export const Reports = () => {
 
                 {/* Primary KPIs 4-Card Grid */}
                 {loading ? (
-                    <div className="py-20 text-center text-slate-400 dark:text-slate-500">Carregando demonstrativo executivo...</div>
+                    <div className="py-20 text-center text-fg-muted dark:text-slate-500">Carregando demonstrativo executivo...</div>
                 ) : !kpis || kpis.totalTrades === 0 ? (
                     <div className="py-16 text-center space-y-3">
-                        <ShieldAlert size={40} className="mx-auto text-slate-400 dark:text-slate-600" />
-                        <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Nenhuma operação encontrada</h3>
-                        <p className="text-slate-500 text-sm max-w-md mx-auto">
+                        <ShieldAlert size={40} className="mx-auto text-fg-muted dark:text-slate-600" />
+                        <h3 className="text-lg font-bold text-fg-muted ">Nenhuma operação encontrada</h3>
+                        <p className="text-fg-subtle text-sm max-w-md mx-auto">
                             Não existem trades fechados para os filtros e conta selecionados. Tente alterar o período ou a conta de trading ativa.
                         </p>
                     </div>
@@ -544,7 +546,7 @@ export const Reports = () => {
                             {/* Net Profit */}
                             <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-none">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wider">Lucro Líquido</span>
+                                    <span className="text-xs text-fg-subtle dark:text-slate-400 uppercase font-semibold tracking-wider">Lucro Líquido</span>
                                     <div className={`p-1.5 rounded-lg ${kpis.netProfit >= 0 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
                                         {kpis.netProfit >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                                     </div>
@@ -552,7 +554,7 @@ export const Reports = () => {
                                 <div className={`text-2xl font-black ${kpis.netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                     {kpis.netProfit >= 0 ? '+' : ''}${kpis.netProfit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                 </div>
-                                <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
+                                <div className="flex justify-between text-[11px] text-fg-subtle dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
                                     <span>Ganhos: <strong className="text-emerald-600 dark:text-emerald-400">${kpis.grossProfit.toFixed(2)}</strong></span>
                                     <span>Perdas: <strong className="text-rose-600 dark:text-rose-400">${kpis.grossLoss.toFixed(2)}</strong></span>
                                 </div>
@@ -561,15 +563,15 @@ export const Reports = () => {
                             {/* Win Rate */}
                             <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-none">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wider">Taxa de Acerto</span>
+                                    <span className="text-xs text-fg-subtle dark:text-slate-400 uppercase font-semibold tracking-wider">Taxa de Acerto</span>
                                     <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
                                         <Percent size={16} />
                                     </div>
                                 </div>
-                                <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+                                <div className="text-2xl font-black text-fg ">
                                     {kpis.winRate}%
                                 </div>
-                                <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
+                                <div className="flex justify-between text-[11px] text-fg-subtle dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
                                     <span>Total: <strong className="text-slate-700 dark:text-slate-200">{kpis.totalTrades}</strong></span>
                                     <span>W: <strong className="text-emerald-600 dark:text-emerald-400">{kpis.wins}</strong> / L: <strong className="text-rose-600 dark:text-rose-400">{kpis.losses}</strong></span>
                                 </div>
@@ -578,15 +580,15 @@ export const Reports = () => {
                             {/* Profit Factor */}
                             <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-none">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wider">Fator de Lucro</span>
+                                    <span className="text-xs text-fg-subtle dark:text-slate-400 uppercase font-semibold tracking-wider">Fator de Lucro</span>
                                     <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
                                         <Activity size={16} />
                                     </div>
                                 </div>
-                                <div className="text-2xl font-black text-slate-900 dark:text-slate-100">
+                                <div className="text-2xl font-black text-fg ">
                                     {kpis.profitFactor}
                                 </div>
-                                <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
+                                <div className="flex justify-between text-[11px] text-fg-subtle dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
                                     <span>R:R Médio: <strong className="text-indigo-600 dark:text-indigo-300">1:{kpis.riskRewardRatio}</strong></span>
                                     <span>Expectativa: <strong className={kpis.expectancy >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>${kpis.expectancy}</strong></span>
                                 </div>
@@ -595,7 +597,7 @@ export const Reports = () => {
                             {/* Max Drawdown */}
                             <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-none">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold tracking-wider">Drawdown Máximo</span>
+                                    <span className="text-xs text-fg-subtle dark:text-slate-400 uppercase font-semibold tracking-wider">Drawdown Máximo</span>
                                     <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
                                         <ShieldAlert size={16} />
                                     </div>
@@ -603,7 +605,7 @@ export const Reports = () => {
                                 <div className="text-2xl font-black text-rose-600 dark:text-rose-400">
                                     -${kpis.maxDrawdown.toFixed(2)}
                                 </div>
-                                <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
+                                <div className="flex justify-between text-[11px] text-fg-subtle dark:text-slate-400 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60">
                                     <span>Rebaixamento: <strong className="text-rose-600 dark:text-rose-300">{kpis.maxDrawdownPercent}%</strong></span>
                                     <span>ROI: <strong className={kpis.roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>{kpis.roi}%</strong></span>
                                 </div>
@@ -613,42 +615,42 @@ export const Reports = () => {
                         {/* Secondary Metrics Ribbon */}
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8 bg-slate-100/70 dark:bg-slate-950/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800/60 text-xs">
                             <div>
-                                <span className="text-slate-500 block">Maior Ganho</span>
+                                <span className="text-fg-subtle block">Maior Ganho</span>
                                 <span className="font-bold text-emerald-600 dark:text-emerald-400">+${kpis.largestWin.toFixed(2)}</span>
                             </div>
                             <div>
-                                <span className="text-slate-500 block">Maior Perda</span>
+                                <span className="text-fg-subtle block">Maior Perda</span>
                                 <span className="font-bold text-rose-600 dark:text-rose-400">-${Math.abs(kpis.largestLoss).toFixed(2)}</span>
                             </div>
                             <div>
-                                <span className="text-slate-500 block">Média de Ganho</span>
+                                <span className="text-fg-subtle block">Média de Ganho</span>
                                 <span className="font-bold text-emerald-600 dark:text-emerald-300">+${kpis.averageWin.toFixed(2)}</span>
                             </div>
                             <div>
-                                <span className="text-slate-500 block">Média de Perda</span>
+                                <span className="text-fg-subtle block">Média de Perda</span>
                                 <span className="font-bold text-rose-600 dark:text-rose-300">-${Math.abs(kpis.averageLoss).toFixed(2)}</span>
                             </div>
                             <div>
-                                <span className="text-slate-500 block">Volume Negociado</span>
-                                <span className="font-bold text-slate-800 dark:text-slate-200">{kpis.totalVolume} lotes</span>
+                                <span className="text-fg-subtle block">Volume Negociado</span>
+                                <span className="font-bold text-fg ">{kpis.totalVolume} lotes</span>
                             </div>
                                 <div>
-                                    <span className="text-slate-500 block">Comissões & Swaps</span>
-                                    <span className="font-bold text-slate-700 dark:text-slate-300">-${(kpis.totalCommission + kpis.totalSwap).toFixed(2)}</span>
+                                    <span className="text-fg-subtle block">Comissões & Swaps</span>
+                                    <span className="font-bold text-fg-muted ">-${(kpis.totalCommission + kpis.totalSwap).toFixed(2)}</span>
                                 </div>
                             </div>
 
                             {/* Row: Gráfico por Operação & Calendário Operacional Inline */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-stretch">
                                 {/* 1. Resultado por Operação / Curva de Lucro Acumulado */}
-                                <div className="bg-slate-50 dark:bg-[#111319] p-4 sm:p-5 rounded-xl border border-slate-200 dark:border-white/[0.08] flex flex-col justify-between shadow-xs dark:shadow-none h-full min-w-0">
+                                <div className="bg-slate-50 dark:bg-[#111319] p-4 sm:p-5 rounded-xl border border-line flex flex-col justify-between shadow-xs dark:shadow-none h-full min-w-0">
                                     <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
                                         <div>
-                                            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-200 flex items-center gap-2">
+                                            <h3 className="text-sm font-bold text-fg flex items-center gap-2">
                                                 <TrendingUp size={16} className="text-emerald-500 dark:text-emerald-400" />
                                                 {executionChartMode === 'executions' ? 'Resultado por Operação' : 'Curva de Lucro Acumulado'}
                                             </h3>
-                                            <p className="text-[11px] text-slate-500">
+                                            <p className="text-[11px] text-fg-subtle">
                                                 {executionChartMode === 'executions'
                                                     ? 'Operações com loss destacadas abaixo da linha de zero ($0)'
                                                     : 'Evolução acumulada do capital ao longo das operações'}
@@ -659,20 +661,20 @@ export const Reports = () => {
                                             <button
                                                 onClick={() => setExecutionChartMode('executions')}
                                                 className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer ${
-                                                    executionChartMode === 'executions'
-                                                        ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
-                                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                                                }`}
+ executionChartMode === 'executions'
+ ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+ : 'text-fg-muted hover:text-fg '
+ }`}
                                             >
                                                 Por Operação
                                             </button>
                                             <button
                                                 onClick={() => setExecutionChartMode('cumulative')}
                                                 className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer ${
-                                                    executionChartMode === 'cumulative'
-                                                        ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
-                                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                                                }`}
+ executionChartMode === 'cumulative'
+ ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+ : 'text-fg-muted hover:text-fg '
+ }`}
                                             >
                                                 Acumulado
                                             </button>
@@ -684,7 +686,7 @@ export const Reports = () => {
                                             cumulativeLineData ? (
                                                 <Line data={cumulativeLineData} options={zeroBaselineChartOptions as any} />
                                             ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-xs">
+                                                <div className="w-full h-full flex items-center justify-center text-fg-muted dark:text-slate-600 text-xs">
                                                     Sem dados suficientes para gerar o gráfico
                                                 </div>
                                             )
@@ -692,14 +694,14 @@ export const Reports = () => {
                                             executionsBarData ? (
                                                 <Bar data={executionsBarData} options={zeroBaselineChartOptions as any} />
                                             ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-slate-400 dark:text-slate-600 text-xs">
+                                                <div className="w-full h-full flex items-center justify-center text-fg-muted dark:text-slate-600 text-xs">
                                                     Sem dados suficientes para gerar o gráfico
                                                 </div>
                                             )
                                         )}
                                     </div>
 
-                                    <div className="flex justify-between text-[10px] text-slate-500 mt-2 border-t border-slate-200 dark:border-white/[0.06] pt-2 font-mono">
+                                    <div className="flex justify-between text-[10px] text-fg-subtle mt-2 border-t border-line pt-2 font-mono">
                                         <span className="flex items-center gap-1.5">
                                             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Lucros (&gt; $0)
                                         </span>
@@ -722,11 +724,11 @@ export const Reports = () => {
                         {/* Radar de Performance Operacional (Ativos, Sessões, Dias) */}
                         <div className="mb-8 space-y-2.5">
                             <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-[#F3F4F6] flex items-center gap-1.5 font-mono">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-fg flex items-center gap-1.5 font-mono">
                                     <Activity size={14} className="text-emerald-500 dark:text-emerald-400" />
                                     Detalhamento Operacional (Radares)
                                 </h3>
-                                <span className="text-[10px] text-slate-500 dark:text-[#6B7280] font-mono">
+                                <span className="text-[10px] text-fg-subtle dark:text-[#6B7280] font-mono">
                                     Ativos, Sessões e Dias da Semana
                                 </span>
                             </div>
@@ -741,27 +743,27 @@ export const Reports = () => {
 
                         {/* Trade Ledger Table */}
                         <div className="bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200 dark:border-slate-800/80 overflow-hidden shadow-xs dark:shadow-none">
-                            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                            <div className="p-4 border-b border-line flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                                 <div>
-                                    <h3 className="text-sm font-bold text-slate-900 dark:text-slate-200">Livro de Ordens (Trade Ledger)</h3>
-                                    <p className="text-xs text-slate-500">Listagem de todas as ordens fechadas computadas neste relatório.</p>
+                                    <h3 className="text-sm font-bold text-fg ">Livro de Ordens (Trade Ledger)</h3>
+                                    <p className="text-xs text-fg-subtle">Listagem de todas as ordens fechadas computadas neste relatório.</p>
                                 </div>
 
                                 <div className="relative w-full md:w-64">
-                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted dark:text-slate-500" />
                                     <input
                                         type="text"
                                         placeholder="Buscar ticket, par, tipo..."
                                         value={searchTerm}
                                         onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs rounded-lg pl-8 pr-3 py-1.5 text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
+                                        className="w-full bg-surface border border-slate-200 dark:border-slate-700 text-xs rounded-lg pl-8 pr-3 py-1.5 text-fg placeholder:text-fg-muted dark:placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
                                     />
                                 </div>
                             </div>
 
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-xs border-collapse">
-                                    <thead className="bg-slate-100 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[11px]">
+                                    <thead className="bg-slate-100 dark:bg-slate-900/80 text-fg-muted font-semibold border-b border-line uppercase tracking-wider text-[11px]">
                                         <tr>
                                             <th className="p-3">Ticket</th>
                                             {isConsolidated && <th className="p-3">Conta</th>}
@@ -776,13 +778,13 @@ export const Reports = () => {
                                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/50">
                                         {paginatedTrades.map((t: any) => (
                                             <tr key={t.id} className="hover:bg-slate-100/70 dark:hover:bg-slate-900/40 transition-colors">
-                                                <td className="p-3 font-mono text-slate-700 dark:text-slate-300 font-medium">#{t.ticket}</td>
+                                                <td className="p-3 font-mono text-fg-muted font-medium">#{t.ticket}</td>
                                                 {isConsolidated && (
                                                     <td className="p-3">
-                                                        <span className="font-semibold text-slate-700 dark:text-slate-300">{t.accountName}</span>
+                                                        <span className="font-semibold text-fg-muted ">{t.accountName}</span>
                                                     </td>
                                                 )}
-                                                <td className="p-3 font-bold text-slate-900 dark:text-slate-200">{t.symbol}</td>
+                                                <td className="p-3 font-bold text-fg ">{t.symbol}</td>
                                                 <td className="p-3">
                                                     <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
                                                         t.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
@@ -790,11 +792,11 @@ export const Reports = () => {
                                                         {t.type}
                                                     </span>
                                                 </td>
-                                                <td className="p-3 text-slate-700 dark:text-slate-300 font-mono">{t.volume}</td>
-                                                <td className="p-3 text-slate-500 dark:text-slate-400">
+                                                <td className="p-3 text-fg-muted font-mono">{t.volume}</td>
+                                                <td className="p-3 text-fg-subtle dark:text-slate-400">
                                                     {t.openTime ? new Date(t.openTime).toLocaleDateString('pt-BR') : '-'}
                                                 </td>
-                                                <td className="p-3 text-slate-500 dark:text-slate-400">
+                                                <td className="p-3 text-fg-subtle dark:text-slate-400">
                                                     {t.closeTime ? new Date(t.closeTime).toLocaleDateString('pt-BR') : '-'}
                                                 </td>
                                                 <td className={`p-3 text-right font-bold font-mono ${t.netPnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
@@ -808,7 +810,7 @@ export const Reports = () => {
 
                             {/* Pagination */}
                             {totalPages > 1 && (
-                                <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 bg-slate-100/50 dark:bg-slate-900/20">
+                                <div className="p-3.5 border-t border-line flex items-center justify-between text-xs text-fg-muted bg-slate-100/50 dark:bg-slate-900/20">
                                     <span>Página {currentPage} de {totalPages} ({filteredTrades.length} ordens)</span>
                                     <div className="flex items-center gap-1">
                                         <button

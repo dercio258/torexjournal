@@ -201,34 +201,34 @@ export const AdminUsers = () => {
     const activeUserSub = planModalUser ? getActiveSub(planModalUser) : null;
     const projectedDate = calculateProjectedDate();
 
-    if (isLoading) return <div className="text-white p-6">Carregando usuários...</div>;
+    if (isLoading) return <div className="text-fg p-6">Carregando usuários...</div>;
 
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-white tracking-tight">Gestão de Usuários</h1>
-                    <p className="text-slate-400 text-sm mt-1">
+                    <h1 className="text-3xl font-bold text-fg tracking-tight">Gestão de Usuários</h1>
+                    <p className="text-fg-muted text-sm mt-1">
                         Gerencie contas, atribua planos e aumente validades de assinaturas
                     </p>
                 </div>
 
                 <div className="relative w-full sm:w-72">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" size={16} />
                     <input
                         type="text"
                         placeholder="Buscar por nome, email ou tel..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                        className="w-full pl-9 pr-4 py-2 bg-surface/80 border border-line rounded-xl text-sm text-fg placeholder-fg-subtle focus:outline-none focus:border-indigo-500 transition-colors"
                     />
                 </div>
             </div>
 
-            <Card className="border-slate-800 bg-slate-900/50 overflow-hidden shadow-xl">
+            <Card className="border-line bg-surface/50 overflow-hidden shadow-xl">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-400">
-                        <thead className="bg-slate-900/80 text-slate-200 uppercase font-medium text-xs border-b border-slate-800">
+                    <table className="w-full text-left text-sm text-fg-muted">
+                        <thead className="bg-surface/80 text-fg uppercase font-medium text-xs border-b border-line">
                             <tr>
                                 <th className="px-6 py-4">Usuário</th>
                                 <th className="px-6 py-4">Contato</th>
@@ -239,10 +239,10 @@ export const AdminUsers = () => {
                                 <th className="px-6 py-4 text-right">Ações de Plano</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60">
+                        <tbody className="divide-y divide-line">
                             {filteredUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                                    <td colSpan={7} className="px-6 py-12 text-center text-fg-subtle">
                                         Nenhum usuário encontrado.
                                     </td>
                                 </tr>
@@ -257,14 +257,14 @@ export const AdminUsers = () => {
                                         : 0;
 
                                     return (
-                                        <tr key={user.id} className="hover:bg-slate-800/40 transition-colors">
+                                        <tr key={user.id} className="hover:bg-surface-2/40 transition-colors">
                                             <td className="px-6 py-4">
-                                                <div className="font-semibold text-white">{user.name || 'Sem nome'}</div>
-                                                <div className="text-xs text-slate-400">{user.email}</div>
+                                                <div className="font-semibold text-fg">{user.name || 'Sem nome'}</div>
+                                                <div className="text-xs text-fg-muted">{user.email}</div>
                                             </td>
                                             <td className="px-6 py-4 text-xs">
                                                 {user.whatsapp ? (
-                                                    <span className="font-mono text-slate-300">{user.whatsapp}</span>
+                                                    <span className="font-mono text-fg/80">{user.whatsapp}</span>
                                                 ) : (
                                                     <span className="text-slate-600">-</span>
                                                 )}
@@ -272,16 +272,16 @@ export const AdminUsers = () => {
                                             <td className="px-6 py-4">
                                                 {activeSub ? (
                                                     <div className="flex items-center gap-2">
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-accent-fg border border-emerald-500/20">
                                                             <Crown size={12} className="text-amber-400" />
                                                             {activeSub.planConfig?.tier || 'PRO'}
                                                         </span>
-                                                        <span className="text-[11px] font-medium text-slate-400">
+                                                        <span className="text-[11px] font-medium text-fg-muted">
                                                             ({activeSub.cycle === 'YEARLY' ? 'Anual' : 'Mensal'})
                                                         </span>
                                                     </div>
                                                 ) : (
-                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700/60">
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-2 text-fg-muted border border-line-strong">
                                                         Free
                                                     </span>
                                                 )}
@@ -289,12 +289,12 @@ export const AdminUsers = () => {
                                             <td className="px-6 py-4 text-xs">
                                                 {activeSub && activeSub.currentPeriodEnd ? (
                                                     <div>
-                                                        <div className="text-slate-200 font-medium">
+                                                        <div className="text-fg font-medium">
                                                             {new Date(activeSub.currentPeriodEnd).toLocaleDateString('pt-PT')}
                                                         </div>
                                                         <div
                                                             className={`text-[11px] ${
-                                                                daysLeft <= 5 ? 'text-amber-400 font-bold' : 'text-slate-500'
+                                                                daysLeft <= 5 ? 'text-amber-400 font-bold' : 'text-fg-subtle'
                                                             }`}
                                                         >
                                                             {daysLeft > 0 ? `${daysLeft} dias restantes` : 'Expira hoje'}
@@ -305,11 +305,11 @@ export const AdminUsers = () => {
                                                 )}
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className="text-slate-400 font-mono text-xs">
+                                                <span className="text-fg-muted font-mono text-xs">
                                                     {user.smsUsageCount || 0}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 text-xs text-slate-400">
+                                            <td className="px-6 py-4 text-xs text-fg-muted">
                                                 {new Date(user.createdAt).toLocaleDateString('pt-PT')}
                                             </td>
                                             <td className="px-6 py-4 text-right">
@@ -319,7 +319,7 @@ export const AdminUsers = () => {
                                                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                                                             activeSub
                                                                 ? 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shadow-sm'
-                                                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                                                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-accent-fg border border-emerald-500/30 shadow-sm'
                                                         }`}
                                                         title="Atribuir ou Aumentar Plano"
                                                     >
@@ -338,7 +338,7 @@ export const AdminUsers = () => {
 
                                                     <button
                                                         onClick={() => fetchHistory(user)}
-                                                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-700"
+                                                        className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors border border-transparent hover:border-line-strong"
                                                         title="Ver Histórico de Assinaturas"
                                                     >
                                                         <History size={16} />
@@ -367,26 +367,26 @@ export const AdminUsers = () => {
             >
                 <form onSubmit={handlePlanSubmit} className="space-y-5">
                     {/* User Status Card Banner */}
-                    <div className="p-3.5 rounded-xl bg-slate-800/70 border border-slate-700/80 flex items-center justify-between">
+                    <div className="p-3.5 rounded-xl bg-surface-2/70 border border-line-strong flex items-center justify-between">
                         <div>
-                            <div className="text-xs text-slate-400">Usuário Selecionado</div>
-                            <div className="font-semibold text-white text-sm">{planModalUser?.name || 'Sem nome'}</div>
-                            <div className="text-xs text-slate-400 font-mono">{planModalUser?.email}</div>
+                            <div className="text-xs text-fg-muted">Usuário Selecionado</div>
+                            <div className="font-semibold text-fg text-sm">{planModalUser?.name || 'Sem nome'}</div>
+                            <div className="text-xs text-fg-muted font-mono">{planModalUser?.email}</div>
                         </div>
                         <div className="text-right">
-                            <div className="text-xs text-slate-400">Status Atual</div>
+                            <div className="text-xs text-fg-muted">Status Atual</div>
                             {activeUserSub ? (
                                 <div className="mt-0.5">
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-accent-fg border border-emerald-500/20">
                                         <Crown size={11} className="text-amber-400" />
                                         {activeUserSub.planConfig?.tier || 'PRO'} Ativo
                                     </span>
-                                    <div className="text-[11px] text-slate-400 mt-1">
+                                    <div className="text-[11px] text-fg-muted mt-1">
                                         Vence: {new Date(activeUserSub.currentPeriodEnd).toLocaleDateString('pt-PT')}
                                     </div>
                                 </div>
                             ) : (
-                                <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700 text-slate-300">
+                                <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full text-xs font-medium bg-surface-3 text-fg/80">
                                     Gratuito (Free)
                                 </span>
                             )}
@@ -394,7 +394,7 @@ export const AdminUsers = () => {
                     </div>
 
                     {/* Action Type Selection Tabs */}
-                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-surface rounded-xl border border-line">
                         {activeUserSub && (
                             <button
                                 type="button"
@@ -402,7 +402,7 @@ export const AdminUsers = () => {
                                 className={`py-2 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                                     actionType === 'EXTEND'
                                         ? 'bg-indigo-600 text-white shadow-md'
-                                        : 'text-slate-400 hover:text-white'
+                                        : 'text-fg-muted hover:text-white'
                                 }`}
                             >
                                 <CalendarPlus size={14} />
@@ -415,7 +415,7 @@ export const AdminUsers = () => {
                             className={`py-2 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                                 actionType === 'ASSIGN'
                                     ? 'bg-indigo-600 text-white shadow-md'
-                                    : 'text-slate-400 hover:text-white'
+                                    : 'text-fg-muted hover:text-white'
                             } ${!activeUserSub ? 'col-span-2' : ''}`}
                         >
                             <Crown size={14} />
@@ -428,7 +428,7 @@ export const AdminUsers = () => {
                                 className={`py-2 px-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
                                     actionType === 'CANCEL'
                                         ? 'bg-rose-600 text-white shadow-md'
-                                        : 'text-slate-400 hover:text-rose-400'
+                                        : 'text-fg-muted hover:text-danger-fg'
                                 }`}
                             >
                                 <Trash2 size={14} />
@@ -440,7 +440,7 @@ export const AdminUsers = () => {
                     {/* FORM CONTENT BASED ON ACTION */}
                     {actionType === 'CANCEL' ? (
                         <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm space-y-2">
-                            <div className="flex items-center gap-2 font-bold text-rose-400">
+                            <div className="flex items-center gap-2 font-bold text-danger-fg">
                                 <AlertCircle size={18} />
                                 Atenção: Revogação de Assinatura
                             </div>
@@ -455,7 +455,7 @@ export const AdminUsers = () => {
                             {/* PLAN TIER SELECTION (FOR ASSIGN) */}
                             {actionType === 'ASSIGN' && (
                                 <div className="space-y-2">
-                                    <label className="text-xs font-semibold text-slate-300 block">
+                                    <label className="text-xs font-semibold text-fg/80 block">
                                         Escolha o Plano a Atribuir:
                                     </label>
                                     <div className="grid grid-cols-2 gap-3">
@@ -474,11 +474,11 @@ export const AdminUsers = () => {
                                                         className={`p-3 rounded-xl border cursor-pointer transition-all ${
                                                             isSelected
                                                                 ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500'
-                                                                : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
+                                                                : 'border-line bg-surface/60 hover:border-line-strong'
                                                         }`}
                                                     >
                                                         <div className="flex items-center justify-between">
-                                                            <span className="font-bold text-sm text-white flex items-center gap-1.5">
+                                                            <span className="font-bold text-sm text-fg flex items-center gap-1.5">
                                                                 <Crown
                                                                     size={14}
                                                                     className={
@@ -493,7 +493,7 @@ export const AdminUsers = () => {
                                                                 <Check size={16} className="text-indigo-400" />
                                                             )}
                                                         </div>
-                                                        <div className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                                                        <div className="text-[11px] text-fg-muted mt-1 line-clamp-1">
                                                             {plan.description || 'Plano de acesso'}
                                                         </div>
                                                     </div>
@@ -508,11 +508,11 @@ export const AdminUsers = () => {
                                                         className={`p-3 rounded-xl border cursor-pointer transition-all ${
                                                             selectedTier === tier
                                                                 ? 'border-indigo-500 bg-indigo-500/10 ring-1 ring-indigo-500'
-                                                                : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'
+                                                                : 'border-line bg-surface/60 hover:border-line-strong'
                                                         }`}
                                                     >
                                                         <div className="flex items-center justify-between">
-                                                            <span className="font-bold text-sm text-white flex items-center gap-1.5">
+                                                            <span className="font-bold text-sm text-fg flex items-center gap-1.5">
                                                                 <Crown
                                                                     size={14}
                                                                     className={tier === 'PRO' ? 'text-amber-400' : 'text-indigo-400'}
@@ -533,7 +533,7 @@ export const AdminUsers = () => {
 
                             {/* DURATION / EXTENSION PRESETS */}
                             <div className="space-y-2">
-                                <label className="text-xs font-semibold text-slate-300 block">
+                                <label className="text-xs font-semibold text-fg/80 block">
                                     {actionType === 'EXTEND'
                                         ? 'Quanto tempo adicionar à validade atual?'
                                         : 'Duração da Assinatura:'}
@@ -558,7 +558,7 @@ export const AdminUsers = () => {
                                             className={`py-2 px-2 text-xs font-medium rounded-lg border transition-all ${
                                                 selectedDays === opt.days && !customDays && !customDate
                                                     ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
-                                                    : 'bg-slate-900/60 text-slate-300 border-slate-800 hover:border-slate-700'
+                                                    : 'bg-surface/60 text-fg/80 border-line hover:border-line-strong'
                                             }`}
                                         >
                                             {opt.label}
@@ -570,7 +570,7 @@ export const AdminUsers = () => {
                             {/* CUSTOM DAYS OR CUSTOM DATE */}
                             <div className="grid grid-cols-2 gap-3 pt-1">
                                 <div>
-                                    <label className="text-[11px] text-slate-400 block mb-1">
+                                    <label className="text-[11px] text-fg-muted block mb-1">
                                         Ou dias personalizados:
                                     </label>
                                     <input
@@ -582,11 +582,11 @@ export const AdminUsers = () => {
                                             setCustomDays(e.target.value);
                                             setCustomDate('');
                                         }}
-                                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                                        className="w-full px-3 py-2 bg-surface border border-line rounded-lg text-sm text-fg placeholder-fg-subtle focus:outline-none focus:border-indigo-500"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[11px] text-slate-400 block mb-1">
+                                    <label className="text-[11px] text-fg-muted block mb-1">
                                         Ou data de término exata:
                                     </label>
                                     <input
@@ -596,7 +596,7 @@ export const AdminUsers = () => {
                                             setCustomDate(e.target.value);
                                             setCustomDays('');
                                         }}
-                                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                        className="w-full px-3 py-2 bg-surface border border-line rounded-lg text-sm text-fg focus:outline-none focus:border-indigo-500"
                                     />
                                 </div>
                             </div>
@@ -608,7 +608,7 @@ export const AdminUsers = () => {
                                         <Calendar size={14} className="text-indigo-400" />
                                         Nova Validade Projetada:
                                     </span>
-                                    <span className="font-bold text-white text-sm font-mono">
+                                    <span className="font-bold text-fg text-sm font-mono">
                                         {projectedDate.toLocaleDateString('pt-PT', {
                                             day: '2-digit',
                                             month: '2-digit',
@@ -622,7 +622,7 @@ export const AdminUsers = () => {
 
                     {/* REASON / INTERNAL NOTE */}
                     <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-300 block">
+                        <label className="text-xs font-semibold text-fg/80 block">
                             Motivo / Observação (Opcional):
                         </label>
                         <input
@@ -630,7 +630,7 @@ export const AdminUsers = () => {
                             placeholder="Ex: Pagamento via transferência manual, Bônus VIP, Cortesia..."
                             value={reason}
                             onChange={(e) => setReason(e.target.value)}
-                            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                            className="w-full px-3 py-2 bg-surface border border-line rounded-lg text-sm text-fg placeholder-fg-subtle focus:outline-none focus:border-indigo-500"
                         />
                     </div>
 
@@ -639,21 +639,21 @@ export const AdminUsers = () => {
                         <div
                             className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
                                 planMessage.type === 'success'
-                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                    ? 'bg-emerald-500/10 text-accent-fg border border-emerald-500/20'
+                                    : 'bg-rose-500/10 text-danger-fg border border-rose-500/20'
                             }`}
                         >
                             {planMessage.type === 'success' ? (
-                                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                <CheckCircle2 size={16} className="text-accent-fg shrink-0" />
                             ) : (
-                                <AlertCircle size={16} className="text-rose-400 shrink-0" />
+                                <AlertCircle size={16} className="text-danger-fg shrink-0" />
                             )}
                             <span>{planMessage.text}</span>
                         </div>
                     )}
 
                     {/* ACTIONS */}
-                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+                    <div className="flex items-center justify-end gap-3 pt-2 border-t border-line">
                         <Button
                             type="button"
                             variant="secondary"
@@ -694,21 +694,21 @@ export const AdminUsers = () => {
             >
                 <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                     {isLoadingHistory ? (
-                        <div className="text-slate-500 text-center py-8">Carregando histórico...</div>
+                        <div className="text-fg-subtle text-center py-8">Carregando histórico...</div>
                     ) : history.length === 0 ? (
-                        <div className="text-slate-500 text-center py-8">Nenhum registro encontrado.</div>
+                        <div className="text-fg-subtle text-center py-8">Nenhum registro encontrado.</div>
                     ) : (
                         history.map((sub) => (
                             <div
                                 key={sub.id}
-                                className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/80 flex justify-between items-center"
+                                className="p-4 rounded-xl bg-surface-2/50 border border-line-strong flex justify-between items-center"
                             >
                                 <div className="space-y-1">
                                     <div className="flex items-center gap-2">
-                                        <span className="font-bold text-white uppercase text-sm">
+                                        <span className="font-bold text-fg uppercase text-sm">
                                             {sub.planConfig?.tier || 'Custom'}
                                         </span>
-                                        <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-300">
+                                        <span className="text-[10px] bg-surface-3 px-1.5 py-0.5 rounded text-fg/80">
                                             {sub.cycle}
                                         </span>
                                         {sub.paymentMethod && (
@@ -717,13 +717,13 @@ export const AdminUsers = () => {
                                             </span>
                                         )}
                                     </div>
-                                    <div className="text-xs text-slate-400">
+                                    <div className="text-xs text-fg-muted">
                                         Criado em: {new Date(sub.createdAt).toLocaleDateString('pt-PT')}
                                     </div>
                                     {sub.currentPeriodEnd && (
                                         <div
                                             className={`text-xs font-medium ${
-                                                sub.status === 'ACTIVE' ? 'text-emerald-400' : 'text-slate-400'
+                                                sub.status === 'ACTIVE' ? 'text-accent-fg' : 'text-fg-muted'
                                             }`}
                                         >
                                             Término: {new Date(sub.currentPeriodEnd).toLocaleDateString('pt-PT')}
@@ -732,7 +732,7 @@ export const AdminUsers = () => {
                                 </div>
                                 <div className="text-right">
                                     {sub.status === 'ACTIVE' ? (
-                                        <span className="flex items-center gap-1 text-emerald-400 text-xs font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full">
+                                        <span className="flex items-center gap-1 text-accent-fg text-xs font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full">
                                             <CheckCircle2 size={12} /> Ativo
                                         </span>
                                     ) : sub.status === 'APPROVAL_PENDING' ? (
@@ -740,11 +740,11 @@ export const AdminUsers = () => {
                                             <Clock size={12} /> Pendente
                                         </span>
                                     ) : (
-                                        <span className="flex items-center gap-1 text-slate-400 text-xs font-bold bg-slate-700/60 px-2 py-1 rounded-full">
+                                        <span className="flex items-center gap-1 text-fg-muted text-xs font-bold bg-surface-3/60 px-2 py-1 rounded-full">
                                             <XCircle size={12} /> {sub.status}
                                         </span>
                                     )}
-                                    <div className="text-[10px] text-slate-500 mt-1 uppercase font-mono">
+                                    <div className="text-[10px] text-fg-subtle mt-1 uppercase font-mono">
                                         Ref: {sub.paymentReference?.slice(0, 14)}...
                                     </div>
                                 </div>

@@ -65,7 +65,7 @@ const MetricSlider = ({
                     <Icon size={18} className={colorClass} />
                     <span className="text-sm font-semibold text-slate-800 dark:text-slate-300">{label}</span>
                 </div>
-                <span className="text-lg font-black font-mono text-slate-900 dark:text-slate-100">{value}</span>
+                <span className="text-lg font-black font-mono text-fg ">{value}</span>
             </div>
             <input
                 type="range"
@@ -75,7 +75,7 @@ const MetricSlider = ({
                 onChange={(e) => onChange(parseInt(e.target.value))}
                 className={`w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer ${bgClass}`}
             />
-            <div className="flex justify-between text-[10px] text-slate-500 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold">
+            <div className="flex justify-between text-[10px] text-fg-subtle dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold">
                 <span>{reverse ? 'Alto' : 'Baixo'}</span>
                 <span>{reverse ? 'Baixo' : 'Alto'}</span>
             </div>
@@ -104,7 +104,7 @@ const MentalScore = ({ score }: { score: number }) => {
                     stroke="currentColor"
                     strokeWidth="12"
                     fill="transparent"
-                    className="text-slate-200 dark:text-slate-800"
+                    className="text-fg dark:text-slate-800"
                 />
                 <circle
                     cx="96"
@@ -121,7 +121,7 @@ const MentalScore = ({ score }: { score: number }) => {
             </svg>
             <div className="absolute flex flex-col items-center">
                 <span className={`text-5xl font-bold ${color}`}>{score}</span>
-                <span className="text-xs text-slate-500 uppercase tracking-widest mt-1">Mental Score</span>
+                <span className="text-xs text-fg-subtle uppercase tracking-widest mt-1">Mental Score</span>
             </div>
         </div>
     );
@@ -233,7 +233,7 @@ const EmotionalManagement = () => {
                 // 2. Capture & Upload Screenshot
                 if (captureRef.current) {
                     const canvas = await html2canvas(captureRef.current, {
-                        backgroundColor: '#0f172a',
+                        backgroundColor: getComputedStyle(document.body).backgroundColor, // follow current theme
                         scale: 1,
                         useCORS: true,
                         allowTaint: true
@@ -323,23 +323,23 @@ const EmotionalManagement = () => {
         }
     };
 
-    if (loading) return <div className="p-10 text-center text-slate-500">Carregando...</div>;
+    if (loading) return <div className="p-10 text-center text-fg-subtle">Carregando...</div>;
 
     return (
         <div className="space-y-6">
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-fg flex items-center gap-2">
                         <BrainCircuit className="text-purple-500 dark:text-purple-400" />
                         Gestão Mental & Emocional
                     </h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Prepare sua mente antes de cada sessão de trading.</p>
+                    <p className="text-fg-subtle dark:text-slate-400 text-sm">Prepare sua mente antes de cada sessão de trading.</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                     {/* Account Selector / Indicator */}
-                    <div className="flex items-center gap-2 bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-xs">
-                        <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <div className="flex items-center gap-2 bg-white dark:bg-slate-900/60 border border-line p-1.5 rounded-xl shadow-xs">
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-fg-muted ">
                             <Briefcase size={14} className="text-indigo-500 dark:text-indigo-400" />
                             <span>Conta:</span>
                         </div>
@@ -347,9 +347,9 @@ const EmotionalManagement = () => {
                             <button
                                 onClick={() => selectAccount('all')}
                                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${isConsolidated
-                                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                                    }`}
+ ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+ : 'text-fg-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800/60'
+ }`}
                             >
                                 Todas
                             </button>
@@ -358,9 +358,9 @@ const EmotionalManagement = () => {
                                     key={acc.id}
                                     onClick={() => selectAccount(acc.id)}
                                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${selectedAccountId === acc.id
-                                            ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                                        }`}
+ ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+ : 'text-fg-muted hover:text-fg hover:bg-slate-100 dark:hover:bg-slate-800/60'
+ }`}
                                 >
                                     <span>{acc.name}</span>
                                     <span className={`text-[9px] px-1 py-0.2 rounded font-mono uppercase ${String(acc.type).toUpperCase() === 'LIVE' ? 'bg-rose-500/20 text-rose-600 dark:text-rose-300' : 'bg-blue-500/20 text-blue-600 dark:text-blue-300'
@@ -372,9 +372,9 @@ const EmotionalManagement = () => {
                         </div>
                     </div>
 
-                    <div className="text-right hidden xl:block pl-2 border-l border-slate-200 dark:border-slate-800">
-                        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Hoje</p>
-                        <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                    <div className="text-right hidden xl:block pl-2 border-l border-line ">
+                        <p className="text-[11px] text-fg-subtle uppercase tracking-wider font-semibold">Hoje</p>
+                        <p className="text-sm font-bold text-fg ">
                             {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })}
                         </p>
                     </div>
@@ -392,10 +392,10 @@ const EmotionalManagement = () => {
                             crossOrigin="anonymous"
                         />
                         <div>
-                            <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <h2 className="text-xl font-bold text-fg flex items-center gap-2">
                                 TOREX JOURNAL
                             </h2>
-                            <p className="text-slate-500 dark:text-slate-400 text-sm">Relatório Mental Diário</p>
+                            <p className="text-fg-subtle dark:text-slate-400 text-sm">Relatório Mental Diário</p>
                         </div>
                     </div>
                     <div className="text-right">
@@ -407,29 +407,29 @@ const EmotionalManagement = () => {
                             </span>
                         </div>
                         {selectedAccount && !isConsolidated && (
-                            <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
+                            <p className="text-fg-subtle dark:text-slate-400 text-xs mt-0.5">
                                 {selectedAccount.broker} • <span className={String(selectedAccount.type).toUpperCase() === 'LIVE' ? 'text-rose-600 dark:text-rose-400 font-semibold' : 'text-blue-600 dark:text-blue-400 font-semibold'}>{selectedAccount.type}</span> ({selectedAccount.currency})
                             </p>
                         )}
-                        <p className="text-slate-500 text-xs mt-0.5">
+                        <p className="text-fg-subtle text-xs mt-0.5">
                             {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                         </p>
-                        <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5 font-mono">
+                        <p className="text-fg-subtle dark:text-slate-400 text-xs mt-0.5 font-mono">
                             {log.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • Sessão {log.session || currentSession}
                         </p>
                     </div>
                 </div>
 
                 {/* Score Column */}
-                <div className="lg:col-span-1 bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-6 shadow-sm dark:shadow-none">
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-200">Score Diário</h3>
+                <div className="lg:col-span-1 bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-line rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-6 shadow-sm dark:shadow-none">
+                    <h3 className="text-lg font-bold text-fg ">Score Diário</h3>
                     <MentalScore score={log.overallScore} />
 
                     <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700/50 w-full text-left">
                         <div className="flex items-center gap-2 mb-2 text-slate-800 dark:text-slate-300 font-semibold">
                             <Target size={16} /> Insight do Sistema
                         </div>
-                        <p className={`text-sm ${log.overallScore < 50 ? 'text-red-500 dark:text-red-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                        <p className={`text-sm ${log.overallScore < 50 ? 'text-red-500 dark:text-red-400' : 'text-fg-muted '}`}>
                             {getInsight(log.overallScore)}
                         </p>
                     </div>
@@ -447,8 +447,8 @@ const EmotionalManagement = () => {
 
                 {/* Metrics Grid */}
                 <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-none">
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-slate-200 mb-6">Métricas Fisiológicas</h3>
+                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-line rounded-2xl p-6 shadow-sm dark:shadow-none">
+                        <h3 className="text-lg font-bold text-fg mb-6">Métricas Fisiológicas</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <MetricSlider
                                 label="Qualidade do Sono"
@@ -485,8 +485,8 @@ const EmotionalManagement = () => {
                         </div>
                     </div>
 
-                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-none">
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-slate-200 mb-6">Estado Emocional</h3>
+                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-line rounded-2xl p-6 shadow-sm dark:shadow-none">
+                        <h3 className="text-lg font-bold text-fg mb-6">Estado Emocional</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <MetricSlider
                                 label="Humor Geral"
@@ -508,12 +508,12 @@ const EmotionalManagement = () => {
                         </div>
                     </div>
 
-                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm dark:shadow-none">
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-slate-200 mb-4">Notas & Observações</h3>
+                    <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-line rounded-2xl p-6 shadow-sm dark:shadow-none">
+                        <h3 className="text-lg font-bold text-fg mb-4">Notas & Observações</h3>
                         <textarea
                             value={log.notes}
                             onChange={(e) => updateMetric('notes', e.target.value)}
-                            className="w-full h-24 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none transition-all"
+                            className="w-full h-24 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg p-4 text-fg placeholder:text-fg-muted dark:placeholder:text-slate-600 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none transition-all"
                             placeholder="Algum evento externo afetando seu trading hoje? Notícias, família, saúde..."
                         ></textarea>
                     </div>
@@ -521,15 +521,15 @@ const EmotionalManagement = () => {
             </div>
 
             {/* History Section */}
-            <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl p-6 mt-6 shadow-sm dark:shadow-none">
+            <div className="bg-white dark:bg-slate-900/50 backdrop-blur-xl border border-line rounded-2xl p-6 mt-6 shadow-sm dark:shadow-none">
                 <div className="flex items-center gap-2 mb-6">
-                    <History className="text-slate-500 dark:text-slate-400" />
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-slate-200">Histórico de Registros</h3>
+                    <History className="text-fg-subtle dark:text-slate-400" />
+                    <h3 className="text-lg font-bold text-fg ">Histórico de Registros</h3>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-100/90 dark:bg-slate-950/30 text-xs text-slate-700 dark:text-slate-400 uppercase tracking-wider font-bold border-b border-slate-200 dark:border-slate-800">
+                        <thead className="bg-slate-100/90 dark:bg-slate-950/30 text-xs text-fg-muted uppercase tracking-wider font-bold border-b border-line ">
                             <tr>
                                 <th className="p-4 rounded-tl-lg">Data & Hora</th>
                                 <th className="p-4">Conta Trading</th>
@@ -542,7 +542,7 @@ const EmotionalManagement = () => {
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800/50 text-sm">
                             {history.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="p-8 text-center text-slate-500 italic">
+                                    <td colSpan={6} className="p-8 text-center text-fg-subtle italic">
                                         Nenhum registro encontrado no histórico.
                                     </td>
                                 </tr>
@@ -550,34 +550,34 @@ const EmotionalManagement = () => {
                                 <tr key={h.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
                                     <td className="p-4 text-slate-800 dark:text-slate-300 font-medium whitespace-nowrap">
                                         <div className="flex items-center gap-2">
-                                            <Calendar size={14} className="text-slate-400 dark:text-slate-500" />
+                                            <Calendar size={14} className="text-fg-muted dark:text-slate-500" />
                                             <div className="flex flex-col">
                                                 <span>{new Date(h.date).toLocaleDateString('pt-BR')}</span>
-                                                <span className="text-xs text-slate-500 dark:text-slate-400">{h.time || new Date(h.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                <span className="text-xs text-fg-subtle dark:text-slate-400">{h.time || new Date(h.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                                             </div>
                                         </div>
                                     </td>
                                     <td className="p-4 whitespace-nowrap">
                                         {h.account ? (
                                             <div className="flex flex-col">
-                                                <span className="font-semibold text-slate-900 dark:text-slate-200 text-xs flex items-center gap-1.5">
+                                                <span className="font-semibold text-fg text-xs flex items-center gap-1.5">
                                                     <Briefcase size={12} className="text-indigo-500 dark:text-indigo-400" />
                                                     {h.account.name}
                                                 </span>
-                                                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                                <span className="text-[10px] text-fg-subtle dark:text-slate-400">
                                                     {h.account.broker} • <span className={String(h.account.type).toUpperCase() === 'LIVE' ? 'text-rose-600 dark:text-rose-400 font-medium' : 'text-blue-600 dark:text-blue-400 font-medium'}>{h.account.type}</span>
                                                 </span>
                                             </div>
                                         ) : (
-                                            <span className="text-slate-500 text-xs italic">Conta Padrão</span>
+                                            <span className="text-fg-subtle text-xs italic">Conta Padrão</span>
                                         )}
                                     </td>
                                     <td className="p-4">
                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${h.session === 'London' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20' :
-                                            h.session === 'New York' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
-                                                h.session === 'Asian' ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20' :
-                                                    'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                                            }`}>
+ h.session === 'New York' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
+ h.session === 'Asian' ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20' :
+ 'bg-surface-2 text-fg-muted border border-slate-200 dark:border-slate-700'
+ }`}>
                                             {h.session || 'N/A'}
                                         </span>
                                     </td>
@@ -586,7 +586,7 @@ const EmotionalManagement = () => {
                                             {h.overallScore}
                                         </span>
                                     </td>
-                                    <td className="p-4 text-slate-700 dark:text-slate-400">
+                                    <td className="p-4 text-fg-muted ">
                                         {getInsight(h.overallScore)}
                                     </td>
                                     <td className="p-4 text-right">
@@ -597,14 +597,14 @@ const EmotionalManagement = () => {
                                                         href={`${window.location.origin}${h.imageUrl}`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-2 p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors text-xs font-bold uppercase tracking-wider border border-slate-200 dark:border-slate-700"
+                                                        className="inline-flex items-center gap-2 p-2 bg-surface-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors text-xs font-bold uppercase tracking-wider border border-slate-200 dark:border-slate-700"
                                                         title="Ver Imagem Original"
                                                     >
                                                         <ExternalLink size={16} /> Ver
                                                     </a>
                                                     <button
                                                         onClick={() => handleShare(h.imageUrl)}
-                                                        className="inline-flex items-center gap-2 p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg text-blue-600 dark:text-blue-400 transition-colors text-xs font-bold uppercase tracking-wider border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                                        className="inline-flex items-center gap-2 p-2 bg-surface-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-blue-600 dark:text-blue-400 transition-colors text-xs font-bold uppercase tracking-wider border border-slate-200 dark:border-slate-700 cursor-pointer"
                                                         title="Compartilhar"
                                                     >
                                                         <Share2 size={16} /> Share
@@ -612,7 +612,7 @@ const EmotionalManagement = () => {
                                                 </>
 
                                             ) : (
-                                                <span className="text-slate-400 dark:text-slate-600 text-xs italic">Sem Imagem</span>
+                                                <span className="text-fg-muted dark:text-slate-600 text-xs italic">Sem Imagem</span>
                                             )}
                                         </div>
                                     </td>

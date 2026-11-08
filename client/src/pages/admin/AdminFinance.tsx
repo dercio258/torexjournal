@@ -16,6 +16,7 @@ import {
     Filler
 } from 'chart.js';
 import { Line, Pie, Doughnut } from 'react-chartjs-2';
+import { useChartTheme } from '../../hooks/useChartTheme';
 
 ChartJS.register(
     CategoryScale,
@@ -31,6 +32,7 @@ ChartJS.register(
 );
 
 export const AdminFinance = () => {
+    const ct = useChartTheme();
     const [stats, setStats] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [dateFilter, setDateFilter] = useState<'this_month' | 'last_3_months' | 'all_time'>('this_month');
@@ -134,10 +136,10 @@ export const AdminFinance = () => {
                 display: false
             },
             tooltip: {
-                backgroundColor: '#0f172a',
-                titleColor: '#94a3b8',
-                bodyColor: '#ffffff',
-                borderColor: '#334155',
+                backgroundColor: ct.tooltipBg,
+                titleColor: ct.tooltipTitle,
+                bodyColor: ct.tooltipBody,
+                borderColor: ct.tooltipBorder,
                 borderWidth: 1,
                 padding: 10,
                 displayColors: false
@@ -149,16 +151,16 @@ export const AdminFinance = () => {
                     display: false
                 },
                 ticks: {
-                    color: '#64748b',
+                    color: ct.tick,
                     font: { size: 10 }
                 }
             },
             y: {
                 grid: {
-                    color: 'rgba(51, 65, 85, 0.2)'
+                    color: ct.grid
                 },
                 ticks: {
-                    color: '#64748b',
+                    color: ct.tick,
                     font: { size: 10 },
                     precision: 0
                 }
@@ -239,7 +241,7 @@ export const AdminFinance = () => {
                 '#f59e0b'  // Orange / Yellow (PayFast)
             ],
             borderWidth: 1,
-            borderColor: '#0f172a'
+            borderColor: ct.background
         }]
     };
 
@@ -258,7 +260,7 @@ export const AdminFinance = () => {
                 '#3b82f6'  // Blue (Pendentes)
             ],
             borderWidth: 1,
-            borderColor: '#0f172a'
+            borderColor: ct.background
         }]
     };
 
@@ -269,14 +271,16 @@ export const AdminFinance = () => {
             legend: {
                 position: 'right' as const,
                 labels: {
-                    color: '#94a3b8',
+                    color: ct.label,
                     font: { size: 11 },
                     boxWidth: 12
                 }
             },
             tooltip: {
-                backgroundColor: '#0f172a',
-                borderColor: '#334155',
+                backgroundColor: ct.tooltipBg,
+                titleColor: ct.tooltipTitle,
+                bodyColor: ct.tooltipBody,
+                borderColor: ct.tooltipBorder,
                 borderWidth: 1
             }
         }
@@ -287,18 +291,18 @@ export const AdminFinance = () => {
             {/* Header section with Date Filter */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Financeiro & Métricas</h1>
-                    <p className="text-slate-400 mt-1">Análise detalhada de faturamento, planos e crescimento de usuários.</p>
+                    <h1 className="text-3xl font-bold text-fg">Financeiro & Métricas</h1>
+                    <p className="text-fg-muted mt-1">Análise detalhada de faturamento, planos e crescimento de usuários.</p>
                 </div>
 
                 {/* Date Filter Selector */}
-                <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 items-center">
+                <div className="flex bg-surface border border-line rounded-xl p-1 items-center">
                     <button
                         onClick={() => setDateFilter('this_month')}
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
                             dateFilter === 'this_month'
                                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-slate-400 hover:text-white'
+                                : 'text-fg-muted hover:text-white'
                         }`}
                     >
                         <Calendar size={14} />
@@ -309,7 +313,7 @@ export const AdminFinance = () => {
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
                             dateFilter === 'last_3_months'
                                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-slate-400 hover:text-white'
+                                : 'text-fg-muted hover:text-white'
                         }`}
                     >
                         Últimos 3 Meses
@@ -319,7 +323,7 @@ export const AdminFinance = () => {
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
                             dateFilter === 'all_time'
                                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-slate-400 hover:text-white'
+                                : 'text-fg-muted hover:text-white'
                         }`}
                     >
                         Tudo
@@ -332,17 +336,17 @@ export const AdminFinance = () => {
                 {cards.map((card, idx) => {
                     const Icon = card.icon;
                     return (
-                        <Card key={idx} className="p-6 border-slate-800 bg-slate-900/50 flex flex-col justify-between min-h-[120px]">
+                        <Card key={idx} className="p-6 border-line bg-surface/50 flex flex-col justify-between min-h-[120px]">
                             <div className="flex items-center justify-between gap-4">
                                 <div>
-                                    <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider">{card.label}</p>
-                                    <h3 className="text-2xl font-black text-white mt-2 tracking-tight">{card.value}</h3>
+                                    <p className="text-fg-muted text-xs font-semibold uppercase tracking-wider">{card.label}</p>
+                                    <h3 className="text-2xl font-black text-fg mt-2 tracking-tight">{card.value}</h3>
                                 </div>
                                 <div className={`p-3 rounded-xl ${card.bg} flex-shrink-0`}>
                                     <Icon className={`w-6 h-6 ${card.color}`} />
                                 </div>
                             </div>
-                            <span className="text-[10px] text-slate-500 font-medium mt-3 border-t border-slate-800/60 pt-2 block">
+                            <span className="text-[10px] text-fg-subtle font-medium mt-3 border-t border-line pt-2 block">
                                 {card.description}
                             </span>
                         </Card>
@@ -352,16 +356,16 @@ export const AdminFinance = () => {
 
             {/* Three line charts for Renewals, Subscriptions, Upgrades */}
             <div>
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-fg mb-4 flex items-center gap-2">
                     <TrendingUp className="text-indigo-400" size={20} />
                     Volume de Transações por Categoria
                 </h2>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Chart 1: New Subscriptions */}
-                    <Card className="p-6 border-slate-800 bg-slate-900/50">
+                    <Card className="p-6 border-line bg-surface/50">
                         <div className="mb-4">
-                            <h3 className="text-white font-bold text-sm">Novas Subscrições</h3>
-                            <p className="text-slate-500 text-xs">Novos cadastros de planos pagos</p>
+                            <h3 className="text-fg font-bold text-sm">Novas Subscrições</h3>
+                            <p className="text-fg-subtle text-xs">Novos cadastros de planos pagos</p>
                         </div>
                         <div className="h-56">
                             <Line options={baseChartOptions} data={newSubsChartData} />
@@ -369,10 +373,10 @@ export const AdminFinance = () => {
                     </Card>
 
                     {/* Chart 2: Renewals */}
-                    <Card className="p-6 border-slate-800 bg-slate-900/50">
+                    <Card className="p-6 border-line bg-surface/50">
                         <div className="mb-4">
-                            <h3 className="text-white font-bold text-sm">Renovações</h3>
-                            <p className="text-slate-500 text-xs">Renovações automáticas ou manuais</p>
+                            <h3 className="text-fg font-bold text-sm">Renovações</h3>
+                            <p className="text-fg-subtle text-xs">Renovações automáticas ou manuais</p>
                         </div>
                         <div className="h-56">
                             <Line options={baseChartOptions} data={renewalsChartData} />
@@ -380,10 +384,10 @@ export const AdminFinance = () => {
                     </Card>
 
                     {/* Chart 3: Upgrades */}
-                    <Card className="p-6 border-slate-800 bg-slate-900/50">
+                    <Card className="p-6 border-line bg-surface/50">
                         <div className="mb-4">
-                            <h3 className="text-white font-bold text-sm">Upgrades</h3>
-                            <p className="text-slate-500 text-xs">Migração do plano Básico para PRO</p>
+                            <h3 className="text-fg font-bold text-sm">Upgrades</h3>
+                            <p className="text-fg-subtle text-xs">Migração do plano Básico para PRO</p>
                         </div>
                         <div className="h-56">
                             <Line options={baseChartOptions} data={upgradesChartData} />
@@ -395,10 +399,10 @@ export const AdminFinance = () => {
             {/* Pie Charts & Status Breakdown */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Pie Chart: Payment Methods */}
-                <Card className="p-6 border-slate-800 bg-slate-900/50">
+                <Card className="p-6 border-line bg-surface/50">
                     <div className="mb-4 flex items-center gap-2">
-                        <CreditCard className="text-emerald-400" size={18} />
-                        <h3 className="text-white font-bold text-sm">Métodos de Pagamento</h3>
+                        <CreditCard className="text-accent-fg" size={18} />
+                        <h3 className="text-fg font-bold text-sm">Métodos de Pagamento</h3>
                     </div>
                     <div className="h-64 relative flex items-center justify-center">
                         <Pie options={pieOptions} data={paymentMethodsChartData} />
@@ -406,10 +410,10 @@ export const AdminFinance = () => {
                 </Card>
 
                 {/* Doughnut Chart: Subscription Attempts */}
-                <Card className="p-6 border-slate-800 bg-slate-900/50">
+                <Card className="p-6 border-line bg-surface/50">
                     <div className="mb-4 flex items-center gap-2">
                         <PieChart className="text-indigo-400" size={18} />
-                        <h3 className="text-white font-bold text-sm">Status das Tentativas de Assinatura</h3>
+                        <h3 className="text-fg font-bold text-sm">Status das Tentativas de Assinatura</h3>
                     </div>
                     <div className="h-64 relative flex items-center justify-center">
                         <Doughnut options={pieOptions} data={statusesChartData} />
@@ -418,11 +422,11 @@ export const AdminFinance = () => {
             </div>
 
             {/* Growth Chart */}
-            <Card className="p-6 border-slate-800 bg-slate-900/50">
+            <Card className="p-6 border-line bg-surface/50">
                 <div className="mb-4 flex items-center justify-between">
                     <div>
-                        <h3 className="text-white font-bold text-sm">Crescimento Acumulado de Usuários</h3>
-                        <p className="text-slate-500 text-xs">Curva acumulada de traders cadastrados</p>
+                        <h3 className="text-fg font-bold text-sm">Crescimento Acumulado de Usuários</h3>
+                        <p className="text-fg-subtle text-xs">Curva acumulada de traders cadastrados</p>
                     </div>
                     <span className="text-xs text-indigo-400 font-bold bg-indigo-500/10 px-3 py-1 rounded-full">
                         Ativo

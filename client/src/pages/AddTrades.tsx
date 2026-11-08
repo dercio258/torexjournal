@@ -200,8 +200,8 @@ export const AddTrades = () => {
     return (
         <div className="max-w-4xl mx-auto space-y-12">
             <header className="text-center">
-                <h1 className="text-3xl font-bold text-slate-100">Adicionar Trades</h1>
-                <p className="text-slate-400 mt-2">Conecte sua conta ou importe arquivos para sincronizar seu histórico.</p>
+                <h1 className="text-3xl font-bold text-fg">Adicionar Trades</h1>
+                <p className="text-fg-muted mt-2">Conecte sua conta ou importe arquivos para sincronizar seu histórico.</p>
             </header>
 
             <div className="space-y-12">
@@ -215,7 +215,7 @@ export const AddTrades = () => {
 
                     {step === 'CONNECT_MT_OPTIONS' && (
                         <div className="animate-in fade-in slide-in-from-right-4">
-                            <button onClick={handleBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
+                            <button onClick={handleBack} className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors mb-6 text-sm">
                                 Voltar
                             </button>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -223,27 +223,27 @@ export const AddTrades = () => {
                                     <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Terminal size={32} />
                                     </div>
-                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Usar Expert Advisor (EA)</h3>
-                                    <p className="text-slate-400 text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader {mtVersion} rodando no seu computador ou VPS.</p>
+                                    <h3 className="text-xl font-bold text-fg mb-2">Usar Expert Advisor (EA)</h3>
+                                    <p className="text-fg-muted text-sm">Obtenha um token exclusivo para conectar nosso EA diretamente no seu MetaTrader {mtVersion} rodando no seu computador ou VPS.</p>
                                 </Card>
                                 <Card className="p-8 cursor-pointer hover:border-emerald-500/50 transition-all group relative" onClick={() => setStep('CONNECT_MT_CLOUD')}>
                                     <div className="absolute top-4 right-4">
-                                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-accent-fg border border-emerald-500/20">
                                             Disponível
                                         </span>
                                     </div>
                                     <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <Cloud size={32} />
                                     </div>
-                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Sincronização em Nuvem</h3>
-                                    <p className="text-slate-400 text-sm">Insira seus dados de leitura (Senha de Investidor) e nosso servidor fará a conexão com a corretora automaticamente para o MT{mtVersion}.</p>
+                                    <h3 className="text-xl font-bold text-fg mb-2">Sincronização em Nuvem</h3>
+                                    <p className="text-fg-muted text-sm">Insira seus dados de leitura (Senha de Investidor) e nosso servidor fará a conexão com a corretora automaticamente para o MT{mtVersion}.</p>
                                 </Card>
                                 <Card className="p-8 cursor-pointer hover:border-amber-500/50 transition-all group" onClick={() => setStep('CONNECT_MANUAL_MT')}>
                                     <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                                         <FileText size={32} />
                                     </div>
-                                    <h3 className="text-xl font-bold text-slate-100 mb-2">Importar Documento</h3>
-                                    <p className="text-slate-400 text-sm">Envie relatórios ou modelos oficiais em formato CSV, HTML, Excel (.xls/.xlsx) ou PDF para sincronizar suas operações.</p>
+                                    <h3 className="text-xl font-bold text-fg mb-2">Importar Documento</h3>
+                                    <p className="text-fg-muted text-sm">Envie relatórios ou modelos oficiais em formato CSV, HTML, Excel (.xls/.xlsx) ou PDF para sincronizar suas operações.</p>
                                 </Card>
                             </div>
                         </div>
@@ -251,17 +251,17 @@ export const AddTrades = () => {
 
                     {step === 'CONNECT_MT_EA' && (
                         <div className="animate-in fade-in slide-in-from-right-4 max-w-xl mx-auto">
-                            <button onClick={() => setStep('CONNECT_MT_OPTIONS')} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
+                            <button onClick={() => setStep('CONNECT_MT_OPTIONS')} className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors mb-6 text-sm">
                                 Voltar as opções
                             </button>
                             <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 border border-indigo-500/30 rounded-3xl p-8 relative overflow-hidden group shadow-2xl">
                                 <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                                     <Terminal size={150} />
                                 </div>
-                                <h3 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
+                                <h3 className="text-2xl font-bold text-fg mb-2 flex items-center gap-2">
                                     <Terminal className="text-indigo-400" /> Auto-Importação via EA
                                 </h3>
-                                <p className="text-slate-400 mb-6">Use este token para conectar seu Expert Advisor (EA) no MetaTrader {mtVersion}.</p>
+                                <p className="text-fg-muted mb-6">Use este token para conectar seu Expert Advisor (EA) no MetaTrader {mtVersion}.</p>
 
                                 {/* Account Scoping Notice */}
                                 <div className="bg-indigo-950/40 border border-indigo-500/20 rounded-2xl p-4 mb-6 flex items-center justify-between">
@@ -269,9 +269,9 @@ export const AddTrades = () => {
                                         <span className="text-[11px] uppercase tracking-wider text-indigo-400 font-semibold block">
                                             Conta de Destino do EA
                                         </span>
-                                        <p className="text-sm font-bold text-slate-100 mt-0.5">
+                                        <p className="text-sm font-bold text-fg mt-0.5">
                                             {selectedAccount?.name || 'Conta Principal'}
-                                            <span className="text-xs text-slate-400 font-normal ml-2">
+                                            <span className="text-xs text-fg-muted font-normal ml-2">
                                                 ({selectedAccount?.broker || 'MetaTrader 5'} • {selectedAccount?.currency || 'USD'})
                                             </span>
                                         </p>
@@ -284,20 +284,20 @@ export const AddTrades = () => {
                                     </button>
                                 </div>
 
-                                <div className="bg-slate-950/80 rounded-2xl p-6 border border-indigo-500/20 mb-6 backdrop-blur-md">
-                                    <span className="text-sm text-slate-500 font-bold uppercase tracking-wider block mb-2">Token Exclusivo da Conta</span>
+                                <div className="bg-canvas/80 rounded-2xl p-6 border border-indigo-500/20 mb-6 backdrop-blur-md">
+                                    <span className="text-sm text-fg-subtle font-bold uppercase tracking-wider block mb-2">Token Exclusivo da Conta</span>
                                     <div className="flex items-center justify-between gap-4">
                                         <code className="text-indigo-300 font-mono text-xl tracking-widest break-all">{appToken || 'Gerando...'}</code>
                                         <button onClick={copyToken} className="p-3 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-xl text-indigo-400 transition-colors shrink-0" title="Copiar Token">
                                             <Copy size={24} />
                                         </button>
                                     </div>
-                                    <p className="text-[11px] text-slate-500 mt-2">
+                                    <p className="text-[11px] text-fg-subtle mt-2">
                                         Este token direciona os trades recebidos exclusivamente para esta conta no TorexJournal.
                                     </p>
                                 </div>
 
-                                <div className="flex items-center justify-center gap-3 text-sm text-slate-400 bg-slate-900/50 p-4 rounded-xl">
+                                <div className="flex items-center justify-center gap-3 text-sm text-fg-muted bg-surface/50 p-4 rounded-xl">
                                     <div className="w-3 h-3 rounded-full bg-indigo-500 animate-pulse"></div>
                                     Aguardando conexão do EA...
                                 </div>
@@ -315,32 +315,32 @@ export const AddTrades = () => {
 
                     {step === 'CONNECT_DERIV' && (
                         <div className="animate-in fade-in slide-in-from-right-4 max-w-2xl mx-auto">
-                            <button onClick={handleBack} className="flex items-center gap-2 text-slate-400 hover:text-slate-100 transition-colors mb-6 text-sm">
+                            <button onClick={handleBack} className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors mb-6 text-sm">
                                 ← Voltar para seleção de corretoras
                             </button>
 
-                            <div className="bg-[#111319] border border-white/[0.08] shadow-2xl rounded-3xl p-8 relative overflow-hidden">
+                            <div className="bg-surface border border-line shadow-2xl rounded-3xl p-8 relative overflow-hidden">
                                 {/* Ambient glow */}
                                 <div className="absolute -top-24 -right-24 w-64 h-64 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
 
                                 {/* Header */}
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/[0.08]">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-line">
                                     <div className="flex items-center gap-4">
                                         <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
                                             <img src="https://deriv.com/static/deriv-logo-c97b819f.svg" className="w-7 h-7" alt="Deriv" />
                                         </div>
                                         <div>
-                                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                            <h3 className="text-xl font-bold text-fg flex items-center gap-2">
                                                 Deriv Autosync
                                             </h3>
-                                            <p className="text-xs text-slate-400">Sincronização em tempo real via WebSocket oficial</p>
+                                            <p className="text-xs text-fg-muted">Sincronização em tempo real via WebSocket oficial</p>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center gap-2">
                                         {derivStatus?.isConnected ? (
                                             <>
-                                                <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-xs rounded-full">
+                                                <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-accent-fg font-bold text-xs rounded-full">
                                                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Conectado
                                                 </span>
                                                 <span className="flex items-center gap-1 text-[11px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-full font-medium">
@@ -348,7 +348,7 @@ export const AddTrades = () => {
                                                 </span>
                                             </>
                                         ) : (
-                                            <span className="text-xs font-semibold px-3 py-1 bg-slate-800/80 border border-slate-700/50 text-slate-400 rounded-full">
+                                            <span className="text-xs font-semibold px-3 py-1 bg-surface-2/80 border border-line-strong text-fg-muted rounded-full">
                                                 Desconectado
                                             </span>
                                         )}
@@ -363,9 +363,9 @@ export const AddTrades = () => {
                                             : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
                                     }`}>
                                         {derivMessage.type === 'success' ? (
-                                            <CheckCircle2 size={18} className="shrink-0 mt-0.5 text-emerald-400" />
+                                            <CheckCircle2 size={18} className="shrink-0 mt-0.5 text-accent-fg" />
                                         ) : (
-                                            <AlertCircle size={18} className="shrink-0 mt-0.5 text-rose-400" />
+                                            <AlertCircle size={18} className="shrink-0 mt-0.5 text-danger-fg" />
                                         )}
                                         <div className="flex-1">{derivMessage.text}</div>
                                     </div>
@@ -376,30 +376,30 @@ export const AddTrades = () => {
                                     <div className="mt-8 space-y-6">
                                         {/* Account Info Stats */}
                                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                            <div className="bg-[#0C0D12] border border-white/[0.06] rounded-2xl p-4">
-                                                <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold block">Conta Deriv</span>
-                                                <span className="text-sm font-bold text-white font-mono mt-1 block">
+                                            <div className="bg-canvas-subtle border border-line rounded-2xl p-4">
+                                                <span className="text-[11px] uppercase tracking-wider text-fg-subtle font-semibold block">Conta Deriv</span>
+                                                <span className="text-sm font-bold text-fg font-mono mt-1 block">
                                                     {derivStatus.accountId || '—'}
                                                 </span>
                                             </div>
 
-                                            <div className="bg-[#0C0D12] border border-white/[0.06] rounded-2xl p-4">
-                                                <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold block">Saldo Atual</span>
-                                                <span className="text-sm font-bold text-emerald-400 font-mono mt-1 block">
+                                            <div className="bg-canvas-subtle border border-line rounded-2xl p-4">
+                                                <span className="text-[11px] uppercase tracking-wider text-fg-subtle font-semibold block">Saldo Atual</span>
+                                                <span className="text-sm font-bold text-accent-fg font-mono mt-1 block">
                                                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: derivStatus.currency || 'USD' }).format(derivStatus.balance || 0)}
                                                 </span>
                                             </div>
 
-                                            <div className="bg-[#0C0D12] border border-white/[0.06] rounded-2xl p-4">
-                                                <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold block">Moeda</span>
-                                                <span className="text-sm font-bold text-white mt-1 block">
+                                            <div className="bg-canvas-subtle border border-line rounded-2xl p-4">
+                                                <span className="text-[11px] uppercase tracking-wider text-fg-subtle font-semibold block">Moeda</span>
+                                                <span className="text-sm font-bold text-fg mt-1 block">
                                                     {derivStatus.currency || 'USD'}
                                                 </span>
                                             </div>
 
-                                            <div className="bg-[#0C0D12] border border-white/[0.06] rounded-2xl p-4">
-                                                <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold block">Última Sincronização</span>
-                                                <span className="text-[11px] font-medium text-slate-300 mt-1 block truncate" title={derivStatus.lastSyncAt ? new Date(derivStatus.lastSyncAt).toLocaleString() : 'Recente'}>
+                                            <div className="bg-canvas-subtle border border-line rounded-2xl p-4">
+                                                <span className="text-[11px] uppercase tracking-wider text-fg-subtle font-semibold block">Última Sincronização</span>
+                                                <span className="text-[11px] font-medium text-fg/80 mt-1 block truncate" title={derivStatus.lastSyncAt ? new Date(derivStatus.lastSyncAt).toLocaleString() : 'Recente'}>
                                                     {derivStatus.lastSyncAt ? new Date(derivStatus.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recente'}
                                                 </span>
                                             </div>
@@ -416,15 +416,15 @@ export const AddTrades = () => {
                                                 {isDerivSyncing ? 'Sincronizando Operações...' : 'Sincronizar Histórico Agora'}
                                             </button>
 
-                                            <p className="text-[11px] text-center text-slate-500">
+                                            <p className="text-[11px] text-center text-fg-subtle">
                                                 Novas ordens abertas ou fechadas no MT5/Deriv Web são importadas automaticamente pelo Live Stream.
                                             </p>
 
-                                            <div className="pt-4 border-t border-white/[0.06] text-center">
+                                            <div className="pt-4 border-t border-line text-center">
                                                 <button
                                                     onClick={handleDerivDisconnect}
                                                     disabled={isDerivLoading}
-                                                    className="text-xs text-rose-400/70 hover:text-rose-400 font-semibold transition-colors"
+                                                    className="text-xs text-rose-400/70 hover:text-danger-fg font-semibold transition-colors"
                                                 >
                                                     Desconectar Conta da Deriv
                                                 </button>
@@ -435,18 +435,18 @@ export const AddTrades = () => {
                                     /* Disconnected Setup View */
                                     <div className="mt-6 space-y-6">
                                         {/* Step-by-step instructions */}
-                                        <div className="bg-[#0C0D12] border border-white/[0.06] rounded-2xl p-5 space-y-3">
-                                            <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-2">
+                                        <div className="bg-canvas-subtle border border-line rounded-2xl p-5 space-y-3">
+                                            <h4 className="text-xs font-bold uppercase tracking-wider text-danger-fg flex items-center gap-2">
                                                 <ShieldCheck size={16} /> Instruções para Obter o Token de API:
                                             </h4>
-                                            <ol className="text-xs text-slate-300 space-y-2.5 list-decimal list-inside leading-relaxed">
+                                            <ol className="text-xs text-fg/80 space-y-2.5 list-decimal list-inside leading-relaxed">
                                                 <li>
                                                     Acesse sua conta Deriv no menu de tokens:{' '}
                                                     <a 
                                                         href="https://app.deriv.com/account/api-token" 
                                                         target="_blank" 
                                                         rel="noopener noreferrer"
-                                                        className="text-rose-400 hover:text-rose-300 underline font-semibold inline-flex items-center gap-1"
+                                                        className="text-danger-fg hover:text-rose-300 underline font-semibold inline-flex items-center gap-1"
                                                     >
                                                         Gerar Token Deriv <ExternalLink size={11} />
                                                     </a>
@@ -455,14 +455,14 @@ export const AddTrades = () => {
                                                     Selecione os escopos: <span className="bg-rose-500/15 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 font-semibold font-mono">Read</span> (Leitura) e <span className="bg-rose-500/15 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 font-semibold font-mono">Trade</span> (Negociação).
                                                 </li>
                                                 <li>
-                                                    Defina o nome do token como <span className="text-white font-mono bg-white/[0.05] px-1.5 py-0.5 rounded">TorexJournal</span>, crie e copie o token gerado.
+                                                    Defina o nome do token como <span className="text-fg font-mono bg-fg/[0.05] px-1.5 py-0.5 rounded">TorexJournal</span>, crie e copie o token gerado.
                                                 </li>
                                             </ol>
                                         </div>
 
                                         <form onSubmit={handleDerivConnect} className="space-y-4">
                                             <div>
-                                                <label className="text-xs font-semibold text-slate-300 mb-2 block">
+                                                <label className="text-xs font-semibold text-fg/80 mb-2 block">
                                                     Personal Access Token (PAT)
                                                 </label>
                                                 <div className="relative">
@@ -472,18 +472,18 @@ export const AddTrades = () => {
                                                         value={derivTokenInput}
                                                         onChange={(e) => setDerivTokenInput(e.target.value)}
                                                         disabled={isDerivConnecting}
-                                                        className="w-full bg-[#0C0D12] border border-white/[0.08] rounded-xl px-4 py-3.5 pr-12 text-sm text-white focus:outline-none focus:border-rose-500/50 transition-all font-mono placeholder:text-slate-600"
+                                                        className="w-full bg-canvas-subtle border border-line rounded-xl px-4 py-3.5 pr-12 text-sm text-fg focus:outline-none focus:border-rose-500/50 transition-all font-mono placeholder:text-slate-600"
                                                     />
                                                     <button
                                                         type="button"
                                                         onClick={() => setShowDerivToken(!showDerivToken)}
-                                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-1"
+                                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg/80 transition-colors p-1"
                                                         tabIndex={-1}
                                                     >
                                                         {showDerivToken ? <EyeOff size={16} /> : <Eye size={16} />}
                                                     </button>
                                                 </div>
-                                                <p className="text-[11px] text-slate-500 mt-1.5">
+                                                <p className="text-[11px] text-fg-subtle mt-1.5">
                                                     Seu token é criptografado com AES-256-GCM antes de ser armazenado no servidor.
                                                 </p>
                                             </div>
@@ -520,7 +520,7 @@ export const AddTrades = () => {
                 </div>
 
                 {/* Import History Centered at Bottom */}
-                <div className="pt-8 border-t border-slate-800/50">
+                <div className="pt-8 border-t border-line">
                     <ImportHistory />
                 </div>
             </div>
@@ -534,21 +534,21 @@ export const AddTrades = () => {
             )}
 
             {showDevModal && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900/95 border border-slate-800 p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+                <div className="fixed inset-0 bg-canvas/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                    <div className="bg-surface/95 border border-line p-8 rounded-2xl max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
                         {/* Glow decorativo */}
                         <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
                         <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
 
-                        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-6 shadow-lg shadow-emerald-500/5">
+                        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-accent-fg mb-6 shadow-lg shadow-emerald-500/5">
                             <Lock size={28} className="animate-pulse" />
                         </div>
 
-                        <h3 className="text-xl font-bold text-white mb-2">
+                        <h3 className="text-xl font-bold text-fg mb-2">
                             Funcionalidade em Desenvolvimento
                         </h3>
                         
-                        <p className="text-sm text-slate-400 leading-relaxed mb-8">
+                        <p className="text-sm text-fg-muted leading-relaxed mb-8">
                             A sincronização automática para {upgradeFeature} está sendo preparada com muito carinho e estará disponível em breve. Aguarde, em breve!
                         </p>
 

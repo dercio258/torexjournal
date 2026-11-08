@@ -213,7 +213,7 @@ export const Trades = () => {
                 </button>
                 <button
                     onClick={fetchTrades}
-                    className="p-2 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded-xl hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800 cursor-pointer shadow-xs active:scale-95"
+                    className="p-2 bg-surface text-fg-muted rounded-xl hover:text-fg hover:bg-surface-2 transition-all border border-line cursor-pointer shadow-xs active:scale-95"
                     title="Atualizar lista"
                 >
                     <RefreshCw size={15} className={isLoading ? 'animate-spin text-indigo-500 dark:text-indigo-400' : ''} />
@@ -254,7 +254,7 @@ export const Trades = () => {
 
 
             {/* Filters Bar */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col gap-4 shadow-sm">
+            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-line p-4 rounded-2xl flex flex-col gap-4 shadow-sm">
 
                 <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
                     {/* Left: Input Filters */}
@@ -266,7 +266,7 @@ export const Trades = () => {
                                 placeholder="Ticket ID..."
                                 value={ticketFilter}
                                 onChange={(e) => setTicketFilter(e.target.value)}
-                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-200 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none w-32 placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                                className="bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-fg focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none w-32 placeholder:text-fg-muted dark:placeholder:text-slate-600"
                             />
                         </div>
 
@@ -274,7 +274,7 @@ export const Trades = () => {
                         <select
                             value={symbolFilter}
                             onChange={(e) => setSymbolFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer"
+                            className="bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer"
                         >
                             <option value="ALL">Todos os Símbolos</option>
                             {availableSymbols.map(sym => (
@@ -283,17 +283,17 @@ export const Trades = () => {
                         </select>
 
                         {/* Date Inputs */}
-                        <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl p-1">
+                        <div className="flex items-center gap-2 bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl p-1">
                             <input
                                 type="date"
-                                className="bg-transparent text-xs text-slate-700 dark:text-slate-400 focus:text-slate-900 dark:focus:text-slate-200 outline-none p-1.5"
+                                className="bg-transparent text-xs text-fg-muted focus:text-fg outline-none p-1.5"
                                 value={dateRange.start}
                                 onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                             />
-                            <span className="text-slate-400 dark:text-slate-600">-</span>
+                            <span className="text-fg-muted dark:text-slate-600">-</span>
                             <input
                                 type="date"
-                                className="bg-transparent text-xs text-slate-700 dark:text-slate-400 focus:text-slate-900 dark:focus:text-slate-200 outline-none p-1.5"
+                                className="bg-transparent text-xs text-fg-muted focus:text-fg outline-none p-1.5"
                                 value={dateRange.end}
                                 onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                             />
@@ -306,7 +306,7 @@ export const Trades = () => {
                         <select
                             value={typeFilter}
                             onChange={(e) => setTypeFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer text-xs"
+                            className="bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer text-xs"
                         >
                             <option value="ALL">Todos os Tipos</option>
                             <option value="BUY">Compra (Buy)</option>
@@ -317,7 +317,7 @@ export const Trades = () => {
                         <select
                             value={statusFilter}
                             onChange={(e) => setStatusFilter(e.target.value)}
-                            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer text-xs"
+                            className="bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-800 dark:text-slate-300 focus:bg-white dark:focus:bg-slate-950 focus:ring-2 focus:ring-emerald-500/50 outline-none cursor-pointer text-xs"
                         >
                             <option value="ALL">Todos os Status</option>
                             <option value="Open">Open</option>
@@ -329,7 +329,7 @@ export const Trades = () => {
                             <select
                                 value={sortOption}
                                 onChange={(e) => setSortOption(e.target.value)}
-                                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-indigo-600 dark:text-indigo-400 font-bold focus:ring-2 focus:ring-indigo-500/50 outline-none cursor-pointer text-xs"
+                                className="bg-canvas border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-indigo-600 dark:text-indigo-400 font-bold focus:ring-2 focus:ring-indigo-500/50 outline-none cursor-pointer text-xs"
                             >
                                 <option value="date-desc">📅 Data (Mais recente)</option>
                                 <option value="date-asc">📅 Data (Mais antiga)</option>
@@ -344,10 +344,10 @@ export const Trades = () => {
             </div>
 
             {/* Trades Table */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
+            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-line rounded-2xl overflow-hidden shadow-sm dark:shadow-xl">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-slate-100/90 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 uppercase tracking-wider font-bold">
+                        <thead className="bg-slate-100/90 dark:bg-slate-950/70 border-b border-line text-xs text-fg-muted uppercase tracking-wider font-bold">
                             <tr>
                                 {isConsolidated && <th className="p-4 whitespace-nowrap">Conta</th>}
                                 <th className="p-4 whitespace-nowrap">Ticket</th>
@@ -366,7 +366,7 @@ export const Trades = () => {
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800/50 text-sm">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={isConsolidated ? 12 : 11} className="p-8 text-center text-slate-500">
+                                    <td colSpan={isConsolidated ? 12 : 11} className="p-8 text-center text-fg-subtle">
                                         Carregando trades...
                                     </td>
                                 </tr>
@@ -374,7 +374,7 @@ export const Trades = () => {
                                 <tr>
                                     <td colSpan={isConsolidated ? 12 : 11} className="p-12 text-center">
                                         <div className="flex flex-col items-center justify-center gap-3">
-                                            <p className="text-slate-600 dark:text-slate-400 font-medium">Nenhum trade encontrado com os filtros selecionados.</p>
+                                            <p className="text-fg-muted font-medium">Nenhum trade encontrado com os filtros selecionados.</p>
                                             <button
                                                 onClick={() => navigate('/add-trades')}
                                                 className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl transition-all text-xs font-bold cursor-pointer"
@@ -404,20 +404,20 @@ export const Trades = () => {
                                                  </span>
                                              </td>
                                          )}
-                                         <td className="p-4 text-slate-500 dark:text-slate-400 font-mono text-xs">#{trade.ticket}</td>
-                                         <td className="p-4 text-slate-600 dark:text-slate-400 whitespace-nowrap text-xs">
+                                         <td className="p-4 text-fg-subtle dark:text-slate-400 font-mono text-xs">#{trade.ticket}</td>
+                                         <td className="p-4 text-fg-muted whitespace-nowrap text-xs">
                                              {new Date(trade.closeTime || trade.openTime || Date.now()).toLocaleString('pt-BR', { timeZone: 'UTC' })}
                                          </td>
-                                         <td className="p-4 font-bold text-slate-900 dark:text-slate-200">{trade.symbol}</td>
+                                         <td className="p-4 font-bold text-fg ">{trade.symbol}</td>
                                          <td className="p-4">
                                              <span className={`px-2 py-1 rounded text-[10px] font-bold border ${trade.type === 'BUY' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'}`}>
                                                  {trade.type}
                                              </span>
                                          </td>
-                                         <td className="p-4 text-slate-700 dark:text-slate-400 font-mono">{trade.volume.toFixed(2)}</td>
-                                         <td className="p-4 text-right font-mono text-slate-700 dark:text-slate-400">{trade.openPrice}</td>
-                                         <td className="p-4 text-right font-mono text-slate-700 dark:text-slate-400">{trade.closePrice || '-'}</td>
-                                         <td className="p-4 text-right font-mono text-slate-500 text-xs">
+                                         <td className="p-4 text-fg-muted font-mono">{trade.volume.toFixed(2)}</td>
+                                         <td className="p-4 text-right font-mono text-fg-muted ">{trade.openPrice}</td>
+                                         <td className="p-4 text-right font-mono text-fg-muted ">{trade.closePrice || '-'}</td>
+                                         <td className="p-4 text-right font-mono text-fg-subtle text-xs">
                                              {(trade.commission + trade.swap).toFixed(2)}
                                          </td>
                                          <td className="p-4 text-center">
@@ -428,19 +428,19 @@ export const Trades = () => {
                                              ) : trade.profit < 0 ? (
                                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400">LOSS</span>
                                              ) : (
-                                                 <span className="text-slate-400">-</span>
+                                                 <span className="text-fg-muted">-</span>
                                              )}
                                          </td>
                                          <td className={`p-4 text-right font-bold font-mono ${trade.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                              <div>{trade.profit >= 0 ? '+' : ''}{trade.profit.toFixed(2)}</div>
                                              {trade.netProfit !== undefined && Math.abs(trade.netProfit - trade.profit) > 0.005 && (
-                                                 <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
+                                                 <div className="text-[10px] font-normal text-fg-muted dark:text-slate-500">
                                                      Líq: {trade.netProfit >= 0 ? '+' : ''}{trade.netProfit.toFixed(2)}
                                                  </div>
                                              )}
                                          </td>
                                          <td className="p-4 text-center">
-                                             <button className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors">
+                                             <button className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-fg-muted hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors">
                                                  <MoreHorizontal size={16} />
                                              </button>
                                          </td>
@@ -453,22 +453,22 @@ export const Trades = () => {
                  </div>
 
                  {/* Pagination */}
-                 <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center">
-                     <span className="text-xs text-slate-600 dark:text-slate-400">
+                 <div className="p-4 border-t border-line flex justify-between items-center">
+                     <span className="text-xs text-fg-muted ">
                          Mostrando {Math.min((currentPage - 1) * itemsPerPage + 1, filteredTrades.length)} - {Math.min(currentPage * itemsPerPage, filteredTrades.length)} de {filteredTrades.length} trades
                      </span>
                      <div className="flex gap-2">
                          <button
                              onClick={() => handlePageChange(currentPage - 1)}
                              disabled={currentPage === 1}
-                             className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                             className="p-2 rounded-lg bg-surface-2 text-fg-muted hover:text-fg hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                          >
                              <ChevronLeft size={16} />
                          </button>
                          <button
                              onClick={() => handlePageChange(currentPage + 1)}
                              disabled={currentPage === totalPages}
-                             className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                             className="p-2 rounded-lg bg-surface-2 text-fg-muted hover:text-fg hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                          >
                              <ChevronRight size={16} />
                          </button>

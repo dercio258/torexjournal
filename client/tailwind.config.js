@@ -102,7 +102,7 @@ export default {
                 glow: '0 0 24px rgb(var(--ds-accent) / 0.30)',
                 'focus-accent': '0 0 0 3px rgb(var(--ds-accent) / 0.18)',
                 'focus-danger': '0 0 0 3px rgb(var(--ds-danger) / 0.18)',
-                panel: '0 24px 64px -16px rgb(0 0 0 / 0.55)',
+                panel: '0 24px 64px -16px rgb(0 0 0 / var(--ds-shadow-alpha))',
             },
             keyframes: {
                 'fade-in-up': {

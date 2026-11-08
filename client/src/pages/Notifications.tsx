@@ -27,8 +27,8 @@ const NotificationButton = ({ children, variant = 'primary', className = '', ico
 
     const variants: any = {
         primary: "bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-900/20 border border-transparent",
-        secondary: "bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700",
-        ghost: "bg-transparent text-slate-400 hover:text-white hover:bg-slate-800/50",
+        secondary: "bg-surface-2 text-fg/80 hover:text-fg hover:bg-surface-3 border border-line-strong",
+        ghost: "bg-transparent text-fg-muted hover:text-fg hover:bg-surface-2/50",
         danger: "bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20"
     };
 
@@ -43,7 +43,7 @@ const NotificationButton = ({ children, variant = 'primary', className = '', ico
 const Badge = ({ count, variant = 'default' }: any) => {
     if (count === 0) return null;
     const colors: any = {
-        default: "bg-slate-700 text-slate-300",
+        default: "bg-surface-3 text-fg/80",
         emerald: "bg-emerald-500 text-white",
         red: "bg-red-500 text-white"
     };
@@ -56,7 +56,7 @@ const Badge = ({ count, variant = 'default' }: any) => {
 
 const TraderHealthScore = ({ score, details }: { score: number; details: any }) => {
     const getScoreColor = (s: number) => {
-        if (s >= 80) return 'text-emerald-400';
+        if (s >= 80) return 'text-accent-fg';
         if (s >= 50) return 'text-amber-400';
         return 'text-red-400';
     };
@@ -68,7 +68,7 @@ const TraderHealthScore = ({ score, details }: { score: number; details: any }) 
     };
 
     return (
-        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 mb-8 flex flex-col md:flex-row items-center gap-8 shadow-2xl relative overflow-hidden group">
+        <div className="bg-surface/60 backdrop-blur-xl border border-line rounded-3xl p-6 mb-8 flex flex-col md:flex-row items-center gap-8 shadow-2xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-[80px] -z-10 group-hover:bg-emerald-500/10 transition-colors duration-700" />
 
             {/* Circular Progress */}
@@ -98,34 +98,34 @@ const TraderHealthScore = ({ score, details }: { score: number; details: any }) 
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <span className={`text-3xl font-black ${getScoreColor(score)}`}>{score}</span>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Health</span>
+                    <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-tighter">Health</span>
                 </div>
             </div>
 
             <div className="flex-1 text-center md:text-left">
-                <h3 className="text-xl font-bold text-white mb-1 flex items-center justify-center md:justify-start gap-2">
+                <h3 className="text-xl font-bold text-fg mb-1 flex items-center justify-center md:justify-start gap-2">
                     Saúde do Trader: <span className={getScoreColor(score)}>{getScoreLabel(score)}</span>
                 </h3>
-                <p className="text-slate-400 text-sm mb-4">
+                <p className="text-fg-muted text-sm mb-4">
                     Seu score é baseado na disciplina dos últimos 7 dias. Evite alertas críticos para manter uma alta pontuação.
                 </p>
                 <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                    <div className="bg-slate-950/50 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
+                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                        <span className="text-xs text-slate-400 font-medium">Críticos: <span className="text-white font-bold">{details?.penalties?.critical || 0}</span></span>
+                        <span className="text-xs text-fg-muted font-medium">Críticos: <span className="text-fg font-bold">{details?.penalties?.critical || 0}</span></span>
                     </div>
-                    <div className="bg-slate-950/50 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
+                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        <span className="text-xs text-slate-400 font-medium">Avisos: <span className="text-white font-bold">{details?.penalties?.warning || 0}</span></span>
+                        <span className="text-xs text-fg-muted font-medium">Avisos: <span className="text-fg font-bold">{details?.penalties?.warning || 0}</span></span>
                     </div>
-                    <div className="bg-slate-950/50 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
+                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        <span className="text-xs text-slate-400 font-medium">Periodo: <span className="text-white font-bold">7d</span></span>
+                        <span className="text-xs text-fg-muted font-medium">Periodo: <span className="text-fg font-bold">7d</span></span>
                     </div>
                 </div>
             </div>
 
-            <button onClick={() => window.location.href = '/performance'} className="px-5 py-2.5 bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold rounded-xl transition-all border border-slate-700 hover:border-slate-600">
+            <button onClick={() => window.location.href = '/performance'} className="px-5 py-2.5 bg-surface-2 hover:bg-slate-750 text-fg text-xs font-bold rounded-xl transition-all border border-line-strong hover:border-slate-600">
                 Ver Relatório
             </button>
         </div>
@@ -141,7 +141,7 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
         if (severity === 'CRITICAL') return <Search className="text-red-500 animate-pulse" size={20} />;
 
         switch (type.toLowerCase()) {
-            case 'trade_success': return <TrendingUp className="text-emerald-400" size={20} />;
+            case 'trade_success': return <TrendingUp className="text-accent-fg" size={20} />;
             case 'risk':
             case 'risk_alert': return <AlertTriangle className="text-red-400" size={20} />;
             case 'psychology':
@@ -150,8 +150,8 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
             case 'discipline': return <CheckCircle2 className="text-amber-400" size={20} />;
             case 'system': return <Info className="text-blue-400" size={20} />;
             case 'journal':
-            case 'trade_neutral': return <Clock className="text-slate-400" size={20} />;
-            default: return <Bell className="text-slate-400" size={20} />;
+            case 'trade_neutral': return <Clock className="text-fg-muted" size={20} />;
+            default: return <Bell className="text-fg-muted" size={20} />;
         }
     };
 
@@ -160,7 +160,7 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
             case 'CRITICAL': return 'border-red-500/50 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]';
             case 'WARNING': return 'border-amber-500/40 bg-amber-500/5';
             case 'INFO': return 'border-blue-500/30 bg-blue-500/5';
-            default: return 'border-slate-800 bg-slate-800/20';
+            default: return 'border-line bg-surface-2/20';
         }
     };
 
@@ -170,7 +170,7 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
             case 'trade_success': return 'border-emerald-500/30 bg-emerald-500/5';
             case 'risk_alert':
             case 'risk': return 'border-red-500/30 bg-red-500/5';
-            default: return 'border-slate-800 bg-slate-900/40';
+            default: return 'border-line bg-surface/40';
         }
     };
 
@@ -178,7 +178,7 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
         <div className={`group relative p-5 rounded-2xl border transition-all duration-500 hover:scale-[1.01] ${isAlert ? getSeverityStyles(item.severity) : getStatusColor(item.type, item.read)}`}>
             <div className="flex gap-4">
                 {/* Ícone Container */}
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 bg-slate-950 border border-slate-800 group-hover:border-slate-700 transition-colors ${!item.read ? 'shadow-xl' : ''}`}>
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 bg-canvas border border-line group-hover:border-line-strong transition-colors ${!item.read ? 'shadow-xl' : ''}`}>
                     {getIcon(item.type, item.severity)}
                 </div>
 
@@ -193,16 +193,16 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
                                     {item.severity}
                                 </span>
                             )}
-                            <h4 className={`text-base font-bold truncate pr-4 ${item.read || item.resolved ? 'text-slate-400' : 'text-white'}`}>
+                            <h4 className={`text-base font-bold truncate pr-4 ${item.read || item.resolved ? 'text-fg-muted' : 'text-fg'}`}>
                                 {item.title}
                             </h4>
                         </div>
-                        <span className="text-xs text-slate-500 whitespace-nowrap flex items-center gap-1 font-medium bg-slate-950/50 px-2 py-1 rounded-lg">
+                        <span className="text-xs text-fg-subtle whitespace-nowrap flex items-center gap-1 font-medium bg-canvas/50 px-2 py-1 rounded-lg">
                             <Clock size={12} /> {new Date(item.createdAt || item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {new Date(item.createdAt || item.time).toLocaleDateString()}
                         </span>
                     </div>
 
-                    <p className={`text-sm leading-relaxed mb-4 ${item.read || item.resolved ? 'text-slate-500' : 'text-slate-300'}`}>
+                    <p className={`text-sm leading-relaxed mb-4 ${item.read || item.resolved ? 'text-fg-subtle' : 'text-fg/80'}`}>
                         {isAlert ? item.description : item.message}
                     </p>
 
@@ -210,9 +210,9 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
                     {isAlert && item.metadata && (
                         <div className="flex gap-4 mb-4">
                             {Object.entries(item.metadata).map(([key, value]: [string, any]) => (
-                                <div key={key} className="bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800/50">
-                                    <span className="text-[10px] text-slate-500 uppercase block font-bold mb-0.5">{key.replace('_', ' ')}</span>
-                                    <span className="text-xs font-mono text-emerald-400 font-bold">{typeof value === 'number' ? value.toFixed(2) : value}</span>
+                                <div key={key} className="bg-canvas/80 px-3 py-1.5 rounded-xl border border-line">
+                                    <span className="text-[10px] text-fg-subtle uppercase block font-bold mb-0.5">{key.replace('_', ' ')}</span>
+                                    <span className="text-xs font-mono text-accent-fg font-bold">{typeof value === 'number' ? value.toFixed(2) : value}</span>
                                 </div>
                             ))}
                         </div>
@@ -228,11 +228,11 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
                                 <Check size={14} /> Resolver Alerta
                             </button>
                         ) : !isAlert && !item.read && (
-                            <button onClick={() => onRead(item.id)} className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-xl transition-colors border border-emerald-500/20">
+                            <button onClick={() => onRead(item.id)} className="text-xs font-bold text-accent-fg hover:text-emerald-300 flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-xl transition-colors border border-emerald-500/20">
                                 <Check size={14} /> Marcar como lida
                             </button>
                         )}
-                        <button onClick={() => onDelete(item.id, isAlert)} className="text-xs font-bold text-slate-500 hover:text-red-400 flex items-center gap-2 hover:bg-red-500/5 px-3 py-1.5 rounded-xl transition-colors">
+                        <button onClick={() => onDelete(item.id, isAlert)} className="text-xs font-bold text-fg-subtle hover:text-red-400 flex items-center gap-2 hover:bg-red-500/5 px-3 py-1.5 rounded-xl transition-colors">
                             {isAlert ? 'Descartar' : 'Excluir'}
                         </button>
                     </div>
@@ -324,14 +324,14 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
             <div className="space-y-6">
 
                 {/* Telegram Section */}
-                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                <div className="bg-canvas/50 p-4 rounded-xl border border-line">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="p-2 bg-blue-500/10 rounded-lg">
                             <MessageCircle className="text-blue-400" size={20} />
                         </div>
                         <div>
-                            <h4 className="font-bold text-white">Telegram Bot</h4>
-                            <p className="text-xs text-slate-400">Receba alertas em tempo real no seu Telegram.</p>
+                            <h4 className="font-bold text-fg">Telegram Bot</h4>
+                            <p className="text-xs text-fg-muted">Receba alertas em tempo real no seu Telegram.</p>
                         </div>
                     </div>
 
@@ -348,12 +348,12 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
                     {step === 'otp' && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
                             <div className="text-center">
-                                <p className="text-sm text-slate-400 mb-2">Envie este código para o nosso bot:</p>
+                                <p className="text-sm text-fg-muted mb-2">Envie este código para o nosso bot:</p>
                                 <div className="flex items-center justify-center gap-2">
-                                    <code className="text-2xl font-mono font-bold text-emerald-400 bg-slate-900 px-4 py-2 rounded-lg border border-slate-700 tracking-widest">
+                                    <code className="text-2xl font-mono font-bold text-accent-fg bg-surface px-4 py-2 rounded-lg border border-line-strong tracking-widest">
                                         {otp}
                                     </code>
-                                    <button onClick={handleCopyOtp} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors">
+                                    <button onClick={handleCopyOtp} className="p-2 hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg transition-colors">
                                         <Copy size={18} />
                                     </button>
                                 </div>
@@ -372,7 +372,7 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
 
                             <button
                                 onClick={checkStatus}
-                                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors text-sm"
+                                className="w-full py-2 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-lg transition-colors text-sm"
                             >
                                 Já enviei o código
                             </button>
@@ -381,7 +381,7 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
 
                     {step === 'connected' && (
                         <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg">
-                            <span className="text-emerald-400 text-sm font-bold flex items-center gap-2">
+                            <span className="text-accent-fg text-sm font-bold flex items-center gap-2">
                                 <CheckCircle2 size={16} /> Conectado
                             </span>
                             <button
@@ -397,7 +397,7 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
 
                 {/* Preferences Section */}
                 <div>
-                    <h4 className="font-bold text-white mb-3">Preferências</h4>
+                    <h4 className="font-bold text-fg mb-3">Preferências</h4>
                     <div className="space-y-2">
                         {[
                             { id: 'trade_success', label: 'Trades e Profit' },
@@ -405,13 +405,13 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
                             { id: 'mental_insight', label: 'Insights Mentais' },
                             { id: 'system', label: 'Sistema' }
                         ].map(pref => (
-                            <label key={pref.id} className="flex items-center justify-between p-3 bg-slate-900 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors">
-                                <span className="text-sm text-slate-300">{pref.label}</span>
+                            <label key={pref.id} className="flex items-center justify-between p-3 bg-surface rounded-lg cursor-pointer hover:bg-surface-2/50 transition-colors">
+                                <span className="text-sm text-fg/80">{pref.label}</span>
                                 <input
                                     type="checkbox"
                                     checked={preferences[pref.id as keyof typeof preferences]}
                                     onChange={() => handlePreferenceChange(pref.id)}
-                                    className="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-500 focus:ring-emerald-500/50"
+                                    className="w-5 h-5 rounded border-line-strong bg-surface-2 text-emerald-500 focus:ring-emerald-500/50"
                                 />
                             </label>
                         ))}
@@ -521,7 +521,7 @@ export const Notifications = () => {
     });
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 font-sans relative overflow-hidden flex justify-center p-4 md:p-8">
+        <div className="min-h-screen bg-canvas text-fg font-sans relative overflow-hidden flex justify-center p-4 md:p-8">
 
             {/* Background Ambience */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -535,19 +535,19 @@ export const Notifications = () => {
                 <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                                <Bell className="text-emerald-400" size={24} />
+                            <div className="p-2 bg-surface border border-line rounded-lg">
+                                <Bell className="text-accent-fg" size={24} />
                             </div>
-                            <h1 className="text-2xl md:text-3xl font-bold text-white">Notificações</h1>
+                            <h1 className="text-2xl md:text-3xl font-bold text-fg">Notificações</h1>
                         </div>
-                        <p className="text-slate-400 text-sm">Gerencie seus alertas de trade e insights do sistema.</p>
+                        <p className="text-fg-muted text-sm">Gerencie seus alertas de trade e insights do sistema.</p>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <NotificationButton variant="secondary" onClick={markAllAsRead} disabled={unreadCount === 0} icon={CheckCircle2}>
                             Marcar lidas
                         </NotificationButton>
-                        <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+                        <div className="h-8 w-px bg-surface-2 hidden md:block"></div>
                         <NotificationButton
                             variant="ghost"
                             className="hidden md:flex"
@@ -564,11 +564,11 @@ export const Notifications = () => {
                 {scoreData && <TraderHealthScore score={scoreData.score} details={scoreData.details} />}
 
                 {/* Container Principal */}
-                <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl overflow-hidden shadow-2xl min-h-[600px] flex flex-col">
+                <div className="bg-surface/40 backdrop-blur-xl border border-line rounded-3xl overflow-hidden shadow-2xl min-h-[600px] flex flex-col">
 
                     {/* Barra de Filtros */}
-                    <div className="border-b border-slate-800 p-4 md:p-6 flex flex-col md:flex-row gap-4 justify-between items-center bg-slate-900/50">
-                        <div className="flex p-1 bg-slate-950 rounded-xl w-full md:w-auto overflow-x-auto">
+                    <div className="border-b border-line p-4 md:p-6 flex flex-col md:flex-row gap-4 justify-between items-center bg-surface/50">
+                        <div className="flex p-1 bg-canvas rounded-xl w-full md:w-auto overflow-x-auto">
                             {[
                                 { id: 'all', label: 'Todas' },
                                 { id: 'unread', label: 'Não lidas', count: unreadCount + pendingAlertsCount },
@@ -578,8 +578,8 @@ export const Notifications = () => {
                                     key={tab.id}
                                     onClick={() => setFilter(tab.id)}
                                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${filter === tab.id
-                                        ? 'bg-slate-800 text-white shadow-md'
-                                        : 'text-slate-500 hover:text-slate-300'
+                                        ? 'bg-surface-2 text-fg shadow-md'
+                                        : 'text-fg-subtle hover:text-fg/80'
                                         }`}
                                 >
                                     {tab.label}
@@ -589,11 +589,11 @@ export const Notifications = () => {
                         </div>
 
                         <div className="relative w-full md:w-64 group">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-emerald-400 transition-colors" size={16} />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle group-focus-within:text-accent-fg transition-colors" size={16} />
                             <input
                                 type="text"
                                 placeholder="Buscar alertas..."
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm text-slate-200 placeholder:text-slate-600 focus:ring-0 focus:border-emerald-500/50 transition-all outline-none"
+                                className="w-full bg-canvas border border-line rounded-xl py-2 pl-10 pr-4 text-sm text-fg placeholder:text-slate-600 focus:ring-0 focus:border-emerald-500/50 transition-all outline-none"
                             />
                         </div>
                     </div>
@@ -612,13 +612,13 @@ export const Notifications = () => {
                             ))
                         ) : (
                             <div className="h-full flex flex-col items-center justify-center text-center py-20 opacity-50">
-                                <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mb-6">
+                                <div className="w-20 h-20 bg-surface-2/50 rounded-full flex items-center justify-center mb-6">
                                     <Bell className="text-slate-600" size={32} />
                                 </div>
-                                <h3 className="text-xl font-bold text-slate-300 mb-2">Tudo limpo por aqui!</h3>
-                                <p className="text-slate-500 max-w-xs">Você resolveu todos os alertas desta categoria.</p>
+                                <h3 className="text-xl font-bold text-fg/80 mb-2">Tudo limpo por aqui!</h3>
+                                <p className="text-fg-subtle max-w-xs">Você resolveu todos os alertas desta categoria.</p>
                                 {filter !== 'all' && (
-                                    <button onClick={() => setFilter('all')} className="mt-6 text-emerald-400 hover:text-emerald-300 text-sm font-bold flex items-center gap-2">
+                                    <button onClick={() => setFilter('all')} className="mt-6 text-accent-fg hover:text-emerald-300 text-sm font-bold flex items-center gap-2">
                                         Ver todos os alertas <ArrowRight size={14} />
                                     </button>
                                 )}
@@ -627,7 +627,7 @@ export const Notifications = () => {
                     </div>
 
                     {/* Footer da Lista */}
-                    <div className="bg-slate-950/50 border-t border-slate-800 p-4 flex justify-between items-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+                    <div className="bg-canvas/50 border-t border-line p-4 flex justify-between items-center text-[10px] text-fg-subtle uppercase tracking-widest font-bold">
                         <span>Sincronizado há pouco • Torex Engine v2.0</span>
                         <div className="flex gap-6">
                             <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Trades</span>

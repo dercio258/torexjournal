@@ -101,20 +101,20 @@ export const Configuration = () => {
         }
     };
 
-    if (isLoading) return <div className="p-8 text-center text-slate-500">Carregando configurações...</div>;
+    if (isLoading) return <div className="p-8 text-center text-fg-subtle">Carregando configurações...</div>;
 
     return (
         <div className="max-w-5xl mx-auto space-y-6">
             <header className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-100">Configuração</h1>
-                <p className="text-sm text-slate-400">Gerencie sua conta e conexões</p>
+                <h1 className="text-2xl font-bold text-fg">Configuração</h1>
+                <p className="text-sm text-fg-muted">Gerencie sua conta e conexões</p>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* User Info */}
                 <Card className="p-6 lg:col-span-2">
                     <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                        <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
                             <User className="w-4 h-4 text-indigo-400" /> Informações do Usuário
                         </h2>
                         <span className="px-2 py-1 bg-indigo-500/10 text-indigo-400 text-xs rounded border border-indigo-500/20">
@@ -125,50 +125,50 @@ export const Configuration = () => {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1.5 block">Nome Completo</label>
+                                <label className="text-[10px] uppercase font-bold text-fg-subtle mb-1.5 block">Nome Completo</label>
                                 <input
                                     disabled
                                     value={user?.name || ''}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none"
+                                    className="w-full bg-surface border border-line-strong rounded-lg px-3 py-2 text-sm text-fg/80 focus:outline-none"
                                 />
                             </div>
                             <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500 mb-1.5 block">Email</label>
+                                <label className="text-[10px] uppercase font-bold text-fg-subtle mb-1.5 block">Email</label>
                                 <input
                                     disabled
                                     value={user?.email || ''}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none"
+                                    className="w-full bg-surface border border-line-strong rounded-lg px-3 py-2 text-sm text-fg/80 focus:outline-none"
                                 />
                             </div>
                         </div>
 
                         <div>
-                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1.5 block">WhatsApp</label>
+                            <label className="text-[10px] uppercase font-bold text-fg-subtle mb-1.5 block">WhatsApp</label>
                             <div className="flex gap-2">
                                 <input
                                     disabled
                                     value={user?.whatsapp || ''}
-                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none"
+                                    className="flex-1 bg-surface border border-line-strong rounded-lg px-3 py-2 text-sm text-fg/80 focus:outline-none"
                                     placeholder="Não informado"
                                 />
-                                <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors">
+                                <button className="px-4 py-2 bg-surface-2 hover:bg-surface-3 text-fg text-xs font-bold rounded-lg transition-colors">
                                     Editar
                                 </button>
                             </div>
                         </div>
 
                         {/* Risk Management */}
-                        <div className="pt-4 border-t border-slate-800">
-                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-2 block">Gerenciamento de Risco</label>
+                        <div className="pt-4 border-t border-line">
+                            <label className="text-[10px] uppercase font-bold text-fg-subtle mb-2 block">Gerenciamento de Risco</label>
                             <div className="flex flex-col md:flex-row gap-4 items-end">
                                 <div className="flex-1">
-                                    <p className="text-xs text-slate-400 mb-2">Limite de Perda Diária (MT)</p>
+                                    <p className="text-xs text-fg-muted mb-2">Limite de Perda Diária (MT)</p>
                                     <input
                                         type="number"
                                         placeholder="0.00"
                                         value={user?.dailyLossLimit || ''}
                                         onChange={(e) => setUser(prev => prev ? { ...prev, dailyLossLimit: parseFloat(e.target.value) } : null)}
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none"
+                                        className="w-full bg-surface border border-line-strong rounded-lg px-3 py-2 text-sm text-fg focus:ring-1 focus:ring-indigo-500 outline-none"
                                     />
                                 </div>
                                 <button 
@@ -185,7 +185,7 @@ export const Configuration = () => {
                                     Gravar Limite
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-500 mt-2 italic">
+                            <p className="text-[10px] text-fg-subtle mt-2 italic">
                                 Você receberá um alerta no Telegram/WhatsApp assim que sua perda diária atingir este valor.
                             </p>
                         </div>
@@ -195,47 +195,47 @@ export const Configuration = () => {
                 {/* Security Card */}
                 <Card className="p-6">
                     <div className="flex items-center gap-2 mb-6">
-                        <Shield className="w-4 h-4 text-emerald-400" />
-                        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Segurança</h2>
+                        <Shield className="w-4 h-4 text-accent-fg" />
+                        <h2 className="text-sm font-bold text-fg uppercase tracking-wider">Segurança</h2>
                     </div>
 
                     <div className="space-y-6">
-                        <div className="flex items-center justify-between p-4 rounded-xl bg-slate-900/50 border border-slate-800">
+                        <div className="flex items-center justify-between p-4 rounded-xl bg-surface/50 border border-line">
                             <div>
-                                <p className="text-sm font-bold text-slate-200">Autenticação 2FA</p>
-                                <p className="text-[10px] text-slate-500 mt-1">Proteja sua conta com um código extra enviado ao seu e-mail.</p>
+                                <p className="text-sm font-bold text-fg">Autenticação 2FA</p>
+                                <p className="text-[10px] text-fg-subtle mt-1">Proteja sua conta com um código extra enviado ao seu e-mail.</p>
                             </div>
                             <button 
                                 onClick={handleToggle2FA}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${user?.twoFactorEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${user?.twoFactorEnabled ? 'bg-emerald-500' : 'bg-surface-3'}`}
                             >
                                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${user?.twoFactorEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                             </button>
                         </div>
                         
-                        <div className={`p-3 rounded-lg text-xs leading-relaxed ${user?.twoFactorEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800/50 text-slate-500 border border-slate-700'}`}>
+                        <div className={`p-3 rounded-lg text-xs leading-relaxed ${user?.twoFactorEnabled ? 'bg-emerald-500/10 text-accent-fg border border-emerald-500/20' : 'bg-surface-2/50 text-fg-subtle border border-line-strong'}`}>
                             {user?.twoFactorEnabled 
                                 ? 'Sua conta está protegida com Google Authenticator ou similar.' 
                                 : 'Ative a autenticação de dois fatores para aumentar significativamente a segurança da sua conta.'}
                         </div>
 
                         {show2FASetup && (
-                            <div className="mt-6 p-4 bg-slate-900 rounded-xl border border-indigo-500/30 space-y-4 animate-in fade-in slide-in-from-top-4">
-                                <p className="text-xs font-bold text-slate-200 uppercase">Configurar 2FA</p>
-                                <p className="text-[10px] text-slate-400">Escaneie o QR Code abaixo com seu app de autenticação (Google Authenticator, Authy, etc).</p>
+                            <div className="mt-6 p-4 bg-surface rounded-xl border border-indigo-500/30 space-y-4 animate-in fade-in slide-in-from-top-4">
+                                <p className="text-xs font-bold text-fg uppercase">Configurar 2FA</p>
+                                <p className="text-[10px] text-fg-muted">Escaneie o QR Code abaixo com seu app de autenticação (Google Authenticator, Authy, etc).</p>
                                 
                                 <div className="flex justify-center p-2 bg-white rounded-lg">
                                     <img src={qrCode} alt="2FA QR Code" className="w-32 h-32" />
                                 </div>
 
                                 <div className="space-y-2">
-                                    <label className="text-[10px] uppercase font-bold text-slate-500 block">Código de Verificação</label>
+                                    <label className="text-[10px] uppercase font-bold text-fg-subtle block">Código de Verificação</label>
                                     <div className="flex gap-2">
                                         <input 
                                             value={otpCode}
                                             onChange={(e) => setOtpCode(e.target.value)}
                                             placeholder="000000"
-                                            className="flex-1 bg-slate-800 border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                            className="flex-1 bg-surface-2 border-line-strong rounded-lg px-3 py-2 text-sm text-fg focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                         />
                                         <button 
                                             onClick={handleVerifySetup}
@@ -246,7 +246,7 @@ export const Configuration = () => {
                                     </div>
                                     <button 
                                         onClick={() => setShow2FASetup(false)}
-                                        className="w-full py-2 text-[10px] text-slate-500 hover:text-slate-300"
+                                        className="w-full py-2 text-[10px] text-fg-subtle hover:text-fg/80"
                                     >
                                         Cancelar
                                     </button>
@@ -260,23 +260,23 @@ export const Configuration = () => {
                 <Card className="p-6">
                     <div className="flex items-center gap-2 mb-6">
                         <Smartphone className="w-4 h-4 text-indigo-400" />
-                        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Notificações WhatsApp</h2>
+                        <h2 className="text-sm font-bold text-fg uppercase tracking-wider">Notificações WhatsApp</h2>
                     </div>
 
                     <div className="space-y-6">
-                        <div className="flex items-center justify-between p-4 rounded-xl bg-slate-900/50 border border-slate-800">
+                        <div className="flex items-center justify-between p-4 rounded-xl bg-surface/50 border border-line">
                             <div>
-                                <p className="text-sm font-bold text-slate-200">Status do Bot</p>
+                                <p className="text-sm font-bold text-fg">Status do Bot</p>
                                 <div className="flex items-center gap-1.5 mt-1">
                                     {waStatus?.connected ? (
                                         <>
                                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                            <span className="text-[10px] text-emerald-400 font-bold uppercase">Vinculado</span>
+                                            <span className="text-[10px] text-accent-fg font-bold uppercase">Vinculado</span>
                                         </>
                                     ) : (
                                         <>
                                             <span className="w-2 h-2 rounded-full bg-slate-600" />
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase">Não Vinculado</span>
+                                            <span className="text-[10px] text-fg-subtle font-bold uppercase">Não Vinculado</span>
                                         </>
                                     )}
                                 </div>
@@ -294,19 +294,19 @@ export const Configuration = () => {
                         </div>
 
                         {waStatus?.connected && (
-                            <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] leading-relaxed">
+                            <div className="p-3 rounded-lg bg-emerald-500/10 text-accent-fg border border-emerald-500/20 text-[10px] leading-relaxed">
                                 Seu número <strong>{waStatus.whatsappNumber}</strong> está recebendo alertas de ordens e notificações críticas.
                             </div>
                         )}
 
                         {waCode && !waStatus?.connected && (
-                            <div className="p-4 bg-slate-900 rounded-xl border border-indigo-500/30 space-y-4 animate-in fade-in slide-in-from-top-4">
+                            <div className="p-4 bg-surface rounded-xl border border-indigo-500/30 space-y-4 animate-in fade-in slide-in-from-top-4">
                                 <div className="text-center space-y-2">
-                                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Código de Vinculação</p>
-                                    <div className="text-3xl font-mono font-bold text-white tracking-[0.5em] bg-slate-800 py-3 rounded-lg border border-slate-700">
+                                    <p className="text-[10px] text-fg-muted uppercase font-bold tracking-widest">Código de Vinculação</p>
+                                    <div className="text-3xl font-mono font-bold text-fg tracking-[0.5em] bg-surface-2 py-3 rounded-lg border border-line-strong">
                                         {waCode}
                                     </div>
-                                    <p className="text-[10px] text-slate-500 flex items-center justify-center gap-1">
+                                    <p className="text-[10px] text-fg-subtle flex items-center justify-center gap-1">
                                         <Clock className="w-3 h-3" />Expira em {new Date(waExpiresAt!).toLocaleTimeString()}
                                     </p>
                                 </div>
@@ -319,7 +319,7 @@ export const Configuration = () => {
                         )}
                         
                         {!waStatus?.connected && !waCode && (
-                            <div className="p-3 rounded-lg bg-slate-800/50 text-slate-500 border border-slate-700 text-xs leading-relaxed">
+                            <div className="p-3 rounded-lg bg-surface-2/50 text-fg-subtle border border-line-strong text-xs leading-relaxed">
                                 Clique em vincular para gerar um código e conectar seu WhatsApp à plataforma.
                             </div>
                         )}

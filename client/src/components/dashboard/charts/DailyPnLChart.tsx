@@ -169,13 +169,13 @@ export const DailyPnLChart: React.FC<PnLChartProps> = ({ data = [] }) => {
         return (
             <div className="bg-transparent w-full h-full flex flex-col justify-between font-sans">
                 <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold text-slate-100 flex items-center gap-2 text-xs tracking-wider uppercase font-mono">
-                        <TrendingUp className="text-emerald-400" size={15} /> Performance Diária de PnL
+                    <h3 className="font-semibold text-fg flex items-center gap-2 text-xs tracking-wider uppercase font-mono">
+                        <TrendingUp className="text-accent-fg" size={15} /> Performance Diária de PnL
                     </h3>
                 </div>
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border border-dashed border-white/[0.06] rounded-xl my-2">
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border border-dashed border-line rounded-xl my-2">
                     <AlertCircle className="w-8 h-8 text-slate-600 mb-2" />
-                    <p className="text-xs text-slate-400 font-mono">Nenhuma operação registrada no período selecionado</p>
+                    <p className="text-xs text-fg-muted font-mono">Nenhuma operação registrada no período selecionado</p>
                     <p className="text-[11px] text-slate-600 mt-1">Sincronize sua conta ou adicione trades para visualizar a curva de resultado.</p>
                 </div>
             </div>
@@ -187,13 +187,13 @@ export const DailyPnLChart: React.FC<PnLChartProps> = ({ data = [] }) => {
             {/* Header: Title, Net Period PnL & High-contrast Badges */}
             <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
                 <div className="flex items-center gap-2.5">
-                    <h3 className="font-semibold text-slate-100 flex items-center gap-2 text-xs tracking-wider uppercase font-sans">
-                        <TrendingUp className="text-emerald-400" size={15} /> Performance Diária de PnL
+                    <h3 className="font-semibold text-fg flex items-center gap-2 text-xs tracking-wider uppercase font-sans">
+                        <TrendingUp className="text-accent-fg" size={15} /> Performance Diária de PnL
                     </h3>
                     <span className={`text-xs font-mono tabular-nums font-bold px-2.5 py-0.5 rounded border ${
                         summaryMetrics.total >= 0
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            ? 'bg-emerald-500/10 text-accent-fg border-emerald-500/20'
+                            : 'bg-rose-500/10 text-danger-fg border-rose-500/20'
                     }`}>
                         Total: {summaryMetrics.total >= 0 ? '+' : '-'}${Math.abs(summaryMetrics.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
@@ -202,20 +202,20 @@ export const DailyPnLChart: React.FC<PnLChartProps> = ({ data = [] }) => {
                 {/* KPI Badges & Clean Legend */}
                 <div className="flex items-center gap-3 text-[11px] font-sans">
                     {summaryMetrics.maxWin > 0 && (
-                        <span className="text-slate-400 hidden sm:inline">
-                            Máx Win: <strong className="text-emerald-400 font-mono tabular-nums font-semibold">+${summaryMetrics.maxWin.toFixed(2)}</strong>
+                        <span className="text-fg-muted hidden sm:inline">
+                            Máx Win: <strong className="text-accent-fg font-mono tabular-nums font-semibold">+${summaryMetrics.maxWin.toFixed(2)}</strong>
                         </span>
                     )}
                     {summaryMetrics.maxLoss < 0 && (
-                        <span className="text-slate-400 hidden sm:inline">
-                            Máx Loss: <strong className="text-rose-400 font-mono tabular-nums font-semibold">-${Math.abs(summaryMetrics.maxLoss).toFixed(2)}</strong>
+                        <span className="text-fg-muted hidden sm:inline">
+                            Máx Loss: <strong className="text-danger-fg font-mono tabular-nums font-semibold">-${Math.abs(summaryMetrics.maxLoss).toFixed(2)}</strong>
                         </span>
                     )}
-                    <div className="flex items-center gap-2 pl-1 border-l border-white/[0.08]">
-                        <span className="flex items-center gap-1 text-emerald-400 font-medium font-sans">
+                    <div className="flex items-center gap-2 pl-1 border-l border-line">
+                        <span className="flex items-center gap-1 text-accent-fg font-medium font-sans">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Lucro
                         </span>
-                        <span className="flex items-center gap-1 text-rose-400 font-medium font-sans">
+                        <span className="flex items-center gap-1 text-danger-fg font-medium font-sans">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Prejuízo
                         </span>
                     </div>

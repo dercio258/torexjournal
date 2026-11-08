@@ -131,24 +131,24 @@ export const AdminPlans = () => {
         setIsModalOpen(true);
     };
 
-    if (isLoading) return <div className="text-white">Carregando...</div>;
+    if (isLoading) return <div className="text-fg">Carregando...</div>;
 
     return (
         <div>
             <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-white">Planos de Assinatura</h1>
+                <h1 className="text-3xl font-bold text-fg">Planos de Assinatura</h1>
             </div>
 
             {/* Notificação Toast de Alteração de Estado do Trial */}
             {trialMessage && (
-                <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <CheckCircle2 size={20} className="shrink-0 text-emerald-400" />
+                <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-accent-fg flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <CheckCircle2 size={20} className="shrink-0 text-accent-fg" />
                     <span className="text-sm font-medium">{trialMessage}</span>
                 </div>
             )}
 
             {/* CARD INSTITUCIONAL: CAMPANHA DE PERÍODO DE TESTE (TRIAL 30 DIAS) */}
-            <div className="mb-8 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-6 sm:p-7 relative overflow-hidden shadow-xl">
+            <div className="mb-8 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-line rounded-3xl p-6 sm:p-7 relative overflow-hidden shadow-xl">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
 
                 <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
@@ -157,42 +157,42 @@ export const AdminPlans = () => {
                             <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
                                 <Gift size={20} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-400">
+                            <span className="text-xs font-black uppercase tracking-widest text-fg-muted">
                                 Campanha Global de Onboarding
                             </span>
                             <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
                                 trialCampaign?.active 
-                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-                                    : 'bg-slate-800 border-slate-700 text-slate-400'
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-accent-fg' 
+                                    : 'bg-surface-2 border-line-strong text-fg-muted'
                             }`}>
                                 <span className={`w-2 h-2 rounded-full ${trialCampaign?.active ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
                                 {trialCampaign?.active ? 'Campanha Ativa' : 'Pausada'}
                             </span>
                         </div>
 
-                        <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                        <h2 className="text-xl sm:text-2xl font-black text-fg tracking-tight">
                             Período de Teste Gratuito (Trial de 30 Dias Premium)
                         </h2>
 
-                        <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                        <p className="text-xs sm:text-sm text-fg-muted leading-relaxed">
                             Quando ativada, qualquer novo trader que acessar o sistema sem um plano ativo recebe 
-                            automaticamente <strong className="text-white font-bold">30 dias de Plano Premium grátis</strong> de forma instantânea, com disparo de e-mail formal de boas-vindas. Usuários que já usufruíram do teste uma vez são bloqueados de receber novamente e direcionados à página de preços.
+                            automaticamente <strong className="text-fg font-bold">30 dias de Plano Premium grátis</strong> de forma instantânea, com disparo de e-mail formal de boas-vindas. Usuários que já usufruíram do teste uma vez são bloqueados de receber novamente e direcionados à página de preços.
                         </p>
 
-                        <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1 text-xs text-slate-300">
-                            <div className="flex items-center gap-1.5 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
-                                <ShieldCheck size={14} className="text-emerald-400" />
-                                <span>Plano Concedido: <strong className="text-white">PREMIUM (PRO)</strong></span>
+                        <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1 text-xs text-fg/80">
+                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
+                                <ShieldCheck size={14} className="text-accent-fg" />
+                                <span>Plano Concedido: <strong className="text-fg">PREMIUM (PRO)</strong></span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
                                 <Clock size={14} className="text-amber-400" />
-                                <span>Duração: <strong className="text-white">{trialCampaign?.trialDays || 30} Dias</strong></span>
+                                <span>Duração: <strong className="text-fg">{trialCampaign?.trialDays || 30} Dias</strong></span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
                                 <Users size={14} className="text-indigo-400" />
-                                <span>Total Beneficiados: <strong className="text-emerald-400 font-bold">{trialCampaign?.totalTrialsGranted ?? 0} traders</strong></span>
+                                <span>Total Beneficiados: <strong className="text-accent-fg font-bold">{trialCampaign?.totalTrialsGranted ?? 0} traders</strong></span>
                             </div>
                         </div>
                     </div>
@@ -220,7 +220,7 @@ export const AdminPlans = () => {
                                 </>
                             )}
                         </Button>
-                        <span className="text-[11px] text-slate-500 text-center lg:text-right">
+                        <span className="text-[11px] text-fg-subtle text-center lg:text-right">
                             {trialCampaign?.active 
                                 ? 'Novos usuários recebem 30 dias automaticamente' 
                                 : 'Novos trials suspensos até nova ativação'}
@@ -231,11 +231,11 @@ export const AdminPlans = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {plans.map((plan) => (
-                    <Card key={plan.id} className="p-6 border-slate-800 bg-slate-900/50">
+                    <Card key={plan.id} className="p-6 border-line bg-surface/50">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <h3 className="text-xl font-bold text-white">{plan.tier}</h3>
-                                <p className="text-slate-400 text-sm">ID: ...{plan.id.slice(-6)}</p>
+                                <h3 className="text-xl font-bold text-fg">{plan.tier}</h3>
+                                <p className="text-fg-muted text-sm">ID: ...{plan.id.slice(-6)}</p>
                             </div>
                             {plan.isActive && (
                                 <span className="bg-green-500/10 text-green-500 p-1 rounded-full">
@@ -245,10 +245,10 @@ export const AdminPlans = () => {
                         </div>
 
                         <div className="space-y-3 mb-6">
-                            <p className="text-sm text-slate-400 italic">{plan.description}</p>
+                            <p className="text-sm text-fg-muted italic">{plan.description}</p>
 
                             {plan.features && plan.features.length > 0 && (
-                                <ul className="text-xs text-slate-300 space-y-1 mb-2">
+                                <ul className="text-xs text-fg/80 space-y-1 mb-2">
                                     {plan.features.map((f: string, i: number) => (
                                         <li key={i} className="flex gap-2">
                                             <Check size={12} className="text-emerald-500 mt-0.5" /> {f}
@@ -257,23 +257,23 @@ export const AdminPlans = () => {
                                 </ul>
                             )}
 
-                            <div className="flex justify-between text-sm pt-2 border-t border-slate-800">
-                                <span className="text-slate-400">Preço Mensal</span>
-                                <span className="text-white font-medium">$ {plan.monthlyPrice} USD</span>
+                            <div className="flex justify-between text-sm pt-2 border-t border-line">
+                                <span className="text-fg-muted">Preço Mensal</span>
+                                <span className="text-fg font-medium">$ {plan.monthlyPrice} USD</span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-slate-400">Preço Anual (Equiv.)</span>
-                                <span className="text-emerald-400 font-medium">
+                                <span className="text-fg-muted">Preço Anual (Equiv.)</span>
+                                <span className="text-accent-fg font-medium">
                                     $ {(Number(plan.monthlyPrice) * 12 * (1 - Number(plan.annualDiscountPercent) / 100)).toFixed(2)} USD
                                 </span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-slate-400">Desconto Anual</span>
-                                <span className="text-emerald-400 font-medium">{plan.annualDiscountPercent}%</span>
+                                <span className="text-fg-muted">Desconto Anual</span>
+                                <span className="text-accent-fg font-medium">{plan.annualDiscountPercent}%</span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-slate-400">Dias de Teste</span>
-                                <span className="text-white font-medium">{plan.trialDays} dias</span>
+                                <span className="text-fg-muted">Dias de Teste</span>
+                                <span className="text-fg font-medium">{plan.trialDays} dias</span>
                             </div>
                         </div>
 
@@ -300,64 +300,64 @@ export const AdminPlans = () => {
             >
                 <form onSubmit={handleCreateOrUpdatePlan} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Nome do Plano (Tier)</label>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">Nome do Plano (Tier)</label>
                         <input
                             type="text"
                             value={newPlan.tier}
                             onChange={(e) => setNewPlan({ ...newPlan, tier: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
                             placeholder="Ex: GOLD, VIP, ENTERPRISE"
                             required
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Descrição</label>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">Descrição</label>
                         <input
                             type="text"
                             value={newPlan.description}
                             onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
                             placeholder="Descrição curta (ex: Para iniciantes)"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Funcionalidades (separadas por vírgula)</label>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">Funcionalidades (separadas por vírgula)</label>
                         <textarea
                             value={newPlan.features}
                             onChange={(e) => setNewPlan({ ...newPlan, features: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors h-20"
+                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors h-20"
                             placeholder="Ex: Acesso VIP, Sinais Diários, Suporte 24h"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Preço Mensal (MT)</label>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">Preço Mensal (MT)</label>
                         <input
                             type="number"
                             value={newPlan.monthlyPrice}
                             onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
                             placeholder="2000"
                             required
                         />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Desc. Anual (%)</label>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Desc. Anual (%)</label>
                             <input
                                 type="number"
                                 value={newPlan.annualDiscountPercent}
                                 onChange={(e) => setNewPlan({ ...newPlan, annualDiscountPercent: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
                                 placeholder="20"
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Dias de Teste</label>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Dias de Teste</label>
                             <input
                                 type="number"
                                 value={newPlan.trialDays}
                                 onChange={(e) => setNewPlan({ ...newPlan, trialDays: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
                                 placeholder="0"
                             />
                         </div>

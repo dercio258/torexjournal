@@ -110,7 +110,7 @@ export const Pricing = () => {
 
     if (isLoading) {
         return (
-            <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+            <div className="min-h-screen bg-canvas flex items-center justify-center">
                 <Loader2 className="animate-spin text-emerald-500" size={32} />
             </div>
         );
@@ -121,11 +121,11 @@ export const Pricing = () => {
     const exchangeRate = pricingConfig?.exchangeRate ? Number(pricingConfig.exchangeRate) : 65;
 
     return (
-        <div className="min-h-screen py-12 px-4 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
+        <div className="min-h-screen py-12 px-4 bg-canvas text-fg transition-colors duration-200">
             <div className="max-w-6xl mx-auto">
                 <div className="text-center mb-12">
-                    <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white mb-4 tracking-tight">Escolha seu Plano</h1>
-                    <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl mx-auto mb-8">
+                    <h1 className="text-4xl md:text-5xl font-extrabold text-fg mb-4 tracking-tight">Escolha seu Plano</h1>
+                    <p className="text-fg-muted text-lg max-w-2xl mx-auto mb-8">
                         Desbloqueie todo o potencial do TOREX JOURNAL com análises avançadas e sincronização automática.
                     </p>
 
@@ -133,13 +133,13 @@ export const Pricing = () => {
                     <div className="inline-flex bg-slate-200 dark:bg-slate-900 rounded-full p-1 border border-slate-300 dark:border-slate-800 relative shadow-inner">
                         <button
                             onClick={() => setBillingCycle('MONTHLY')}
-                            className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${billingCycle === 'MONTHLY' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                            className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${billingCycle === 'MONTHLY' ? 'bg-indigo-600 text-white shadow-md' : 'text-fg-muted hover:text-fg '}`}
                         >
                             Mensal
                         </button>
                         <button
                             onClick={() => setBillingCycle('YEARLY')}
-                            className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${billingCycle === 'YEARLY' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                            className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${billingCycle === 'YEARLY' ? 'bg-indigo-600 text-white shadow-md' : 'text-fg-muted hover:text-fg '}`}
                         >
                             Anual <span className="text-xs text-emerald-500 dark:text-emerald-300 ml-1 font-extrabold">-20%</span>
                         </button>
@@ -153,28 +153,28 @@ export const Pricing = () => {
                             <div className="text-center mb-6">
                                 <h2 className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mb-2">Básico</h2>
                                 <div className="flex items-baseline justify-center gap-1.5">
-                                    <span className="text-2xl font-bold text-slate-500 dark:text-slate-400 align-top mt-1">$</span>
-                                    <span className="text-5xl font-extrabold text-slate-900 dark:text-white font-mono">{getPrice(basicPlan).toFixed(2)}</span>
-                                    <span className="text-sm font-bold text-slate-500 dark:text-slate-400 self-end mb-2">USD /mês</span>
+                                    <span className="text-2xl font-bold text-fg-subtle dark:text-slate-400 align-top mt-1">$</span>
+                                    <span className="text-5xl font-extrabold text-fg font-mono">{getPrice(basicPlan).toFixed(2)}</span>
+                                    <span className="text-sm font-bold text-fg-subtle dark:text-slate-400 self-end mb-2">USD /mês</span>
                                 </div>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
+                                <p className="text-xs text-fg-subtle dark:text-slate-400 mt-1 font-mono">
                                     ~ MT {(getPrice(basicPlan) * exchangeRate).toFixed(0)} MZN (M-Pesa / e-Mola)
                                 </p>
-                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium">Para quem está começando no trading</p>
+                                <p className="text-sm text-fg-subtle dark:text-slate-400 mt-2 font-medium">Para quem está começando no trading</p>
                             </div>
                             {basicPlan.description && (
-                                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 text-center">{basicPlan.description}</p>
+                                <p className="text-sm text-fg-subtle dark:text-slate-400 mb-4 text-center">{basicPlan.description}</p>
                             )}
 
                             <ul className="space-y-4 mb-8">
                                 {basicPlan.features?.map((item, i) => (
-                                    <li key={i} className="flex items-center gap-3 text-slate-700 dark:text-slate-300">
+                                    <li key={i} className="flex items-center gap-3 text-fg-muted ">
                                         <Check className="w-5 h-5 text-emerald-500 shrink-0" />
                                         <span className="text-sm font-medium">{item}</span>
                                     </li>
                                 ))}
                                 {(!basicPlan.features || basicPlan.features.length === 0) && (
-                                    <li className="text-slate-400 italic">Sem funcionalidades listadas</li>
+                                    <li className="text-fg-muted italic">Sem funcionalidades listadas</li>
                                 )}
                             </ul>
                             <Button
@@ -196,11 +196,11 @@ export const Pricing = () => {
                             <div className="text-center mb-6">
                                 <h2 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mb-2">Premium</h2>
                                 <div className="flex items-baseline justify-center gap-1.5">
-                                    <span className="text-2xl font-bold text-slate-500 dark:text-slate-400 align-top mt-1">$</span>
-                                    <span className="text-5xl font-extrabold text-slate-900 dark:text-white font-mono">{getPrice(proPlan).toFixed(2)}</span>
-                                    <span className="text-sm font-bold text-slate-500 dark:text-slate-400 self-end mb-2">USD /mês</span>
+                                    <span className="text-2xl font-bold text-fg-subtle dark:text-slate-400 align-top mt-1">$</span>
+                                    <span className="text-5xl font-extrabold text-fg font-mono">{getPrice(proPlan).toFixed(2)}</span>
+                                    <span className="text-sm font-bold text-fg-subtle dark:text-slate-400 self-end mb-2">USD /mês</span>
                                 </div>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
+                                <p className="text-xs text-fg-subtle dark:text-slate-400 mt-1 font-mono">
                                     ~ MT {(getPrice(proPlan) * exchangeRate).toFixed(0)} MZN (M-Pesa / e-Mola)
                                 </p>
                                 {billingCycle === 'YEARLY' && (
@@ -209,13 +209,13 @@ export const Pricing = () => {
                             </div>
                             <ul className="space-y-4 mb-8">
                                 {proPlan.features?.map((item, i) => (
-                                    <li key={i} className="flex items-center gap-3 text-slate-700 dark:text-slate-300">
+                                    <li key={i} className="flex items-center gap-3 text-fg-muted ">
                                         <CheckCircle className="w-5 h-5 text-indigo-500 shrink-0" />
                                         <span className="text-sm font-medium">{item}</span>
                                     </li>
                                 ))}
                                 {(!proPlan.features || proPlan.features.length === 0) && (
-                                    <li className="text-slate-400 italic">Sem funcionalidades listadas</li>
+                                    <li className="text-fg-muted italic">Sem funcionalidades listadas</li>
                                 )}
                             </ul>
                             <Button

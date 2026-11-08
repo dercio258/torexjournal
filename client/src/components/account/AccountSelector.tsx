@@ -69,8 +69,8 @@ export const AccountSelector: React.FC = () => {
             default:
                 return {
                     label: 'LIVE',
-                    classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                    icon: <Flame size={12} className="text-emerald-400" />
+                    classes: 'bg-emerald-500/15 text-accent-fg border-emerald-500/30',
+                    icon: <Flame size={12} className="text-accent-fg" />
                 };
         }
     };
@@ -80,7 +80,7 @@ export const AccountSelector: React.FC = () => {
             {/* Trigger Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-[#111319] hover:bg-[#161822] border border-white/[0.08] hover:border-white/[0.15] transition-all duration-200 shadow-md group focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-surface hover:bg-surface-2 border border-line hover:border-line-strong transition-all duration-200 shadow-md group focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                 title="Alternar Conta de Trading"
             >
                 <div className="flex items-center gap-2.5">
@@ -89,14 +89,14 @@ export const AccountSelector: React.FC = () => {
                             <Layers size={15} />
                         </div>
                     ) : (
-                        <div className="w-7 h-7 rounded-lg bg-[#161822] border border-white/[0.08] flex items-center justify-center">
+                        <div className="w-7 h-7 rounded-lg bg-surface-2 border border-line flex items-center justify-center">
                             {getTypeBadge(selectedAccount?.type || 'live').icon}
                         </div>
                     )}
 
                     <div className="flex flex-col text-left">
                         <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-[#F3F4F6] max-w-[130px] sm:max-w-[160px] truncate leading-tight">
+                            <span className="text-xs font-bold text-fg max-w-[130px] sm:max-w-[160px] truncate leading-tight">
                                 {isConsolidated 
                                     ? 'Todas as contas' 
                                     : `${selectedAccount?.name || 'Conta'}${selectedAccount?.mt5Id ? ` (#${selectedAccount.mt5Id})` : ''}`}
@@ -111,7 +111,7 @@ export const AccountSelector: React.FC = () => {
                             {isConsolidated ? (
                                 <span className="text-indigo-400 font-semibold">{activeAccounts.length} contas</span>
                             ) : (
-                                <span className={`font-bold ${(selectedAccount?.netPnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                <span className={`font-bold ${(selectedAccount?.netPnl || 0) >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                     {(selectedAccount?.netPnl || 0) >= 0 ? '+' : ''}
                                     {formatMoney(selectedAccount?.netPnl || 0, selectedAccount?.currency)}
                                 </span>
@@ -122,19 +122,19 @@ export const AccountSelector: React.FC = () => {
 
                 <ChevronDown 
                     size={15} 
-                    className={`text-[#9CA3AF] transition-transform duration-200 ml-1 ${isOpen ? 'rotate-180 text-emerald-400' : 'group-hover:text-[#F3F4F6]'}`} 
+                    className={`text-fg-muted transition-transform duration-200 ml-1 ${isOpen ? 'rotate-180 text-accent-fg' : 'group-hover:text-fg'}`} 
                 />
             </button>
 
             {/* Dropdown Menu */}
             {isOpen && (
-                <div className="absolute right-0 sm:left-0 sm:right-auto mt-2 w-72 rounded-2xl bg-[#111319]/95 border border-white/[0.08] shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-                    <div className="p-3 border-b border-white/[0.06] flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs font-bold text-[#9CA3AF] uppercase tracking-wider">
+                <div className="absolute right-0 sm:left-0 sm:right-auto mt-2 w-72 rounded-2xl bg-surface/95 border border-line shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="p-3 border-b border-line flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-bold text-fg-muted uppercase tracking-wider">
                             <Briefcase size={13} />
                             <span>Contas de Trading</span>
                         </div>
-                        <span className="text-[10px] bg-[#161822] text-[#9CA3AF] px-2 py-0.5 rounded-full font-mono border border-white/[0.06]">
+                        <span className="text-[10px] bg-surface-2 text-fg-muted px-2 py-0.5 rounded-full font-mono border border-line">
                             {activeAccounts.length}
                         </span>
                     </div>
@@ -154,13 +154,13 @@ export const AccountSelector: React.FC = () => {
                                     }}
                                     className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                                         isSelected 
-                                            ? 'bg-emerald-500/10 border border-emerald-500/30 text-[#F3F4F6] shadow-sm' 
-                                            : 'hover:bg-[#161822]/60 text-[#9CA3AF] hover:text-[#F3F4F6] border border-transparent'
+                                            ? 'bg-emerald-500/10 border border-emerald-500/30 text-fg shadow-sm' 
+                                            : 'hover:bg-surface-2/60 text-fg-muted hover:text-fg border border-transparent'
                                     }`}
                                 >
                                     <div className="flex items-center gap-2.5 overflow-hidden">
                                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
-                                             isSelected ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-[#161822] border-white/[0.08]'
+                                             isSelected ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-surface-2 border-line'
                                          }`}>
                                              {badge.icon}
                                          </div>
@@ -171,7 +171,7 @@ export const AccountSelector: React.FC = () => {
                                                      {account.name}
                                                  </span>
                                                  {account.mt5Id && (
-                                                     <span className="text-[10px] text-[#6B7280] font-mono">
+                                                     <span className="text-[10px] text-fg-subtle font-mono">
                                                          (#{account.mt5Id})
                                                      </span>
                                                  )}
@@ -179,15 +179,15 @@ export const AccountSelector: React.FC = () => {
                                                      {badge.label}
                                                  </span>
                                                  {account.isPrimary && (
-                                                     <span className="text-[9px] bg-[#161822] text-[#9CA3AF] px-1 rounded border border-white/[0.06]">
+                                                     <span className="text-[9px] bg-surface-2 text-fg-muted px-1 rounded border border-line">
                                                          Principal
                                                      </span>
                                                  )}
                                              </div>
-                                             <div className="flex items-center gap-2 text-[11px] font-mono text-[#9CA3AF] leading-tight mt-0.5">
+                                             <div className="flex items-center gap-2 text-[11px] font-mono text-fg-muted leading-tight mt-0.5">
                                                  <span>{account.broker}</span>
                                                  <span>•</span>
-                                                 <span className={`font-semibold ${(account.netPnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                 <span className={`font-semibold ${(account.netPnl || 0) >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                                      {(account.netPnl || 0) >= 0 ? '+' : ''}{formatMoney(account.netPnl || 0, account.currency)}
                                                  </span>
                                              </div>
@@ -195,24 +195,24 @@ export const AccountSelector: React.FC = () => {
                                      </div>
 
                                      {isSelected && (
-                                         <Check size={16} className="text-emerald-400 flex-shrink-0 ml-2" />
+                                         <Check size={16} className="text-accent-fg flex-shrink-0 ml-2" />
                                      )}
                                  </button>
                              );
                          })}
 
                          {activeAccounts.length === 0 && (
-                             <div className="text-center py-4 text-xs text-[#6B7280]">
+                             <div className="text-center py-4 text-xs text-fg-subtle">
                                  Nenhuma conta cadastrada
                              </div>
                          )}
                      </div>
 
                      {/* Divisor */}
-                     <div className="border-t border-white/[0.06]" />
+                     <div className="border-t border-line" />
 
                      {/* Ações Especiais */}
-                     <div className="p-1.5 space-y-1 bg-[#0C0D12]/60">
+                     <div className="p-1.5 space-y-1 bg-canvas-subtle/60">
                          {/* Opção Todas as Contas */}
                          <button
                              onClick={() => {
@@ -222,7 +222,7 @@ export const AccountSelector: React.FC = () => {
                              className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${
                                  isConsolidated 
                                      ? 'bg-indigo-500/10 border border-indigo-500/30 text-indigo-300' 
-                                     : 'hover:bg-[#161822]/60 text-[#9CA3AF] hover:text-[#F3F4F6] border border-transparent'
+                                     : 'hover:bg-surface-2/60 text-fg-muted hover:text-fg border border-transparent'
                              }`}
                          >
                              <div className="flex items-center gap-2.5">
@@ -233,7 +233,7 @@ export const AccountSelector: React.FC = () => {
                                      <span className="text-xs font-semibold leading-tight">
                                          Todas as contas
                                      </span>
-                                     <span className="text-[10px] text-[#6B7280] leading-tight mt-0.5">
+                                     <span className="text-[10px] text-fg-subtle leading-tight mt-0.5">
                                          Visão Consolidada Geral
                                      </span>
                                  </div>
@@ -250,9 +250,9 @@ export const AccountSelector: React.FC = () => {
                                      setIsOpen(false);
                                      openCreateModal();
                                  }}
-                                 className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+                                 className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-medium text-accent-fg hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
                              >
-                                 <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                                 <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-accent-fg">
                                      <Plus size={15} />
                                  </div>
                                  <span>Adicionar conta</span>
@@ -263,9 +263,9 @@ export const AccountSelector: React.FC = () => {
                                  setIsOpen(false);
                                  openManageModal('accounts');
                              }}
-                             className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-medium text-[#9CA3AF] hover:bg-[#161822]/60 hover:text-[#F3F4F6] transition-colors"
+                             className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-medium text-fg-muted hover:bg-surface-2/60 hover:text-fg transition-colors"
                          >
-                             <div className="w-8 h-8 rounded-lg bg-[#161822] border border-white/[0.08] flex items-center justify-center text-[#9CA3AF]">
+                             <div className="w-8 h-8 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-fg-muted">
                                  <Settings2 size={15} />
                              </div>
                              <span>Gerenciar contas</span>

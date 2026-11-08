@@ -28,11 +28,11 @@ const DevelopmentModal = ({ featureName, onClose }: { featureName: string; onClo
 
     return createPortal(
         <div
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200"
+            className="fixed inset-0 bg-canvas/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200"
             onClick={onClose}
         >
             <div
-                className="bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-3xl max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-in zoom-in-95 duration-200"
+                className="bg-surface border border-line p-6 sm:p-8 rounded-3xl max-w-md w-full shadow-2xl relative overflow-hidden flex flex-col items-center text-center animate-in zoom-in-95 duration-200"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Glow decorativo */}
@@ -42,7 +42,7 @@ const DevelopmentModal = ({ featureName, onClose }: { featureName: string; onClo
                 {/* Botão Fechar X */}
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    className="absolute top-4 right-4 p-2 rounded-xl text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                     title="Fechar"
                 >
                     <X size={18} />
@@ -52,11 +52,11 @@ const DevelopmentModal = ({ featureName, onClose }: { featureName: string; onClo
                     <Lock size={26} />
                 </div>
 
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-2">
+                <h3 className="text-lg sm:text-xl font-bold text-fg mb-2">
                     {featureName} em Desenvolvimento
                 </h3>
 
-                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed mb-6 max-w-xs">
+                <p className="text-xs sm:text-sm text-fg-muted leading-relaxed mb-6 max-w-xs">
                     {description}
                 </p>
 
@@ -115,11 +115,11 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                     e.preventDefault();
                     setDevFeature(label);
                 }}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg transition-all group text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-[#F3F4F6] hover:bg-slate-100 dark:hover:bg-[#161822] cursor-pointer text-left text-sm font-medium"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg transition-all group text-fg-muted hover:text-fg hover:bg-surface-2 cursor-pointer text-left text-sm font-medium"
                 title={`${label} (Em Desenvolvimento)`}
             >
                 <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-slate-400 dark:text-[#6B7280] group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors shrink-0">
+                    <span className="text-fg-muted dark:text-[#6B7280] group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors shrink-0">
                         {icon}
                     </span>
                     <span className="truncate">{label}</span>
@@ -131,11 +131,11 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                 to={to}
                 onClick={onClose}
                 className={({ isActive }) => `
-                    relative flex items-center justify-between px-3 py-2 rounded-lg transition-all group text-left text-sm font-medium
-                    ${isActive
-                        ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-emerald-700 dark:text-[#34D399] font-semibold shadow-xs'
-                        : 'text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-[#F3F4F6] hover:bg-slate-100 dark:hover:bg-[#161822] border border-transparent'}
-                `}
+ relative flex items-center justify-between px-3 py-2 rounded-lg transition-all group text-left text-sm font-medium
+ ${isActive
+ ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-emerald-700 dark:text-[#34D399] font-semibold shadow-xs'
+ : 'text-fg-muted hover:text-fg hover:bg-surface-2 border border-transparent'}
+ `}
             >
                 {({ isActive }) => (
                     <>
@@ -144,7 +144,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                             {isActive && (
                                 <span className="absolute left-1 w-1 h-3.5 bg-emerald-500 dark:bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
                             )}
-                            <span className={`${isActive ? 'text-emerald-600 dark:text-emerald-400 pl-1' : 'text-slate-400 dark:text-[#6B7280] group-hover:text-emerald-600 dark:group-hover:text-emerald-400'} transition-colors shrink-0`}>
+                            <span className={`${isActive ? 'text-emerald-600 dark:text-emerald-400 pl-1' : 'text-fg-muted dark:text-[#6B7280] group-hover:text-emerald-600 dark:group-hover:text-emerald-400'} transition-colors shrink-0`}>
                                 {icon}
                             </span>
                             <span className="truncate">{label}</span>
@@ -162,9 +162,9 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
 
     return (
         <>
-            <aside className="w-64 bg-white dark:bg-[#0C0D12] border-r border-slate-200 dark:border-white/[0.08] flex flex-col z-20 h-screen select-none overflow-hidden transition-all duration-200 shadow-xl md:shadow-none shrink-0">
+            <aside className="w-64 bg-white dark:bg-[#0C0D12] border-r border-line flex flex-col z-20 h-screen select-none overflow-hidden transition-all duration-200 shadow-xl md:shadow-none shrink-0">
                 {/* Header do Sidebar: Alinhado exatamente em h-16 (64px) com o Header Principal */}
-                <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-white/[0.08] shrink-0">
+                <div className="h-16 px-4 flex items-center justify-between border-b border-line shrink-0">
                     <div className="flex items-center gap-2.5 min-w-0">
                         <img
                             src="https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790957899791_0521d2dc46a60392_touro_design_1.jpeg"
@@ -172,7 +172,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                             className="w-7 h-7 object-contain shrink-0 drop-shadow-sm"
                         />
                         <div className="flex flex-col justify-center min-w-0">
-                            <span className="font-bold text-sm tracking-wider text-slate-900 dark:text-[#F3F4F6] uppercase leading-none truncate">
+                            <span className="font-bold text-sm tracking-wider text-fg uppercase leading-none truncate">
                                 TOREX <span className="text-emerald-600 dark:text-emerald-400">JOURNAL</span>
                             </span>
                         </div>
@@ -180,7 +180,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                     {onClose && (
                         <button
                             onClick={onClose}
-                            className="md:hidden p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-[#161822] rounded-lg cursor-pointer transition-colors"
+                            className="md:hidden p-1.5 text-fg-subtle dark:text-slate-400 hover:text-fg bg-surface-2 rounded-lg cursor-pointer transition-colors"
                             title="Fechar menu"
                         >
                             <X size={16} />
@@ -190,7 +190,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
 
                 {/* Navegação Estruturada */}
                 <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-                    <div className="text-[10px] font-semibold text-slate-400 dark:text-[#6B7280] uppercase tracking-[0.14em] px-3 py-1.5 mb-1">
+                    <div className="text-[10px] font-semibold text-fg-muted dark:text-[#6B7280] uppercase tracking-[0.14em] px-3 py-1.5 mb-1">
                         Plataforma
                     </div>
                     {links.map(link => <NavItem key={link.label} {...link} />)}

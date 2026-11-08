@@ -44,6 +44,8 @@ html.dark,
     --ds-danger-fg: 251 113 133;
     --ds-warning: 245 158 11;
 
+    --ds-shadow-alpha: 0.55;
+
     color-scheme: dark;
 }
 
@@ -62,8 +64,11 @@ html.light {
 
     --ds-line: 15 23 42;
 
-    --ds-accent-fg: 5 150 105;
+    /* emerald-700 / rose-600: >= 4.5:1 on white (WCAG AA) */
+    --ds-accent-fg: 4 120 87;
     --ds-danger-fg: 225 29 72;
+
+    --ds-shadow-alpha: 0.10;
 
     color-scheme: light;
 }
@@ -157,8 +162,8 @@ html.light {
 
     body {
         font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background-color: var(--background);
-        color: var(--text-primary);
+        background-color: rgb(var(--ds-canvas));
+        color: rgb(var(--ds-fg));
         transition: background-color 0.2s ease, color 0.2s ease;
         -webkit-font-smoothing: antialiased;
     }
@@ -170,30 +175,21 @@ html.light {
 }
 .card-hover:hover {
     transform: translateY(-1px);
-    border-color: var(--border-hover);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    border-color: rgb(var(--ds-accent) / 0.4);
+    box-shadow: 0 8px 24px rgb(0 0 0 / var(--ds-shadow-alpha));
 }
 
 /* Radar Performance Cards */
 .radar-card {
-    background: linear-gradient(180deg, rgba(16, 21, 34, 0.9) 0%, rgba(10, 14, 23, 0.95) 100%);
-    border: 1px solid #1a2336;
-    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+    background: linear-gradient(180deg, rgb(var(--ds-surface) / 0.9) 0%, rgb(var(--ds-canvas-subtle) / 0.95) 100%);
+    border: 1px solid rgb(var(--ds-line) / 0.08);
+    box-shadow: 0 10px 30px -5px rgb(0 0 0 / var(--ds-shadow-alpha));
     backdrop-filter: blur(8px);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .radar-card:hover {
     border-color: rgba(59, 130, 246, 0.35);
-    box-shadow: 0 14px 38px -5px rgba(0, 0, 0, 0.8), 0 0 20px -3px rgba(59, 130, 246, 0.15);
-}
-html.light .radar-card {
-    background: #ffffff;
-    border-color: #e2e8f0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-html.light .radar-card:hover {
-    border-color: rgba(59, 130, 246, 0.4);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 14px 38px -5px rgb(0 0 0 / var(--ds-shadow-alpha)), 0 0 20px -3px rgba(59, 130, 246, 0.15);
 }
 
 /* Synchronized Candlestick & Wick Terminal Animations */
@@ -248,107 +244,14 @@ html.light .radar-card:hover {
 }
 
 ::-webkit-scrollbar-track {
-    background: #08090C;
+    background: rgb(var(--ds-canvas));
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #1C1F2C;
+    background: rgb(var(--ds-surface-3));
     border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #282D3F;
-}
-
-/* ==========================================================================
-   LIGHT MODE DESIGN SYSTEM OVERRIDES
-   ========================================================================== */
-html.light,
-html.light body {
-    background-color: #f8fafc;
-    color: #0f172a;
-}
-
-html.light .bg-slate-950,
-html.light .bg-\[\#050508\],
-html.light .bg-\[\#0b0e14\],
-html.light .bg-\[\#070B16\],
-html.light .bg-\[\#080D19\],
-html.light .bg-\[\#08090C\],
-html.light .bg-\[\#0C0D12\] {
-    background-color: #f8fafc !important;
-}
-
-html.light .bg-slate-900,
-html.light .bg-\[\#0D1424\],
-html.light .bg-\[\#111319\] {
-    background-color: #ffffff !important;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
-}
-
-html.light .bg-slate-800,
-html.light .bg-\[\#111A2D\],
-html.light .bg-\[\#161822\],
-html.light .bg-\[\#1C1F2C\] {
-    background-color: #f1f5f9 !important;
-}
-
-html.light .border-slate-800,
-html.light .border-slate-700,
-html.light .border-white\/\[0\.08\],
-html.light .border-white\/\[0\.06\],
-html.light .border-white\/\[0\.12\],
-html.light .border-white\/\[0\.14\],
-html.light .border-white\/\[0\.15\] {
-    border-color: #e2e8f0 !important;
-}
-
-html.light .text-white:not([class*="bg-"]):not(button):not(a):not(span[class*="bg-"]):not(svg),
-html.light .text-slate-100,
-html.light .text-\[\#F3F4F6\] {
-    color: #0f172a !important;
-}
-
-html.light .text-slate-200 {
-    color: #1e293b !important;
-}
-
-html.light .text-slate-300 {
-    color: #334155 !important;
-}
-
-html.light .text-slate-400,
-html.light .text-\[\#9CA3AF\] {
-    color: #475569 !important;
-}
-
-html.light .text-slate-500,
-html.light .text-\[\#6B7280\] {
-    color: #64748b !important;
-}
-
-html.light input:not([type="checkbox"]):not([type="radio"]):not(.ds-control),
-html.light select:not(.ds-control),
-html.light textarea:not(.ds-control) {
-    background-color: #ffffff !important;
-    border-color: #cbd5e1 !important;
-    color: #0f172a !important;
-}
-
-html.light input:not(.ds-control)::placeholder,
-html.light textarea:not(.ds-control)::placeholder {
-    color: #94a3b8 !important;
-}
-
-html.light ::-webkit-scrollbar-track {
-    background: #f1f5f9;
-}
-
-html.light ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 4px;
-}
-
-html.light ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: rgb(var(--ds-fg-subtle));
 }

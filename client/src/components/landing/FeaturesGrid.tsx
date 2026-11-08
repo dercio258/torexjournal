@@ -4,12 +4,12 @@ import { Section, SectionHeading } from './primitives';
 
 // Full class strings so Tailwind's scanner picks them up.
 const TONES: Record<FeatureTone, { tile: string; text: string }> = {
-    emerald: { tile: 'bg-emerald-500/10 border-emerald-500/20', text: 'text-emerald-400' },
+    emerald: { tile: 'bg-emerald-500/10 border-emerald-500/20', text: 'text-accent-fg' },
     blue: { tile: 'bg-blue-500/10 border-blue-500/20', text: 'text-blue-400' },
     violet: { tile: 'bg-violet-500/10 border-violet-500/20', text: 'text-violet-400' },
     amber: { tile: 'bg-amber-500/10 border-amber-500/20', text: 'text-amber-400' },
     teal: { tile: 'bg-teal-500/10 border-teal-500/20', text: 'text-teal-400' },
-    rose: { tile: 'bg-rose-500/10 border-rose-500/20', text: 'text-rose-400' },
+    rose: { tile: 'bg-rose-500/10 border-rose-500/20', text: 'text-danger-fg' },
 };
 
 export const FeaturesGrid = () => (

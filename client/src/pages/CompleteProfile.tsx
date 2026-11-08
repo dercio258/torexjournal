@@ -42,7 +42,7 @@ export const CompleteProfile = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="min-h-screen bg-canvas flex flex-col items-center justify-center p-4">
             <Card className="w-full max-w-md shadow-2xl space-y-6">
                 <div className="space-y-2 text-center">
                     <div className="flex justify-center mb-4">
@@ -50,22 +50,22 @@ export const CompleteProfile = () => {
                             <Phone className="w-8 h-8 text-emerald-500" />
                         </div>
                     </div>
-                    <h2 className="text-2xl font-bold text-white tracking-tight">Finalizar Registo</h2>
-                    <p className="text-slate-400 text-sm">
+                    <h2 className="text-2xl font-bold text-fg tracking-tight">Finalizar Registo</h2>
+                    <p className="text-fg-muted text-sm">
                         Precisamos do seu WhatsApp para enviar notificações importantes e bónus exclusivos.
                     </p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {error && (
-                        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center gap-3 text-rose-400 text-sm">
+                        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center gap-3 text-danger-fg text-sm">
                             <AlertCircle className="w-4 h-4 flex-shrink-0" />
                             {error}
                         </div>
                     )}
                     
                     {success && (
-                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-emerald-400 text-sm">
+                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-accent-fg text-sm">
                             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                             Contacto guardado com sucesso! Redirecionando...
                         </div>

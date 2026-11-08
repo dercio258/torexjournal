@@ -18,7 +18,7 @@ export const MainLayout = () => {
 
     if (isLoading) {
         return (
-            <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-[#08090C]">
+            <div className="flex h-screen items-center justify-center bg-canvas ">
                 <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
             </div>
         );
@@ -30,7 +30,7 @@ export const MainLayout = () => {
     }
 
     return (
-        <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-[#08090C] font-sans text-slate-900 dark:text-[#F3F4F6] transition-colors duration-200 selection:bg-emerald-500/20">
+        <div className="flex h-screen overflow-hidden bg-canvas font-sans text-fg transition-colors duration-200 selection:bg-emerald-500/20">
             {hasNoPlan && <PlanRequiredOverlay />}
             {showOnboarding && <OnboardingSurvey onComplete={() => {}} />}
             <AccountManagerModal />

@@ -226,7 +226,7 @@ export const TradingCalendarView: React.FC<TradingCalendarViewProps> = ({
         if (day.pnl < -0.001) {
             return "bg-rose-500/[0.09] dark:bg-rose-950/45 border-rose-500/35 dark:border-rose-500/40 text-rose-600 dark:text-rose-400 hover:border-rose-500/60 shadow-[0_2px_8px_rgba(244,63,94,0.06)]";
         }
-        return "bg-slate-100 dark:bg-slate-900/80 border-slate-200 dark:border-slate-800 text-slate-400";
+        return "bg-slate-100 dark:bg-slate-900/80 border-line text-fg-muted";
     };
 
     const formatCurrency = (amount: number, compact: boolean = true) => {
@@ -245,18 +245,18 @@ export const TradingCalendarView: React.FC<TradingCalendarViewProps> = ({
     };
 
     return (
-        <div className="bg-slate-50 dark:bg-[#111319] p-3.5 sm:p-4 rounded-xl border border-slate-200 dark:border-white/[0.08] shadow-xs dark:shadow-none flex flex-col justify-between w-full h-full">
+        <div className="bg-slate-50 dark:bg-[#111319] p-3.5 sm:p-4 rounded-xl border border-line shadow-xs dark:shadow-none flex flex-col justify-between w-full h-full">
             {/* Header: Title, Month Navigation & Monthly KPIs */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 mb-2 border-b border-slate-200 dark:border-white/[0.06]">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2.5 mb-2 border-b border-line ">
                 <div className="flex items-center gap-2">
                     <div className="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-500 dark:text-purple-400">
                         <Calendar size={15} />
                     </div>
                     <div>
-                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider font-mono">
+                        <h3 className="text-xs sm:text-sm font-bold text-fg uppercase tracking-wider font-mono">
                             Calendário Operacional
                         </h3>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        <p className="text-[10px] text-fg-subtle dark:text-slate-400">
                             Resultados diários e semanais
                         </p>
                     </div>
@@ -274,29 +274,29 @@ export const TradingCalendarView: React.FC<TradingCalendarViewProps> = ({
                             }`}>
                                 {formatCurrency(monthStats.totalMonthPnl, false)}
                             </div>
-                            <div className="px-1.5 py-0.5 rounded font-mono text-[10px] sm:text-[11px] font-semibold bg-slate-100 dark:bg-[#08090C] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/[0.06]">
+                            <div className="px-1.5 py-0.5 rounded font-mono text-[10px] sm:text-[11px] font-semibold bg-slate-100 dark:bg-[#08090C] text-fg-muted border border-line ">
                                 <span className="text-emerald-500">{monthStats.greenDays}W</span> / <span className="text-rose-500">{monthStats.redDays}L</span>
                             </div>
                         </div>
                     )}
 
                     {/* Month Navigator Controls */}
-                    <div className="flex items-center gap-1 bg-white dark:bg-[#08090C] border border-slate-200 dark:border-white/[0.08] rounded-lg p-0.5 shadow-xs">
+                    <div className="flex items-center gap-1 bg-white dark:bg-[#08090C] border border-line rounded-lg p-0.5 shadow-xs">
                         <button 
                             onClick={handlePrevMonth}
-                            className="p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors cursor-pointer"
+                            className="p-1 text-fg-subtle hover:text-fg dark:text-slate-400 rounded hover:bg-surface-2 transition-colors cursor-pointer"
                             title="Mês Anterior"
                         >
                             <ChevronLeft className="w-3.5 h-3.5" />
                         </button>
                         
-                        <span className="font-mono text-[11px] sm:text-xs font-bold text-slate-800 dark:text-slate-200 min-w-[105px] text-center tracking-tight">
+                        <span className="font-mono text-[11px] sm:text-xs font-bold text-fg min-w-[105px] text-center tracking-tight">
                             {MONTH_NAMES[month]} {year}
                         </span>
                         
                         <button 
                             onClick={handleNextMonth}
-                            className="p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors cursor-pointer"
+                            className="p-1 text-fg-subtle hover:text-fg dark:text-slate-400 rounded hover:bg-surface-2 transition-colors cursor-pointer"
                             title="Próximo Mês"
                         >
                             <ChevronRight className="w-3.5 h-3.5" />
@@ -309,7 +309,7 @@ export const TradingCalendarView: React.FC<TradingCalendarViewProps> = ({
             <div className="overflow-x-auto pb-1 no-scrollbar flex-1 flex flex-col justify-center">
                 <div className="min-w-[340px] space-y-1">
                     {/* Days of Week Header (7 Columns) */}
-                    <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 font-mono">
+                    <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[10px] sm:text-[11px] font-bold text-fg-subtle dark:text-slate-400 font-mono">
                         {DAYS_HEADER.map((day, idx) => (
                             <div key={idx} className="py-0.5 uppercase tracking-wider">{day}</div>
                         ))}
@@ -359,7 +359,7 @@ export const TradingCalendarView: React.FC<TradingCalendarViewProps> = ({
             </div>
 
             {/* Subtle Footer Legend & Help Text */}
-            <div className="flex flex-wrap justify-between items-center text-[10px] text-slate-500 dark:text-slate-400 mt-2 border-t border-slate-200 dark:border-white/[0.06] pt-2 font-mono">
+            <div className="flex flex-wrap justify-between items-center text-[10px] text-fg-subtle dark:text-slate-400 mt-2 border-t border-line pt-2 font-mono">
                 <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block shadow-[0_0_6px_rgba(16,185,129,0.4)]" /> 

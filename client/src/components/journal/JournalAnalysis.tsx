@@ -11,6 +11,7 @@ import {
     Title
 } from 'chart.js';
 import { Activity } from 'lucide-react';
+import { useChartTheme } from '../../hooks/useChartTheme';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
@@ -19,6 +20,7 @@ interface JournalAnalysisProps {
 }
 
 export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
+    const ct = useChartTheme();
 
     // Stats Calculation
     const stats = useMemo(() => {
@@ -82,7 +84,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
 
     if (!stats) {
         return (
-            <div className="flex items-center justify-center h-64 text-slate-500">
+            <div className="flex items-center justify-center h-64 text-fg-subtle">
                 <p>Nenhum dado para análise.</p>
             </div>
         );
@@ -90,33 +92,33 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
 
     return (
         <div className="space-y-6">
-            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <h3 className="text-xl font-bold text-fg flex items-center gap-2">
                 <Activity className="text-indigo-400" /> Análise de Performance
             </h3>
 
             {/* Quick Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
-                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Win Rate</div>
-                    <div className={`text-2xl font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <div className="bg-surface/40 p-4 rounded-2xl border border-line">
+                    <div className="text-fg-muted text-xs uppercase font-bold mb-1">Win Rate</div>
+                    <div className={`text-2xl font-bold ${stats.winRate >= 50 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                         {stats.winRate.toFixed(1)}%
                     </div>
                 </div>
-                <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
-                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Profit Factor</div>
-                    <div className={`text-2xl font-bold ${stats.profitFactor >= 1.5 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                <div className="bg-surface/40 p-4 rounded-2xl border border-line">
+                    <div className="text-fg-muted text-xs uppercase font-bold mb-1">Profit Factor</div>
+                    <div className={`text-2xl font-bold ${stats.profitFactor >= 1.5 ? 'text-accent-fg' : 'text-fg'}`}>
                         {stats.profitFactor.toFixed(2)}
                     </div>
                 </div>
-                <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
-                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Total Trades</div>
-                    <div className="text-2xl font-bold text-white">
+                <div className="bg-surface/40 p-4 rounded-2xl border border-line">
+                    <div className="text-fg-muted text-xs uppercase font-bold mb-1">Total Trades</div>
+                    <div className="text-2xl font-bold text-fg">
                         {stats.totalTrades}
                     </div>
                 </div>
-                <div className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800">
-                    <div className="text-slate-400 text-xs uppercase font-bold mb-1">Net PnL</div>
-                    <div className={`text-2xl font-bold ${stats.totalProfit - stats.totalLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <div className="bg-surface/40 p-4 rounded-2xl border border-line">
+                    <div className="text-fg-muted text-xs uppercase font-bold mb-1">Net PnL</div>
+                    <div className={`text-2xl font-bold ${stats.totalProfit - stats.totalLoss >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                         {(stats.totalProfit - stats.totalLoss).toFixed(2)}
                     </div>
                 </div>
@@ -126,8 +128,8 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                 {/* Win/Loss Ratio */}
-                <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800 flex flex-col items-center">
-                    <h4 className="text-sm font-bold text-slate-300 mb-4 w-full">Taxa de Acerto</h4>
+                <div className="bg-surface/40 p-6 rounded-3xl border border-line flex flex-col items-center">
+                    <h4 className="text-sm font-bold text-fg/80 mb-4 w-full">Taxa de Acerto</h4>
                     <div className="w-48 h-48 relative">
                         <Doughnut
                             data={winLossData}
@@ -137,15 +139,15 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
                             }}
                         />
                         <div className="absolute inset-0 flex items-center justify-center flex-col pointer-events-none">
-                            <span className="text-2xl font-bold text-white">{stats.winRate.toFixed(0)}%</span>
-                            <span className="text-[10px] text-slate-500 uppercase">Win Rate</span>
+                            <span className="text-2xl font-bold text-fg">{stats.winRate.toFixed(0)}%</span>
+                            <span className="text-[10px] text-fg-subtle uppercase">Win Rate</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Day of Week Performance */}
-                <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800">
-                    <h4 className="text-sm font-bold text-slate-300 mb-4">Performance por Dia</h4>
+                <div className="bg-surface/40 p-6 rounded-3xl border border-line">
+                    <h4 className="text-sm font-bold text-fg/80 mb-4">Performance por Dia</h4>
                     <div className="h-48">
                         <Bar
                             data={dayPerformance}
@@ -155,12 +157,12 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
                                 plugins: { legend: { display: false } },
                                 scales: {
                                     y: {
-                                        grid: { color: '#1e293b' },
-                                        ticks: { color: '#64748b', font: { size: 10 } }
+                                        grid: { color: ct.grid },
+                                        ticks: { color: ct.tick, font: { size: 10 } }
                                     },
                                     x: {
                                         grid: { display: false },
-                                        ticks: { color: '#94a3b8', font: { size: 10 } }
+                                        ticks: { color: ct.label, font: { size: 10 } }
                                     }
                                 }
                             }}

@@ -93,10 +93,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
         // ---- Legacy v1 rendering (unchanged look) ----
         const variants = {
-            dark: 'bg-[#08090C] border-white/[0.08] text-slate-100 placeholder:text-slate-500 focus:border-[#10B981] focus:ring-[#10B981]/20',
+            dark: 'bg-canvas border-line text-fg placeholder:text-fg-subtle focus:border-[#10B981] focus:ring-[#10B981]/20',
             light: 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:ring-emerald-500/20',
         };
-        const labelColor = variant === 'dark' ? 'text-slate-400' : 'text-gray-700';
+        const labelColor = variant === 'dark' ? 'text-fg-muted' : 'text-gray-700';
 
         return (
             <div className={cn('space-y-1', wrapperClassName)}>
@@ -107,7 +107,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                 )}
                 <div className="relative">
                     {icon && (
-                        <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">{icon}</div>
+                        <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle">{icon}</div>
                     )}
                     <input
                         ref={ref}
@@ -126,12 +126,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                     {endAdornment}
                 </div>
                 {error ? (
-                    <p id={errorId} className="text-xs text-rose-400">
+                    <p id={errorId} className="text-xs text-danger-fg">
                         {error}
                     </p>
                 ) : (
                     hint && (
-                        <p id={hintId} className="text-xs text-slate-500">
+                        <p id={hintId} className="text-xs text-fg-subtle">
                             {hint}
                         </p>
                     )

@@ -62,18 +62,18 @@ export const CommunityTab = () => {
     return (
         <div className="h-full flex flex-col gap-6">
             {/* Search Header */}
-            <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-lg">
-                <h2 className="text-xl font-bold text-white mb-2">Comunidade</h2>
-                <p className="text-sm text-slate-400 mb-4">Encontre e conecte-se com outros traders.</p>
+            <div className="bg-surface/40 backdrop-blur-xl border border-line rounded-3xl p-6 shadow-lg">
+                <h2 className="text-xl font-bold text-fg mb-2">Comunidade</h2>
+                <p className="text-sm text-fg-muted mb-4">Encontre e conecte-se com outros traders.</p>
 
                 <form onSubmit={handleSearch} className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" size={18} />
                     <input
                         type="text"
                         value={search}
                         onChange={e => setSearch(e.target.value)}
                         placeholder="Buscar por nome ou usuário..."
-                        className="w-full bg-slate-950/50 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500/50"
+                        className="w-full bg-canvas/50 border border-line rounded-xl pl-10 pr-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500/50"
                     />
                 </form>
             </div>
@@ -81,14 +81,14 @@ export const CommunityTab = () => {
             {/* Users Grid */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {loading ? (
-                    <div className="text-center text-slate-500 py-10">Pesquisando...</div>
+                    <div className="text-center text-fg-subtle py-10">Pesquisando...</div>
                 ) : users.length === 0 ? (
-                    <div className="text-center text-slate-500 py-10">Nenhum usuário encontrado.</div>
+                    <div className="text-center text-fg-subtle py-10">Nenhum usuário encontrado.</div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {users.map(user => (
-                            <div key={user.id} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex gap-4 items-center hover:border-slate-700 transition-all">
-                                <div className="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 font-bold border-2 border-slate-700 overflow-hidden shrink-0">
+                            <div key={user.id} className="bg-surface/40 border border-line rounded-2xl p-4 flex gap-4 items-center hover:border-line-strong transition-all">
+                                <div className="w-14 h-14 rounded-full bg-surface-2 flex items-center justify-center text-fg/80 font-bold border-2 border-line-strong overflow-hidden shrink-0">
                                     {user.avatarUrl ? (
                                         <img src={user.avatarUrl} alt={user.username} className="w-full h-full object-cover" />
                                     ) : (
@@ -96,13 +96,13 @@ export const CommunityTab = () => {
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <h3 className="font-bold text-slate-200 truncate">{user.name || user.username}</h3>
-                                    <p className="text-xs text-slate-500 truncate">@{user.username}</p>
+                                    <h3 className="font-bold text-fg truncate">{user.name || user.username}</h3>
+                                    <p className="text-xs text-fg-subtle truncate">@{user.username}</p>
                                 </div>
                                 <button
                                     onClick={() => toggleFollow(user)}
                                     className={`px-3 py-2 rounded-xl transition-all ${user.isFollowing
-                                            ? 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+                                            ? 'bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-white'
                                             : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
                                         }`}
                                 >

@@ -82,7 +82,7 @@ export const ImportHistory = () => {
             case 'AUTO_SYNC': return <Cloud size={18} className="text-emerald-500 dark:text-emerald-400" />;
             case 'EA': return <Server size={18} className="text-indigo-500 dark:text-indigo-400" />;
             case 'FILE': return <FileText size={18} className="text-emerald-500 dark:text-emerald-400" />;
-            default: return <History size={18} className="text-slate-500 dark:text-slate-400" />;
+            default: return <History size={18} className="text-fg-subtle dark:text-slate-400" />;
         }
     };
 
@@ -122,13 +122,13 @@ export const ImportHistory = () => {
     };
 
     return (
-        <div className="bg-white dark:bg-[#111319] backdrop-blur-xl border border-slate-200 dark:border-white/[0.08] rounded-3xl p-6 shadow-sm dark:shadow-lg transition-colors">
+        <div className="bg-surface backdrop-blur-xl border border-line rounded-3xl p-6 shadow-sm dark:shadow-lg transition-colors">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-[#F3F4F6] flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-fg flex items-center gap-2">
                         <History className="text-indigo-500" /> Histórico de Importação
                     </h3>
-                    <p className="text-xs text-slate-500 dark:text-[#9CA3AF] mt-1">
+                    <p className="text-xs text-fg-subtle dark:text-[#9CA3AF] mt-1">
                         Visualize as operações importadas vinculadas a cada conta trader.
                     </p>
                 </div>
@@ -139,10 +139,10 @@ export const ImportHistory = () => {
                             type="button"
                             onClick={() => setFilterBySelectedAccount(!filterBySelectedAccount)}
                             className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                                filterBySelectedAccount
-                                    ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
-                                    : 'bg-slate-100 dark:bg-[#161822] border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-[#9CA3AF] hover:bg-slate-200 dark:hover:bg-[#1C1F2C]'
-                            }`}
+ filterBySelectedAccount
+ ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 shadow-sm'
+ : 'bg-surface-2 border-line text-fg-muted hover:bg-slate-200 dark:hover:bg-[#1C1F2C]'
+ }`}
                         >
                             <Filter size={13} />
                             {filterBySelectedAccount
@@ -154,11 +154,11 @@ export const ImportHistory = () => {
             </div>
 
             {loading ? (
-                <div className="text-center text-[#9CA3AF] py-8">Carregando histórico...</div>
+                <div className="text-center text-fg-muted py-8">Carregando histórico...</div>
             ) : logs.length === 0 ? (
-                <div className="text-center text-slate-500 dark:text-[#9CA3AF] py-8 border border-dashed border-slate-200 dark:border-white/[0.08] rounded-2xl bg-slate-50/50 dark:bg-[#08090C]/40">
+                <div className="text-center text-fg-subtle dark:text-[#9CA3AF] py-8 border border-dashed border-line rounded-2xl bg-slate-50/50 dark:bg-[#08090C]/40">
                     <p className="font-medium">Nenhuma importação registrada {filterBySelectedAccount ? 'para esta conta trade' : ''}.</p>
-                    <p className="text-xs text-[#9CA3AF] mt-1">Importe arquivos CSV, HTML ou sincronize via EA para registrar operações.</p>
+                    <p className="text-xs text-fg-muted mt-1">Importe arquivos CSV, HTML ou sincronize via EA para registrar operações.</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -169,10 +169,10 @@ export const ImportHistory = () => {
                         return (
                             <div
                                 key={log.id}
-                                className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-slate-50/80 dark:bg-[#0C0D12]/70 border border-slate-200 dark:border-white/[0.06] rounded-2xl hover:bg-slate-100/80 dark:hover:bg-[#161822]/40 transition-colors"
+                                className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-slate-50/80 dark:bg-[#0C0D12]/70 border border-line rounded-2xl hover:bg-slate-100/80 dark:hover:bg-[#161822]/40 transition-colors"
                             >
                                 <div className="flex items-start sm:items-center gap-3.5">
-                                    <div className="p-2.5 bg-white dark:bg-[#111319] rounded-xl border border-slate-200 dark:border-white/[0.08] shrink-0 shadow-sm">
+                                    <div className="p-2.5 bg-surface rounded-xl border border-line shrink-0 shadow-sm">
                                         {getIcon(log.method)}
                                     </div>
 
@@ -193,23 +193,23 @@ export const ImportHistory = () => {
                                                 {accBroker && <span className="text-indigo-400 dark:text-indigo-400 font-mono text-[10px]">({accBroker})</span>}
                                             </span>
 
-                                            <span className="text-[11px] text-slate-400 dark:text-[#6B7280]">
+                                            <span className="text-[11px] text-fg-muted dark:text-[#6B7280]">
                                                 • {new Date(log.createdAt).toLocaleString()}
                                             </span>
                                         </div>
 
-                                        <p className="text-xs sm:text-sm text-slate-600 dark:text-[#9CA3AF]">
+                                        <p className="text-xs sm:text-sm text-fg-muted ">
                                             {getLogSummary(log)}
                                         </p>
                                     </div>
                                 </div>
 
-                                <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200 dark:border-white/[0.06]">
+                                <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-line ">
                                     <div className="text-left sm:text-right">
-                                        <span className="block text-xl font-bold text-slate-900 dark:text-[#F3F4F6] leading-tight">
+                                        <span className="block text-xl font-bold text-fg leading-tight">
                                             {log.tradesCount}
                                         </span>
-                                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                        <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">
                                             Trades
                                         </span>
                                     </div>

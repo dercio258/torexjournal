@@ -1,6 +1,7 @@
 import { createChart, ColorType, IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 import api from '../../api';
+import { useChartTheme } from '../../hooks/useChartTheme';
 
 interface TradeChartProps {
     symbol: string;
@@ -20,6 +21,7 @@ interface Candle {
 }
 
 export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProps) => {
+    const ct = useChartTheme();
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -79,6 +81,14 @@ export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProp
         }
     }, [symbol, openTime, closeTime]);
 
+    // Re-theme the live chart without recreating it.
+    useEffect(() => {
+        chartRef.current?.applyOptions({
+            layout: { textColor: ct.tick },
+            grid: { vertLines: { color: ct.grid }, horzLines: { color: ct.grid } },
+        });
+    }, [ct]);
+
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
@@ -91,11 +101,11 @@ export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProp
         const chart = createChart(chartContainerRef.current, {
             layout: {
                 background: { type: ColorType.Solid, color: 'transparent' },
-                textColor: '#94a3b8',
+                textColor: ct.tick,
             },
             grid: {
-                vertLines: { color: '#1e293b' },
-                horzLines: { color: '#1e293b' },
+                vertLines: { color: ct.grid },
+                horzLines: { color: ct.grid },
             },
             width: chartContainerRef.current.clientWidth,
             height: 400,
@@ -170,13 +180,13 @@ export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProp
         }
     }, [candles, openTime, closeTime, type]);
 
-    if (loading) return <div className="h-[400px] flex items-center justify-center text-slate-500 animate-pulse">Carregando gráfico...</div>;
+    if (loading) return <div className="h-[400px] flex items-center justify-center text-fg-subtle animate-pulse">Carregando gráfico...</div>;
     if (error) return <div className="h-[400px] flex items-center justify-center text-red-400">{error}</div>;
 
     return (
-        <div className="relative w-full h-[400px] bg-slate-950/30 rounded-xl border border-slate-800 overflow-hidden">
+        <div className="relative w-full h-[400px] bg-canvas/30 rounded-xl border border-line overflow-hidden">
             <div ref={chartContainerRef} className="w-full h-full" />
-            <div className="absolute top-4 left-4 z-10 bg-slate-900/80 backdrop-blur px-3 py-1 rounded-lg border border-slate-700 text-xs font-mono text-slate-300">
+            <div className="absolute top-4 left-4 z-10 bg-surface/80 backdrop-blur px-3 py-1 rounded-lg border border-line-strong text-xs font-mono text-fg/80">
                 {symbol} (Replay)
             </div>
         </div>

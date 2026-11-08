@@ -49,7 +49,7 @@ export const BrokerLogo = ({ broker, size = 'md', className = '' }: BrokerLogoPr
 
     return (
         <div
-            className={`${sizeClasses} ${imgPadding} shrink-0 flex items-center justify-center bg-[#181B24] border border-white/[0.1] overflow-hidden shadow-sm ${className}`}
+            className={`${sizeClasses} ${imgPadding} shrink-0 flex items-center justify-center bg-surface-2 border border-line-strong overflow-hidden shadow-sm ${className}`}
             style={{
                 borderColor: `${broker.brandColor}35`,
             }}

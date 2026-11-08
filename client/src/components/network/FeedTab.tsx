@@ -108,7 +108,7 @@ export const FeedTab = ({
 
             {/* Create Post Card */}
             {!isRestricted && (
-                <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm dark:shadow-lg">
+                <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-line rounded-3xl p-6 shadow-sm dark:shadow-lg">
                     <div className="flex gap-4">
                         <div className="w-10 h-10 rounded-full bg-indigo-500/15 dark:bg-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
                             {user?.username?.[0]?.toUpperCase() || <User size={20} />}
@@ -118,7 +118,7 @@ export const FeedTab = ({
                                 value={newPostContent}
                                 onChange={e => setNewPostContent(e.target.value)}
                                 placeholder="Compartilhe um trade, uma ideia ou uma dúvida..."
-                                className="w-full bg-slate-50 dark:bg-slate-950/30 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-slate-800 dark:text-slate-300 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:bg-white dark:focus:bg-slate-950/30 focus:outline-none focus:border-indigo-500 transition-colors"
+                                className="w-full bg-slate-50 dark:bg-slate-950/30 border border-line rounded-xl p-3 text-slate-800 dark:text-slate-300 placeholder:text-fg-muted dark:placeholder:text-slate-600 focus:bg-white dark:focus:bg-slate-950/30 focus:outline-none focus:border-indigo-500 transition-colors"
                             />
                             {mediaPreview && (
                                 <div className="relative mt-3 inline-block">
@@ -127,17 +127,17 @@ export const FeedTab = ({
                                     ) : (
                                         <img src={mediaPreview} alt="Preview" className="max-h-48 rounded-lg border border-slate-200 dark:border-slate-700 object-contain" />
                                     )}
-                                    <button onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-800 hover:bg-rose-500 text-white p-1 rounded-full transition-colors shadow-lg">
+                                    <button onClick={removeMedia} className="absolute -top-2 -right-2 bg-surface-2 hover:bg-rose-500 text-fg p-1 rounded-full transition-colors shadow-lg">
                                         <X size={14} />
                                     </button>
                                 </div>
                             )}
                             <div className="flex justify-between items-center mt-3">
-                                <div className="flex gap-2 text-slate-500 relative">
-                                    <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Foto/Vídeo">
+                                <div className="flex gap-2 text-fg-subtle relative">
+                                    <button onClick={() => fileInputRef.current?.click()} className="p-2 hover:bg-surface-2 hover:text-indigo-600 dark:hover:text-indigo-400 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Foto/Vídeo">
                                         <ImageIcon size={18} /> <Video size={18} />
                                     </button>
-                                    <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-yellow-600 dark:hover:text-yellow-500 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Emoji">
+                                    <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="p-2 hover:bg-surface-2 hover:text-yellow-600 dark:hover:text-yellow-500 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Adicionar Emoji">
                                         <Smile size={18} />
                                     </button>
 
@@ -190,32 +190,32 @@ export const FeedTab = ({
 
             {/* Feed List */}
             {loading ? (
-                <div className="text-center text-slate-500 py-10">Carregando feed...</div>
+                <div className="text-center text-fg-subtle py-10">Carregando feed...</div>
             ) : posts.length === 0 ? (
                 <div className="flex flex-col gap-6">
-                    <div className="text-center py-10 bg-slate-900/30 rounded-3xl border border-slate-800 border-dashed">
-                        <p className="text-slate-400 mb-4">Ainda não há posts no seu feed.</p>
-                        <p className="text-slate-500 text-sm">Siga outros traders para ver o conteúdo deles aqui.</p>
+                    <div className="text-center py-10 bg-surface/30 rounded-3xl border border-line border-dashed">
+                        <p className="text-fg-muted mb-4">Ainda não há posts no seu feed.</p>
+                        <p className="text-fg-subtle text-sm">Siga outros traders para ver o conteúdo deles aqui.</p>
                     </div>
 
                     {suggestions.length > 0 && (
                         <div className="space-y-4">
-                            <h3 className="font-bold text-slate-300 px-2">Sugestões de Conexão</h3>
+                            <h3 className="font-bold text-fg/80 px-2">Sugestões de Conexão</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {suggestions.map(s => (
-                                    <div key={s.id} className="bg-slate-900/40 border border-slate-800 p-4 rounded-xl flex items-center gap-4 hover:border-slate-700 transition-colors">
-                                        <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-300 font-bold border border-slate-700 overflow-hidden shrink-0">
+                                    <div key={s.id} className="bg-surface/40 border border-line p-4 rounded-xl flex items-center gap-4 hover:border-line-strong transition-colors">
+                                        <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center text-fg/80 font-bold border border-line-strong overflow-hidden shrink-0">
                                             {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : s.username?.[0]?.toUpperCase()}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <h4 className="font-bold text-slate-200 truncate">{s.name || s.username}</h4>
-                                            <p className="text-xs text-slate-500 truncate">@{s.username}</p>
+                                            <h4 className="font-bold text-fg truncate">{s.name || s.username}</h4>
+                                            <p className="text-xs text-fg-subtle truncate">@{s.username}</p>
                                         </div>
                                         <button
                                             disabled={isRestricted}
                                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${isRestricted
-                                                ? 'bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed'
-                                                : 'bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white border-indigo-500/30'
+                                                ? 'bg-surface-2/50 text-fg-subtle border-line-strong opacity-50 cursor-not-allowed'
+                                                : 'bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-fg border-indigo-500/30'
                                                 }`}
                                         >
                                             Seguir

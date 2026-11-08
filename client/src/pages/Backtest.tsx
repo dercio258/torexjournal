@@ -155,21 +155,21 @@ export const Backtest = () => {
     return (
         <div className="space-y-6 max-w-[1600px] mx-auto pb-12">
             {/* Header Bar */}
-            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800/80 pb-5">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-line pb-5">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-black text-slate-100 flex items-center gap-2.5 tracking-tight">
-                        <FlaskConical className="text-emerald-400" size={28} />
+                    <h1 className="text-2xl md:text-3xl font-black text-fg flex items-center gap-2.5 tracking-tight">
+                        <FlaskConical className="text-accent-fg" size={28} />
                         Laboratório de Backtesting
                     </h1>
-                    <p className="text-slate-400 text-sm mt-0.5">
+                    <p className="text-fg-muted text-sm mt-0.5">
                         Simule hipóteses sobre o histórico real da conta ou teste estratégias quantitativas.
                     </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                     {/* Account Selector Toolbar */}
-                    <div className="flex items-center gap-2 bg-slate-900/70 border border-slate-800 p-1.5 rounded-xl shadow-lg shadow-black/20">
-                        <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-300">
+                    <div className="flex items-center gap-2 bg-surface/70 border border-line p-1.5 rounded-xl shadow-lg shadow-black/20">
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-fg/80">
                             <Briefcase size={14} className="text-indigo-400" />
                             <span>Conta:</span>
                         </div>
@@ -179,7 +179,7 @@ export const Backtest = () => {
                                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
                                     isConsolidated
                                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                                        : 'text-fg-muted hover:text-fg hover:bg-surface-2/60'
                                 }`}
                             >
                                 Todas
@@ -191,7 +191,7 @@ export const Backtest = () => {
                                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
                                         selectedAccountId === acc.id
                                             ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                                            : 'text-fg-muted hover:text-fg hover:bg-surface-2/60'
                                     }`}
                                 >
                                     <span>{acc.name}</span>
@@ -208,13 +208,13 @@ export const Backtest = () => {
             </header>
 
             {/* Mode Navigation Tabs */}
-            <div className="flex items-center gap-2 border-b border-slate-800">
+            <div className="flex items-center gap-2 border-b border-line">
                 <button
                     onClick={() => { setActiveTab('what_if'); setSimulationResult(null); }}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'what_if'
-                            ? 'border-emerald-500 text-emerald-400'
-                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                            ? 'border-emerald-500 text-accent-fg'
+                            : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
                     <Sliders size={16} />
@@ -224,8 +224,8 @@ export const Backtest = () => {
                     onClick={() => { setActiveTab('strategy_lab'); setSimulationResult(null); }}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'strategy_lab'
-                            ? 'border-emerald-500 text-emerald-400'
-                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                            ? 'border-emerald-500 text-accent-fg'
+                            : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
                     <BarChart2 size={16} />
@@ -235,8 +235,8 @@ export const Backtest = () => {
                     onClick={() => setActiveTab('saved_history')}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'saved_history'
-                            ? 'border-emerald-500 text-emerald-400'
-                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                            ? 'border-emerald-500 text-accent-fg'
+                            : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
                     <History size={16} />
@@ -248,20 +248,20 @@ export const Backtest = () => {
             {activeTab === 'what_if' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Controls Column */}
-                    <div className="lg:col-span-1 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 space-y-6">
+                    <div className="lg:col-span-1 bg-surface/60 backdrop-blur-xl border border-line rounded-2xl p-6 space-y-6">
                         <div>
-                            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2 mb-1">
-                                <Sparkles size={18} className="text-emerald-400" />
+                            <h3 className="text-base font-bold text-fg flex items-center gap-2 mb-1">
+                                <Sparkles size={18} className="text-accent-fg" />
                                 Hipóteses de Otimização
                             </h3>
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-fg-muted">
                                 Aplique novas regras sobre os trades reais de <strong>{selectedAccount?.name || 'Todas as Contas'}</strong>.
                             </p>
                         </div>
 
                         {/* Parameter: R:R Target */}
                         <div className="space-y-2">
-                            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                            <label className="text-xs font-semibold text-fg/80 uppercase tracking-wider block">
                                 Relação Risco:Retorno Alvo
                             </label>
                             <div className="grid grid-cols-4 gap-2">
@@ -272,14 +272,14 @@ export const Backtest = () => {
                                         className={`py-2 text-xs font-bold rounded-lg border transition-all ${
                                             whatIfConfig.rrTarget === rr
                                                 ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                                                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                                                : 'bg-surface-2 border-line-strong text-fg/80 hover:bg-surface-3'
                                         }`}
                                     >
                                         1:{rr}
                                     </button>
                                 ))}
                             </div>
-                            <span className="text-[10px] text-slate-500 block">
+                            <span className="text-[10px] text-fg-subtle block">
                                 Limita perdas a 1R e expande os trades vencedores para {whatIfConfig.rrTarget}R.
                             </span>
                         </div>
@@ -287,10 +287,10 @@ export const Backtest = () => {
                         {/* Parameter: Fixed Risk Per Trade */}
                         <div className="space-y-2">
                             <div className="flex justify-between items-center text-xs">
-                                <label className="font-semibold text-slate-300 uppercase tracking-wider">
+                                <label className="font-semibold text-fg/80 uppercase tracking-wider">
                                     Risco por Trade (% do Capital)
                                 </label>
-                                <span className="font-bold text-emerald-400">{whatIfConfig.riskPerTrade}%</span>
+                                <span className="font-bold text-accent-fg">{whatIfConfig.riskPerTrade}%</span>
                             </div>
                             <input
                                 type="range"
@@ -299,9 +299,9 @@ export const Backtest = () => {
                                 step="0.5"
                                 value={whatIfConfig.riskPerTrade}
                                 onChange={(e) => setWhatIfConfig(prev => ({ ...prev, riskPerTrade: parseFloat(e.target.value) }))}
-                                className="w-full accent-emerald-500 bg-slate-800 h-1.5 rounded-lg appearance-none cursor-pointer"
+                                className="w-full accent-emerald-500 bg-surface-2 h-1.5 rounded-lg appearance-none cursor-pointer"
                             />
-                            <div className="flex justify-between text-[10px] text-slate-500">
+                            <div className="flex justify-between text-[10px] text-fg-subtle">
                                 <span>0.5% (Conservador)</span>
                                 <span>3.0% (Agressivo)</span>
                             </div>
@@ -309,22 +309,22 @@ export const Backtest = () => {
 
                         {/* Parameter: Initial Balance */}
                         <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                            <label className="text-xs font-semibold text-fg/80 uppercase tracking-wider block">
                                 Saldo Inicial da Simulação ($)
                             </label>
                             <input
                                 type="number"
                                 value={whatIfConfig.initialBalance}
                                 onChange={(e) => setWhatIfConfig(prev => ({ ...prev, initialBalance: parseFloat(e.target.value) || 0 }))}
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-surface-2 border border-line-strong rounded-lg px-3 py-2 text-sm text-fg font-mono font-bold focus:outline-none focus:border-emerald-500"
                             />
                         </div>
 
                         {/* Behavioral / Session Filters */}
-                        <div className="space-y-3 pt-3 border-t border-slate-800">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Filtros de Disciplina</h4>
+                        <div className="space-y-3 pt-3 border-t border-line">
+                            <h4 className="text-xs font-bold text-fg-muted uppercase tracking-wider">Filtros de Disciplina</h4>
 
-                            <label className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700/60 cursor-pointer hover:bg-slate-800 transition-colors">
+                            <label className="flex items-center gap-3 p-3 rounded-lg bg-surface-2/50 border border-line-strong cursor-pointer hover:bg-surface-2 transition-colors">
                                 <input
                                     type="checkbox"
                                     checked={whatIfConfig.excludeAsian}
@@ -332,12 +332,12 @@ export const Backtest = () => {
                                     className="accent-emerald-500 rounded"
                                 />
                                 <div className="text-xs">
-                                    <span className="font-semibold text-slate-200 block">Eliminar Sessão Asiática</span>
-                                    <span className="text-slate-500 text-[11px]">Evita operações no pregão asiático de baixa volatilidade.</span>
+                                    <span className="font-semibold text-fg block">Eliminar Sessão Asiática</span>
+                                    <span className="text-fg-subtle text-[11px]">Evita operações no pregão asiático de baixa volatilidade.</span>
                                 </div>
                             </label>
 
-                            <label className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700/60 cursor-pointer hover:bg-slate-800 transition-colors">
+                            <label className="flex items-center gap-3 p-3 rounded-lg bg-surface-2/50 border border-line-strong cursor-pointer hover:bg-surface-2 transition-colors">
                                 <input
                                     type="checkbox"
                                     checked={whatIfConfig.excludeFridays}
@@ -345,8 +345,8 @@ export const Backtest = () => {
                                     className="accent-emerald-500 rounded"
                                 />
                                 <div className="text-xs">
-                                    <span className="font-semibold text-slate-200 block">Eliminar Sextas-feiras</span>
-                                    <span className="text-slate-500 text-[11px]">Protege contra spreads altos e gaps de fim de semana.</span>
+                                    <span className="font-semibold text-fg block">Eliminar Sextas-feiras</span>
+                                    <span className="text-fg-subtle text-[11px]">Protege contra spreads altos e gaps de fim de semana.</span>
                                 </div>
                             </label>
                         </div>
@@ -366,10 +366,10 @@ export const Backtest = () => {
                     {/* Results Column */}
                     <div className="lg:col-span-2 space-y-6">
                         {!simulationResult ? (
-                            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-16 text-center space-y-3">
+                            <div className="bg-surface/40 border border-line rounded-2xl p-16 text-center space-y-3">
                                 <Sliders size={44} className="mx-auto text-slate-600" />
-                                <h3 className="text-lg font-bold text-slate-200">Pronto para simular</h3>
-                                <p className="text-slate-400 text-xs max-w-md mx-auto">
+                                <h3 className="text-lg font-bold text-fg">Pronto para simular</h3>
+                                <p className="text-fg-muted text-xs max-w-md mx-auto">
                                     Ajuste os parâmetros à esquerda e clique em <strong>"Executar Simulação What-If"</strong> para comparar o resultado real da conta com as regras testadas.
                                 </p>
                             </div>
@@ -378,48 +378,48 @@ export const Backtest = () => {
                                 {/* Comparison Header Cards */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {/* Real Result */}
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Resultado Real da Conta</span>
-                                        <div className={`text-2xl font-black ${comparison?.realNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Resultado Real da Conta</span>
+                                        <div className={`text-2xl font-black ${comparison?.realNetProfit >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                             {comparison?.realNetProfit >= 0 ? '+' : ''}${comparison?.realNetProfit?.toFixed(2)}
                                         </div>
-                                        <span className="text-[11px] text-slate-400 block mt-1">
+                                        <span className="text-[11px] text-fg-muted block mt-1">
                                             {comparison?.realTrades} trades executados
                                         </span>
                                     </div>
 
                                     {/* Simulated Result */}
                                     <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4">
-                                        <span className="text-xs text-emerald-400 uppercase font-semibold block mb-1">Resultado com What-If</span>
-                                        <div className={`text-2xl font-black ${comparison?.simulatedNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        <span className="text-xs text-accent-fg uppercase font-semibold block mb-1">Resultado com What-If</span>
+                                        <div className={`text-2xl font-black ${comparison?.simulatedNetProfit >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                             {comparison?.simulatedNetProfit >= 0 ? '+' : ''}${comparison?.simulatedNetProfit?.toFixed(2)}
                                         </div>
-                                        <span className="text-[11px] text-slate-300 block mt-1">
+                                        <span className="text-[11px] text-fg/80 block mt-1">
                                             Saldo Final: ${comparison?.finalBalance?.toFixed(2)}
                                         </span>
                                     </div>
 
                                     {/* Delta / Improvement */}
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Impacto da Otimização</span>
-                                        <div className={`text-2xl font-black ${comparison?.profitDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Impacto da Otimização</span>
+                                        <div className={`text-2xl font-black ${comparison?.profitDelta >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                             {comparison?.profitDelta >= 0 ? '+' : ''}${comparison?.profitDelta?.toFixed(2)}
                                         </div>
-                                        <span className="text-[11px] text-slate-400 block mt-1">
+                                        <span className="text-[11px] text-fg-muted block mt-1">
                                             Win Rate: {comparison?.simulatedWinRate}% • PF: {comparison?.simulatedProfitFactor}
                                         </span>
                                     </div>
                                 </div>
 
                                 {/* Equity Curves Comparison */}
-                                <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-5">
+                                <div className="bg-surface/60 backdrop-blur-xl border border-line rounded-2xl p-5">
                                     <div className="flex justify-between items-center mb-4">
                                         <div>
-                                            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                                                <TrendingUp size={16} className="text-emerald-400" />
+                                            <h3 className="text-sm font-bold text-fg flex items-center gap-2">
+                                                <TrendingUp size={16} className="text-accent-fg" />
                                                 Comparativo de Curva de Capital (Real vs Simulado)
                                             </h3>
-                                            <p className="text-[11px] text-slate-500">
+                                            <p className="text-[11px] text-fg-subtle">
                                                 Linha verde: simulação What-If • Linha roxa: patrimônio real da conta
                                             </p>
                                         </div>
@@ -428,8 +428,8 @@ export const Backtest = () => {
                                                 onClick={handleSaveSession}
                                                 isLoading={saving}
                                                 variant="secondary"
-                                                icon={saveSuccess ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Save size={14} />}
-                                                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold py-2 px-3"
+                                                icon={saveSuccess ? <CheckCircle2 size={14} className="text-accent-fg" /> : <Save size={14} />}
+                                                className="bg-surface-2 hover:bg-surface-3 text-fg border border-line-strong text-xs font-semibold py-2 px-3"
                                             >
                                                 {saveSuccess ? 'Simulação Salva!' : 'Salvar Simulação'}
                                             </Button>
@@ -461,16 +461,16 @@ export const Backtest = () => {
                                                     />
 
                                                     {/* Tooltip */}
-                                                    <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-slate-900 border border-slate-700 text-[10px] p-2 rounded shadow-2xl z-20 whitespace-nowrap pointer-events-none">
-                                                        <span className="font-bold text-slate-200">{pt.date}</span>
-                                                        <span className="text-emerald-400 font-mono">Simulado: ${pt.simulatedEquity}</span>
+                                                    <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-surface border border-line-strong text-[10px] p-2 rounded shadow-2xl z-20 whitespace-nowrap pointer-events-none">
+                                                        <span className="font-bold text-fg">{pt.date}</span>
+                                                        <span className="text-accent-fg font-mono">Simulado: ${pt.simulatedEquity}</span>
                                                         <span className="text-indigo-300 font-mono">Real: ${pt.realEquity}</span>
                                                     </div>
                                                 </div>
                                             );
                                         })}
                                     </div>
-                                    <div className="flex justify-between text-[10px] text-slate-500 mt-2 border-t border-slate-800/60 pt-2">
+                                    <div className="flex justify-between text-[10px] text-fg-subtle mt-2 border-t border-line pt-2">
                                         <span>Primeiro trade</span>
                                         <span>Evolução sequencial</span>
                                         <span>Último trade</span>
@@ -479,15 +479,15 @@ export const Backtest = () => {
 
                                 {/* AI Insights */}
                                 {simulationResult.insights?.length > 0 && (
-                                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-                                        <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <div className="bg-surface/60 border border-line rounded-xl p-4">
+                                        <h4 className="text-xs font-bold text-fg/80 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                                             <Sparkles size={14} className="text-yellow-400" />
                                             Diagnóstico da Simulação
                                         </h4>
-                                        <ul className="space-y-1.5 text-xs text-slate-400">
+                                        <ul className="space-y-1.5 text-xs text-fg-muted">
                                             {simulationResult.insights.map((ins: string, idx: number) => (
                                                 <li key={idx} className="flex items-start gap-2">
-                                                    <span className="text-emerald-400">•</span>
+                                                    <span className="text-accent-fg">•</span>
                                                     <span>{ins}</span>
                                                 </li>
                                             ))}
@@ -504,20 +504,20 @@ export const Backtest = () => {
             {activeTab === 'strategy_lab' && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Strategy Config */}
-                    <div className="lg:col-span-1 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 space-y-6">
+                    <div className="lg:col-span-1 bg-surface/60 backdrop-blur-xl border border-line rounded-2xl p-6 space-y-6">
                         <div>
-                            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2 mb-1">
+                            <h3 className="text-base font-bold text-fg flex items-center gap-2 mb-1">
                                 <Activity size={18} className="text-indigo-400" />
                                 Parâmetros da Estratégia
                             </h3>
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-fg-muted">
                                 Simule modelos técnicos com as especificações da sua conta de trading.
                             </p>
                         </div>
 
                         {/* Strategy Select */}
                         <div className="space-y-2">
-                            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                            <label className="text-xs font-semibold text-fg/80 uppercase tracking-wider block">
                                 Estratégia
                             </label>
                             <div className="grid grid-cols-2 gap-2">
@@ -528,7 +528,7 @@ export const Backtest = () => {
                                         className={`py-2 text-xs font-bold rounded-lg border transition-all ${
                                             strategyConfig.strategy === strat
                                                 ? 'bg-indigo-600 text-white border-indigo-500'
-                                                : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                                                : 'bg-surface-2 border-line-strong text-fg/80 hover:bg-surface-3'
                                         }`}
                                     >
                                         {strat}
@@ -539,13 +539,13 @@ export const Backtest = () => {
 
                         {/* Asset Select */}
                         <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                            <label className="text-xs font-semibold text-fg/80 uppercase tracking-wider block">
                                 Ativo / Símbolo
                             </label>
                             <select
                                 value={strategyConfig.symbol}
                                 onChange={(e) => setStrategyConfig(prev => ({ ...prev, symbol: e.target.value }))}
-                                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500"
+                                className="w-full bg-surface-2 border border-line-strong rounded-lg px-3 py-2 text-xs text-fg font-bold focus:outline-none focus:border-indigo-500"
                             >
                                 {['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'US30', 'NAS100', 'USDJPY'].map(s => (
                                     <option key={s} value={s}>{s}</option>
@@ -556,22 +556,22 @@ export const Backtest = () => {
                         {/* Target R:R & Target WinRate */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 block">R:R Alvo</label>
+                                <label className="text-xs font-semibold text-fg-muted block">R:R Alvo</label>
                                 <input
                                     type="number"
                                     step="0.5"
                                     value={strategyConfig.rrTarget}
                                     onChange={(e) => setStrategyConfig(prev => ({ ...prev, rrTarget: parseFloat(e.target.value) || 2 }))}
-                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-bold font-mono"
+                                    className="w-full bg-surface-2 border border-line-strong rounded-lg p-2 text-xs text-fg font-bold font-mono"
                                 />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 block">Win Rate Alvo (%)</label>
+                                <label className="text-xs font-semibold text-fg-muted block">Win Rate Alvo (%)</label>
                                 <input
                                     type="number"
                                     value={strategyConfig.targetWinRate}
                                     onChange={(e) => setStrategyConfig(prev => ({ ...prev, targetWinRate: parseInt(e.target.value) || 50 }))}
-                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-bold font-mono"
+                                    className="w-full bg-surface-2 border border-line-strong rounded-lg p-2 text-xs text-fg font-bold font-mono"
                                 />
                             </div>
                         </div>
@@ -579,22 +579,22 @@ export const Backtest = () => {
                         {/* Trades Count & Risk */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 block">Trades a Simular</label>
+                                <label className="text-xs font-semibold text-fg-muted block">Trades a Simular</label>
                                 <input
                                     type="number"
                                     value={strategyConfig.totalTrades}
                                     onChange={(e) => setStrategyConfig(prev => ({ ...prev, totalTrades: parseInt(e.target.value) || 30 }))}
-                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-bold font-mono"
+                                    className="w-full bg-surface-2 border border-line-strong rounded-lg p-2 text-xs text-fg font-bold font-mono"
                                 />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-xs font-semibold text-slate-400 block">Risco (%)</label>
+                                <label className="text-xs font-semibold text-fg-muted block">Risco (%)</label>
                                 <input
                                     type="number"
                                     step="0.5"
                                     value={strategyConfig.riskPerTrade}
                                     onChange={(e) => setStrategyConfig(prev => ({ ...prev, riskPerTrade: parseFloat(e.target.value) || 1 }))}
-                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 font-bold font-mono"
+                                    className="w-full bg-surface-2 border border-line-strong rounded-lg p-2 text-xs text-fg font-bold font-mono"
                                 />
                             </div>
                         </div>
@@ -614,10 +614,10 @@ export const Backtest = () => {
                     {/* Results Column */}
                     <div className="lg:col-span-2 space-y-6">
                         {!simulationResult ? (
-                            <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-16 text-center space-y-3">
+                            <div className="bg-surface/40 border border-line rounded-2xl p-16 text-center space-y-3">
                                 <BarChart2 size={44} className="mx-auto text-slate-600" />
-                                <h3 className="text-lg font-bold text-slate-200">Simulador Pronto</h3>
-                                <p className="text-slate-400 text-xs max-w-md mx-auto">
+                                <h3 className="text-lg font-bold text-fg">Simulador Pronto</h3>
+                                <p className="text-fg-muted text-xs max-w-md mx-auto">
                                     Escolha a estratégia técnica e clique em <strong>"Simular Estratégia"</strong> para gerar curvas de patrimônio e métricas probabilísticas.
                                 </p>
                             </div>
@@ -625,36 +625,36 @@ export const Backtest = () => {
                             <>
                                 {/* KPIs Cards */}
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Lucro Projetado</span>
-                                        <span className={`text-2xl font-black ${comparison?.simulatedNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Lucro Projetado</span>
+                                        <span className={`text-2xl font-black ${comparison?.simulatedNetProfit >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                             {comparison?.simulatedNetProfit >= 0 ? '+' : ''}${comparison?.simulatedNetProfit?.toFixed(2)}
                                         </span>
                                     </div>
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Taxa de Acerto</span>
-                                        <span className="text-2xl font-black text-slate-100">
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Taxa de Acerto</span>
+                                        <span className="text-2xl font-black text-fg">
                                             {comparison?.simulatedWinRate}%
                                         </span>
                                     </div>
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Fator de Lucro</span>
-                                        <span className="text-2xl font-black text-slate-100">
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Fator de Lucro</span>
+                                        <span className="text-2xl font-black text-fg">
                                             {comparison?.simulatedProfitFactor}
                                         </span>
                                     </div>
-                                    <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-                                        <span className="text-xs text-slate-500 uppercase font-semibold block mb-1">Max Drawdown</span>
-                                        <span className="text-2xl font-black text-rose-400">
+                                    <div className="bg-surface/70 border border-line rounded-xl p-4">
+                                        <span className="text-xs text-fg-subtle uppercase font-semibold block mb-1">Max Drawdown</span>
+                                        <span className="text-2xl font-black text-danger-fg">
                                             -{comparison?.simulatedMaxDrawdownPercent}%
                                         </span>
                                     </div>
                                 </div>
 
                                 {/* Equity Curve */}
-                                <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-5">
+                                <div className="bg-surface/60 backdrop-blur-xl border border-line rounded-2xl p-5">
                                     <div className="flex justify-between items-center mb-4">
-                                        <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                        <h3 className="text-sm font-bold text-fg flex items-center gap-2">
                                             <TrendingUp size={16} className="text-indigo-400" />
                                             Projeção de Patrimônio da Estratégia
                                         </h3>
@@ -662,8 +662,8 @@ export const Backtest = () => {
                                             onClick={handleSaveSession}
                                             isLoading={saving}
                                             variant="secondary"
-                                            icon={saveSuccess ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Save size={14} />}
-                                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold py-2 px-3"
+                                            icon={saveSuccess ? <CheckCircle2 size={14} className="text-accent-fg" /> : <Save size={14} />}
+                                            className="bg-surface-2 hover:bg-surface-3 text-fg border border-line-strong text-xs font-semibold py-2 px-3"
                                         >
                                             {saveSuccess ? 'Salva!' : 'Salvar Simulação'}
                                         </Button>
@@ -683,10 +683,10 @@ export const Backtest = () => {
                                                         style={{ height: `${height}%` }} 
                                                         className="w-full bg-indigo-500/70 group-hover:bg-indigo-400 rounded-t-xs transition-all" 
                                                     />
-                                                    <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-slate-900 border border-slate-700 text-[10px] p-2 rounded shadow-2xl z-20 whitespace-nowrap pointer-events-none">
-                                                        <span className="font-bold text-slate-200">Trade #{pt.trade}</span>
+                                                    <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-surface border border-line-strong text-[10px] p-2 rounded shadow-2xl z-20 whitespace-nowrap pointer-events-none">
+                                                        <span className="font-bold text-fg">Trade #{pt.trade}</span>
                                                         <span className="text-indigo-300 font-mono">Saldo: ${pt.equity}</span>
-                                                        <span className={pt.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                                        <span className={pt.pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}>
                                                             PnL: {pt.pnl >= 0 ? '+' : ''}${pt.pnl}
                                                         </span>
                                                     </div>
@@ -698,12 +698,12 @@ export const Backtest = () => {
 
                                 {/* Insights */}
                                 {simulationResult.insights?.length > 0 && (
-                                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-                                        <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <div className="bg-surface/60 border border-line rounded-xl p-4">
+                                        <h4 className="text-xs font-bold text-fg/80 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                                             <Sparkles size={14} className="text-indigo-400" />
                                             Relatório da Estratégia
                                         </h4>
-                                        <ul className="space-y-1.5 text-xs text-slate-400">
+                                        <ul className="space-y-1.5 text-xs text-fg-muted">
                                             {simulationResult.insights.map((ins: string, idx: number) => (
                                                 <li key={idx} className="flex items-start gap-2">
                                                     <span className="text-indigo-400">•</span>
@@ -721,14 +721,14 @@ export const Backtest = () => {
 
             {/* TAB 3: SAVED HISTORY */}
             {activeTab === 'saved_history' && (
-                <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-6">
+                <div className="bg-surface/60 backdrop-blur-xl border border-line rounded-2xl p-6">
                     <div className="flex justify-between items-center mb-6">
                         <div>
-                            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                            <h3 className="text-base font-bold text-fg flex items-center gap-2">
                                 <History size={18} className="text-purple-400" />
                                 Histórico de Simulações de Backtest
                             </h3>
-                            <p className="text-xs text-slate-400">
+                            <p className="text-xs text-fg-muted">
                                 Simulações registradas para <strong>{selectedAccount?.name || 'Todas as Contas'}</strong>.
                             </p>
                         </div>
@@ -736,63 +736,63 @@ export const Backtest = () => {
                             onClick={fetchSavedHistory}
                             variant="secondary"
                             icon={<RefreshCw size={13} className={loadingHistory ? 'animate-spin' : ''} />}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs py-2 px-3"
+                            className="bg-surface-2 hover:bg-surface-3 text-fg/80 border border-line-strong text-xs py-2 px-3"
                         >
                             Atualizar
                         </Button>
                     </div>
 
                     {loadingHistory ? (
-                        <div className="py-16 text-center text-slate-500 text-xs">Carregando histórico...</div>
+                        <div className="py-16 text-center text-fg-subtle text-xs">Carregando histórico...</div>
                     ) : savedSessions.length === 0 ? (
                         <div className="py-16 text-center space-y-2">
                             <FlaskConical size={36} className="mx-auto text-slate-600" />
-                            <h4 className="text-sm font-bold text-slate-300">Nenhuma simulação salva</h4>
-                            <p className="text-xs text-slate-500">
+                            <h4 className="text-sm font-bold text-fg/80">Nenhuma simulação salva</h4>
+                            <p className="text-xs text-fg-subtle">
                                 Execute uma simulação nas abas anteriores e clique em "Salvar Simulação" para catalogar seus testes.
                             </p>
                         </div>
                     ) : (
-                        <div className="divide-y divide-slate-800/60">
+                        <div className="divide-y divide-line">
                             {savedSessions.map((session) => (
-                                <div key={session.id} className="py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 hover:bg-slate-800/20 px-3 rounded-xl transition-colors">
+                                <div key={session.id} className="py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 hover:bg-surface-2/20 px-3 rounded-xl transition-colors">
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <h4 className="text-sm font-bold text-slate-200">{session.name}</h4>
+                                            <h4 className="text-sm font-bold text-fg">{session.name}</h4>
                                             <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 font-bold uppercase">
                                                 {session.mode}
                                             </span>
                                             {session.account?.name && (
-                                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                                <span className="text-[10px] px-2 py-0.5 rounded bg-surface-2 text-fg-muted border border-line-strong">
                                                     {session.account.name}
                                                 </span>
                                             )}
                                         </div>
-                                        <p className="text-xs text-slate-400 mt-1">
-                                            Estratégia: <span className="text-slate-300 font-medium">{session.strategy}</span> • Ativo: <span className="text-slate-300 font-medium">{session.symbol}</span> • Criado em: {new Date(session.createdAt).toLocaleDateString('pt-BR')}
+                                        <p className="text-xs text-fg-muted mt-1">
+                                            Estratégia: <span className="text-fg/80 font-medium">{session.strategy}</span> • Ativo: <span className="text-fg/80 font-medium">{session.symbol}</span> • Criado em: {new Date(session.createdAt).toLocaleDateString('pt-BR')}
                                         </p>
                                     </div>
 
                                     <div className="flex items-center gap-4 text-xs font-mono">
                                         {session.results?.simulatedNetProfit !== undefined && (
                                             <div>
-                                                <span className="text-[10px] text-slate-500 block uppercase font-sans">Lucro Simulado</span>
-                                                <span className={`font-bold ${session.results.simulatedNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                <span className="text-[10px] text-fg-subtle block uppercase font-sans">Lucro Simulado</span>
+                                                <span className={`font-bold ${session.results.simulatedNetProfit >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                                     {session.results.simulatedNetProfit >= 0 ? '+' : ''}${session.results.simulatedNetProfit}
                                                 </span>
                                             </div>
                                         )}
                                         {session.results?.simulatedWinRate !== undefined && (
                                             <div>
-                                                <span className="text-[10px] text-slate-500 block uppercase font-sans">Win Rate</span>
-                                                <span className="text-slate-200 font-bold">
+                                                <span className="text-[10px] text-fg-subtle block uppercase font-sans">Win Rate</span>
+                                                <span className="text-fg font-bold">
                                                     {session.results.simulatedWinRate}%
                                                 </span>
                                             </div>
                                         )}
                                         {session.results?.simulatedProfitFactor !== undefined && (
                                             <div>
-                                                <span className="text-[10px] text-slate-500 block uppercase font-sans">Profit Factor</span>
+                                                <span className="text-[10px] text-fg-subtle block uppercase font-sans">Profit Factor</span>
                                                 <span className="text-indigo-300 font-bold">
                                                     {session.results.simulatedProfitFactor}
                                                 </span>

@@ -51,21 +51,21 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue 
     const isUp = trend === 'up';
 
     return (
-        <div className="bg-[#111319]/80 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] rounded-xl p-3.5 sm:p-4 transition-all duration-200 shadow-sm flex flex-col justify-between group">
+        <div className="bg-surface/80 backdrop-blur-md border border-line hover:border-line-strong rounded-xl p-3.5 sm:p-4 transition-all duration-200 shadow-sm flex flex-col justify-between group">
             <div className="flex justify-between items-center mb-2">
-                <span className="text-xs sm:text-[13px] font-bold text-slate-200 uppercase tracking-wide">{title}</span>
+                <span className="text-xs sm:text-[13px] font-bold text-fg uppercase tracking-wide">{title}</span>
                 <div className="flex items-center gap-1.5">
                     {trend && (
                         <span className={`inline-flex items-center gap-0.5 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
                             isUp 
-                                ? 'bg-emerald-500/10 text-emerald-400' 
-                                : 'bg-rose-500/10 text-rose-400'
+                                ? 'bg-emerald-500/10 text-accent-fg' 
+                                : 'bg-rose-500/10 text-danger-fg'
                         }`}>
                             {isUp ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
                             {trendValue}
                         </span>
                     )}
-                    <div className="p-1 rounded-md bg-[#161822] text-slate-400">
+                    <div className="p-1 rounded-md bg-surface-2 text-fg-muted">
                         <Icon size={14} />
                     </div>
                 </div>
@@ -74,13 +74,13 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue 
             <div>
                 <div className={`text-xl sm:text-2xl font-black font-mono tracking-tight ${
                     title.includes('Lucro') 
-                        ? (value.includes('-') ? 'text-rose-400' : 'text-emerald-400')
-                        : 'text-slate-100'
+                        ? (value.includes('-') ? 'text-danger-fg' : 'text-accent-fg')
+                        : 'text-fg'
                 }`}>
                     {value}
                 </div>
                 {subtext && (
-                    <p className="text-[11px] text-slate-500 mt-0.5 font-medium truncate">
+                    <p className="text-[11px] text-fg-subtle mt-0.5 font-medium truncate">
                         {subtext}
                     </p>
                 )}
@@ -327,9 +327,9 @@ export const Dashboard = () => {
 
     if (!stats && isStatsLoading) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] bg-[#08090C] gap-3">
-                <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
-                <p className="text-xs text-[#9CA3AF] font-mono">Sincronizando métricas operacionais...</p>
+            <div className="flex flex-col items-center justify-center min-h-[60vh] bg-canvas gap-3">
+                <RefreshCw className="w-8 h-8 text-accent-fg animate-spin" />
+                <p className="text-xs text-fg-muted font-mono">Sincronizando métricas operacionais...</p>
             </div>
         );
     }
@@ -344,8 +344,8 @@ export const Dashboard = () => {
                             <RefreshCw className="w-4 h-4" />
                         </div>
                         <div>
-                            <h3 className="text-slate-900 dark:text-white font-bold text-xs sm:text-sm">Sua assinatura expira em {subStatus.daysLeft} dias!</h3>
-                            <p className="text-slate-500 dark:text-slate-400 text-xs">Renove com um clique para manter seu histórico sincronizado.</p>
+                            <h3 className="text-fg font-bold text-xs sm:text-sm">Sua assinatura expira em {subStatus.daysLeft} dias!</h3>
+                            <p className="text-fg-subtle dark:text-slate-400 text-xs">Renove com um clique para manter seu histórico sincronizado.</p>
                         </div>
                     </div>
                     <button
@@ -359,14 +359,14 @@ export const Dashboard = () => {
 
             {/* COMPACT TOOLBAR BAR: Segmented Pills + Refresh + Add Trade */}
             <div className="flex flex-wrap items-center justify-between gap-2 pb-0.5">
-                <div className="flex items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-[#9CA3AF]">
-                    <span>{greeting}, <strong className="font-semibold text-slate-900 dark:text-[#F3F4F6]">{displayName}</strong></span>
+                <div className="flex items-center gap-1.5 text-sm font-medium text-fg-muted ">
+                    <span>{greeting}, <strong className="font-semibold text-fg ">{displayName}</strong></span>
                 </div>
 
                 {/* Toolbar: Segmented Filters + Refresh + Add Trade */}
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Segmented Date Pills */}
-                    <div className="flex bg-white dark:bg-[#111319] p-1 rounded-lg border border-slate-200 dark:border-white/[0.08] shadow-xs dark:shadow-none overflow-x-auto no-scrollbar gap-1">
+                    <div className="flex bg-surface p-1 rounded-lg border border-line shadow-xs dark:shadow-none overflow-x-auto no-scrollbar gap-1">
                         {[
                             { label: 'Tudo', val: 'all' },
                             { label: 'Ontem', val: 'yesterday' },
@@ -377,23 +377,23 @@ export const Dashboard = () => {
                                 key={opt.val}
                                 onClick={() => handleDateFilter(opt.val)}
                                 className={`px-3 py-1 text-xs rounded-md transition-all cursor-pointer ${
-                                    dateRange.value === opt.val 
-                                        ? 'bg-emerald-50 dark:bg-[rgba(16,185,129,0.08)] border border-emerald-300 dark:border-[rgba(16,185,129,0.45)] text-emerald-700 dark:text-[#34D399] font-semibold shadow-xs' 
-                                        : 'text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-[#F3F4F6] hover:bg-slate-100 dark:hover:bg-[#161822] border border-transparent'
-                                }`}
+ dateRange.value === opt.val 
+ ? 'bg-emerald-50 dark:bg-[rgba(16,185,129,0.08)] border border-emerald-300 dark:border-[rgba(16,185,129,0.45)] text-emerald-700 dark:text-[#34D399] font-semibold shadow-xs' 
+ : 'text-fg-muted hover:text-fg hover:bg-surface-2 border border-transparent'
+ }`}
                             >
                                 {opt.label}
                             </button>
                         ))}
 
-                        <div className="border-l border-slate-200 dark:border-white/[0.08] mx-0.5 pl-0.5 flex items-center">
+                        <div className="border-l border-line mx-0.5 pl-0.5 flex items-center">
                             <button
                                 onClick={() => setShowDatePicker(true)}
                                 className={`p-1.5 rounded-md transition-colors cursor-pointer ${
-                                    dateRange.value === 'custom' 
-                                        ? 'text-emerald-700 dark:text-[#34D399] bg-emerald-50 dark:bg-[rgba(16,185,129,0.10)] border border-emerald-300 dark:border-[rgba(16,185,129,0.30)]' 
-                                        : 'text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#161822]'
-                                }`}
+ dateRange.value === 'custom' 
+ ? 'text-emerald-700 dark:text-[#34D399] bg-emerald-50 dark:bg-[rgba(16,185,129,0.10)] border border-emerald-300 dark:border-[rgba(16,185,129,0.30)]' 
+ : 'text-fg-muted hover:text-fg hover:bg-surface-2 '
+ }`}
                                 title="Selecionar Período Personalizado"
                             >
                                 <Calendar size={13} />
@@ -404,7 +404,7 @@ export const Dashboard = () => {
                     {/* Refresh Button */}
                     <button 
                         onClick={() => refetchStats()} 
-                        className="p-2 bg-white dark:bg-[#111319] hover:bg-slate-100 dark:hover:bg-[#161822] text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-white rounded-lg transition-all border border-slate-200 dark:border-white/[0.08] hover:border-emerald-500/40 active:scale-95 cursor-pointer shadow-xs dark:shadow-none"
+                        className="p-2 bg-surface hover:bg-surface-2 text-fg-muted hover:text-fg rounded-lg transition-all border border-line hover:border-emerald-500/40 active:scale-95 cursor-pointer shadow-xs dark:shadow-none"
                         title="Atualizar Métricas"
                     >
                         <RefreshCw size={14} className={isStatsLoading ? 'animate-spin text-emerald-500 dark:text-emerald-400' : ''} />
@@ -439,16 +439,16 @@ export const Dashboard = () => {
                             const TrendIcon = pnlInfo.trendIcon;
 
                             return (
-                                <div className="relative bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
+                                <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
                                     {/* Discreet top green accent line */}
                                     <div className="absolute top-0 left-4 right-4 h-[2px] bg-emerald-500/80 rounded-full" />
 
                                     {/* Header / Label */}
                                     <div className="flex justify-between items-center w-full">
-                                        <span className="text-[11px] font-semibold text-slate-500 dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                        <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
                                             TOTAL P&L
                                         </span>
-                                        <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-slate-200 dark:border-white/[0.06] text-slate-500 dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                                        <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
                                             <DollarSign size={14} />
                                         </div>
                                     </div>
@@ -472,16 +472,16 @@ export const Dashboard = () => {
                         })()}
 
                         {/* 2. Total Trades with WinrateGauge Chart */}
-                        <div className="relative bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-xl p-4 sm:p-5 hover:border-indigo-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-indigo-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
                             {/* Discreet top indigo accent line */}
                             <div className="absolute top-0 left-4 right-4 h-[2px] bg-indigo-500/80 rounded-full" />
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
                                     TOTAL TRADES
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-slate-200 dark:border-white/[0.06] text-slate-500 dark:text-[#6B7280] group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors">
                                     <Activity size={14} />
                                 </div>
                             </div>
@@ -498,16 +498,16 @@ export const Dashboard = () => {
                         </div>
 
                         {/* 3. Win Rate with WinRateGaugeChart */}
-                        <div className="relative bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
                             {/* Discreet top green accent line */}
                             <div className="absolute top-0 left-4 right-4 h-[2px] bg-emerald-500/80 rounded-full" />
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
                                     TAXA DE ACERTO
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-slate-200 dark:border-white/[0.06] text-slate-500 dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
                                     <TrendingUp size={14} />
                                 </div>
                             </div>
@@ -534,16 +534,16 @@ export const Dashboard = () => {
                         </div>
 
                         {/* 4. Profit Factor with ProfitFactorDonut */}
-                        <div className="relative bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-xl p-4 sm:p-5 hover:border-amber-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-amber-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
                             {/* Discreet top amber accent line */}
                             <div className="absolute top-0 left-4 right-4 h-[2px] bg-amber-500/80 rounded-full" />
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-slate-500 dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
                                     FATOR DE LUCRO
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-slate-200 dark:border-white/[0.06] text-slate-500 dark:text-[#6B7280] group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
                                     <BarChart3 size={14} />
                                 </div>
                             </div>
@@ -570,11 +570,11 @@ export const Dashboard = () => {
 
                     {/* MAIN PERFORMANCE SECTION (CHARTS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 items-stretch">
-                        <div className="lg:col-span-2 bg-[#111319] border border-white/[0.08] rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
+                        <div className="lg:col-span-2 bg-surface border border-line rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
                             <DailyPnLChart data={currentStats.dailyPnL} />
                         </div>
 
-                        <div className="lg:col-span-1 bg-[#111319] border border-white/[0.08] rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
+                        <div className="lg:col-span-1 bg-surface border border-line rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
                             <PerformanceRadar data={currentStats.radarMetrics} />
                         </div>
                     </div>
@@ -582,11 +582,11 @@ export const Dashboard = () => {
                     {/* INSTITUTIONAL OPERATIONAL BREAKDOWN (3 RADAR CARDS) */}
                     <div className="space-y-2.5">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xs font-bold uppercase tracking-wider text-[#F3F4F6] flex items-center gap-1.5 font-mono">
-                                <Activity size={14} className="text-emerald-400" />
+                            <h2 className="text-xs font-bold uppercase tracking-wider text-fg flex items-center gap-1.5 font-mono">
+                                <Activity size={14} className="text-accent-fg" />
                                 Detalhamento Operacional
                             </h2>
-                            <span className="text-[10px] text-[#6B7280] font-mono">
+                            <span className="text-[10px] text-fg-subtle font-mono">
                                 Ativos, Sessões e Dias da Semana
                             </span>
                         </div>
@@ -603,35 +603,35 @@ export const Dashboard = () => {
 
             {/* CUSTOM DATE PICKER MODAL */}
             {showDatePicker && (
-                <div className="fixed inset-0 bg-[#08090C]/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-                    <div className="bg-[#111319] border border-white/[0.08] rounded-2xl p-5 shadow-2xl max-w-sm w-full space-y-4">
+                <div className="fixed inset-0 bg-canvas/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                    <div className="bg-surface border border-line rounded-2xl p-5 shadow-2xl max-w-sm w-full space-y-4">
                         <div className="flex items-center gap-2.5">
                             <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
                                 <Calendar size={18} />
                             </div>
                             <div>
-                                <h3 className="text-white font-bold text-sm">Filtro Personalizado</h3>
-                                <p className="text-[11px] text-slate-400">Defina o intervalo operacional</p>
+                                <h3 className="text-fg font-bold text-sm">Filtro Personalizado</h3>
+                                <p className="text-[11px] text-fg-muted">Defina o intervalo operacional</p>
                             </div>
                         </div>
 
                         <div className="space-y-3">
                             <div>
-                                <label className="text-[10px] uppercase text-slate-400 font-bold tracking-wider block mb-1">Data de Início</label>
+                                <label className="text-[10px] uppercase text-fg-muted font-bold tracking-wider block mb-1">Data de Início</label>
                                 <input
                                     type="date"
                                     value={customStart}
                                     onChange={e => setCustomStart(e.target.value)}
-                                    className="w-full bg-[#08090C] border border-white/[0.08] rounded-lg text-xs p-2.5 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
                                 />
                             </div>
                             <div>
-                                <label className="text-[10px] uppercase text-slate-400 font-bold tracking-wider block mb-1">Data de Fim (Opcional)</label>
+                                <label className="text-[10px] uppercase text-fg-muted font-bold tracking-wider block mb-1">Data de Fim (Opcional)</label>
                                 <input
                                     type="date"
                                     value={customEnd}
                                     onChange={e => setCustomEnd(e.target.value)}
-                                    className="w-full bg-[#08090C] border border-white/[0.08] rounded-lg text-xs p-2.5 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
                                 />
                             </div>
                         </div>
@@ -639,7 +639,7 @@ export const Dashboard = () => {
                         <div className="flex gap-2.5 pt-1">
                             <button
                                 onClick={() => setShowDatePicker(false)}
-                                className="flex-1 py-2 bg-[#161822] hover:bg-[#1C1F2C] text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-colors border border-white/[0.08]"
+                                className="flex-1 py-2 bg-surface-2 hover:bg-surface-3 text-fg/80 hover:text-fg rounded-lg text-xs font-semibold transition-colors border border-line"
                             >
                                 Cancelar
                             </button>

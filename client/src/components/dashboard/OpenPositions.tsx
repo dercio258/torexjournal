@@ -56,11 +56,11 @@ export const OpenPositions = () => {
         return (
             <Card className="p-6">
                 <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
                         <Activity className="w-4 h-4 text-blue-400" /> Posições Abertas
                     </h2>
                 </div>
-                <div className="text-center py-8 text-slate-500">
+                <div className="text-center py-8 text-fg-subtle">
                     <Activity className="w-12 h-12 mx-auto mb-2 opacity-30" />
                     <p>Nenhuma posição aberta no momento</p>
                 </div>
@@ -71,10 +71,10 @@ export const OpenPositions = () => {
     return (
         <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
                     <Activity className="w-4 h-4 text-blue-400" /> Posições Abertas
                 </h2>
-                <span className="text-xs font-mono text-slate-300 bg-[#161822] border border-white/[0.08] px-2 py-0.5 rounded-lg">
+                <span className="text-xs font-mono text-fg/80 bg-surface-2 border border-line px-2 py-0.5 rounded-lg">
                     {positions.length} Ativa{positions.length !== 1 ? 's' : ''}
                 </span>
             </div>
@@ -82,30 +82,30 @@ export const OpenPositions = () => {
             <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                     <thead>
-                        <tr className="border-b border-white/[0.08]">
-                            <th className="py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Símbolo</th>
-                            <th className="py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Tipo</th>
-                            <th className="text-right py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Volume</th>
-                            <th className="text-right py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Entrada</th>
-                            <th className="text-right py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Atual</th>
-                            <th className="text-right py-3 px-4 font-semibold text-slate-400 uppercase tracking-wider text-xs">Lucro</th>
+                        <tr className="border-b border-line">
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Símbolo</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Tipo</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Volume</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Entrada</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Atual</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Lucro</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/[0.06]">
+                    <tbody className="divide-y divide-line">
                         {positions.map((pos) => {
                             const isWin = pos.profit >= 0;
                             return (
-                                <tr key={pos.ticket} className="hover:bg-[#161822]/50 transition-colors">
-                                    <td className="py-3 px-4 font-medium text-slate-200">{pos.symbol}</td>
+                                <tr key={pos.ticket} className="hover:bg-surface-2/50 transition-colors">
+                                    <td className="py-3 px-4 font-medium text-fg">{pos.symbol}</td>
                                     <td className="py-3 px-4">
                                         <span className={`text-xs px-2 py-0.5 rounded-full ${pos.type === 'BUY' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
                                             {pos.type}
                                         </span>
                                     </td>
-                                    <td className="py-3 px-4 text-right text-slate-300">{Number(pos.volume).toFixed(2)}</td>
-                                    <td className="py-3 px-4 text-right text-slate-300">{Number(pos.open_price).toFixed(5)}</td>
-                                    <td className="py-3 px-4 text-right text-slate-300">{Number(pos.current_price).toFixed(5)}</td>
-                                    <td className={`py-3 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    <td className="py-3 px-4 text-right text-fg/80">{Number(pos.volume).toFixed(2)}</td>
+                                    <td className="py-3 px-4 text-right text-fg/80">{Number(pos.open_price).toFixed(5)}</td>
+                                    <td className="py-3 px-4 text-right text-fg/80">{Number(pos.current_price).toFixed(5)}</td>
+                                    <td className={`py-3 px-4 text-right font-bold ${isWin ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                         <div className="flex items-center justify-end gap-1">
                                             {isWin ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                                             {isWin ? '+' : ''}{Number(pos.profit).toFixed(2)}

@@ -100,9 +100,9 @@ export const PlanModal = ({
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#08090C]/85 backdrop-blur-md animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-canvas/85 backdrop-blur-md animate-in fade-in duration-300">
             {/* Modal Container */}
-            <div className="bg-[#111319] border border-white/[0.08] rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative p-8 text-center animate-in zoom-in-95 duration-300">
+            <div className="bg-surface border border-line rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative p-8 text-center animate-in zoom-in-95 duration-300">
                 {/* Glow Effects */}
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/10 blur-[50px] rounded-full pointer-events-none" />
 
@@ -110,7 +110,7 @@ export const PlanModal = ({
                 {type !== 'NO_ACTIVE_PLAN' && type !== 'PLAN_EXPIRED' && !showPinPrompt && (
                     <button 
                         onClick={onClose} 
-                        className="absolute top-6 right-6 p-1.5 rounded-lg bg-[#161822] border border-white/[0.08] text-[#9CA3AF] hover:text-[#F3F4F6] transition-all"
+                        className="absolute top-6 right-6 p-1.5 rounded-lg bg-surface-2 border border-line text-fg-muted hover:text-fg transition-all"
                     >
                         <X size={18} />
                     </button>
@@ -123,8 +123,8 @@ export const PlanModal = ({
                             <KeyRound size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-[#F3F4F6] tracking-tight">ATIVAÇÃO DE CONTA</h3>
-                            <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                            <h3 className="text-2xl font-black text-fg tracking-tight">ATIVAÇÃO DE CONTA</h3>
+                            <p className="text-fg-muted text-sm leading-relaxed">
                                 Seja bem-vindo ao <strong>TOREX JOURNAL</strong>! Para visualizar o painel operacional, gerenciar seus trades e desbloquear as ferramentas, você precisa ativar um plano.
                             </p>
                         </div>
@@ -144,9 +144,9 @@ export const PlanModal = ({
                             <Sparkles size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-[#F3F4F6] tracking-tight uppercase">Upgrade Premium</h3>
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">Upgrade Premium</h3>
                             <p className="text-indigo-400 text-xs font-bold uppercase tracking-widest">{featureName}</p>
-                            <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                            <p className="text-fg-muted text-sm leading-relaxed">
                                 Esta funcionalidade requer o plano <strong>Premium (PRO)</strong>. Faça o upgrade agora para ter auto-sync, backtesting ilimitado, análises com IA e muito mais.
                             </p>
                         </div>
@@ -168,39 +168,39 @@ export const PlanModal = ({
                                     <RefreshCw size={32} />
                                 </div>
                                 <div className="space-y-2">
-                                    <h4 className="text-xl font-bold text-[#F3F4F6] uppercase tracking-tight">Confirmar no Telemóvel</h4>
-                                    <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                                    <h4 className="text-xl font-bold text-fg uppercase tracking-tight">Confirmar no Telemóvel</h4>
+                                    <p className="text-fg-muted text-sm leading-relaxed">
                                         Enviamos um pedido de pagamento de Mpesa/e-Mola para o número <strong>{savedPhoneNumber}</strong>. Digite seu PIN no celular para concluir a renovação.
                                     </p>
                                 </div>
                             </div>
                         ) : (
                             <>
-                                <div className="mx-auto w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center">
+                                <div className="mx-auto w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-accent-fg rounded-2xl flex items-center justify-center">
                                     <Smartphone size={32} />
                                 </div>
                                 <div className="space-y-2">
-                                    <h3 className="text-2xl font-black text-[#F3F4F6] tracking-tight">RENOVAÇÃO RÁPIDA</h3>
-                                    <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                                    <h3 className="text-2xl font-black text-fg tracking-tight">RENOVAÇÃO RÁPIDA</h3>
+                                    <p className="text-fg-muted text-sm leading-relaxed">
                                         Deseja renovar sua assinatura do plano usando seus dados salvos?
                                     </p>
                                 </div>
 
                                 {savedPhoneNumber && savedPaymentMethod && (
-                                    <div className="bg-[#0C0D12] border border-white/[0.08] rounded-2xl p-4 flex items-center justify-between text-left">
+                                    <div className="bg-canvas-subtle border border-line rounded-2xl p-4 flex items-center justify-between text-left">
                                         <div>
-                                            <p className="text-[10px] text-[#6B7280] font-bold uppercase tracking-wider">Método Salvo</p>
-                                            <p className="text-[#F3F4F6] font-bold capitalize">{savedPaymentMethod}</p>
+                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">Método Salvo</p>
+                                            <p className="text-fg font-bold capitalize">{savedPaymentMethod}</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-[10px] text-[#6B7280] font-bold uppercase tracking-wider">Número</p>
-                                            <p className="text-[#F3F4F6] font-mono font-bold">{savedPhoneNumber}</p>
+                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">Número</p>
+                                            <p className="text-fg font-mono font-bold">{savedPhoneNumber}</p>
                                         </div>
                                     </div>
                                 )}
 
                                 {errorMessage && (
-                                    <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-semibold">
+                                    <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-danger-fg text-xs font-semibold">
                                         {errorMessage}
                                     </div>
                                 )}
@@ -226,7 +226,7 @@ export const PlanModal = ({
                                     <button
                                         onClick={handleAlternativeCheckout}
                                         disabled={isRenewing}
-                                        className="w-full py-3 bg-[#161822] hover:bg-[#1C1F2C] text-[#F3F4F6] font-bold rounded-xl transition-colors border border-white/[0.08] text-xs uppercase"
+                                        className="w-full py-3 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-xl transition-colors border border-line text-xs uppercase"
                                     >
                                         Alterar Método / Ir para Checkout
                                     </button>
@@ -243,8 +243,8 @@ export const PlanModal = ({
                             <ShieldAlert size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-[#F3F4F6] tracking-tight uppercase">ASSINATURA EXPIRADA</h3>
-                            <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">ASSINATURA EXPIRADA</h3>
+                            <p className="text-fg-muted text-sm leading-relaxed">
                                 Sua assinatura expirou. Para continuar acompanhando seu desempenho, registrar novos trades e utilizar nossas ferramentas de análise, por favor reative sua assinatura.
                             </p>
                         </div>
@@ -264,8 +264,8 @@ export const PlanModal = ({
                             <Clock size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-[#F3F4F6] tracking-tight uppercase">Assinatura Próxima do Fim</h3>
-                            <p className="text-[#9CA3AF] text-sm leading-relaxed">
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">Assinatura Próxima do Fim</h3>
+                            <p className="text-fg-muted text-sm leading-relaxed">
                                 Atenção: sua assinatura do Torex Journal expira em <strong className="text-amber-400">{daysLeft}</strong> dias. Renove agora para garantir acesso ininterrupto.
                             </p>
                         </div>
@@ -281,7 +281,7 @@ export const PlanModal = ({
                             </button>
                             <button
                                 onClick={onClose}
-                                className="w-full py-3 bg-[#161822] hover:bg-[#1C1F2C] text-[#F3F4F6] font-bold rounded-xl transition-colors border border-white/[0.08] text-xs uppercase"
+                                className="w-full py-3 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-xl transition-colors border border-line text-xs uppercase"
                             >
                                 Continuar para a Dashboard
                             </button>

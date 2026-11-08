@@ -32,10 +32,10 @@ interface PostCardProps {
 
 export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) => {
     return (
-        <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm dark:shadow-lg hover:border-slate-300 dark:hover:border-slate-700 transition-all group">
+        <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-line rounded-3xl p-6 shadow-sm dark:shadow-lg hover:border-line-strong transition-all group">
             <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300 font-bold border-2 border-slate-200 dark:border-slate-700 group-hover:border-indigo-500/50 transition-colors">
+                    <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center text-fg-muted font-bold border-2 border-slate-200 dark:border-slate-700 group-hover:border-indigo-500/50 transition-colors">
                         {post.user?.avatarUrl ? (
                             <img src={post.user.avatarUrl} alt={post.user.username} className="w-full h-full rounded-full object-cover" />
                         ) : (
@@ -43,24 +43,24 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
                         )}
                     </div>
                     <div>
-                        <h3 className="font-bold text-slate-900 dark:text-white text-base leading-tight flex items-center gap-2">
+                        <h3 className="font-bold text-fg text-base leading-tight flex items-center gap-2">
                             {post.user?.username || 'Usuário Desconhecido'}
-                            <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-normal">Trader</span>
+                            <span className="px-1.5 py-0.5 rounded bg-surface-2 text-[10px] text-fg-muted font-normal">Trader</span>
                         </h3>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{new Date(post.createdAt).toLocaleDateString()} às {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-xs text-fg-subtle dark:text-slate-400">{new Date(post.createdAt).toLocaleDateString()} às {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                 </div>
-                <button className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><MoreHorizontal size={20} /></button>
+                <button className="text-fg-muted hover:text-slate-700 dark:hover:text-white p-2 hover:bg-surface-2 rounded-full transition-colors"><MoreHorizontal size={20} /></button>
             </div>
 
-            <div className="text-slate-700 dark:text-slate-300 text-sm mb-4 whitespace-pre-wrap leading-relaxed pl-[3.75rem]">
+            <div className="text-fg-muted text-sm mb-4 whitespace-pre-wrap leading-relaxed pl-[3.75rem]">
                 {post.content}
             </div>
 
             {/* Generic Image Post */}
             {post.type === 'image' && post.imageUrl && !post.tradeData?.imageUrl && (
                 <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50 group/image">
+                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50 group/image">
                         <img
                             src={`${ASSETS_URL}${post.imageUrl}`}
                             alt="Post Media"
@@ -75,7 +75,7 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
             {/* Generic Video Post */}
             {post.type === 'video' && post.imageUrl && (
                 <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50">
+                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50">
                         <video
                             src={`${ASSETS_URL}${post.imageUrl}`}
                             controls
@@ -88,7 +88,7 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
             {/* Trade Analysis/Share Post (Legacy or specialized) */}
             {post.type === 'image' && post.tradeData?.imageUrl && (
                 <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-slate-950/50 group/image">
+                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50 group/image">
                         <img
                             src={`${ASSETS_URL}${post.tradeData?.imageUrl}`}
                             alt="Trade Review"
@@ -97,17 +97,17 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
                             onClick={() => window.open(`${ASSETS_URL}${post.tradeData?.imageUrl}`, '_blank')}
                         />
                         {post.tradeData?.symbol && (
-                            <div className="absolute top-3 left-3 bg-slate-900/80 backdrop-blur border border-slate-700 px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
-                                <span className="text-white font-bold text-sm tracking-wide">{post.tradeData?.symbol}</span>
+                            <div className="absolute top-3 left-3 bg-surface/80 backdrop-blur border border-line-strong px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
+                                <span className="text-fg font-bold text-sm tracking-wide">{post.tradeData?.symbol}</span>
                                 {post.tradeData?.ticket && (
-                                    <span className="text-slate-400 text-xs">#{post.tradeData?.ticket}</span>
+                                    <span className="text-fg-muted text-xs">#{post.tradeData?.ticket}</span>
                                 )}
                             </div>
                         )}
                         {post.tradeData?.profit !== undefined && post.tradeData?.isWin !== undefined && (
                             <div className={`absolute bottom-3 right-3 backdrop-blur px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg border text-sm font-bold ${post.tradeData?.isWin
-                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                                : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                ? 'bg-emerald-500/20 text-accent-fg border-emerald-500/30'
+                                : 'bg-rose-500/20 text-danger-fg border-rose-500/30'
                                 }`}>
                                 {post.tradeData?.isWin ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
                                 {post.tradeData?.isWin ? '+' : ''}{Number(post.tradeData?.profit).toFixed(2)}
@@ -122,7 +122,7 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
                 <button
                     onClick={() => !isRestricted && onLike(post.id)}
                     disabled={isRestricted}
-                    className={`flex items-center gap-2 text-sm font-bold transition-all ${post.isLiked ? 'text-rose-500' : 'text-slate-500 hover:text-rose-500'
+                    className={`flex items-center gap-2 text-sm font-bold transition-all ${post.isLiked ? 'text-rose-500' : 'text-fg-subtle hover:text-rose-500'
                         } ${isRestricted
                             ? 'opacity-50 cursor-not-allowed'
                             : 'hover:bg-rose-500/10 px-2 py-1 -ml-2 rounded-lg'
@@ -133,7 +133,7 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
                 </button>
                 <button
                     disabled={isRestricted}
-                    className={`flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all ${isRestricted
+                    className={`flex items-center gap-2 text-sm font-bold text-fg-subtle hover:text-indigo-600 dark:hover:text-indigo-400 transition-all ${isRestricted
                             ? 'opacity-50 cursor-not-allowed'
                             : 'hover:bg-indigo-500/10 px-2 py-1 rounded-lg'
                         }`}
@@ -142,7 +142,7 @@ export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) 
                     {post.commentsCount || 0}
                 </button>
                 <button
-                    className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg transition-all ml-auto"
+                    className="flex items-center gap-2 text-sm font-bold text-fg-subtle hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg transition-all ml-auto"
                 >
                     <Share2 size={18} />
                 </button>

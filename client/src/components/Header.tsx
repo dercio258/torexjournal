@@ -119,8 +119,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
             default:
                 return {
                     label: 'LIVE',
-                    classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                    icon: <Flame size={11} className="text-emerald-400" />
+                    classes: 'bg-emerald-500/15 text-accent-fg border-emerald-500/30',
+                    icon: <Flame size={11} className="text-accent-fg" />
                 };
         }
     };
@@ -128,13 +128,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
     const totalConsolidatedPnl = activeAccounts.reduce((sum, a) => sum + (a.netPnl || 0), 0);
 
     return (
-        <header className="sticky top-0 z-30 w-full h-16 bg-white/95 dark:bg-[#08090C]/90 backdrop-blur-xl border-b border-slate-200 dark:border-white/[0.08] flex items-center justify-between px-3 sm:px-6 transition-colors duration-200 shadow-xs dark:shadow-none">
+        <header className="sticky top-0 z-30 w-full h-16 bg-white/95 dark:bg-[#08090C]/90 backdrop-blur-xl border-b border-line flex items-center justify-between px-3 sm:px-6 transition-colors duration-200 shadow-xs dark:shadow-none">
             {/* LADO ESQUERDO: Mobile Toggle / Breadcrumb / Seletor de Conta */}
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                 {/* Mobile Hamburger */}
                 <button
                     onClick={onOpenSidebar}
-                    className="md:hidden p-2 text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] rounded-lg transition-colors focus:outline-none"
+                    className="md:hidden p-2 text-fg-muted hover:text-fg bg-slate-100 dark:bg-[#111319] border border-line rounded-lg transition-colors focus:outline-none"
                     title="Abrir menu lateral"
                 >
                     <Menu size={19} />
@@ -147,14 +147,14 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                         alt="Logo"
                         className="w-7 h-7 object-contain"
                     />
-                    <span className="font-bold text-xs tracking-tight text-slate-900 dark:text-[#F3F4F6] hidden xs:inline">
+                    <span className="font-bold text-xs tracking-tight text-fg hidden xs:inline">
                         TOREX <span className="text-emerald-500 dark:text-emerald-400">JOURNAL</span>
                     </span>
                 </div>
 
                 {/* Desktop Page Title */}
-                <div className="hidden md:flex items-center gap-2 pr-3 border-r border-slate-200 dark:border-white/[0.08]">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-[#F3F4F6] tracking-tight">
+                <div className="hidden md:flex items-center gap-2 pr-3 border-r border-line ">
+                    <span className="text-sm font-semibold text-fg tracking-tight">
                         {getPageTitle()}
                     </span>
                 </div>
@@ -164,9 +164,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                     <button
                         onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
                         className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border transition-all duration-200 group focus:outline-none ${isAccountMenuOpen
-                                ? 'bg-slate-100 dark:bg-[#161822] border-emerald-500/50 shadow-sm'
-                                : 'bg-slate-50 dark:bg-[#111319] hover:bg-slate-100 dark:hover:bg-[#161822] border-slate-200 dark:border-white/[0.08] hover:border-emerald-500/30'
-                            }`}
+ ? 'bg-surface-2 border-emerald-500/50 shadow-sm'
+ : 'bg-slate-50 dark:bg-[#111319] hover:bg-surface-2 border-line hover:border-emerald-500/30'
+ }`}
                         title="Alternar Conta de Trading"
                     >
                         <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border ${isConsolidated
@@ -178,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
 
                         <div className="flex flex-col text-left min-w-0">
                             <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="text-xs font-semibold text-slate-900 dark:text-[#F3F4F6] max-w-[100px] sm:max-w-[140px] truncate leading-tight">
+                                <span className="text-xs font-semibold text-fg max-w-[100px] sm:max-w-[140px] truncate leading-tight">
                                     {isConsolidated ? 'Todas as Contas' : (selectedAccount?.name || 'Conta Principal')}
                                 </span>
                                 {!isConsolidated && selectedAccount && (
@@ -201,16 +201,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
 
                         <ChevronDown
                             size={13}
-                            className={`text-slate-400 dark:text-[#6B7280] transition-transform duration-200 ml-0.5 shrink-0 ${isAccountMenuOpen ? 'rotate-180 text-emerald-500 dark:text-emerald-400' : 'group-hover:text-slate-600 dark:group-hover:text-[#9CA3AF]'
-                                }`}
+                            className={`text-fg-muted dark:text-[#6B7280] transition-transform duration-200 ml-0.5 shrink-0 ${isAccountMenuOpen ? 'rotate-180 text-emerald-500 dark:text-emerald-400' : 'group-hover:text-fg-muted '
+ }`}
                         />
                     </button>
 
                     {/* Dropdown de Contas */}
                     {isAccountMenuOpen && (
-                        <div className="absolute left-0 mt-2 w-72 sm:w-80 rounded-xl bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-                            <div className="p-3 border-b border-slate-200 dark:border-white/[0.08] flex items-center justify-between bg-slate-50 dark:bg-[#0C0D12]">
-                                <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-[#F3F4F6]">
+                        <div className="absolute left-0 mt-2 w-72 sm:w-80 rounded-xl bg-surface border border-line shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                            <div className="p-3 border-b border-line flex items-center justify-between bg-slate-50 dark:bg-[#0C0D12]">
+                                <div className="flex items-center gap-2 text-xs font-bold text-fg ">
                                     <Briefcase size={14} className="text-emerald-500 dark:text-emerald-400" />
                                     <span>Contas de Trading</span>
                                 </div>
@@ -220,25 +220,25 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                             </div>
 
                             {/* Opção: Visão Consolidada */}
-                            <div className="p-1.5 border-b border-slate-200 dark:border-white/[0.08]">
+                            <div className="p-1.5 border-b border-line ">
                                 <button
                                     onClick={() => {
                                         selectAccount('all');
                                         setIsAccountMenuOpen(false);
                                     }}
                                     className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${isConsolidated
-                                            ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-900 dark:text-white shadow-sm'
-                                            : 'hover:bg-slate-100 dark:hover:bg-[#161822] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-transparent'
-                                        }`}
+ ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-900 dark:text-white shadow-sm'
+ : 'hover:bg-surface-2 text-fg-muted hover:text-fg border border-transparent'
+ }`}
                                 >
                                     <div className="flex items-center gap-2.5 overflow-hidden">
-                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${isConsolidated ? 'bg-indigo-500/30 border-indigo-500/50 text-indigo-600 dark:text-indigo-300' : 'bg-slate-100 dark:bg-[#161822] border-slate-200 dark:border-white/[0.08] text-slate-500 dark:text-slate-400'
-                                            }`}>
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${isConsolidated ? 'bg-indigo-500/30 border-indigo-500/50 text-indigo-600 dark:text-indigo-300' : 'bg-surface-2 border-line text-fg-subtle dark:text-slate-400'
+ }`}>
                                             <Layers size={16} />
                                         </div>
                                         <div>
                                             <span className="text-xs font-bold block leading-tight">Todas as Contas</span>
-                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                            <span className="text-[10px] text-fg-subtle dark:text-slate-400 font-mono">
                                                 Visão consolidada ({activeAccounts.length} contas)
                                             </span>
                                         </div>
@@ -268,13 +268,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                                 setIsAccountMenuOpen(false);
                                             }}
                                             className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all ${isSelected
-                                                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-white shadow-sm'
-                                                    : 'hover:bg-slate-100 dark:hover:bg-[#161822] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white border border-transparent'
-                                                }`}
+ ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-white shadow-sm'
+ : 'hover:bg-surface-2 text-fg-muted hover:text-slate-950 dark:hover:text-white border border-transparent'
+ }`}
                                         >
                                             <div className="flex items-center gap-2.5 min-w-0">
-                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${isSelected ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-600 dark:text-emerald-300' : 'bg-slate-100 dark:bg-[#161822] border-slate-200 dark:border-white/[0.08]'
-                                                    }`}>
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 ${isSelected ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-600 dark:text-emerald-300' : 'bg-surface-2 border-line '
+ }`}>
                                                     {badge.icon}
                                                 </div>
 
@@ -287,7 +287,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                                             {badge.label}
                                                         </span>
                                                     </div>
-                                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                                    <span className="text-[10px] text-fg-subtle dark:text-slate-400 truncate mt-0.5">
                                                         {account.broker} • {account.currency}
                                                     </span>
                                                 </div>
@@ -305,15 +305,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                             </div>
 
                             {/* Footer do Dropdown: Link para Perfil / Criar Conta */}
-                            <div className="p-2 border-t border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0C0D12] flex items-center justify-between gap-2">
+                            <div className="p-2 border-t border-line bg-slate-50 dark:bg-[#0C0D12] flex items-center justify-between gap-2">
                                 <button
                                     onClick={() => {
                                         setIsAccountMenuOpen(false);
                                         navigate('/profile');
                                     }}
-                                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#161822] dark:hover:bg-[#1C1F2C] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/[0.08] text-xs font-semibold transition-colors"
+                                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-surface-2 hover:bg-slate-200 dark:hover:bg-[#1C1F2C] text-fg-muted border border-line text-xs font-semibold transition-colors"
                                 >
-                                    <Briefcase size={14} className="text-slate-500 dark:text-slate-400" />
+                                    <Briefcase size={14} className="text-fg-subtle dark:text-slate-400" />
                                     <span>Gerenciar Contas no Perfil</span>
                                 </button>
                             </div>
@@ -327,7 +327,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                 {/* BOTÃO DE MUDAR MODO CLARO / ESCURO */}
                 <button
                     onClick={toggleTheme}
-                    className="p-2 rounded-lg bg-slate-100 dark:bg-[#111319] hover:bg-slate-200 dark:hover:bg-[#161822] border border-slate-200 dark:border-white/[0.08] hover:border-amber-500/30 text-slate-600 dark:text-[#9CA3AF] hover:text-amber-500 transition-all flex items-center justify-center focus:outline-none shadow-xs dark:shadow-none"
+                    className="p-2 rounded-lg bg-slate-100 dark:bg-[#111319] hover:bg-slate-200 dark:hover:bg-[#161822] border border-line hover:border-amber-500/30 text-fg-muted hover:text-amber-500 transition-all flex items-center justify-center focus:outline-none shadow-xs dark:shadow-none"
                     title={theme === 'dark' ? 'Alternar para Modo Claro' : 'Alternar para Modo Escuro'}
                 >
                     {theme === 'dark' ? (
@@ -340,7 +340,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                 {/* NOTIFICAÇÕES SHORTCUT */}
                 <NavLink
                     to="/notifications"
-                    className="p-2 rounded-lg bg-slate-100 dark:bg-[#111319] hover:bg-slate-200 dark:hover:bg-[#161822] border border-slate-200 dark:border-white/[0.08] hover:border-emerald-500/30 text-slate-600 dark:text-[#9CA3AF] hover:text-slate-900 dark:hover:text-[#F3F4F6] transition-all flex items-center justify-center focus:outline-none shadow-xs dark:shadow-none"
+                    className="p-2 rounded-lg bg-slate-100 dark:bg-[#111319] hover:bg-slate-200 dark:hover:bg-[#161822] border border-line hover:border-emerald-500/30 text-fg-muted hover:text-fg transition-all flex items-center justify-center focus:outline-none shadow-xs dark:shadow-none"
                     title="Notificações"
                 >
                     <Bell size={16} />
@@ -351,9 +351,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                     <button
                         onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                         className={`flex items-center gap-2 p-1 sm:px-2 sm:py-1 rounded-lg border transition-all duration-200 group text-left focus:outline-none ${isUserMenuOpen
-                                ? 'bg-slate-100 dark:bg-[#161822] border-emerald-500/50 shadow-sm'
-                                : 'hover:bg-slate-100 dark:hover:bg-[#161822] border-transparent hover:border-slate-200 dark:hover:border-white/[0.08]'
-                            }`}
+ ? 'bg-surface-2 border-emerald-500/50 shadow-sm'
+ : 'hover:bg-surface-2 border-transparent hover:border-line '
+ }`}
                         title="Meu Perfil"
                     >
                         <div className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-[#04110C] font-bold text-xs shadow-md overflow-hidden border border-emerald-400/30">
@@ -365,7 +365,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                         </div>
 
                         <div className="hidden sm:flex flex-col min-w-0 max-w-[110px]">
-                            <span className="text-xs font-semibold text-slate-900 dark:text-[#F3F4F6] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors leading-tight truncate">
+                            <span className="text-xs font-semibold text-fg group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors leading-tight truncate">
                                 {user?.username || 'Trader'}
                             </span>
                             <span className="text-[9.5px] text-emerald-600 dark:text-[#34D399] font-medium leading-tight truncate mt-0.5">
@@ -375,16 +375,16 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
 
                         <ChevronDown
                             size={14}
-                            className={`hidden sm:block text-slate-400 dark:text-slate-400 transition-transform duration-200 ml-0.5 ${isUserMenuOpen ? 'rotate-180 text-emerald-500 dark:text-emerald-400' : 'group-hover:text-slate-600 dark:group-hover:text-slate-200'
+                            className={`hidden sm:block text-fg-muted dark:text-slate-400 transition-transform duration-200 ml-0.5 ${isUserMenuOpen ? 'rotate-180 text-emerald-500 dark:text-emerald-400' : 'group-hover:text-slate-600 dark:group-hover:text-slate-200'
                                 }`}
                         />
                     </button>
 
                     {/* Dropdown do Usuário */}
                     {isUserMenuOpen && (
-                        <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="absolute right-0 mt-2 w-64 rounded-xl bg-surface border border-line shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
                             {/* Card do Usuário */}
-                            <div className="p-4 border-b border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0C0D12]">
+                            <div className="p-4 border-b border-line bg-slate-50 dark:bg-[#0C0D12]">
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-[#04110C] font-bold text-sm flex items-center justify-center border border-emerald-400/30 shrink-0">
                                         {user?.avatarUrl ? (
@@ -394,10 +394,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                         )}
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="text-sm font-bold text-slate-900 dark:text-[#F3F4F6] truncate leading-tight">
+                                        <p className="text-sm font-bold text-fg truncate leading-tight">
                                             {user?.username || 'Trader'}
                                         </p>
-                                        <p className="text-xs text-slate-500 dark:text-[#6B7280] truncate leading-tight mt-0.5">
+                                        <p className="text-xs text-fg-subtle dark:text-[#6B7280] truncate leading-tight mt-0.5">
                                             {user?.email || ''}
                                         </p>
                                         <span className="inline-block text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 uppercase tracking-wide mt-1.5">
@@ -412,7 +412,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                 <NavLink
                                     to="/profile"
                                     onClick={() => setIsUserMenuOpen(false)}
-                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors"
+                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-slate-950 dark:hover:text-white hover:bg-surface-2 transition-colors"
                                 >
                                     <User size={15} className="text-emerald-600 dark:text-emerald-400" />
                                     <span>Meu Perfil & Contas</span>
@@ -421,7 +421,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                 <NavLink
                                     to="/leaderboard"
                                     onClick={() => setIsUserMenuOpen(false)}
-                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors"
+                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-slate-950 dark:hover:text-white hover:bg-surface-2 transition-colors"
                                 >
                                     <Trophy size={15} className="text-amber-500 dark:text-amber-400" />
                                     <span>Tabela de Classificação</span>
@@ -430,24 +430,24 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar }) => {
                                 <NavLink
                                     to="/configuration"
                                     onClick={() => setIsUserMenuOpen(false)}
-                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors"
+                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-slate-950 dark:hover:text-white hover:bg-surface-2 transition-colors"
                                 >
-                                    <Settings size={15} className="text-slate-500 dark:text-slate-400" />
+                                    <Settings size={15} className="text-fg-subtle dark:text-slate-400" />
                                     <span>Configurações</span>
                                 </NavLink>
 
                                 <NavLink
                                     to="/payments"
                                     onClick={() => setIsUserMenuOpen(false)}
-                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#161822] transition-colors"
+                                    className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-slate-950 dark:hover:text-white hover:bg-surface-2 transition-colors"
                                 >
-                                    <CreditCard size={15} className="text-slate-500 dark:text-slate-400" />
+                                    <CreditCard size={15} className="text-fg-subtle dark:text-slate-400" />
                                     <span>Planos & Assinatura</span>
                                 </NavLink>
                             </div>
 
                             {/* Botão de Logout */}
-                            <div className="p-2 border-t border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0C0D12]">
+                            <div className="p-2 border-t border-line bg-slate-50 dark:bg-[#0C0D12]">
                                 <button
                                     onClick={() => {
                                         setIsUserMenuOpen(false);

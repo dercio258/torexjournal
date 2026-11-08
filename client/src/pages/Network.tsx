@@ -187,7 +187,7 @@ export const Network = () => {
     return (
         <div className="h-[calc(100vh-7rem)] flex flex-col">
             {/* Tabs Header */}
-            <div className="flex gap-1 mb-6 p-1 bg-slate-100 dark:bg-slate-900/50 rounded-xl w-full md:w-fit border border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar shadow-xs">
+            <div className="flex gap-1 mb-6 p-1 bg-slate-100 dark:bg-slate-900/50 rounded-xl w-full md:w-fit border border-line overflow-x-auto no-scrollbar shadow-xs">
                 {[
                     { id: 'feed', label: 'Feed', icon: <TrendingUp size={16} /> },
                     { id: 'messages', label: 'Mensagens', icon: <MessageSquare size={16} /> },
@@ -198,12 +198,12 @@ export const Network = () => {
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
                         className={`
-                            whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all cursor-pointer
-                            ${activeTab === tab.id
-                                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/20'
-                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                            }
-                        `}
+ whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all cursor-pointer
+ ${activeTab === tab.id
+ ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/20'
+ : 'text-fg-muted hover:text-fg hover:bg-slate-200/60 dark:hover:bg-slate-800'
+ }
+ `}
                     >
                         {tab.icon} {tab.label}
                     </button>

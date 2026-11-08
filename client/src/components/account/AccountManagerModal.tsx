@@ -184,30 +184,30 @@ export const AccountManagerModal: React.FC = () => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#08090C]/85 backdrop-blur-md animate-in fade-in duration-200">
-            <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl bg-[#111319] border border-white/[0.08] shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-canvas/85 backdrop-blur-md animate-in fade-in duration-200">
+            <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl bg-surface border border-line shadow-2xl overflow-hidden">
                 {/* Header */}
-                <div className="p-6 border-b border-white/[0.08] flex items-center justify-between bg-[#0C0D12]/90">
+                <div className="p-6 border-b border-line flex items-center justify-between bg-canvas-subtle/90">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-accent-fg">
                             <Briefcase size={20} />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-[#F3F4F6]">Gerenciar Contas de Trading</h2>
-                            <p className="text-xs text-[#9CA3AF]">Crie, isole e administre suas contas de trading</p>
+                            <h2 className="text-xl font-bold text-fg">Gerenciar Contas de Trading</h2>
+                            <p className="text-xs text-fg-muted">Crie, isole e administre suas contas de trading</p>
                         </div>
                     </div>
 
                     <button
                         onClick={() => setIsManagerOpen(false)}
-                        className="p-2 rounded-xl text-[#9CA3AF] hover:text-[#F3F4F6] hover:bg-[#161822] transition-colors"
+                        className="p-2 rounded-xl text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                     >
                         <X size={20} />
                     </button>
                 </div>
 
                 {/* Navigation Tabs */}
-                <div className="flex items-center gap-2 px-6 pt-3 border-b border-white/[0.06] bg-[#0C0D12]/40">
+                <div className="flex items-center gap-2 px-6 pt-3 border-b border-line bg-canvas-subtle/40">
                     <button
                         onClick={() => {
                             setActiveManagerTab('accounts');
@@ -215,8 +215,8 @@ export const AccountManagerModal: React.FC = () => {
                         }}
                         className={`pb-3 px-3 text-xs font-bold transition-all border-b-2 ${
                             activeManagerTab === 'accounts'
-                                ? 'border-emerald-500 text-emerald-400'
-                                : 'border-transparent text-[#9CA3AF] hover:text-[#F3F4F6]'
+                                ? 'border-emerald-500 text-accent-fg'
+                                : 'border-transparent text-fg-muted hover:text-fg'
                         }`}
                     >
                         Minhas Contas ({accounts.filter(a => !a.isArchived).length})
@@ -229,8 +229,8 @@ export const AccountManagerModal: React.FC = () => {
                             }}
                             className={`pb-3 px-3 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 ${
                                 activeManagerTab === 'create'
-                                    ? 'border-emerald-500 text-emerald-400'
-                                    : 'border-transparent text-[#9CA3AF] hover:text-[#F3F4F6]'
+                                    ? 'border-emerald-500 text-accent-fg'
+                                    : 'border-transparent text-fg-muted hover:text-fg'
                             }`}
                         >
                             {editingAccount ? <Edit3 size={14} /> : <Plus size={14} />}
@@ -241,13 +241,13 @@ export const AccountManagerModal: React.FC = () => {
 
                 {/* Feedback Alerts */}
                 {errorMessage && (
-                    <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
+                    <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-danger-fg text-xs flex items-center gap-2">
                         <AlertCircle size={16} />
                         <span>{errorMessage}</span>
                     </div>
                 )}
                 {successMessage && (
-                    <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
+                    <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-accent-fg text-xs flex items-center gap-2">
                         <Check size={16} />
                         <span>{successMessage}</span>
                     </div>
@@ -257,12 +257,12 @@ export const AccountManagerModal: React.FC = () => {
                 {activeManagerTab === 'accounts' && (
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs text-[#9CA3AF]">
+                            <span className="text-xs text-fg-muted">
                                 {showArchived ? 'Contas arquivadas' : 'Contas de trading ativas'}
                             </span>
                             <button
                                 onClick={() => setShowArchived(!showArchived)}
-                                className="text-xs text-[#9CA3AF] hover:text-[#F3F4F6] underline"
+                                className="text-xs text-fg-muted hover:text-fg underline"
                             >
                                 {showArchived ? 'Ver contas ativas' : 'Ver contas arquivadas'}
                             </button>
@@ -279,14 +279,14 @@ export const AccountManagerModal: React.FC = () => {
                                         key={account.id}
                                         className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
                                             account.id === selectedAccountId
-                                                ? 'bg-[#161822] border-emerald-500/60 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30'
-                                                : 'bg-[#0C0D12]/70 border-white/[0.08] hover:border-white/[0.15]'
+                                                ? 'bg-surface-2 border-emerald-500/60 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30'
+                                                : 'bg-canvas-subtle/70 border-line hover:border-line-strong'
                                         }`}
                                     >
                                         <div>
                                             <div className="flex items-start justify-between mb-2">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    <h3 className="font-bold text-[#F3F4F6] text-sm">
+                                                    <h3 className="font-bold text-fg text-sm">
                                                         {account.name}
                                                     </h3>
                                                     {account.mt5Id && (
@@ -295,7 +295,7 @@ export const AccountManagerModal: React.FC = () => {
                                                         </span>
                                                     )}
                                                     {account.isPrimary && (
-                                                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-semibold">
+                                                        <span className="text-[10px] bg-emerald-500/20 text-accent-fg border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-semibold">
                                                             Principal
                                                         </span>
                                                     )}
@@ -306,20 +306,20 @@ export const AccountManagerModal: React.FC = () => {
                                                         ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
                                                         : account.type === 'demo'
                                                         ? 'bg-sky-500/10 text-sky-400 border-sky-500/30'
-                                                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                        : 'bg-emerald-500/10 text-accent-fg border-emerald-500/30'
                                                 }`}>
                                                     {account.type.toUpperCase()}
                                                 </span>
                                             </div>
 
-                                            <div className="text-xs text-[#9CA3AF] flex items-center gap-2 mb-3 flex-wrap">
+                                            <div className="text-xs text-fg-muted flex items-center gap-2 mb-3 flex-wrap">
                                                 <span>{account.broker}</span>
                                                 <span>•</span>
                                                 <span>{account.currency}</span>
                                                 {(account.mt5Id || Number(account.balance) > 0) && (
                                                     <>
                                                         <span>•</span>
-                                                        <span className="font-mono text-[#F3F4F6] font-semibold">
+                                                        <span className="font-mono text-fg font-semibold">
                                                             Saldo: {formatMoney(Number(account.balance) || 0, account.currency)}
                                                         </span>
                                                     </>
@@ -327,33 +327,33 @@ export const AccountManagerModal: React.FC = () => {
                                             </div>
 
                                             {/* Métricas Reais do Trading */}
-                                            <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-[#08090C] border border-white/[0.06] mb-3 text-xs">
+                                            <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-canvas border border-line mb-3 text-xs">
                                                 <div>
-                                                    <span className="text-[9px] text-[#6B7280] uppercase tracking-wider block">Lucro Líquido</span>
+                                                    <span className="text-[9px] text-fg-subtle uppercase tracking-wider block">Lucro Líquido</span>
                                                     <span className={`font-mono font-bold text-xs ${
-                                                        (account.netPnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                                        (account.netPnl || 0) >= 0 ? 'text-accent-fg' : 'text-danger-fg'
                                                     }`}>
                                                         {(account.netPnl || 0) >= 0 ? '+' : ''}
                                                         {formatMoney(account.netPnl || 0, account.currency)}
                                                     </span>
                                                 </div>
                                                 <div>
-                                                    <span className="text-[9px] text-[#6B7280] uppercase tracking-wider block">Win Rate</span>
-                                                    <span className="font-mono font-bold text-xs text-[#F3F4F6]">
+                                                    <span className="text-[9px] text-fg-subtle uppercase tracking-wider block">Win Rate</span>
+                                                    <span className="font-mono font-bold text-xs text-fg">
                                                         {(account.winRate || 0).toFixed(1)}%
                                                     </span>
                                                 </div>
                                                 <div>
-                                                    <span className="text-[9px] text-[#6B7280] uppercase tracking-wider block">Trades</span>
-                                                    <span className="font-mono font-bold text-xs text-[#F3F4F6]">
+                                                    <span className="text-[9px] text-fg-subtle uppercase tracking-wider block">Trades</span>
+                                                    <span className="font-mono font-bold text-xs text-fg">
                                                         {account.tradesCount || 0}
                                                     </span>
                                                 </div>
                                             </div>
 
                                             {/* Token do EA MT5 */}
-                                            <div className="p-2 rounded-xl bg-[#08090C]/80 border border-white/[0.06] mb-3">
-                                                <div className="flex items-center justify-between text-[11px] text-[#9CA3AF] mb-1">
+                                            <div className="p-2 rounded-xl bg-canvas/80 border border-line mb-3">
+                                                <div className="flex items-center justify-between text-[11px] text-fg-muted mb-1">
                                                     <span className="flex items-center gap-1">
                                                         <KeyRound size={11} className="text-indigo-400" />
                                                         Token MT5 EA:
@@ -366,20 +366,20 @@ export const AccountManagerModal: React.FC = () => {
                                                     </button>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-2">
-                                                    <code className="text-[10px] font-mono text-[#9CA3AF] truncate">
+                                                    <code className="text-[10px] font-mono text-fg-muted truncate">
                                                         {isTokenVisible ? token : '••••••••••••••••••••••••'}
                                                     </code>
                                                     <div className="flex items-center gap-1">
                                                         <button
                                                             onClick={() => handleCopyToken(account.id, token)}
-                                                            className="p-1 rounded bg-[#161822] hover:bg-[#1C1F2C] text-[#9CA3AF] hover:text-[#F3F4F6] transition-colors"
+                                                            className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg transition-colors"
                                                             title="Copiar Token EA"
                                                         >
-                                                            {copiedTokenId === account.id ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                                                            {copiedTokenId === account.id ? <Check size={12} className="text-accent-fg" /> : <Copy size={12} />}
                                                         </button>
                                                         <button
                                                             onClick={() => handleRegenerateToken(account.id)}
-                                                            className="p-1 rounded bg-[#161822] hover:bg-[#1C1F2C] text-[#9CA3AF] hover:text-[#F3F4F6] transition-colors"
+                                                            className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg transition-colors"
                                                             title="Regenerar Token EA"
                                                         >
                                                             <RefreshCw size={12} />
@@ -390,11 +390,11 @@ export const AccountManagerModal: React.FC = () => {
                                         </div>
 
                                         {/* Ações da Conta */}
-                                        <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between gap-1 text-xs">
+                                        <div className="pt-2 border-t border-line flex items-center justify-between gap-1 text-xs">
                                             {!account.isPrimary && !account.isArchived && (
                                                 <button
                                                     onClick={() => setPrimaryAccount(account.id)}
-                                                    className="text-[#9CA3AF] hover:text-emerald-400 text-[11px] font-medium transition-colors"
+                                                    className="text-fg-muted hover:text-accent-fg text-[11px] font-medium transition-colors"
                                                 >
                                                     Tornar Principal
                                                 </button>
@@ -406,7 +406,7 @@ export const AccountManagerModal: React.FC = () => {
                                                         setEditingAccount(account);
                                                         setActiveManagerTab('create');
                                                     }}
-                                                    className="p-1.5 rounded-lg text-[#9CA3AF] hover:text-[#F3F4F6] hover:bg-[#161822] transition-colors"
+                                                    className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                                                     title="Editar"
                                                 >
                                                     <Edit3 size={14} />
@@ -415,7 +415,7 @@ export const AccountManagerModal: React.FC = () => {
                                                 {account.isArchived ? (
                                                     <button
                                                         onClick={() => restoreAccount(account.id)}
-                                                        className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                                                        className="p-1.5 rounded-lg text-accent-fg hover:bg-emerald-500/10 transition-colors"
                                                         title="Restaurar"
                                                     >
                                                         <RotateCcw size={14} />
@@ -423,7 +423,7 @@ export const AccountManagerModal: React.FC = () => {
                                                 ) : (
                                                     <button
                                                         onClick={() => archiveAccount(account.id)}
-                                                        className="p-1.5 rounded-lg text-[#9CA3AF] hover:text-amber-400 hover:bg-[#161822] transition-colors"
+                                                        className="p-1.5 rounded-lg text-fg-muted hover:text-amber-400 hover:bg-surface-2 transition-colors"
                                                         title="Arquivar"
                                                     >
                                                         <Archive size={14} />
@@ -432,7 +432,7 @@ export const AccountManagerModal: React.FC = () => {
 
                                                 <button
                                                     onClick={() => handleDelete(account)}
-                                                    className="p-1.5 rounded-lg text-[#9CA3AF] hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                                    className="p-1.5 rounded-lg text-fg-muted hover:text-danger-fg hover:bg-rose-500/10 transition-colors"
                                                     title="Excluir"
                                                 >
                                                     <Trash2 size={14} />
@@ -453,35 +453,35 @@ export const AccountManagerModal: React.FC = () => {
                         {/* Formulário Principal */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-medium text-[#9CA3AF] mb-1.5">Nome da Conta *</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Nome da Conta *</label>
                                 <input
                                     type="text"
                                     value={formData.name}
                                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                                     placeholder="Ex: FTMO $100K, Exness Live..."
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-sm focus:border-emerald-500/60 focus:outline-none"
+                                    className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                     required
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-[#9CA3AF] mb-1.5">Corretora / Broker *</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Corretora / Broker *</label>
                                 <input
                                     type="text"
                                     value={formData.broker}
                                     onChange={e => setFormData({ ...formData, broker: e.target.value })}
                                     placeholder="Ex: FTMO, Exness, IC Markets, Deriv..."
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-sm focus:border-emerald-500/60 focus:outline-none"
+                                    className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                     required
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-[#9CA3AF] mb-1.5">Tipo de Conta</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Tipo de Conta</label>
                                 <select
                                     value={formData.type}
                                     onChange={e => setFormData({ ...formData, type: e.target.value as AccountType })}
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-sm focus:border-emerald-500/60 focus:outline-none"
+                                    className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                 >
                                     <option value="live">Live (Real)</option>
                                     <option value="demo">Demo</option>
@@ -493,11 +493,11 @@ export const AccountManagerModal: React.FC = () => {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-[#9CA3AF] mb-1.5">Moeda Base</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Moeda Base</label>
                                 <select
                                     value={formData.currency}
                                     onChange={e => setFormData({ ...formData, currency: e.target.value })}
-                                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-sm focus:border-emerald-500/60 focus:outline-none"
+                                    className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                 >
                                     <option value="USD">USD ($)</option>
                                     <option value="EUR">EUR (€)</option>
@@ -519,47 +519,47 @@ export const AccountManagerModal: React.FC = () => {
 
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                     <div>
-                                        <label className="block text-[11px] text-[#9CA3AF] mb-1">Meta de Lucro (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">Meta de Lucro (%)</label>
                                         <input
                                             type="number"
                                             value={formData.profitTarget || ''}
                                             onChange={e => setFormData({ ...formData, profitTarget: parseFloat(e.target.value) || 0 })}
                                             placeholder="Ex: 10"
-                                            className="w-full px-3 py-2 rounded-lg bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
+                                            className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-[11px] text-[#9CA3AF] mb-1">Perda Máxima Diária (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">Perda Máxima Diária (%)</label>
                                         <input
                                             type="number"
                                             value={formData.dailyLossLimit || ''}
                                             onChange={e => setFormData({ ...formData, dailyLossLimit: parseFloat(e.target.value) || 0 })}
                                             placeholder="Ex: 5"
-                                            className="w-full px-3 py-2 rounded-lg bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
+                                            className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-[11px] text-[#9CA3AF] mb-1">Drawdown Máximo (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">Drawdown Máximo (%)</label>
                                         <input
                                             type="number"
                                             value={formData.maxDrawdown || ''}
                                             onChange={e => setFormData({ ...formData, maxDrawdown: parseFloat(e.target.value) || 0 })}
                                             placeholder="Ex: 10"
-                                            className="w-full px-3 py-2 rounded-lg bg-[#08090C] border border-white/[0.08] text-[#F3F4F6] text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
+                                            className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
                                 </div>
                             </div>
                         )}
 
-                        <div className="flex justify-end gap-3 pt-4 border-t border-white/[0.08]">
+                        <div className="flex justify-end gap-3 pt-4 border-t border-line">
                             <button
                                 type="button"
                                 onClick={() => {
                                     setActiveManagerTab('accounts');
                                     setEditingAccount(null);
                                 }}
-                                className="px-4 py-2 rounded-xl text-xs font-semibold text-[#9CA3AF] hover:text-[#F3F4F6] hover:bg-[#161822] transition-colors"
+                                className="px-4 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                             >
                                 Cancelar
                             </button>

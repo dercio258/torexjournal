@@ -10,7 +10,7 @@ interface JournalEditorProps {
 
 export const JournalEditor: React.FC<JournalEditorProps> = ({ value, onEditorChange, placeholder, height = 300 }) => {
     return (
-        <div className="rounded-lg overflow-hidden border border-slate-700">
+        <div className="rounded-lg overflow-hidden border border-line-strong">
             <Editor
                 apiKey={import.meta.env.VITE_TINY_API_KEY}
                 value={value}

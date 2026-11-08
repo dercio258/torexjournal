@@ -19,11 +19,11 @@ const buttonVariants = cva(
                 link: 'h-auto border-transparent p-0 font-semibold text-accent-fg hover:text-accent-hover hover:underline disabled:text-fg-subtle disabled:no-underline disabled:opacity-100',
 
                 // Legacy v1 (kept so existing screens look identical)
-                primary: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-500/20',
+                primary: 'border-emerald-500/30 bg-emerald-500/10 text-accent-fg hover:border-emerald-500/50 hover:bg-emerald-500/20',
                 solid: 'border-transparent bg-[#10B981] font-semibold text-[#04110C] shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:bg-[#059669]',
-                secondary: 'border-white/[0.08] bg-[#161822] text-slate-200 hover:bg-[#1C1F2C]',
-                danger: 'border-rose-500/20 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20',
-                ghost: 'border-transparent text-slate-400 hover:bg-[#161822] hover:text-slate-100',
+                secondary: 'border-line bg-surface-2 text-fg hover:bg-surface-3',
+                danger: 'border-rose-500/20 bg-rose-500/10 text-danger-fg hover:bg-rose-500/20',
+                ghost: 'border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg',
                 gradient: 'border-none bg-gradient-to-r from-emerald-500 to-emerald-600 font-semibold text-[#04110C] shadow-lg shadow-emerald-500/30 hover:from-emerald-600 hover:to-emerald-700',
             },
             size: {

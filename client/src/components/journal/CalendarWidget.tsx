@@ -66,12 +66,12 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             >
                 <div className="flex justify-between items-start">
                     <span className={`text-sm font-bold ${
-                        isSelected 
-                            ? 'text-indigo-700 dark:text-white font-black' 
-                            : isToday 
-                                ? 'text-indigo-600 dark:text-indigo-400 font-black' 
-                                : 'text-slate-700 dark:text-slate-300'
-                    }`}>
+ isSelected 
+ ? 'text-indigo-700 dark:text-white font-black' 
+ : isToday 
+ ? 'text-indigo-600 dark:text-indigo-400 font-black' 
+ : 'text-fg-muted '
+ }`}>
                         {day}
                     </span>
                     {isToday && <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>}
@@ -79,7 +79,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
                 {hasTrades && (
                     <div className="text-right flex flex-col items-end transform group-hover:scale-105 transition-transform">
-                        <div className="text-[9px] text-slate-500 dark:text-slate-400 font-bold mb-0.5 leading-none opacity-80 uppercase tracking-tighter">
+                        <div className="text-[9px] text-fg-subtle dark:text-slate-400 font-bold mb-0.5 leading-none opacity-80 uppercase tracking-tighter">
                             {dayTrades.length} TX
                         </div>
                         <div className={`text-[11px] font-black font-mono tracking-tighter ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
@@ -95,20 +95,20 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
         <div className="bg-white dark:bg-slate-900/60 backdrop-blur-2xl border border-slate-200 dark:border-indigo-500/20 rounded-3xl overflow-hidden shadow-lg dark:shadow-2xl flex flex-col ring-1 ring-slate-900/5 dark:ring-white/5">
             {/* Calendar Header */}
             <div className="flex items-center justify-between p-5 bg-gradient-to-b from-indigo-50/70 to-transparent dark:from-indigo-500/10 dark:to-transparent border-b border-slate-200 dark:border-slate-800/50">
-                <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 text-xl">
+                <h3 className="font-bold text-fg flex items-center gap-2 text-xl">
                     <span className="capitalize">{currentDate.toLocaleString('pt-BR', { month: 'long' })}</span>
                     <span className="text-indigo-600 dark:text-indigo-400 font-mono text-lg">{currentDate.getFullYear()}</span>
                 </h3>
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => onMonthChange(-1)}
-                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
+                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-fg-muted hover:text-fg transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
                     >
                         <ChevronLeft size={20} />
                     </button>
                     <button
                         onClick={() => onMonthChange(1)}
-                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
+                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-fg-muted hover:text-fg transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
                     >
                         <ChevronRight size={20} />
                     </button>
@@ -118,7 +118,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
             {/* Days Header */}
             <div className="grid grid-cols-7 bg-slate-50 dark:bg-slate-900 py-3 text-center border-b border-slate-200 dark:border-slate-800/50">
                 {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (
-                    <span key={i} className={`text-xs font-bold tracking-wider ${i === 0 || i === 6 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-400'}`}>
+                    <span key={i} className={`text-xs font-bold tracking-wider ${i === 0 || i === 6 ? 'text-rose-600 dark:text-rose-400' : 'text-fg-muted '}`}>
                         {d}
                     </span>
                 ))}

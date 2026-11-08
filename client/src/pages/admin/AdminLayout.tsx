@@ -24,16 +24,16 @@ export const AdminLayout = () => {
     ];
 
     return (
-        <div className="min-h-screen bg-slate-950 flex">
+        <div className="min-h-screen bg-canvas flex">
             {/* Sidebar */}
             <aside
-                className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                className={`fixed inset-y-0 left-0 z-50 w-64 bg-surface border-r border-line transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     } lg:translate-x-0 lg:static`}
             >
                 <div className="h-full flex flex-col">
-                    <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                        <span className="text-xl font-bold text-white">Admin<span className="text-red-500">Panel</span></span>
-                        <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400">
+                    <div className="p-6 border-b border-line flex justify-between items-center">
+                        <span className="text-xl font-bold text-fg">Admin<span className="text-red-500">Panel</span></span>
+                        <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-fg-muted">
                             <X />
                         </button>
                     </div>
@@ -48,7 +48,7 @@ export const AdminLayout = () => {
                                     to={item.path}
                                     className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive
                                             ? 'bg-red-500/10 text-red-500'
-                                            : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                            : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
                                         }`}
                                 >
                                     <Icon size={20} />
@@ -58,7 +58,7 @@ export const AdminLayout = () => {
                         })}
                     </nav>
 
-                    <div className="p-4 border-t border-slate-800">
+                    <div className="p-4 border-t border-line">
                         <Button
                             variant="secondary"
                             onClick={handleLogout}
@@ -72,11 +72,11 @@ export const AdminLayout = () => {
 
             {/* Main Content */}
             <main className="flex-1 min-w-0 overflow-auto">
-                <div className="lg:hidden p-4 border-b border-slate-800 bg-slate-900 flex items-center gap-4">
-                    <button onClick={() => setIsSidebarOpen(true)} className="text-white">
+                <div className="lg:hidden p-4 border-b border-line bg-surface flex items-center gap-4">
+                    <button onClick={() => setIsSidebarOpen(true)} className="text-fg">
                         <Menu />
                     </button>
-                    <span className="font-bold text-white">Admin Panel</span>
+                    <span className="font-bold text-fg">Admin Panel</span>
                 </div>
                 <div className="p-6 lg:p-8 max-w-7xl mx-auto">
                     <Outlet />

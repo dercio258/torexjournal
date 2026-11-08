@@ -18,16 +18,16 @@ export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBanne
     };
 
     return (
-        <div className="relative overflow-hidden bg-[#111319]/80 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:border-white/[0.15] shadow-lg group">
+        <div className="relative overflow-hidden bg-surface/80 backdrop-blur-xl border border-line rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:border-line-strong shadow-lg group">
             {/* Ambient Glow */}
             <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-500/5 to-transparent rounded-full -mr-8 -mt-8 transition-opacity duration-500 ${includeToday ? 'opacity-100 from-emerald-500/5' : ''}`} />
 
             <div className="flex items-center gap-3.5 relative z-10">
-                <div className={`p-2.5 rounded-xl border transition-all ${includeToday ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-lg shadow-emerald-500/5' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-lg shadow-indigo-500/5'}`}>
+                <div className={`p-2.5 rounded-xl border transition-all ${includeToday ? 'bg-emerald-500/10 text-accent-fg border-emerald-500/20 shadow-lg shadow-emerald-500/5' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-lg shadow-indigo-500/5'}`}>
                     <Calendar size={20} className={includeToday ? '' : 'animate-pulse'} />
                 </div>
                 <div>
-                    <h3 className="text-sm font-bold text-[#F3F4F6] flex items-center gap-1.5 leading-none">
+                    <h3 className="text-sm font-bold text-fg flex items-center gap-1.5 leading-none">
                         {includeToday ? (
                             <>
                                 <span>Dados de hoje incluídos</span>
@@ -37,16 +37,16 @@ export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBanne
                             'Exibindo dados consolidados'
                         )}
                     </h3>
-                    <p className="text-xs text-[#9CA3AF] mt-1 flex items-center gap-1.5 font-mono">
+                    <p className="text-xs text-fg-muted mt-1 flex items-center gap-1.5 font-mono">
                         {includeToday ? (
                             <>
-                                Até hoje: <span className="text-emerald-400 font-semibold">{formatDate(today)}</span>
+                                Até hoje: <span className="text-accent-fg font-semibold">{formatDate(today)}</span>
                             </>
                         ) : (
                             <>
                                 Até ontem: <span className="text-indigo-400 font-semibold">{formatDate(yesterday)}</span>
                                 <span className="text-white/20">|</span>
-                                <span className="text-[#6B7280] text-[10px] flex items-center gap-1" title="Por padrão, ocultamos dados parciais do dia de hoje para evitar ruído de operações em andamento.">
+                                <span className="text-fg-subtle text-[10px] flex items-center gap-1" title="Por padrão, ocultamos dados parciais do dia de hoje para evitar ruído de operações em andamento.">
                                     <HelpCircle size={12} className="cursor-help" /> dados até ontem
                                 </span>
                             </>
@@ -59,13 +59,13 @@ export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBanne
                 onClick={onToggle}
                 className={`relative z-10 flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl border transition-all duration-300 ${
                     includeToday
-                        ? 'bg-[#161822] text-[#F3F4F6] border-white/[0.08] hover:bg-[#1C1F2C]'
+                        ? 'bg-surface-2 text-fg border-line hover:bg-surface-3'
                         : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-500 shadow-md shadow-indigo-600/10 hover:shadow-indigo-500/20 active:scale-95'
                 }`}
             >
                 {includeToday ? (
                     <>
-                        <Check size={14} className="text-emerald-400 font-bold" />
+                        <Check size={14} className="text-accent-fg font-bold" />
                         Remover dados de hoje
                     </>
                 ) : (

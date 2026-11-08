@@ -333,11 +333,11 @@ export const AdminCalendar = () => {
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                    <h1 className="text-3xl font-bold text-fg flex items-center gap-3">
                         <CalendarIcon className="text-emerald-500" size={28} />
                         Calendário Econômico
                     </h1>
-                    <p className="text-sm text-slate-400 mt-1">
+                    <p className="text-sm text-fg-muted mt-1">
                         Gerenciamento manual, divulgação de resultados macroeconômicos e auditoria interna
                     </p>
                 </div>
@@ -348,46 +348,46 @@ export const AdminCalendar = () => {
 
             {/* Quick KPI Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total de Eventos</span>
-                    <div className="text-2xl font-bold text-white mt-1">{totalEvents}</div>
-                    <span className="text-[10px] text-slate-500">Cadastrados no TorexJournal</span>
+                <div className="bg-surface/60 border border-line rounded-xl p-4">
+                    <span className="text-xs font-bold text-fg-muted uppercase tracking-wider">Total de Eventos</span>
+                    <div className="text-2xl font-bold text-fg mt-1">{totalEvents}</div>
+                    <span className="text-[10px] text-fg-subtle">Cadastrados no TorexJournal</span>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+                <div className="bg-surface/60 border border-line rounded-xl p-4">
                     <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Alto Impacto</span>
                     <div className="text-2xl font-bold text-red-400 mt-1">{highImpactCount}</div>
-                    <span className="text-[10px] text-slate-500">Na página atual</span>
+                    <span className="text-[10px] text-fg-subtle">Na página atual</span>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+                <div className="bg-surface/60 border border-line rounded-xl p-4">
                     <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">Agendados</span>
                     <div className="text-2xl font-bold text-blue-400 mt-1">{scheduledCount}</div>
-                    <span className="text-[10px] text-slate-500">Aguardando divulgação</span>
+                    <span className="text-[10px] text-fg-subtle">Aguardando divulgação</span>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Concluídos</span>
-                    <div className="text-2xl font-bold text-emerald-400 mt-1">{completedCount}</div>
-                    <span className="text-[10px] text-slate-500">Com resultado publicado</span>
+                <div className="bg-surface/60 border border-line rounded-xl p-4">
+                    <span className="text-xs font-bold text-accent-fg uppercase tracking-wider">Concluídos</span>
+                    <div className="text-2xl font-bold text-accent-fg mt-1">{completedCount}</div>
+                    <span className="text-[10px] text-fg-subtle">Com resultado publicado</span>
                 </div>
             </div>
 
             {/* Filters Bar */}
-            <Card className="border-slate-800 bg-slate-900/50 p-4">
+            <Card className="border-line bg-surface/50 p-4">
                 <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-3">
                     <div className="flex-1 min-w-[220px] relative">
-                        <Search className="absolute left-3 top-2.5 text-slate-500" size={16} />
+                        <Search className="absolute left-3 top-2.5 text-fg-subtle" size={16} />
                         <input
                             type="text"
                             placeholder="Buscar notícia, país ou moeda..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl pl-9 pr-4 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                         />
                     </div>
 
                     <select
                         value={currencyFilter}
                         onChange={(e) => { setCurrencyFilter(e.target.value); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        className="bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500 cursor-pointer"
                     >
                         <option value="ALL">Todas Moedas</option>
                         {currencies.map(c => <option key={c} value={c}>{c}</option>)}
@@ -396,7 +396,7 @@ export const AdminCalendar = () => {
                     <select
                         value={impactFilter}
                         onChange={(e) => { setImpactFilter(e.target.value); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        className="bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500 cursor-pointer"
                     >
                         <option value="ALL">Todos Impactos</option>
                         <option value="HIGH">🔴 Alto Impacto (HIGH)</option>
@@ -407,7 +407,7 @@ export const AdminCalendar = () => {
                     <select
                         value={statusFilter}
                         onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        className="bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500 cursor-pointer"
                     >
                         <option value="ALL">Todos Status</option>
                         <option value="SCHEDULED">Agendado (SCHEDULED)</option>
@@ -419,7 +419,7 @@ export const AdminCalendar = () => {
                     <select
                         value={categoryFilter}
                         onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        className="bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500 cursor-pointer"
                     >
                         <option value="ALL">Todas Categorias</option>
                         {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
@@ -429,14 +429,14 @@ export const AdminCalendar = () => {
                         type="date"
                         value={dateRange.from}
                         onChange={(e) => { setDateRange(prev => ({ ...prev, from: e.target.value })); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                        className="bg-canvas border border-line rounded-xl px-2 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                         title="Data inicial"
                     />
                     <input
                         type="date"
                         value={dateRange.to}
                         onChange={(e) => { setDateRange(prev => ({ ...prev, to: e.target.value })); setCurrentPage(1); }}
-                        className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                        className="bg-canvas border border-line rounded-xl px-2 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                         title="Data final"
                     />
 
@@ -447,10 +447,10 @@ export const AdminCalendar = () => {
             </Card>
 
             {/* Table */}
-            <Card className="border-slate-800 bg-slate-900/50 overflow-hidden">
+            <Card className="border-line bg-surface/50 overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs text-slate-400">
-                        <thead className="bg-slate-900 text-slate-300 uppercase font-bold text-[10px] tracking-wider border-b border-slate-800">
+                    <table className="w-full text-left text-xs text-fg-muted">
+                        <thead className="bg-surface text-fg/80 uppercase font-bold text-[10px] tracking-wider border-b border-line">
                             <tr>
                                 <th className="px-4 py-3.5">Data / Hora (UTC)</th>
                                 <th className="px-4 py-3.5">Moeda / País</th>
@@ -459,21 +459,21 @@ export const AdminCalendar = () => {
                                 <th className="px-4 py-3.5 text-center">Impacto</th>
                                 <th className="px-4 py-3.5 text-right">Anterior</th>
                                 <th className="px-4 py-3.5 text-right">Previsão</th>
-                                <th className="px-4 py-3.5 text-right font-bold text-white">Resultado (Actual)</th>
+                                <th className="px-4 py-3.5 text-right font-bold text-fg">Resultado (Actual)</th>
                                 <th className="px-4 py-3.5 text-center">Status</th>
                                 <th className="px-4 py-3.5 text-right">Ações</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60 font-mono">
+                        <tbody className="divide-y divide-line font-mono">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-sans">
+                                    <td colSpan={10} className="px-6 py-12 text-center text-fg-subtle font-sans">
                                         Carregando eventos...
                                     </td>
                                 </tr>
                             ) : events.length === 0 ? (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-sans">
+                                    <td colSpan={10} className="px-6 py-12 text-center text-fg-subtle font-sans">
                                         Nenhum evento econômico cadastrado para os filtros selecionados.
                                     </td>
                                 </tr>
@@ -484,32 +484,32 @@ export const AdminCalendar = () => {
                                     const timeStr = eventDateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
                                     return (
-                                        <tr key={evt.id} className="hover:bg-slate-800/40 transition-colors">
+                                        <tr key={evt.id} className="hover:bg-surface-2/40 transition-colors">
                                             {/* Date / Time */}
-                                            <td className="px-4 py-3 whitespace-nowrap text-slate-300">
+                                            <td className="px-4 py-3 whitespace-nowrap text-fg/80">
                                                 <div className="font-bold">{dateStr}</div>
-                                                <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                                                <div className="text-[10px] text-fg-subtle flex items-center gap-1">
                                                     <Clock size={10} /> {timeStr}
                                                 </div>
                                             </td>
 
                                             {/* Currency / Country */}
                                             <td className="px-4 py-3 whitespace-nowrap">
-                                                <span className="px-2 py-0.5 rounded font-bold bg-slate-800 text-white border border-slate-700">
+                                                <span className="px-2 py-0.5 rounded font-bold bg-surface-2 text-fg border border-line-strong">
                                                     {evt.currency}
                                                 </span>
                                                 {evt.country && (
-                                                    <span className="ml-2 text-[11px] text-slate-400 font-sans">
+                                                    <span className="ml-2 text-[11px] text-fg-muted font-sans">
                                                         {evt.country}
                                                     </span>
                                                 )}
                                             </td>
 
                                             {/* Title */}
-                                            <td className="px-4 py-3 font-sans font-medium text-slate-200 min-w-[200px]">
+                                            <td className="px-4 py-3 font-sans font-medium text-fg min-w-[200px]">
                                                 {evt.title}
                                                 {evt.description && (
-                                                    <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">
+                                                    <div className="text-[10px] text-fg-subtle line-clamp-1 mt-0.5">
                                                         {evt.description}
                                                     </div>
                                                 )}
@@ -517,7 +517,7 @@ export const AdminCalendar = () => {
 
                                             {/* Category */}
                                             <td className="px-4 py-3 whitespace-nowrap">
-                                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-sans">
+                                                <span className="text-[10px] px-2 py-0.5 rounded bg-surface-2 text-fg-muted border border-line-strong font-sans">
                                                     {evt.category}
                                                 </span>
                                             </td>
@@ -533,19 +533,19 @@ export const AdminCalendar = () => {
                                                         MEDIUM
                                                     </span>
                                                 ) : (
-                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/30">
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-fg-muted border border-slate-500/30">
                                                         LOW
                                                     </span>
                                                 )}
                                             </td>
 
                                             {/* Previous */}
-                                            <td className="px-4 py-3 text-right text-slate-400">
+                                            <td className="px-4 py-3 text-right text-fg-muted">
                                                 {evt.previous || '-'}
                                             </td>
 
                                             {/* Forecast */}
-                                            <td className="px-4 py-3 text-right text-slate-300">
+                                            <td className="px-4 py-3 text-right text-fg/80">
                                                 {evt.forecast || '-'}
                                             </td>
 
@@ -568,11 +568,11 @@ export const AdminCalendar = () => {
                                             {/* Status */}
                                             <td className="px-4 py-3 text-center whitespace-nowrap">
                                                 {evt.status === 'COMPLETED' ? (
-                                                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-sans font-bold">
+                                                    <span className="inline-flex items-center gap-1 text-[10px] text-accent-fg font-sans font-bold">
                                                         <CheckCircle2 size={12} /> Concluído
                                                     </span>
                                                 ) : evt.status === 'CANCELLED' ? (
-                                                    <span className="inline-flex items-center gap-1 text-[10px] text-rose-400 font-sans font-bold">
+                                                    <span className="inline-flex items-center gap-1 text-[10px] text-danger-fg font-sans font-bold">
                                                         <XCircle size={12} /> Cancelado
                                                     </span>
                                                 ) : evt.status === 'POSTPONED' ? (
@@ -593,7 +593,7 @@ export const AdminCalendar = () => {
                                                     <button
                                                         onClick={() => handleOpenComplete(evt)}
                                                         title="Lançar Resultado"
-                                                        className="p-1.5 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                                                        className="p-1.5 rounded hover:bg-emerald-500/20 text-accent-fg transition-colors"
                                                     >
                                                         <Check size={14} />
                                                     </button>
@@ -602,7 +602,7 @@ export const AdminCalendar = () => {
                                                     <button
                                                         onClick={() => handleOpenEdit(evt)}
                                                         title="Editar Evento"
-                                                        className="p-1.5 rounded hover:bg-slate-700 text-slate-300 transition-colors"
+                                                        className="p-1.5 rounded hover:bg-surface-3 text-fg/80 transition-colors"
                                                     >
                                                         <Edit size={14} />
                                                     </button>
@@ -629,7 +629,7 @@ export const AdminCalendar = () => {
                                                     <button
                                                         onClick={() => handleOpenHistory(evt)}
                                                         title="Histórico de Auditoria"
-                                                        className="p-1.5 rounded hover:bg-slate-700 text-slate-400 transition-colors"
+                                                        className="p-1.5 rounded hover:bg-surface-3 text-fg-muted transition-colors"
                                                     >
                                                         <History size={14} />
                                                     </button>
@@ -639,7 +639,7 @@ export const AdminCalendar = () => {
                                                         <button
                                                             onClick={() => handleCancelEvent(evt)}
                                                             title="Cancelar Notícia"
-                                                            className="p-1.5 rounded hover:bg-rose-500/20 text-rose-400 transition-colors"
+                                                            className="p-1.5 rounded hover:bg-rose-500/20 text-danger-fg transition-colors"
                                                         >
                                                             <XCircle size={14} />
                                                         </button>
@@ -664,7 +664,7 @@ export const AdminCalendar = () => {
                 </div>
 
                 {/* Pagination */}
-                <div className="p-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+                <div className="p-4 border-t border-line flex justify-between items-center text-xs text-fg-muted">
                     <div>
                         Mostrando {events.length} de {totalEvents} eventos
                     </div>
@@ -677,7 +677,7 @@ export const AdminCalendar = () => {
                         >
                             <ChevronLeft size={16} />
                         </Button>
-                        <span className="font-bold text-white">
+                        <span className="font-bold text-fg">
                             Página {currentPage} de {totalPages || 1}
                         </span>
                         <Button
@@ -702,20 +702,20 @@ export const AdminCalendar = () => {
             >
                 <form onSubmit={handleCreateSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Título do Evento *</label>
+                        <label className="block text-xs font-bold text-fg/80 mb-1">Título do Evento *</label>
                         <input
                             type="text"
                             required
                             placeholder="Ex: Non-Farm Payrolls, Taxa de Inflação CPI"
                             value={formData.title}
                             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Moeda (3 letras) *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Moeda (3 letras) *</label>
                             <input
                                 type="text"
                                 required
@@ -723,28 +723,28 @@ export const AdminCalendar = () => {
                                 placeholder="USD, EUR, GBP..."
                                 value={formData.currency}
                                 onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 uppercase font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 uppercase font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">País / Região</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">País / Região</label>
                             <input
                                 type="text"
                                 placeholder="Ex: United States, Eurozone"
                                 value={formData.country}
                                 onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                             />
                         </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Impacto *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Impacto *</label>
                             <select
                                 value={formData.impact}
                                 onChange={(e) => setFormData({ ...formData, impact: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                             >
                                 <option value="HIGH">🔴 Alto Impacto (HIGH)</option>
                                 <option value="MEDIUM">🟠 Médio Impacto (MEDIUM)</option>
@@ -752,11 +752,11 @@ export const AdminCalendar = () => {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Categoria *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Categoria *</label>
                             <select
                                 value={formData.category}
                                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                             >
                                 {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
@@ -764,61 +764,61 @@ export const AdminCalendar = () => {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Data e Hora *</label>
+                        <label className="block text-xs font-bold text-fg/80 mb-1">Data e Hora *</label>
                         <input
                             type="datetime-local"
                             required
                             value={formData.eventDate}
                             onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                         />
                     </div>
 
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Anterior (Previous)</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Anterior (Previous)</label>
                             <input
                                 type="text"
                                 placeholder="Ex: 135K ou 4.0%"
                                 value={formData.previous}
                                 onChange={(e) => setFormData({ ...formData, previous: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Previsão (Forecast)</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Previsão (Forecast)</label>
                             <input
                                 type="text"
                                 placeholder="Ex: 145K ou 4.1%"
                                 value={formData.forecast}
                                 onChange={(e) => setFormData({ ...formData, forecast: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Unidade (Unit)</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Unidade (Unit)</label>
                             <input
                                 type="text"
                                 placeholder="Ex: %, K, M, B, pts"
                                 value={formData.unit}
                                 onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Descrição / Contexto</label>
+                        <label className="block text-xs font-bold text-fg/80 mb-1">Descrição / Contexto</label>
                         <textarea
                             rows={2}
                             placeholder="Observações contextuais sobre a notícia..."
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 resize-none"
                         />
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                    <div className="flex justify-end gap-3 pt-4 border-t border-line">
                         <Button type="button" variant="secondary" onClick={() => setIsCreateModalOpen(false)}>
                             Cancelar
                         </Button>
@@ -839,45 +839,45 @@ export const AdminCalendar = () => {
             >
                 <form onSubmit={handleEditSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Título do Evento *</label>
+                        <label className="block text-xs font-bold text-fg/80 mb-1">Título do Evento *</label>
                         <input
                             type="text"
                             required
                             value={formData.title}
                             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Moeda *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Moeda *</label>
                             <input
                                 type="text"
                                 required
                                 value={formData.currency}
                                 onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 uppercase font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 uppercase font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">País</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">País</label>
                             <input
                                 type="text"
                                 value={formData.country}
                                 onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                             />
                         </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Impacto *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Impacto *</label>
                             <select
                                 value={formData.impact}
                                 onChange={(e) => setFormData({ ...formData, impact: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                             >
                                 <option value="HIGH">🔴 Alto</option>
                                 <option value="MEDIUM">🟠 Médio</option>
@@ -885,21 +885,21 @@ export const AdminCalendar = () => {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Categoria *</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Categoria *</label>
                             <select
                                 value={formData.category}
                                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                             >
                                 {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Status</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Status</label>
                             <select
                                 value={formData.status}
                                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg/80 focus:outline-none focus:border-emerald-500"
                             >
                                 <option value="SCHEDULED">SCHEDULED</option>
                                 <option value="COMPLETED">COMPLETED</option>
@@ -910,47 +910,47 @@ export const AdminCalendar = () => {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Data e Hora *</label>
+                        <label className="block text-xs font-bold text-fg/80 mb-1">Data e Hora *</label>
                         <input
                             type="datetime-local"
                             required
                             value={formData.eventDate}
                             onChange={(e) => setFormData({ ...formData, eventDate: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500"
                         />
                     </div>
 
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Anterior</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Anterior</label>
                             <input
                                 type="text"
                                 value={formData.previous}
                                 onChange={(e) => setFormData({ ...formData, previous: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Previsão</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Previsão</label>
                             <input
                                 type="text"
                                 value={formData.forecast}
                                 onChange={(e) => setFormData({ ...formData, forecast: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-300 mb-1">Resultado (Actual)</label>
+                            <label className="block text-xs font-bold text-fg/80 mb-1">Resultado (Actual)</label>
                             <input
                                 type="text"
                                 value={formData.actual}
                                 onChange={(e) => setFormData({ ...formData, actual: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-emerald-500 font-mono"
                             />
                         </div>
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                    <div className="flex justify-end gap-3 pt-4 border-t border-line">
                         <Button type="button" variant="secondary" onClick={() => setIsEditModalOpen(false)}>
                             Cancelar
                         </Button>
@@ -970,17 +970,17 @@ export const AdminCalendar = () => {
                 title="Publicar Resultado da Notícia (Actual)"
             >
                 <form onSubmit={handleCompleteSubmit} className="space-y-4">
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1.5">
-                        <div className="text-slate-200 font-bold">{selectedEvent?.title}</div>
-                        <div className="text-slate-400">Moeda: <span className="text-white font-mono">{selectedEvent?.currency}</span> • Impacto: <span className="font-bold text-red-400">{selectedEvent?.impact}</span></div>
-                        <div className="text-slate-500 flex gap-4 pt-1 font-mono">
+                    <div className="p-3 bg-canvas border border-line rounded-xl text-xs space-y-1.5">
+                        <div className="text-fg font-bold">{selectedEvent?.title}</div>
+                        <div className="text-fg-muted">Moeda: <span className="text-fg font-mono">{selectedEvent?.currency}</span> • Impacto: <span className="font-bold text-red-400">{selectedEvent?.impact}</span></div>
+                        <div className="text-fg-subtle flex gap-4 pt-1 font-mono">
                             <span>Anterior: {selectedEvent?.previous || '-'}</span>
                             <span>Previsão: {selectedEvent?.forecast || '-'}</span>
                         </div>
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-200 mb-1">
+                        <label className="block text-xs font-bold text-fg mb-1">
                             Valor Divulgado (Actual) *
                         </label>
                         <input
@@ -989,15 +989,15 @@ export const AdminCalendar = () => {
                             placeholder="Ex: 151K ou 4.1%"
                             value={actualInput}
                             onChange={(e) => setActualInput(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-white font-mono font-bold focus:outline-none focus:border-emerald-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2.5 text-sm text-fg font-mono font-bold focus:outline-none focus:border-emerald-500"
                             autoFocus
                         />
-                        <p className="text-[11px] text-slate-500 mt-1">
-                            Ao confirmar, o status será automaticamente alterado para <strong className="text-emerald-400">COMPLETED</strong> e ficará visível aos traders.
+                        <p className="text-[11px] text-fg-subtle mt-1">
+                            Ao confirmar, o status será automaticamente alterado para <strong className="text-accent-fg">COMPLETED</strong> e ficará visível aos traders.
                         </p>
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                    <div className="flex justify-end gap-3 pt-4 border-t border-line">
                         <Button type="button" variant="secondary" onClick={() => setIsCompleteModalOpen(false)}>
                             Cancelar
                         </Button>
@@ -1017,13 +1017,13 @@ export const AdminCalendar = () => {
                 title="Adiar Divulgação da Notícia"
             >
                 <form onSubmit={handlePostponeSubmit} className="space-y-4">
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1">
-                        <div className="text-slate-200 font-bold">{selectedEvent?.title}</div>
-                        <div className="text-slate-400">Data anterior: {selectedEvent?.eventDate ? new Date(selectedEvent.eventDate).toLocaleString('pt-BR') : '-'}</div>
+                    <div className="p-3 bg-canvas border border-line rounded-xl text-xs space-y-1">
+                        <div className="text-fg font-bold">{selectedEvent?.title}</div>
+                        <div className="text-fg-muted">Data anterior: {selectedEvent?.eventDate ? new Date(selectedEvent.eventDate).toLocaleString('pt-BR') : '-'}</div>
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-200 mb-1">
+                        <label className="block text-xs font-bold text-fg mb-1">
                             Nova Data e Hora *
                         </label>
                         <input
@@ -1031,11 +1031,11 @@ export const AdminCalendar = () => {
                             required
                             value={postponeDate}
                             onChange={(e) => setPostponeDate(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                            className="w-full bg-canvas border border-line rounded-xl px-3 py-2 text-xs text-fg focus:outline-none focus:border-purple-500"
                         />
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                    <div className="flex justify-end gap-3 pt-4 border-t border-line">
                         <Button type="button" variant="secondary" onClick={() => setIsPostponeModalOpen(false)}>
                             Cancelar
                         </Button>
@@ -1056,31 +1056,31 @@ export const AdminCalendar = () => {
             >
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                     {isLoadingHistory ? (
-                        <div className="text-center py-6 text-slate-500 text-xs">Carregando histórico de alterações...</div>
+                        <div className="text-center py-6 text-fg-subtle text-xs">Carregando histórico de alterações...</div>
                     ) : auditHistory.length === 0 ? (
-                        <div className="text-center py-6 text-slate-500 text-xs">Nenhum histórico de auditoria registrado para este evento.</div>
+                        <div className="text-center py-6 text-fg-subtle text-xs">Nenhum histórico de auditoria registrado para este evento.</div>
                     ) : (
                         auditHistory.map((item) => (
-                            <div key={item.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs space-y-1.5 font-sans">
+                            <div key={item.id} className="p-3 bg-canvas border border-line rounded-xl text-xs space-y-1.5 font-sans">
                                 <div className="flex items-center justify-between">
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                        item.action === 'CREATED' ? 'bg-emerald-500/20 text-emerald-400' :
+                                        item.action === 'CREATED' ? 'bg-emerald-500/20 text-accent-fg' :
                                         item.action === 'COMPLETED' ? 'bg-blue-500/20 text-blue-400' :
-                                        item.action === 'CANCELLED' ? 'bg-rose-500/20 text-rose-400' :
+                                        item.action === 'CANCELLED' ? 'bg-rose-500/20 text-danger-fg' :
                                         item.action === 'POSTPONED' ? 'bg-purple-500/20 text-purple-400' :
-                                        'bg-slate-800 text-slate-300'
+                                        'bg-surface-2 text-fg/80'
                                     }`}>
                                         {item.action}
                                     </span>
-                                    <span className="text-[10px] text-slate-500 font-mono">
+                                    <span className="text-[10px] text-fg-subtle font-mono">
                                         {new Date(item.createdAt).toLocaleString('pt-BR')}
                                     </span>
                                 </div>
-                                <div className="text-slate-400 text-[11px]">
-                                    Alterado por: <strong className="text-slate-200">{item.changedBy || 'ADMIN'}</strong>
+                                <div className="text-fg-muted text-[11px]">
+                                    Alterado por: <strong className="text-fg">{item.changedBy || 'ADMIN'}</strong>
                                 </div>
                                 {item.newData && item.newData.actual && (
-                                    <div className="text-[11px] font-mono text-emerald-400">
+                                    <div className="text-[11px] font-mono text-accent-fg">
                                         Actual definido: {item.newData.actual}
                                     </div>
                                 )}
@@ -1088,7 +1088,7 @@ export const AdminCalendar = () => {
                         ))
                     )}
                 </div>
-                <div className="flex justify-end pt-4 border-t border-slate-800">
+                <div className="flex justify-end pt-4 border-t border-line">
                     <Button variant="secondary" onClick={() => setIsHistoryModalOpen(false)}>
                         Fechar
                     </Button>

@@ -47,7 +47,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             id: 'manual_csv',
             name: 'Importar Relatório (CSV / Excel / HTML / PDF)',
             type: 'MANUAL',
-            icon: <Upload className="w-10 h-10 text-slate-400" />,
+            icon: <Upload className="w-10 h-10 text-fg-muted" />,
             description: 'Importar histórico de operações por arquivo'
         }
     ];
@@ -96,20 +96,20 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
         <div className="space-y-8">
             {/* Barra de Busca Global de Corretoras e Servidores */}
             <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={20} />
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-muted" size={20} />
                 <input
                     type="text"
                     placeholder="Pesquisar corretora ou servidor MT5 (Ex: Deriv, Exness, XM, FTMO, IC Markets, Deriv-Demo...)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    className="w-full bg-[#08090C] border border-white/[0.08] rounded-xl py-3.5 pl-11 pr-4 text-[#F3F4F6] focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-[#6B7280]"
+                    className="w-full bg-canvas border border-line rounded-xl py-3.5 pl-11 pr-4 text-fg focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-fg-subtle"
                 />
             </div>
 
             {/* Métodos Principais de Conexão */}
             {filteredMainMethods.length > 0 && (
                 <div className="space-y-3">
-                    <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-fg-muted">
                         Modos Principais de Conexão
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -119,10 +119,10 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                 <div
                                     key={broker.id}
                                     onClick={() => onSelect(broker)}
-                                    className="group relative bg-[#111319] border border-white/[0.08] hover:bg-[#161822] hover:border-emerald-500/40 rounded-xl p-5 cursor-pointer transition-all flex items-center gap-4 overflow-hidden"
+                                    className="group relative bg-surface border border-line hover:bg-surface-2 hover:border-emerald-500/40 rounded-xl p-5 cursor-pointer transition-all flex items-center gap-4 overflow-hidden"
                                 >
                                     {isLocked && (
-                                        <div className="absolute top-3 right-3 text-[#6B7280] group-hover:text-emerald-400 transition-colors">
+                                        <div className="absolute top-3 right-3 text-fg-subtle group-hover:text-accent-fg transition-colors">
                                             <Lock size={14} />
                                         </div>
                                     )}
@@ -131,21 +131,21 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                     <div className="relative shrink-0">{broker.icon}</div>
 
                                     <div className="relative">
-                                        <h3 className="font-bold text-[#F3F4F6] group-hover:text-emerald-400 transition-colors">
+                                        <h3 className="font-bold text-fg group-hover:text-accent-fg transition-colors">
                                             {broker.name}
                                         </h3>
                                         <div className="flex items-center gap-2 mt-1">
                                             <span
                                                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
                                                     broker.type === 'AUTO_SYNC'
-                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                                        ? 'bg-emerald-500/10 text-accent-fg border-emerald-500/20'
                                                         : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
                                                 }`}
                                             >
                                                 {broker.type === 'AUTO_SYNC' ? 'AUTO SYNC' : 'MULTI-FORMATO'}
                                             </span>
                                         </div>
-                                        <p className="text-xs text-[#9CA3AF] mt-1 line-clamp-1">
+                                        <p className="text-xs text-fg-muted mt-1 line-clamp-1">
                                             {broker.description}
                                         </p>
                                     </div>
@@ -160,11 +160,11 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                        <h2 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                            <Building2 size={16} className="text-emerald-400" />
+                        <h2 className="text-sm font-bold text-fg flex items-center gap-2">
+                            <Building2 size={16} className="text-accent-fg" />
                             Diretório de Corretoras &amp; Servidores MT5 ({filteredCatalogBrokers.length})
                         </h2>
-                        <p className="text-xs text-slate-400">
+                        <p className="text-xs text-fg-muted">
                             Clique na sua corretora ou diretamente em um servidor pronto para conectar na Nuvem MT5.
                         </p>
                     </div>
@@ -178,7 +178,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
                                     categoryFilter === cat
                                         ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                                        : 'bg-[#111319] border-white/[0.06] text-slate-400 hover:text-slate-200'
+                                        : 'bg-surface border-line text-fg-muted hover:text-fg'
                                 }`}
                             >
                                 {cat === 'ALL' ? 'Todas' : cat}
@@ -191,7 +191,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                     {filteredCatalogBrokers.map((group) => (
                         <div
                             key={group.id}
-                            className="bg-[#111319] border border-white/[0.08] hover:border-emerald-500/40 rounded-xl p-4 transition-all flex flex-col justify-between gap-3 group"
+                            className="bg-surface border border-line hover:border-emerald-500/40 rounded-xl p-4 transition-all flex flex-col justify-between gap-3 group"
                         >
                             <div>
                                 <div
@@ -201,15 +201,15 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                     <div className="flex items-center gap-2.5">
                                         <BrokerLogo broker={group} size="lg" />
                                         <div>
-                                            <h3 className="font-bold text-sm text-[#F3F4F6] group-hover:text-emerald-400 transition-colors">
+                                            <h3 className="font-bold text-sm text-fg group-hover:text-accent-fg transition-colors">
                                                 {group.broker}
                                             </h3>
-                                            <span className="text-[10px] text-slate-400">
+                                            <span className="text-[10px] text-fg-muted">
                                                 {group.category} • {group.servers.length} servidor(es)
                                             </span>
                                         </div>
                                     </div>
-                                    <ChevronRight size={16} className="text-slate-500 group-hover:text-emerald-400 transition-colors mt-1" />
+                                    <ChevronRight size={16} className="text-fg-subtle group-hover:text-accent-fg transition-colors mt-1" />
                                 </div>
 
                                 {/* Lista rápida dos primeiros servidores prontos da corretora */}
@@ -219,7 +219,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                             key={srv.name}
                                             type="button"
                                             onClick={() => handleSelectCatalogBroker(group, srv.name)}
-                                            className="px-2 py-1 rounded-md bg-[#08090C] hover:bg-emerald-500/15 border border-white/[0.06] hover:border-emerald-500/30 text-[11px] font-mono text-slate-300 hover:text-emerald-300 transition-all flex items-center gap-1"
+                                            className="px-2 py-1 rounded-md bg-canvas hover:bg-emerald-500/15 border border-line hover:border-emerald-500/30 text-[11px] font-mono text-fg/80 hover:text-emerald-300 transition-all flex items-center gap-1"
                                             title={srv.description || srv.name}
                                         >
                                             <span className="truncate max-w-[140px]">{srv.name}</span>
@@ -238,7 +238,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                         <button
                                             type="button"
                                             onClick={() => handleSelectCatalogBroker(group)}
-                                            className="px-2 py-1 rounded-md bg-white/[0.03] hover:bg-white/[0.08] text-[10px] text-slate-400 hover:text-white transition-colors"
+                                            className="px-2 py-1 rounded-md bg-fg/[0.03] hover:bg-fg/[0.08] text-[10px] text-fg-muted hover:text-fg transition-colors"
                                         >
                                             +{group.servers.length - 4} mais...
                                         </button>
@@ -251,8 +251,8 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             </div>
 
             {filteredMainMethods.length === 0 && filteredCatalogBrokers.length === 0 && (
-                <div className="text-center py-12 bg-[#111319] border border-white/[0.06] rounded-2xl p-6 space-y-3">
-                    <p className="text-[#9CA3AF]">
+                <div className="text-center py-12 bg-surface border border-line rounded-2xl p-6 space-y-3">
+                    <p className="text-fg-muted">
                         Nenhuma corretora pré-listada encontrada para &ldquo;{search}&rdquo;.
                     </p>
                     <button

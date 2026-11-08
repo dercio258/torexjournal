@@ -29,16 +29,16 @@ export const PlanSummary = ({
             <div className="flex flex-col pb-6 border-b border-slate-200 dark:border-slate-800/80">
                 <span className="text-indigo-600 dark:text-indigo-400 text-xs font-bold uppercase tracking-wider mb-1 block">Plano Selecionado</span>
                 <div className="flex justify-between items-baseline">
-                    <h3 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">{plan.tier}</h3>
+                    <h3 className="text-3xl font-black text-fg tracking-tight">{plan.tier}</h3>
                     <div className="text-right">
-                        <span className="text-[10px] text-slate-500 uppercase tracking-widest block font-bold">Cobrança {isYearly ? 'Anual' : 'Mensal'}</span>
+                        <span className="text-[10px] text-fg-subtle uppercase tracking-widest block font-bold">Cobrança {isYearly ? 'Anual' : 'Mensal'}</span>
                     </div>
                 </div>
             </div>
 
             {/* Price Breakdown */}
             <div className="space-y-3 py-2 text-sm">
-                <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                <div className="flex justify-between text-fg-muted ">
                     <span>Preço Base</span>
                     <span className="font-mono text-slate-800 dark:text-slate-300 font-semibold">$ {subtotal.toFixed(2)} USD</span>
                 </div>
@@ -48,11 +48,11 @@ export const PlanSummary = ({
                         <span className="font-mono">- $ {discount.toFixed(2)} USD</span>
                     </div>
                 )}
-                <div className="flex justify-between items-baseline pt-3 border-t border-slate-200 dark:border-slate-800/50 text-slate-900 dark:text-white">
+                <div className="flex justify-between items-baseline pt-3 border-t border-slate-200 dark:border-slate-800/50 text-fg ">
                     <span className="font-bold">Total a Pagar</span>
                     <div className="text-right">
-                        <span className="text-2xl font-black font-mono text-slate-900 dark:text-white">$ {total.toFixed(2)} USD</span>
-                        <span className="text-[10px] text-slate-500 block uppercase tracking-tighter mt-0.5 font-mono">
+                        <span className="text-2xl font-black font-mono text-fg ">$ {total.toFixed(2)} USD</span>
+                        <span className="text-[10px] text-fg-subtle block uppercase tracking-tighter mt-0.5 font-mono">
                             ~ MT {(total * exchangeRate).toFixed(0)} MZN (M-Pesa / e-Mola)
                         </span>
                     </div>
@@ -71,7 +71,7 @@ export const PlanSummary = ({
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: i * 0.05 }}
                             key={i} 
-                            className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300"
+                            className="flex items-start gap-3 text-sm text-fg-muted "
                         >
                             <Check size={16} className="text-emerald-500 mt-0.5 flex-shrink-0" />
                             <span>{feat}</span>
@@ -111,14 +111,14 @@ export const PaymentMethodBadge = ({
             whileTap={{ scale: 0.98 }}
             onClick={onClick}
             className={`relative group p-4 rounded-2xl border transition-all duration-300 flex flex-col items-center justify-center gap-2.5 overflow-hidden ${
-                active 
-                ? 'border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/5 shadow-[0_0_20px_rgba(99,102,241,0.1)] text-indigo-900 dark:text-white' 
-                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/20 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900/40 hover:text-slate-900 dark:hover:text-white'
-            }`}
+ active 
+ ? 'border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/5 shadow-[0_0_20px_rgba(99,102,241,0.1)] text-indigo-900 dark:text-white' 
+ : 'border-line bg-white dark:bg-slate-900/20 text-fg-muted hover:border-line-strong hover:bg-slate-50 dark:hover:bg-slate-900/40 hover:text-fg '
+ }`}
         >
             <div className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all duration-300 ${
-                active ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
-            }`}>
+ active ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 dark:bg-slate-900/80 border border-line text-fg-muted '
+ }`}>
                 {img ? <img src={img} alt={label} className="w-full h-full object-cover rounded-xl" /> : <Icon size={22} />}
             </div>
             
@@ -126,7 +126,7 @@ export const PaymentMethodBadge = ({
                 <span className={`text-[10px] font-black uppercase tracking-widest block ${active ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-500'}`}>
                     {label}
                 </span>
-                <span className="text-[8px] font-bold text-slate-500 px-1.5 py-0.5 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded mt-1 inline-block">
+                <span className="text-[8px] font-bold text-fg-subtle px-1.5 py-0.5 bg-slate-100 dark:bg-slate-950 border border-line rounded mt-1 inline-block">
                     {isZar ? 'ZAR' : 'MZN'}
                 </span>
             </div>
@@ -170,14 +170,14 @@ export const MobileMoneyForm = ({
         >
             <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Número de Telefone</label>
+                    <label className="text-[10px] font-black text-fg-subtle uppercase tracking-widest">Número de Telefone</label>
                     <span className="text-[9px] text-slate-600 font-bold uppercase">Moçambique</span>
                 </div>
                 
-                <div className={`group flex items-center bg-slate-50 dark:bg-slate-950 border rounded-2xl overflow-hidden transition-all duration-300 focus-within:ring-4 focus-within:ring-indigo-500/10 ${
-                    isInvalid ? 'border-rose-500/50' : 'border-slate-200 dark:border-slate-800 focus-within:border-indigo-500/70'
-                }`}>
-                    <div className="px-5 py-3.5 bg-slate-100 dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-400 font-bold text-sm select-none">
+                <div className={`group flex items-center bg-canvas border rounded-2xl overflow-hidden transition-all duration-300 focus-within:ring-4 focus-within:ring-indigo-500/10 ${
+ isInvalid ? 'border-rose-500/50' : 'border-line focus-within:border-indigo-500/70'
+ }`}>
+                    <div className="px-5 py-3.5 bg-slate-100 dark:bg-slate-900 border-r border-line text-fg-muted font-bold text-sm select-none">
                         +258
                     </div>
                     <input
@@ -185,7 +185,7 @@ export const MobileMoneyForm = ({
                         value={phoneNumber}
                         onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
                         placeholder={method === 'mpesa' ? '84 / 85' : '86 / 87'}
-                        className="flex-1 bg-transparent px-5 py-3.5 text-slate-900 dark:text-white text-lg font-bold outline-none placeholder:text-slate-400 dark:placeholder:text-slate-700"
+                        className="flex-1 bg-transparent px-5 py-3.5 text-fg text-lg font-bold outline-none placeholder:text-fg-muted dark:placeholder:text-slate-700"
                         maxLength={9}
                         disabled={processing}
                     />
@@ -208,9 +208,9 @@ export const MobileMoneyForm = ({
                     <div className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center transition-all ${
                         savePreference ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-950 group-hover:border-slate-400 dark:group-hover:border-slate-700'
                     }`}>
-                        {savePreference && <Check size={10} className="text-white" />}
+                        {savePreference && <Check size={10} className="text-fg" />}
                     </div>
-                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Salvar número para renovações futuras</span>
+                    <span className="text-xs text-fg-muted font-medium">Salvar número para renovações futuras</span>
                 </button>
             </div>
 
@@ -256,11 +256,11 @@ export const CardPaymentView = ({
         className="space-y-6 pt-4"
     >
         <div className="p-6 bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-2xl">
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
+            <p className="text-sm text-fg-muted mb-6 leading-relaxed">
                 {method === 'payfast' ? (
-                    <>Você será redirecionado para o ambiente de checkout seguro do <span className="text-slate-900 dark:text-white font-bold">PayFast</span> para efetuar o pagamento em <span className="text-indigo-600 dark:text-indigo-400 font-bold">ZAR</span>.</>
+                    <>Você será redirecionado para o ambiente de checkout seguro do <span className="text-fg font-bold">PayFast</span> para efetuar o pagamento em <span className="text-indigo-600 dark:text-indigo-400 font-bold">ZAR</span>.</>
                 ) : (
-                    <>Você será redirecionado para a página segura de pagamento da <span className="text-slate-900 dark:text-white font-bold">Debito.co.mz</span> para concluir sua compra usando <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa ou Mastercard</span>.</>
+                    <>Você será redirecionado para a página segura de pagamento da <span className="text-fg font-bold">Debito.co.mz</span> para concluir sua compra usando <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa ou Mastercard</span>.</>
                 )}
             </p>
             
@@ -271,11 +271,11 @@ export const CardPaymentView = ({
             
             <div className="mt-5 flex items-center gap-4 py-3 opacity-60 border-t border-slate-200 dark:border-slate-800/60">
                 {method === 'payfast' ? (
-                    <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Gateway PayFast Autenticado</span>
+                    <span className="text-[9px] uppercase font-bold tracking-widest text-fg-subtle">Gateway PayFast Autenticado</span>
                 ) : (
                     <>
                         <img src="https://paymentsindustryintelligence.com/wp-content/uploads/2021/11/visa-mastercard-logos.jpg" alt="Visa/MC" className="h-5 rounded-sm" />
-                        <span className="text-[9px] uppercase font-bold tracking-widest text-slate-500">Gateway de Cartão Seguro</span>
+                        <span className="text-[9px] uppercase font-bold tracking-widest text-fg-subtle">Gateway de Cartão Seguro</span>
                     </>
                 )}
             </div>
@@ -315,15 +315,15 @@ export const PollingOverlay = ({ method, total, exchangeRate = 65 }: { method: s
 
                 <div className="w-full text-center space-y-6">
                     <div>
-                        <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2 leading-none uppercase tracking-tight">Pedido Enviado</h3>
-                        <p className="text-slate-600 dark:text-slate-400 text-xs max-w-[280px] leading-relaxed mx-auto">
-                            Lançamos um pedido de pagamento de <span className="text-slate-900 dark:text-white font-bold font-mono">$ {total.toFixed(2)} USD</span> (~ MT {(total * exchangeRate).toFixed(0)} MZN) para o seu celular via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
+                        <h3 className="text-xl font-black text-fg mb-2 leading-none uppercase tracking-tight">Pedido Enviado</h3>
+                        <p className="text-fg-muted text-xs max-w-[280px] leading-relaxed mx-auto">
+                            Lançamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> (~ MT {(total * exchangeRate).toFixed(0)} MZN) para o seu celular via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
                         </p>
                     </div>
 
                     {/* Step-by-step Interactive Billing Terminal */}
                     <div className="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-900 rounded-2xl p-4 text-left space-y-4 max-w-xs mx-auto shadow-sm">
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block border-b border-slate-200 dark:border-slate-900 pb-2">Status do Terminal</span>
+                        <span className="text-[9px] font-black text-fg-subtle uppercase tracking-widest block border-b border-slate-200 dark:border-slate-900 pb-2">Status do Terminal</span>
                         
                         <div className="space-y-3 text-xs">
                             <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
@@ -341,7 +341,7 @@ export const PollingOverlay = ({ method, total, exchangeRate = 65 }: { method: s
                         </div>
                     </div>
 
-                    <div className="text-[10px] text-slate-500 leading-normal max-w-xs mx-auto">
+                    <div className="text-[10px] text-fg-subtle leading-normal max-w-xs mx-auto">
                         Insira o seu PIN de segurança no celular para confirmar. Iremos ativar o seu plano assim que a transação for aprovada.
                     </div>
                 </div>

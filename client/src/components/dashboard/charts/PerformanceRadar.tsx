@@ -91,11 +91,11 @@ export const PerformanceRadar = ({ data }: RadarProps) => {
         <div className="bg-transparent w-full relative overflow-hidden flex flex-col h-full">
             {/* Header */}
             <div className="flex justify-between items-center mb-1 z-10">
-                <span className="text-xs sm:text-[13px] font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                    <Radar className="text-emerald-400" size={15} /> Performance Radar
+                <span className="text-xs sm:text-[13px] font-semibold text-fg uppercase tracking-wider flex items-center gap-1.5">
+                    <Radar className="text-accent-fg" size={15} /> Performance Radar
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                    Score: <strong className="text-emerald-400 font-bold">{avgScore}/100</strong>
+                <span className="text-[10px] font-mono text-fg-muted">
+                    Score: <strong className="text-accent-fg font-bold">{avgScore}/100</strong>
                 </span>
             </div>
 
@@ -186,8 +186,8 @@ export const PerformanceRadar = ({ data }: RadarProps) => {
                 </svg>
             </div>
 
-            <div className="text-[11px] text-center text-slate-400 mt-1 font-mono">
-                Consistência Geral: <span className="text-emerald-400 font-bold">{avgScore}%</span>
+            <div className="text-[11px] text-center text-fg-muted mt-1 font-mono">
+                Consistência Geral: <span className="text-accent-fg font-bold">{avgScore}%</span>
             </div>
         </div>
     );

@@ -6,8 +6,8 @@ export const TraderConnection = () => {
     return (
         <div className="max-w-5xl mx-auto space-y-6">
             <header className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-100">Conexão & Importação</h1>
-                <p className="text-sm text-slate-400">Conecte sua conta MT4/MT5 ou importe trades manualmente</p>
+                <h1 className="text-2xl font-bold text-fg">Conexão & Importação</h1>
+                <p className="text-sm text-fg-muted">Conecte sua conta MT4/MT5 ou importe trades manualmente</p>
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -19,7 +19,7 @@ export const TraderConnection = () => {
                 {/* Right Column: Guide */}
                 <div className="lg:col-span-1">
                     <Card className="p-6 sticky top-6">
-                        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-6 flex items-center gap-2">
+                        <h2 className="text-sm font-bold text-fg uppercase tracking-wider mb-6 flex items-center gap-2">
                             <BookOpen className="w-4 h-4 text-amber-400" /> Guia de Conexão
                         </h2>
 
@@ -31,12 +31,12 @@ export const TraderConnection = () => {
                                 { step: 4, title: 'Inserir Token', text: 'Cole seu Token de Conexão nas configurações do EA. Pronto!', color: 'bg-emerald-500' }
                             ].map((item, i) => (
                                 <div key={i} className="flex gap-4">
-                                    <div className={`flex-shrink-0 w-8 h-8 ${item.color} rounded-full flex items-center justify-center text-xs font-bold text-white shadow-lg`}>
+                                    <div className={`flex-shrink-0 w-8 h-8 ${item.color} rounded-full flex items-center justify-center text-xs font-bold text-fg shadow-lg`}>
                                         {item.step}
                                     </div>
                                     <div>
-                                        <h3 className="text-xs font-bold text-slate-200 mb-0.5">{item.title}</h3>
-                                        <p className="text-[11px] text-slate-400 leading-relaxed">{item.text}</p>
+                                        <h3 className="text-xs font-bold text-fg mb-0.5">{item.title}</h3>
+                                        <p className="text-[11px] text-fg-muted leading-relaxed">{item.text}</p>
                                     </div>
                                 </div>
                             ))}

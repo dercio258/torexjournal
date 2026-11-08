@@ -13,6 +13,7 @@ import {
 import { Radar as RadarIcon, TrendingUp } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { DashboardStats } from '../../types';
+import { useChartTheme } from '../../hooks/useChartTheme';
 
 ChartJS.register(
     RadialLinearScale,
@@ -31,11 +32,12 @@ interface ChartsSectionProps {
 }
 
 export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
+    const ct = useChartTheme();
     if (isLoading || !stats) {
         return (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="h-80 animate-pulse bg-slate-800/50" />
-                <Card className="h-80 animate-pulse bg-slate-800/50" />
+                <Card className="h-80 animate-pulse bg-surface-2/50" />
+                <Card className="h-80 animate-pulse bg-surface-2/50" />
             </div>
         );
     }
@@ -67,8 +69,8 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
                 beginAtZero: true,
                 max: 100,
                 ticks: { display: false },
-                grid: { color: 'rgba(148, 163, 184, 0.1)' },
-                pointLabels: { color: '#cbd5e1', font: { size: 12 } }
+                grid: { color: ct.grid },
+                pointLabels: { color: ct.label, font: { size: 12 } }
             }
         },
         plugins: { legend: { display: false } },
@@ -103,12 +105,12 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
         plugins: { legend: { display: false } },
         scales: {
             y: {
-                grid: { color: 'rgba(148, 163, 184, 0.05)' },
-                ticks: { color: '#64748b' }
+                grid: { color: ct.grid },
+                ticks: { color: ct.tick }
             },
             x: {
                 grid: { display: false },
-                ticks: { color: '#64748b' }
+                ticks: { color: ct.tick }
             }
         }
     };
@@ -117,8 +119,8 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
         <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <Card className="lg:col-span-1 p-6 h-[400px] flex flex-col">
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <RadarIcon className="w-4 h-4 text-emerald-400" /> Performance
+                    <h2 className="text-sm font-bold text-fg uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <RadarIcon className="w-4 h-4 text-accent-fg" /> Performance
                     </h2>
                     <div className="flex-1 min-h-0 relative">
                         <Radar data={radarData} options={radarOptions} />
@@ -126,8 +128,8 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
                 </Card>
 
                 <Card className="lg:col-span-2 p-6 h-[400px] flex flex-col">
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-emerald-400" /> Curva de P&L
+                    <h2 className="text-sm font-bold text-fg uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-accent-fg" /> Curva de P&L
                     </h2>
                     <div className="flex-1 min-h-0 relative">
                         <Line data={pnlData} options={pnlOptions} />
@@ -137,7 +139,7 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Card className="p-6 h-80 flex flex-col">
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-fg uppercase tracking-wider mb-4 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-purple-400" /> P&L por Humor
                     </h2>
                     <div className="flex-1 min-h-0">
@@ -157,8 +159,8 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
                                 maintainAspectRatio: false,
                                 plugins: { legend: { display: false } },
                                 scales: {
-                                    y: { grid: { color: 'rgba(148, 163, 184, 0.05)' }, ticks: { color: '#64748b' } },
-                                    x: { grid: { display: false }, ticks: { color: '#64748b' } }
+                                    y: { grid: { color: ct.grid }, ticks: { color: ct.tick } },
+                                    x: { grid: { display: false }, ticks: { color: ct.tick } }
                                 }
                             }}
                         />
@@ -166,7 +168,7 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
                 </Card>
 
                 <Card className="p-6 h-80 flex flex-col">
-                    <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-fg uppercase tracking-wider mb-4 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-blue-400" /> P&L por Setup
                     </h2>
                     <div className="flex-1 min-h-0">
@@ -186,8 +188,8 @@ export const ChartsSection = ({ stats, isLoading }: ChartsSectionProps) => {
                                 maintainAspectRatio: false,
                                 plugins: { legend: { display: false } },
                                 scales: {
-                                    y: { grid: { color: 'rgba(148, 163, 184, 0.05)' }, ticks: { color: '#64748b' } },
-                                    x: { grid: { display: false }, ticks: { color: '#64748b' } }
+                                    y: { grid: { color: ct.grid }, ticks: { color: ct.tick } },
+                                    x: { grid: { display: false }, ticks: { color: ct.tick } }
                                 }
                             }}
                         />

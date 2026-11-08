@@ -112,17 +112,17 @@ export const ConnectionStatusBadge: React.FC = () => {
 
             {/* POPOVER DE DIAGNÓSTICO DETALHADO */}
             {isOpen && (
-                <div className="absolute right-0 sm:right-auto sm:left-0 mt-2 w-72 sm:w-80 rounded-xl bg-white dark:bg-[#111319] border border-slate-200 dark:border-white/[0.08] shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 text-slate-800 dark:text-slate-200">
+                <div className="absolute right-0 sm:right-auto sm:left-0 mt-2 w-72 sm:w-80 rounded-xl bg-surface border border-line shadow-2xl backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150 text-fg ">
                     {/* Header do Popover */}
-                    <div className="p-3 border-b border-slate-200 dark:border-white/[0.08] flex items-center justify-between bg-slate-50 dark:bg-[#0C0D12]">
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-[#F3F4F6]">
+                    <div className="p-3 border-b border-line flex items-center justify-between bg-slate-50 dark:bg-[#0C0D12]">
+                        <div className="flex items-center gap-2 text-xs font-bold text-fg ">
                             <Activity size={14} className="text-emerald-500 dark:text-emerald-400" />
                             <span>Diagnóstico de Conexão</span>
                         </div>
                         <button
                             onClick={handleManualRefresh}
                             disabled={isRefreshing || isAccountLoading}
-                            className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#161822] transition-colors disabled:opacity-50"
+                            className="p-1 rounded-md text-fg-subtle hover:text-fg dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-[#161822] transition-colors disabled:opacity-50"
                             title="Recarregar status"
                         >
                             <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-emerald-500' : ''} />
@@ -132,12 +132,12 @@ export const ConnectionStatusBadge: React.FC = () => {
                     {/* Itens de Conexão */}
                     <div className="p-3 space-y-2.5 text-xs">
                         {/* 1. Servidor WebSocket Torex */}
-                        <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#161822] border border-slate-200 dark:border-white/[0.05]">
+                        <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#161822] border border-line ">
                             <div className="flex items-center gap-2">
-                                <Server size={14} className="text-slate-500 dark:text-slate-400" />
+                                <Server size={14} className="text-fg-subtle dark:text-slate-400" />
                                 <div>
-                                    <div className="font-semibold text-slate-900 dark:text-white leading-tight">Servidor Torex</div>
-                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">WebSocket / Hub em Tempo Real</div>
+                                    <div className="font-semibold text-fg leading-tight">Servidor Torex</div>
+                                    <div className="text-[10px] text-fg-subtle dark:text-slate-400">WebSocket / Hub em Tempo Real</div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -156,12 +156,12 @@ export const ConnectionStatusBadge: React.FC = () => {
                         </div>
 
                         {/* 2. Ponte MetaTrader 5 */}
-                        <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#161822] border border-slate-200 dark:border-white/[0.05]">
+                        <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-[#161822] border border-line ">
                             <div className="flex items-center gap-2">
-                                <Wifi size={14} className="text-slate-500 dark:text-slate-400" />
+                                <Wifi size={14} className="text-fg-subtle dark:text-slate-400" />
                                 <div>
-                                    <div className="font-semibold text-slate-900 dark:text-white leading-tight">MetaTrader 5 Bridge</div>
-                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">Worker Node Windows</div>
+                                    <div className="font-semibold text-fg leading-tight">MetaTrader 5 Bridge</div>
+                                    <div className="text-[10px] text-fg-subtle dark:text-slate-400">Worker Node Windows</div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -180,10 +180,10 @@ export const ConnectionStatusBadge: React.FC = () => {
                         </div>
 
                         {/* 3. Informações da Conta Atual */}
-                        <div className="pt-2 border-t border-slate-200 dark:border-white/[0.08] space-y-1.5">
+                        <div className="pt-2 border-t border-line space-y-1.5">
                             <div className="flex justify-between items-center text-[11px]">
-                                <span className="text-slate-500 dark:text-slate-400">Conta Ativa:</span>
-                                <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[150px]">
+                                <span className="text-fg-subtle dark:text-slate-400">Conta Ativa:</span>
+                                <span className="font-semibold text-fg truncate max-w-[150px]">
                                     {isConsolidated ? 'Todas as Contas (Consolidado)' : (selectedAccount?.name || 'Conta Padrão')}
                                 </span>
                             </div>
@@ -191,14 +191,14 @@ export const ConnectionStatusBadge: React.FC = () => {
                             {!isConsolidated && selectedAccount && (
                                 <>
                                     <div className="flex justify-between items-center text-[11px]">
-                                        <span className="text-slate-500 dark:text-slate-400">Corretora:</span>
-                                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                                        <span className="text-fg-subtle dark:text-slate-400">Corretora:</span>
+                                        <span className="font-mono text-fg-muted ">
                                             {selectedAccount.broker || 'MetaTrader 5'}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center text-[11px]">
-                                        <span className="text-slate-500 dark:text-slate-400">Último Sinal:</span>
-                                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                                        <span className="text-fg-subtle dark:text-slate-400">Último Sinal:</span>
+                                        <span className="font-mono text-fg-muted ">
                                             {formatLastSeen(selectedAccount.lastSeen)}
                                         </span>
                                     </div>
@@ -208,7 +208,7 @@ export const ConnectionStatusBadge: React.FC = () => {
                     </div>
 
                     {/* Rodapé com link de Ação */}
-                    <div className="p-2 border-t border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#0C0D12]">
+                    <div className="p-2 border-t border-line bg-slate-50 dark:bg-[#0C0D12]">
                         <button
                             onClick={() => {
                                 setIsOpen(false);

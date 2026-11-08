@@ -121,7 +121,7 @@ export const Checkout = () => {
     }, [showPinPrompt, navigate, paymentMethod]);
 
     return (
-        <div className="min-h-screen bg-slate-50 dark:bg-[#050508] text-slate-900 dark:text-white selection:bg-indigo-500/30 overflow-hidden relative transition-colors duration-200">
+        <div className="min-h-screen bg-slate-50 dark:bg-[#050508] text-fg selection:bg-indigo-500/30 overflow-hidden relative transition-colors duration-200">
             {/* Ambient Background Glows */}
             <div className="absolute inset-0 pointer-events-none z-0">
                 <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-500/5 blur-[150px] rounded-full" />
@@ -134,9 +134,9 @@ export const Checkout = () => {
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     onClick={() => navigate('/pricing')}
-                    className="flex items-center gap-2 text-slate-600 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors mb-12 group"
+                    className="flex items-center gap-2 text-slate-600 dark:text-slate-500 hover:text-fg transition-colors mb-12 group"
                 >
-                    <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center group-hover:bg-slate-100 dark:group-hover:bg-slate-800 transition-colors shadow-sm">
+                    <div className="w-8 h-8 rounded-full bg-surface border border-line flex items-center justify-center group-hover:bg-surface-2 transition-colors shadow-sm">
                         <ChevronLeft size={16} />
                     </div>
                     <span className="text-sm font-bold uppercase tracking-widest text-[10px]">Voltar aos Planos</span>
@@ -163,8 +163,8 @@ export const Checkout = () => {
                         <div className="bg-white/80 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-800/80 rounded-[32px] p-8 lg:p-12 backdrop-blur-xl shadow-2xl relative overflow-hidden">
                             <div className="relative z-10">
                                 <header className="mb-10">
-                                    <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-3 tracking-tight uppercase">Checkout</h2>
-                                    <p className="text-slate-600 dark:text-slate-400 text-sm">Escolha seu método de pagamento preferido para ativar sua licença Torex.</p>
+                                    <h2 className="text-3xl font-black text-fg mb-3 tracking-tight uppercase">Checkout</h2>
+                                    <p className="text-fg-muted text-sm">Escolha seu método de pagamento preferido para ativar sua licença Torex.</p>
                                 </header>
 
                                 {/* Method Selector */}
@@ -240,10 +240,10 @@ export const Checkout = () => {
                                 <footer className="mt-10 pt-8 border-t border-slate-200 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-6 opacity-70 dark:opacity-50">
                                     <div className="flex items-center gap-2">
                                         <ShieldCheck className="text-indigo-600 dark:text-indigo-400" size={16} />
-                                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-700 dark:text-slate-300">Processamento Criptografado</span>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest text-fg-muted ">Processamento Criptografado</span>
                                     </div>
                                     <div className="flex items-center gap-2 grayscale hover:grayscale-0 transition-all cursor-default">
-                                        <span className="text-[9px] font-bold text-slate-500">Parceiro Oficial:</span>
+                                        <span className="text-[9px] font-bold text-fg-subtle">Parceiro Oficial:</span>
                                         <span className="text-[10px] font-black text-slate-800 dark:text-slate-300">Debito.co.mz</span>
                                     </div>
                                 </footer>
@@ -279,23 +279,23 @@ export const Checkout = () => {
                                             )}
                                         </div>
                                         <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center">
-                                            <Loader2 className="animate-spin text-white" size={10} />
+                                            <Loader2 className="animate-spin text-fg" size={10} />
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="space-y-2">
-                                    <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                                    <h3 className="text-lg font-black text-fg uppercase tracking-tight">
                                         {['mpesa', 'emola'].includes(paymentMethod) ? 'Aguardando Confirmação' : 'Redirecionando'}
                                     </h3>
-                                    <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed">
+                                    <p className="text-fg-muted text-xs leading-relaxed">
                                         {['mpesa', 'emola'].includes(paymentMethod) ? (
                                             <>
-                                                Enviamos um pedido de pagamento de <span className="text-slate-900 dark:text-white font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> (~ MT {(getBillTotalUSD() * exchangeRate).toFixed(0)} MZN) para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.
+                                                Enviamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> (~ MT {(getBillTotalUSD() * exchangeRate).toFixed(0)} MZN) para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.
                                             </>
                                         ) : (
                                             <>
-                                                Estamos a preparar a sua ligação segura. Você será redirecionado para a página de pagamento seguro para concluir a transação de <span className="text-slate-900 dark:text-white font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span>.
+                                                Estamos a preparar a sua ligação segura. Você será redirecionado para a página de pagamento seguro para concluir a transação de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span>.
                                             </>
                                         )}
                                     </p>
@@ -310,7 +310,7 @@ export const Checkout = () => {
                                                 Pendente
                                             </span>
                                         </div>
-                                        <p className="text-[9px] text-slate-500 leading-normal">
+                                        <p className="text-[9px] text-fg-subtle leading-normal">
                                             Após digitar o PIN no seu telemóvel, aguarde a confirmação automática nesta tela. Não feche a página.
                                         </p>
                                     </div>
@@ -323,7 +323,7 @@ export const Checkout = () => {
                                             setProcessing(false);
                                             setShowPinPrompt(false);
                                         }}
-                                        className="text-[10px] text-slate-500 hover:text-slate-800 dark:text-slate-600 dark:hover:text-slate-400 transition-colors uppercase font-bold tracking-widest pt-2 block mx-auto"
+                                        className="text-[10px] text-fg-subtle hover:text-slate-800 dark:text-slate-600 dark:hover:text-slate-400 transition-colors uppercase font-bold tracking-widest pt-2 block mx-auto"
                                     >
                                         Cancelar
                                     </button>

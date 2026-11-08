@@ -10,6 +10,7 @@ import {
     Legend
 } from 'chart.js';
 import { BarChart2, Clock, Calendar, Activity } from 'lucide-react';
+import { ChartTheme, useChartTheme } from '../../../hooks/useChartTheme';
 
 ChartJS.register(
     RadialLinearScale,
@@ -43,7 +44,7 @@ interface OperationalRadarsProps {
     dailyPnL?: Array<{ date: string; pnl?: number; value?: number }>;
 }
 
-const getBaseRadarOptions = (suggestedMax = 100, tooltipCallbacks?: any) => ({
+const getBaseRadarOptions = (ct: ChartTheme, suggestedMax = 100, tooltipCallbacks?: any) => ({
     responsive: true,
     maintainAspectRatio: false,
     layout: {
@@ -51,10 +52,10 @@ const getBaseRadarOptions = (suggestedMax = 100, tooltipCallbacks?: any) => ({
     },
     scales: {
         r: {
-            angleLines: { color: 'rgba(255, 255, 255, 0.06)', lineWidth: 1 },
-            grid: { color: 'rgba(255, 255, 255, 0.06)' },
+            angleLines: { color: ct.grid, lineWidth: 1 },
+            grid: { color: ct.grid },
             pointLabels: {
-                color: '#9CA3AF',
+                color: ct.label,
                 font: { size: 9.5, family: "'Inter', sans-serif", weight: 500 },
                 padding: 6
             },
@@ -66,11 +67,11 @@ const getBaseRadarOptions = (suggestedMax = 100, tooltipCallbacks?: any) => ({
     plugins: {
         legend: { display: false },
         tooltip: {
-            backgroundColor: '#08090C',
-            borderColor: 'rgba(255, 255, 255, 0.1)',
+            backgroundColor: ct.tooltipBg,
+            borderColor: ct.tooltipBorder,
             borderWidth: 1,
-            titleColor: '#F3F4F6',
-            bodyColor: '#9CA3AF',
+            titleColor: ct.tooltipTitle,
+            bodyColor: ct.tooltipBody,
             titleFont: { family: "'Inter', sans-serif", size: 11, weight: 'bold' as const },
             bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
             padding: 8,
@@ -87,6 +88,8 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
     trades = [],
     dailyPnL = []
 }) => {
+    const ct = useChartTheme();
+
     // --- 1. RADAR DE ATIVOS ---
     const assetRadarData = useMemo(() => {
         if (!instrumentsData || instrumentsData.length === 0) return null;
@@ -123,9 +126,9 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
     }, [instrumentsData]);
 
     const assetRadarOptions = useMemo(() => {
-        if (!assetRadarData) return getBaseRadarOptions(100);
+        if (!assetRadarData) return getBaseRadarOptions(ct, 100);
         const maxRate = Math.max(...assetRadarData.winRates, 50);
-        return getBaseRadarOptions(Math.min(100, maxRate + 5), {
+        return getBaseRadarOptions(ct, Math.min(100, maxRate + 5), {
             label: (context: any) => {
                 const idx = context.dataIndex;
                 const asset = instrumentsData[idx];
@@ -137,7 +140,7 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                 ];
             }
         });
-    }, [assetRadarData, instrumentsData]);
+    }, [assetRadarData, instrumentsData, ct]);
 
     // --- 2. RADAR DE SESSÕES OPERACIONAIS ---
     const standardSessions = useMemo(() => ['Nova Iorque', 'Sydney', 'Londres', 'Ásia'], []);
@@ -184,7 +187,7 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
     }, [sessionsData, standardSessions]);
 
     const sessionRadarOptions = useMemo(() => {
-        return getBaseRadarOptions(100, {
+        return getBaseRadarOptions(ct, 100, {
             label: (context: any) => {
                 const item = sessionRadarData.mapped[context.dataIndex];
                 const pnl = item?.pnl ?? 0;
@@ -195,7 +198,7 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                 ];
             }
         });
-    }, [sessionRadarData]);
+    }, [sessionRadarData, ct]);
 
     // --- 3. RADAR DE OPERAÇÃO POR DIAS DA SEMANA (SEG - SEX) ---
     const weekdayData = useMemo(() => {
@@ -261,7 +264,7 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
 
     const weekdayRadarOptions = useMemo(() => {
         const maxTrades = Math.max(...weekdayRadarData.tradeCounts, 10);
-        return getBaseRadarOptions(maxTrades + 2, {
+        return getBaseRadarOptions(ct, maxTrades + 2, {
             label: (context: any) => {
                 const dayInfo = weekdayData[context.dataIndex];
                 const pnl = dayInfo?.pnl ?? 0;
@@ -272,7 +275,7 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                 ];
             }
         });
-    }, [weekdayRadarData, weekdayData]);
+    }, [weekdayRadarData, weekdayData, ct]);
 
     // --- 4. INSIGHTS DE MELHOR E PIOR (CONCISOS / NÃO VERBOSOS) ---
     const assetInsight = useMemo(() => {
@@ -388,13 +391,13 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 items-stretch">
             {/* CARD 1: RADAR DE ATIVOS */}
-            <div className="bg-[#111319] border border-white/[0.08] hover:border-white/[0.14] rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
-                <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
-                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                        <BarChart2 size={13} className="text-emerald-400" />
+            <div className="bg-surface border border-line hover:border-line-strong rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-line">
+                    <span className="text-xs font-semibold text-fg uppercase tracking-wider flex items-center gap-1.5">
+                        <BarChart2 size={13} className="text-accent-fg" />
                         Desempenho por Ativo
                     </span>
-                    <span className="text-[10px] font-mono text-[#6B7280]">
+                    <span className="text-[10px] font-mono text-fg-subtle">
                         {instrumentsData.length} {instrumentsData.length === 1 ? 'ativo' : 'ativos'}
                     </span>
                 </div>
@@ -405,53 +408,53 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                     ) : (
                         <div className="flex flex-col items-center justify-center text-center p-3">
                             <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-1.5">
-                                <Activity size={16} className="text-emerald-400" />
+                                <Activity size={16} className="text-accent-fg" />
                             </div>
-                            <span className="text-xs font-medium text-slate-300">Nenhum trade no período</span>
-                            <span className="text-[10px] text-slate-500 mt-0.5">Aguardando operações</span>
+                            <span className="text-xs font-medium text-fg/80">Nenhum trade no período</span>
+                            <span className="text-[10px] text-fg-subtle mt-0.5">Aguardando operações</span>
                         </div>
                     )}
                 </div>
 
                 {/* Insight Footer */}
-                <div className="pt-2 mt-auto border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono">
+                <div className="pt-2 mt-auto border-t border-line flex items-center justify-between text-[11px] font-mono">
                     {assetInsight.best ? (
                         <div className="flex items-center justify-between w-full gap-2 overflow-hidden">
                             <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="inline-flex items-center gap-1 text-emerald-400 font-bold shrink-0 text-[10px] uppercase">
+                                <span className="inline-flex items-center gap-1 text-accent-fg font-bold shrink-0 text-[10px] uppercase">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                                     Melhor:
                                 </span>
-                                <span className="text-slate-200 font-semibold truncate text-xs">{assetInsight.best.label}</span>
-                                <span className="text-emerald-400 font-bold shrink-0">{assetInsight.best.value}</span>
+                                <span className="text-fg font-semibold truncate text-xs">{assetInsight.best.label}</span>
+                                <span className="text-accent-fg font-bold shrink-0">{assetInsight.best.value}</span>
                             </div>
                             {assetInsight.worst && (
                                 <div className="flex items-center gap-1.5 min-w-0 pl-2">
-                                    <span className="inline-flex items-center gap-1 text-rose-400 font-bold shrink-0 text-[10px] uppercase">
+                                    <span className="inline-flex items-center gap-1 text-danger-fg font-bold shrink-0 text-[10px] uppercase">
                                         <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
                                         Pior:
                                     </span>
-                                    <span className="text-slate-200 font-semibold truncate text-xs">{assetInsight.worst.label}</span>
-                                    <span className="text-rose-400 font-bold shrink-0">{assetInsight.worst.value}</span>
+                                    <span className="text-fg font-semibold truncate text-xs">{assetInsight.worst.label}</span>
+                                    <span className="text-danger-fg font-bold shrink-0">{assetInsight.worst.value}</span>
                                 </div>
                             )}
                         </div>
                     ) : (
                         <div className="flex items-center justify-center w-full">
-                            <span className="text-[10px] text-[#6B7280] font-mono">Sem dados suficientes</span>
+                            <span className="text-[10px] text-fg-subtle font-mono">Sem dados suficientes</span>
                         </div>
                     )}
                 </div>
             </div>
 
             {/* CARD 2: RADAR DE SESSÕES OPERACIONAIS */}
-            <div className="bg-[#111319] border border-white/[0.08] hover:border-white/[0.14] rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
-                <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
-                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <div className="bg-surface border border-line hover:border-line-strong rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-line">
+                    <span className="text-xs font-semibold text-fg uppercase tracking-wider flex items-center gap-1.5">
                         <Clock size={13} className="text-purple-400" />
                         Sessões Operacionais
                     </span>
-                    <span className="text-[10px] font-mono text-[#6B7280]">
+                    <span className="text-[10px] font-mono text-fg-subtle">
                         Volume / PnL
                     </span>
                 </div>
@@ -461,44 +464,44 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                 </div>
 
                 {/* Insight Footer */}
-                <div className="pt-2 mt-auto border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono">
+                <div className="pt-2 mt-auto border-t border-line flex items-center justify-between text-[11px] font-mono">
                     {sessionInsight.best ? (
                         <div className="flex items-center justify-between w-full gap-2 overflow-hidden">
                             <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="inline-flex items-center gap-1 text-emerald-400 font-bold shrink-0 text-[10px] uppercase">
+                                <span className="inline-flex items-center gap-1 text-accent-fg font-bold shrink-0 text-[10px] uppercase">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                                     Melhor:
                                 </span>
-                                <span className="text-slate-200 font-semibold truncate text-xs">{sessionInsight.best.label}</span>
-                                <span className="text-emerald-400 font-bold shrink-0">{sessionInsight.best.value}</span>
+                                <span className="text-fg font-semibold truncate text-xs">{sessionInsight.best.label}</span>
+                                <span className="text-accent-fg font-bold shrink-0">{sessionInsight.best.value}</span>
                             </div>
                             {sessionInsight.worst && (
                                 <div className="flex items-center gap-1.5 min-w-0 pl-2">
-                                    <span className="inline-flex items-center gap-1 text-rose-400 font-bold shrink-0 text-[10px] uppercase">
+                                    <span className="inline-flex items-center gap-1 text-danger-fg font-bold shrink-0 text-[10px] uppercase">
                                         <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
                                         Pior:
                                     </span>
-                                    <span className="text-slate-200 font-semibold truncate text-xs">{sessionInsight.worst.label}</span>
-                                    <span className="text-rose-400 font-bold shrink-0">{sessionInsight.worst.value}</span>
+                                    <span className="text-fg font-semibold truncate text-xs">{sessionInsight.worst.label}</span>
+                                    <span className="text-danger-fg font-bold shrink-0">{sessionInsight.worst.value}</span>
                                 </div>
                             )}
                         </div>
                     ) : (
                         <div className="flex items-center justify-center w-full">
-                            <span className="text-[10px] text-[#6B7280] font-mono">Sem dados suficientes</span>
+                            <span className="text-[10px] text-fg-subtle font-mono">Sem dados suficientes</span>
                         </div>
                     )}
                 </div>
             </div>
 
             {/* CARD 3: RADAR DE OPERAÇÃO POR DIAS DA SEMANA */}
-            <div className="bg-[#111319] border border-white/[0.08] hover:border-white/[0.14] rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
-                <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/[0.06]">
-                    <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <div className="bg-surface border border-line hover:border-line-strong rounded-xl p-3.5 sm:p-4 card-hover flex flex-col justify-between h-[330px] sm:h-[350px]">
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-line">
+                    <span className="text-xs font-semibold text-fg uppercase tracking-wider flex items-center gap-1.5">
                         <Calendar size={13} className="text-cyan-400" />
                         Operação por Dias
                     </span>
-                    <span className="text-[10px] font-mono text-[#6B7280]">
+                    <span className="text-[10px] font-mono text-fg-subtle">
                         Seg — Sex
                     </span>
                 </div>
@@ -508,31 +511,31 @@ export const OperationalRadars: React.FC<OperationalRadarsProps> = ({
                 </div>
 
                 {/* Insight Footer */}
-                <div className="pt-2 mt-auto border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono">
+                <div className="pt-2 mt-auto border-t border-line flex items-center justify-between text-[11px] font-mono">
                     {weekdayInsight.best ? (
                         <div className="flex items-center justify-between w-full gap-2 overflow-hidden">
                             <div className="flex items-center gap-1.5 min-w-0">
-                                <span className="inline-flex items-center gap-1 text-emerald-400 font-bold shrink-0 text-[10px] uppercase">
+                                <span className="inline-flex items-center gap-1 text-accent-fg font-bold shrink-0 text-[10px] uppercase">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                                     Melhor:
                                 </span>
-                                <span className="text-slate-200 font-semibold truncate text-xs">{weekdayInsight.best.label}</span>
-                                <span className="text-emerald-400 font-bold shrink-0">{weekdayInsight.best.value}</span>
+                                <span className="text-fg font-semibold truncate text-xs">{weekdayInsight.best.label}</span>
+                                <span className="text-accent-fg font-bold shrink-0">{weekdayInsight.best.value}</span>
                             </div>
                             {weekdayInsight.worst && (
                                 <div className="flex items-center gap-1.5 min-w-0 pl-2">
-                                    <span className="inline-flex items-center gap-1 text-rose-400 font-bold shrink-0 text-[10px] uppercase">
+                                    <span className="inline-flex items-center gap-1 text-danger-fg font-bold shrink-0 text-[10px] uppercase">
                                         <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
                                         Pior:
                                     </span>
-                                    <span className="text-slate-200 font-semibold truncate text-xs">{weekdayInsight.worst.label}</span>
-                                    <span className="text-rose-400 font-bold shrink-0">{weekdayInsight.worst.value}</span>
+                                    <span className="text-fg font-semibold truncate text-xs">{weekdayInsight.worst.label}</span>
+                                    <span className="text-danger-fg font-bold shrink-0">{weekdayInsight.worst.value}</span>
                                 </div>
                             )}
                         </div>
                     ) : (
                         <div className="flex items-center justify-center w-full">
-                            <span className="text-[10px] text-[#6B7280] font-mono">Sem dados suficientes</span>
+                            <span className="text-[10px] text-fg-subtle font-mono">Sem dados suficientes</span>
                         </div>
                     )}
                 </div>

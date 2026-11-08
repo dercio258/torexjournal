@@ -142,14 +142,14 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
   const activeStep = steps[currentStep];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-4 md:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas/90 backdrop-blur-xl p-4 md:p-6 overflow-y-auto">
       <motion.div 
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="w-full max-w-2xl bg-[#0d1117] border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative"
+        className="w-full max-w-2xl bg-surface border border-line rounded-3xl shadow-2xl overflow-hidden relative"
       >
         {/* Progress header */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 bg-slate-900">
+        <div className="absolute top-0 left-0 right-0 h-1.5 bg-surface">
           <motion.div 
             className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500"
             animate={{ width: `${progress}%` }}
@@ -168,13 +168,13 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
                 <span className="text-xs font-bold text-indigo-500 uppercase tracking-widest">
                   Passo {currentStep + 1} de {steps.length}
                 </span>
-                <h2 className="text-white font-bold">{activeStep.title}</h2>
+                <h2 className="text-fg font-bold">{activeStep.title}</h2>
               </div>
             </div>
             {currentStep > 0 && (
               <button 
                 onClick={() => setCurrentStep(prev => prev - 1)}
-                className="p-2 text-slate-500 hover:text-white transition-colors"
+                className="p-2 text-fg-subtle hover:text-fg transition-colors"
                 title="Voltar"
               >
                 <ChevronLeft size={20} />
@@ -192,7 +192,7 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
                 exit={{ x: -20, opacity: 0 }}
                 className="flex-1"
               >
-                <h1 className="text-2xl md:text-3xl font-bold text-white mb-8 leading-tight">
+                <h1 className="text-2xl md:text-3xl font-bold text-fg mb-8 leading-tight">
                   {activeStep.question}
                 </h1>
 
@@ -203,17 +203,17 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
                       onClick={() => handleOptionSelect(option.value)}
                       className={`group relative flex items-center justify-between p-5 rounded-2xl border transition-all text-left ${
                         answers[activeStep.id] === option.value
-                          ? 'bg-indigo-500/10 border-indigo-500/50 text-white'
-                          : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-800/50'
+                          ? 'bg-indigo-500/10 border-indigo-500/50 text-fg'
+                          : 'bg-surface/50 border-line text-fg-muted hover:border-line-strong hover:bg-surface-2/50'
                       }`}
                     >
                       <span className="font-medium">{option.label}</span>
                       <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
                         answers[activeStep.id] === option.value
                           ? 'bg-indigo-500 border-indigo-500'
-                          : 'border-slate-700 group-hover:border-slate-600'
+                          : 'border-line-strong group-hover:border-slate-600'
                       }`}>
-                        {answers[activeStep.id] === option.value && <Check size={14} className="text-white" />}
+                        {answers[activeStep.id] === option.value && <Check size={14} className="text-fg" />}
                       </div>
                     </button>
                   ))}
@@ -229,7 +229,7 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
                 <div 
                   key={i} 
                   className={`h-1 w-4 rounded-full transition-all ${
-                    i === currentStep ? 'bg-indigo-500 w-8' : i < currentStep ? 'bg-emerald-500/40' : 'bg-slate-800'
+                    i === currentStep ? 'bg-indigo-500 w-8' : i < currentStep ? 'bg-emerald-500/40' : 'bg-surface-2'
                   }`}
                 />
               ))}

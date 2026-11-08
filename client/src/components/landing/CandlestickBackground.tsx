@@ -50,7 +50,7 @@ export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps>
 
     return (
         <div 
-            className={`absolute inset-0 pointer-events-none overflow-hidden select-none bg-[#08090C] z-0 ${className}`}
+            className={`absolute inset-0 pointer-events-none overflow-hidden select-none bg-canvas z-0 ${className}`}
             aria-hidden="true"
         >
             {/* Máscara suave integrada perfeitamente ao fundo preto obsidiana */}
