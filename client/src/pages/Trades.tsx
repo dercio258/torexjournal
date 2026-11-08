@@ -110,18 +110,14 @@ export const Trades = () => {
             // Status
             if (statusFilter !== 'ALL' && (trade.status || 'CLOSED').toUpperCase() !== statusFilter.toUpperCase()) return false;
 
-            // Date Range
+            // Date Range (comparação em UTC para preservar a data exata do MT5/Relatório)
             if (dateRange.start) {
-                const tradeDate = new Date(trade.closeTime);
-                const startDate = new Date(dateRange.start);
-                startDate.setHours(0, 0, 0, 0);
-                if (tradeDate < startDate) return false;
+                const tradeDateStr = new Date(trade.closeTime).toISOString().split('T')[0];
+                if (tradeDateStr < dateRange.start) return false;
             }
             if (dateRange.end) {
-                const tradeDate = new Date(trade.closeTime);
-                const endDate = new Date(dateRange.end);
-                endDate.setHours(23, 59, 59, 999);
-                if (tradeDate > endDate) return false;
+                const tradeDateStr = new Date(trade.closeTime).toISOString().split('T')[0];
+                if (tradeDateStr > dateRange.end) return false;
             }
 
             return true;
@@ -408,7 +404,7 @@ export const Trades = () => {
                                          )}
                                          <td className="p-4 text-slate-500 dark:text-slate-400 font-mono text-xs">#{trade.ticket}</td>
                                          <td className="p-4 text-slate-600 dark:text-slate-400 whitespace-nowrap text-xs">
-                                             {new Date(trade.closeTime || trade.openTime || Date.now()).toLocaleString('pt-BR')}
+                                             {new Date(trade.closeTime || trade.openTime || Date.now()).toLocaleString('pt-BR', { timeZone: 'UTC' })}
                                          </td>
                                          <td className="p-4 font-bold text-slate-900 dark:text-slate-200">{trade.symbol}</td>
                                          <td className="p-4">
@@ -434,7 +430,12 @@ export const Trades = () => {
                                              )}
                                          </td>
                                          <td className={`p-4 text-right font-bold font-mono ${trade.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                             {trade.profit >= 0 ? '+' : ''}{trade.profit.toFixed(2)}
+                                             <div>{trade.profit >= 0 ? '+' : ''}{trade.profit.toFixed(2)}</div>
+                                             {trade.rawProfit !== undefined && Math.abs(trade.profit - trade.rawProfit) > 0.005 && (
+                                                 <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
+                                                     Bruto MT5: {trade.rawProfit >= 0 ? '+' : ''}{trade.rawProfit.toFixed(2)}
+                                                 </div>
+                                             )}
                                          </td>
                                          <td className="p-4 text-center">
                                              <button className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors">

@@ -1159,9 +1159,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 </td>
                                                 <td className="py-2.5 px-3 text-slate-400">
                                                     {trade.closeTime
-                                                        ? new Date(trade.closeTime).toLocaleString()
+                                                        ? new Date(trade.closeTime).toLocaleString('pt-BR', { timeZone: 'UTC' })
                                                         : trade.openTime
-                                                            ? new Date(trade.openTime).toLocaleString()
+                                                            ? new Date(trade.openTime).toLocaleString('pt-BR', { timeZone: 'UTC' })
                                                             : '-'}
                                                 </td>
                                                 <td className={`py-2.5 px-3 text-right font-bold ${

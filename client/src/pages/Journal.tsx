@@ -225,9 +225,9 @@ export const Journal = () => {
     const filteredTrades = trades.filter(t => {
         if (!selectedDate) return false;
         const d = new Date(t.close_time);
-        return d.getDate() === selectedDate.getDate() &&
-            d.getMonth() === selectedDate.getMonth() &&
-            d.getFullYear() === selectedDate.getFullYear();
+        return d.getUTCDate() === selectedDate.getDate() &&
+            d.getUTCMonth() === selectedDate.getMonth() &&
+            d.getUTCFullYear() === selectedDate.getFullYear();
     });
 
     return (

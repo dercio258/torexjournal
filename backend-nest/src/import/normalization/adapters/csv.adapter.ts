@@ -51,6 +51,22 @@ export class CsvAdapter implements ITradeAdapter {
 
     private safeDate(dateInput: any): Date | null {
         if (!dateInput) return null;
+        if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? null : dateInput;
+        if (typeof dateInput === 'string') {
+            const trimmed = dateInput.trim();
+            const m = trimmed.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+            if (m) {
+                const d = new Date(Date.UTC(
+                    parseInt(m[1], 10),
+                    parseInt(m[2], 10) - 1,
+                    parseInt(m[3], 10),
+                    m[4] ? parseInt(m[4], 10) : 0,
+                    m[5] ? parseInt(m[5], 10) : 0,
+                    m[6] ? parseInt(m[6], 10) : 0
+                ));
+                if (!isNaN(d.getTime())) return d;
+            }
+        }
         let date = new Date(dateInput);
         if (isNaN(date.getTime()) && typeof dateInput === 'string') {
             const dotted = dateInput.replace(/\./g, '-');

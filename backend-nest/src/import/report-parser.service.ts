@@ -23,8 +23,7 @@ export class ReportParserService {
         };
 
         const parseDate = (dateStr: string) => {
-            if (!dateStr || dateStr.trim() === '') return null;
-            return new Date(dateStr.replace(/\./g, '-'));
+            return this.normalizeDate(dateStr);
         };
 
         while ((match = rowRegex.exec(content)) !== null) {
@@ -171,14 +170,13 @@ export class ReportParserService {
         const trimmed = dateStr.toString().trim().replace(/"/g, '');
         if (!trimmed) return null;
 
-        // 1. Direct standard parse (handles ISO timestamps with or without ms, e.g. 2026-02-02T08:15:00.000)
-        const directDate = new Date(trimmed);
-        if (!isNaN(directDate.getTime())) {
-            const yr = directDate.getFullYear();
-            if (yr >= 1990 && yr <= 2100) return directDate;
+        // 1. Se já possui sufixo explícito de fuso horário ISO (Z ou +HH:MM / -HH:MM), usa parse nativo
+        if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(trimmed)) {
+            const isoDate = new Date(trimmed);
+            if (!isNaN(isoDate.getTime())) return isoDate;
         }
 
-        // 2. Split date and time
+        // 2. Split date and time (preservando o horário exato do relatório/MT5 em UTC sem deslocamento local)
         const [datePart, ...restTime] = trimmed.split(/[ T]/);
         const timePart = restTime.join(' ');
 
@@ -220,6 +218,13 @@ export class ReportParserService {
             }
             const d = new Date(Date.UTC(year, month, day, hours, minutes, seconds));
             if (!isNaN(d.getTime())) return d;
+        }
+
+        // 5. Fallback standard parse
+        const directDate = new Date(trimmed);
+        if (!isNaN(directDate.getTime())) {
+            const yr = directDate.getFullYear();
+            if (yr >= 1990 && yr <= 2100) return directDate;
         }
 
         return null;

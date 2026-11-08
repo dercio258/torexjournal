@@ -8,6 +8,7 @@ import { TradeEntity } from '../trade.entity';
 import { Mt5Service } from '../mt5.service';
 import { Mt5Gateway } from '../mt5.gateway';
 import { ImportLog, ImportMethod, ImportStatus } from '../import-log.entity';
+import { DashboardService } from '../../dashboard/dashboard.service';
 
 export enum WorkerTaskType {
     START_ACCOUNT = 'START_ACCOUNT',
@@ -126,6 +127,7 @@ export class Mt5WorkerService implements OnModuleInit {
         private readonly importLogRepo: Repository<ImportLog>,
         private readonly mt5Service: Mt5Service,
         private readonly mt5Gateway: Mt5Gateway,
+        private readonly dashboardService: DashboardService,
     ) { }
 
     async onModuleInit() {
@@ -921,6 +923,7 @@ export class Mt5WorkerService implements OnModuleInit {
 
         this.logger.log(`Salvando ${normalizedTrades.length} trades para conta ${account.mt5Id || account.name} via AUTO_SYNC`);
         let savedCount = 0;
+        let updatedCount = 0;
         try {
             const result = await this.mt5Service.saveHistory(
                 normalizedTrades,
@@ -975,15 +978,87 @@ export class Mt5WorkerService implements OnModuleInit {
                             ]
                         );
                         savedCount++;
-                    } else if (existing[0] && existing[0].ticket !== tr.ticket && tr.ticket) {
-                        await this.accountRepo.manager.query(
-                            `UPDATE trades SET ticket = $1 WHERE id = $2`,
-                            [tr.ticket, existing[0].id]
-                        ).catch(() => {});
                     }
                 } catch (innerErr) {
                     this.logger.warn(`[FALLBACK SQL] Falha ao inserir trade ${tr.ticket} na conta ${cleanLogin}: ${innerErr.message}`);
                 }
+            }
+        }
+
+        // Reconciliação autoritativa de trades já existentes no DB (corrige profit, commission, swap, netPnl, open_time, close_time e ticket)
+        for (const tr of normalizedTrades) {
+            try {
+                const existingRows = await this.accountRepo.manager.query(
+                    `SELECT id, ticket, "contractId", profit, commission, swap, "netPnl", open_price, close_price, open_time, close_time
+                     FROM trades
+                     WHERE account_id::text = $1 AND (ticket IN ($2, $3, $4) OR "contractId" IN ($2, $3, $4))
+                     LIMIT 1`,
+                    [account.id, tr.ticket, tr.contractId, tr.dealTicket || tr.ticket]
+                );
+                if (existingRows && existingRows.length > 0) {
+                    const ex = existingRows[0];
+                    const dbOpenMs = ex.open_time ? new Date(ex.open_time).getTime() : 0;
+                    const dbCloseMs = ex.close_time ? new Date(ex.close_time).getTime() : 0;
+                    const newOpenMs = tr.openTime ? new Date(tr.openTime).getTime() : 0;
+                    const newCloseMs = tr.closeTime ? new Date(tr.closeTime).getTime() : 0;
+
+                    const needsUpdate =
+                        String(ex.ticket) !== String(tr.ticket) ||
+                        Math.abs(Number(ex.profit || 0) - Number(tr.profit || 0)) > 0.001 ||
+                        Math.abs(Number(ex.commission || 0) - Number(tr.commission || 0)) > 0.001 ||
+                        Math.abs(Number(ex.swap || 0) - Number(tr.swap || 0)) > 0.001 ||
+                        Math.abs(Number(ex.netPnl || 0) - Number(tr.netPnl || 0)) > 0.001 ||
+                        Math.abs(Number(ex.open_price || 0) - Number(tr.openPrice || 0)) > 0.00001 ||
+                        Math.abs(Number(ex.close_price || 0) - Number(tr.closePrice || 0)) > 0.00001 ||
+                        (newOpenMs > 0 && Math.abs(dbOpenMs - newOpenMs) > 1000) ||
+                        (newCloseMs > 0 && Math.abs(dbCloseMs - newCloseMs) > 1000);
+
+                    if (needsUpdate) {
+                        await this.accountRepo.manager.query(
+                            `UPDATE trades
+                             SET ticket = $1,
+                                 "contractId" = $2,
+                                 type = $3,
+                                 volume = $4,
+                                 open_price = $5,
+                                 close_price = $6,
+                                 profit = $7,
+                                 commission = $8,
+                                 swap = $9,
+                                 "netPnl" = $10,
+                                 open_time = $11,
+                                 close_time = $12,
+                                 status = $13
+                             WHERE id = $14`,
+                            [
+                                tr.ticket,
+                                tr.contractId,
+                                tr.type || 'BUY',
+                                Number(tr.volume || 0),
+                                Number(tr.openPrice || 0),
+                                Number(tr.closePrice || 0),
+                                Number(tr.profit || 0),
+                                Number(tr.commission || 0),
+                                Number(tr.swap || 0),
+                                Number(tr.netPnl || 0),
+                                tr.openTime,
+                                tr.closeTime ?? tr.openTime,
+                                tr.status || 'CLOSED',
+                                ex.id,
+                            ]
+                        );
+                        updatedCount++;
+                    }
+                }
+            } catch (recErr) {
+                this.logger.warn(`[RECONCILE] Falha ao atualizar trade ${tr.ticket} na conta ${cleanLogin}: ${recErr.message}`);
+            }
+        }
+
+        if (updatedCount > 0) {
+            this.logger.log(`[RECONCILE] ${updatedCount} trade(s) existente(s) na conta ${cleanLogin} foram reconciliados com valores/horários exatos do MT5.`);
+            if (account.userId) {
+                this.dashboardService.invalidateUserCache(account.userId).catch(() => {});
             }
         }
 

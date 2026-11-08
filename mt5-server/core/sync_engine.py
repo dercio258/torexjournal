@@ -1084,33 +1084,38 @@ class SyncEngine:
                         trades=[]
                     )
 
-                # Cache rápido dos deals de entrada (DEAL_ENTRY_IN) presentes na janela
+                 # Cache rápido dos deals de entrada (DEAL_ENTRY_IN) presentes na janela
                 entry_by_position: Dict[int, Any] = {}
+                entry_comm_by_position: Dict[int, float] = {}
                 out_count_by_position: Dict[int, int] = {}
                 for d in deals:
                     if d.ticket > max_ticket:
                         max_ticket = d.ticket
                     if d.entry == 0 and d.position_id:
-                        entry_by_position[d.position_id] = d
+                        if d.position_id not in entry_by_position:
+                            entry_by_position[d.position_id] = d
+                        entry_comm_by_position[d.position_id] = (
+                            entry_comm_by_position.get(d.position_id, 0.0)
+                            + float(d.commission or 0.0)
+                            + float(getattr(d, "fee", 0.0) or 0.0)
+                        )
                     elif d.entry in (1, 2, 3) and d.position_id:
                         out_count_by_position[d.position_id] = out_count_by_position.get(d.position_id, 0) + 1
-
-                broker_offset_sec = self._get_broker_utc_offset_seconds()
 
                 for d in deals:
                     if d.ticket <= last_deal_ticket:
                         continue
 
-                    # Posições em aberto já vão via /sync/positions; em /sync/trades enviamos deals de fechamento
-                    # (DEAL_ENTRY_OUT=1, DEAL_ENTRY_INOUT=2, DEAL_ENTRY_OUT_BY=3) para evitar colisão de positionId com profit=0
-                    if d.entry == 0 and d.type in (0, 1):
+                    # Ignora deals de depósito/saque/crédito e entradas em aberto (DEAL_ENTRY_IN=0)
+                    if d.type not in (0, 1) or d.entry == 0:
                         continue
 
                     entry_type = DEAL_ENTRY_MAP.get(d.entry, "DEAL_ENTRY_OUT")
                     raw_deal_type = DEAL_TYPE_MAP.get(d.type, "DEAL_TYPE_BALANCE")
 
-                    close_time = datetime.datetime.fromtimestamp(max(0, d.time - broker_offset_sec), tz=datetime.timezone.utc)
-                    open_price = d.price
+                    # No MT5, d.time já representa exatamente a data/hora (YYYY.MM.DD HH:MM:SS) exibida no terminal
+                    close_time = datetime.datetime.fromtimestamp(int(d.time), tz=datetime.timezone.utc)
+                    open_price = float(d.price)
                     open_time = None
                     total_commission = float(d.commission or 0.0) + float(getattr(d, "fee", 0.0) or 0.0)
                     trade_direction = raw_deal_type
@@ -1119,10 +1124,14 @@ class SyncEngine:
                         entry_deal = self._find_entry_deal(d.position_id, entry_by_position)
                         if entry_deal is not None:
                             open_price = float(entry_deal.price)
-                            open_time = datetime.datetime.fromtimestamp(max(0, entry_deal.time - broker_offset_sec), tz=datetime.timezone.utc)
+                            open_time = datetime.datetime.fromtimestamp(int(entry_deal.time), tz=datetime.timezone.utc)
                             # Soma a comissão cobrada na abertura quando não houver múltiplas saídas parciais
                             if out_count_by_position.get(d.position_id, 1) <= 1:
-                                total_commission += float(entry_deal.commission or 0.0) + float(getattr(entry_deal, "fee", 0.0) or 0.0)
+                                entry_c = entry_comm_by_position.get(
+                                    d.position_id,
+                                    float(entry_deal.commission or 0.0) + float(getattr(entry_deal, "fee", 0.0) or 0.0)
+                                )
+                                total_commission += entry_c
                             trade_direction = "DEAL_TYPE_BUY" if entry_deal.type == 0 else "DEAL_TYPE_SELL"
                         elif d.entry in (1, 3):
                             # No MT5, um DEAL_ENTRY_OUT de SELL fecha uma posição de BUY (e vice-versa)

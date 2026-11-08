@@ -356,7 +356,7 @@ export const TradeDetails = () => {
                             </div>
                             <p className="text-slate-400 text-sm flex items-center gap-2 mt-1">
                                 <Calendar size={12} />
-                                {new Date(trade.openTime).toLocaleString('pt-BR')}
+                                {new Date(trade.openTime).toLocaleString('pt-BR', { timeZone: 'UTC' })}
                             </p>
                         </div>
                     </div>

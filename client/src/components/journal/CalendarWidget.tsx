@@ -34,10 +34,10 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
     // Days of the month
     for (let day = 1; day <= daysInMonth; day++) {
-        // Find trades for this day
+        // Find trades for this day (em UTC para preservar a data exata do MT5/Relatório)
         const dayTrades = trades.filter(t => {
             const d = new Date(t.close_time);
-            return d.getDate() === day && d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear();
+            return d.getUTCDate() === day && d.getUTCMonth() === currentDate.getMonth() && d.getUTCFullYear() === currentDate.getFullYear();
         });
 
         const pnl = dayTrades.reduce((acc, t) => acc + t.profit, 0);
