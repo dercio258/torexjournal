@@ -143,7 +143,10 @@ export class GenericExceptionFilter implements ExceptionFilter {
             }
         } else {
             // Log non-HTTP exceptions (like database errors or system crashes) internally
-            this.logger.error('Uncaught Exception details:', exception?.stack || exception);
+            this.logger.error(`Uncaught Exception on ${cleanPath}:`, exception?.stack || exception);
+            if (cleanPath.includes('/mt5-worker/')) {
+                message = exception?.message || message;
+            }
         }
 
         // Impede que CDNs (como Cloudflare) façam cache de respostas 404/500

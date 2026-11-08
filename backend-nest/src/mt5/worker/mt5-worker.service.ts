@@ -894,19 +894,74 @@ export class Mt5WorkerService implements OnModuleInit {
         });
 
         this.logger.log(`Salvando ${normalizedTrades.length} trades para conta ${account.mt5Id || account.name} via AUTO_SYNC`);
-        const result = await this.mt5Service.saveHistory(
-            normalizedTrades,
-            ImportMethod.AUTO_SYNC,
-            account.userId,
-            account.id
-        );
+        let savedCount = 0;
+        try {
+            const result = await this.mt5Service.saveHistory(
+                normalizedTrades,
+                ImportMethod.AUTO_SYNC,
+                account.userId,
+                account.id
+            );
+            savedCount = result?.count || 0;
+        } catch (saveErr) {
+            this.logger.error(`[FALLBACK SQL] saveHistory falhou para conta ${cleanLogin}: ${saveErr.message}`, saveErr.stack);
+            for (const tr of normalizedTrades) {
+                try {
+                    const existing = await this.accountRepo.manager.query(
+                        `SELECT id FROM trades WHERE account_id::text = $1 AND (ticket = $2 OR "contractId" = $3) LIMIT 1`,
+                        [account.id, tr.ticket, tr.contractId]
+                    );
+                    if (!existing || existing.length === 0) {
+                        const rawMagic = Number(tr.magic) || 0;
+                        const safeMagic = rawMagic >= -2147483648 && rawMagic <= 2147483647 ? Math.trunc(rawMagic) : 0;
+                        await this.accountRepo.manager.query(
+                            `INSERT INTO trades (
+                                account_id, ticket, "contractId", symbol, type,
+                                volume, open_price, close_price, profit, commission,
+                                swap, "netPnl", sl, tp, open_time, close_time,
+                                status, magic, comment
+                            ) VALUES (
+                                $1, $2, $3, $4, $5,
+                                $6, $7, $8, $9, $10,
+                                $11, $12, $13, $14, $15, $16,
+                                $17, $18, $19
+                            )`,
+                            [
+                                account.id,
+                                tr.ticket,
+                                tr.contractId,
+                                tr.symbol || 'Unknown',
+                                tr.type || 'BUY',
+                                Number(tr.volume || 0),
+                                Number(tr.openPrice || 0),
+                                Number(tr.closePrice || 0),
+                                Number(tr.profit || 0),
+                                Number(tr.commission || 0),
+                                Number(tr.swap || 0),
+                                Number(tr.netPnl || 0),
+                                tr.sl ?? null,
+                                tr.tp ?? null,
+                                tr.openTime,
+                                tr.closeTime ?? null,
+                                tr.status || 'CLOSED',
+                                safeMagic,
+                                tr.comment || '',
+                            ]
+                        );
+                        savedCount++;
+                    }
+                } catch (innerErr) {
+                    this.logger.warn(`[FALLBACK SQL] Falha ao inserir trade ${tr.ticket} na conta ${cleanLogin}: ${innerErr.message}`);
+                }
+            }
+        }
 
         if (existingTel) {
-            existingTel.lastSyncedTradesCount = (existingTel.lastSyncedTradesCount || 0) + (result?.count || 0);
+            existingTel.lastSyncedTradesCount = (existingTel.lastSyncedTradesCount || 0) + savedCount;
             this.accountTelemetry.set(cleanLogin, existingTel);
         }
 
-        return { success: true, saved: result.count, lastTicket: lastDealTicket };
+        return { success: true, saved: savedCount, lastTicket: lastDealTicket };
     }
 
     async recordWorkerEvent(event: {

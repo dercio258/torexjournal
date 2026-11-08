@@ -164,6 +164,7 @@ async function runAuditFixes() {
             `ALTER TABLE trades ALTER COLUMN profit TYPE numeric(18,2)`,
             `ALTER TABLE trades ALTER COLUMN commission TYPE numeric(18,2)`,
             `ALTER TABLE trades ALTER COLUMN swap TYPE numeric(18,2)`,
+            `ALTER TABLE trades ALTER COLUMN "netPnl" TYPE numeric(20,2)`,
             `ALTER TABLE trades ALTER COLUMN net_pnl TYPE numeric(18,2)`,
             `ALTER TABLE positions ALTER COLUMN open_price TYPE numeric(18,5)`,
             `ALTER TABLE positions ALTER COLUMN current_price TYPE numeric(18,5)`,

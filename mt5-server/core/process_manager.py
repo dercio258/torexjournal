@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import subprocess
 from pathlib import Path
@@ -20,6 +21,61 @@ class MT5ProcessManager:
         instance_dir = (self.instances_dir / f"acc_{account_id}").resolve()
         instance_dir.mkdir(parents=True, exist_ok=True)
         return instance_dir
+
+    def get_or_prepare_isolated_terminal_exe(self, account_id: int) -> str:
+        """
+        Prepara um diretório portátil exclusivo para a conta (instances/acc_<account_id>/terminal64.exe)
+        copiando/linkando o executável base e a lista de servidores de corretoras (servers.dat).
+        Assim cada conta roda em sua própria janela terminal64.exe sem deslogar outras contas!
+        """
+        if not self.terminal_path or not os.path.exists(self.terminal_path):
+            return self.terminal_path
+
+        instance_dir = self.get_account_instance_dir(account_id)
+        isolated_exe = (instance_dir / "terminal64.exe").resolve()
+        base_exe = Path(self.terminal_path).resolve()
+        base_dir = base_exe.parent
+
+        try:
+            if not isolated_exe.exists():
+                try:
+                    os.link(str(base_exe), str(isolated_exe))
+                except Exception:
+                    shutil.copy2(str(base_exe), str(isolated_exe))
+                logger.info(f"[ISOLAMENTO MT5] Executável isolado preparado para conta {account_id}: {isolated_exe}")
+
+            # Copia arquivos de suporte essenciais (servers.dat / Config) para que o modo /portable reconheça todas as corretoras
+            isolated_cfg_dir = instance_dir / "Config"
+            isolated_cfg_dir.mkdir(parents=True, exist_ok=True)
+            isolated_servers_dat = isolated_cfg_dir / "servers.dat"
+
+            if not isolated_servers_dat.exists():
+                candidate_servers = [
+                    base_dir / "Config" / "servers.dat",
+                    base_dir / "config" / "servers.dat",
+                ]
+                appdata = os.environ.get("APPDATA")
+                if appdata:
+                    mq_dir = Path(appdata) / "MetaQuotes" / "Terminal"
+                    if mq_dir.exists():
+                        for sub in mq_dir.iterdir():
+                            if sub.is_dir():
+                                s_dat = sub / "config" / "servers.dat"
+                                if s_dat.exists():
+                                    candidate_servers.insert(0, s_dat)
+                                s_dat_upper = sub / "Config" / "servers.dat"
+                                if s_dat_upper.exists():
+                                    candidate_servers.insert(0, s_dat_upper)
+
+                for src_servers in candidate_servers:
+                    if src_servers.exists():
+                        shutil.copy2(str(src_servers), str(isolated_servers_dat))
+                        break
+
+            return str(isolated_exe)
+        except Exception as e:
+            logger.warning(f"Não foi possível preparar executável isolado para conta {account_id} (usando caminho padrão): {e}")
+            return self.terminal_path
 
     def create_startup_config(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> Path:
         """Gera arquivo de inicialização .ini para o terminal com formatação compatível com Windows/MT5"""
@@ -82,16 +138,17 @@ class MT5ProcessManager:
                 return False
 
         instance_dir = self.get_account_instance_dir(account_id)
+        isolated_exe = self.get_or_prepare_isolated_terminal_exe(account_id)
         config_path = self.create_startup_config(account_id, login, server, password)
 
         cmd = [
-            self.terminal_path,
+            isolated_exe,
             "/portable",
             f"/config:{config_path.resolve()}"
         ]
 
         try:
-            logger.info(f"Iniciando terminal para conta {account_id} (RAM livre: {available_mb} MB)...")
+            logger.info(f"Iniciando terminal isolado para conta {account_id} ({isolated_exe} | RAM livre: {available_mb} MB)...")
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(instance_dir),
@@ -107,7 +164,7 @@ class MT5ProcessManager:
             return False
 
     def is_running(self, account_id: Optional[int] = None) -> bool:
-        """Verifica se o processo terminal64.exe da conta (ou global em modo multiplexado) está ativo."""
+        """Verifica se o processo terminal64.exe exclusivo da conta está ativo."""
         if account_id is not None and account_id in self.pids:
             pid = self.pids[account_id]
             if psutil.pid_exists(pid):
@@ -118,13 +175,23 @@ class MT5ProcessManager:
                 except Exception:
                     pass
 
-        for proc in psutil.process_iter(['pid', 'name', 'status']):
+        target_exe_norm = None
+        if account_id is not None:
+            try:
+                target_exe_norm = os.path.normcase(os.path.abspath(str(self.get_account_instance_dir(account_id) / "terminal64.exe")))
+            except Exception:
+                target_exe_norm = None
+
+        for proc in psutil.process_iter(['pid', 'name', 'status', 'exe']):
             try:
                 name = proc.info.get('name') or ''
-                if 'terminal64' in name.lower():
-                    if proc.info.get('status') != psutil.STATUS_ZOMBIE:
-                        if account_id is not None:
+                if 'terminal64' in name.lower() and proc.info.get('status') != psutil.STATUS_ZOMBIE:
+                    if target_exe_norm:
+                        proc_exe = proc.info.get('exe') or ''
+                        if proc_exe and os.path.normcase(os.path.abspath(proc_exe)) == target_exe_norm:
                             self.pids[account_id] = proc.info['pid']
+                            return True
+                    else:
                         return True
             except Exception:
                 pass

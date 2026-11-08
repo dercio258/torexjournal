@@ -381,14 +381,26 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
             const contractIds = trades.map(t => (t.contractId || t.ticket)?.toString()).filter(Boolean);
 
             // Fetch existing tickets and contractIds in batch strictly scoped to this accountId
-            const existingTrades = (tickets.length > 0 || contractIds.length > 0)
-                ? await queryRunner.manager.find(TradeEntity, {
-                    where: [
-                        ...(tickets.length > 0 ? [{ ticket: In(tickets), accountId }] : []),
-                        ...(contractIds.length > 0 ? [{ contractId: In(contractIds), accountId }] : [])
-                    ]
-                  })
-                : [];
+            let existingTrades: Array<{ ticket?: string; contractId?: string }> = [];
+            if (tickets.length > 0 || contractIds.length > 0) {
+                await queryRunner.query('SAVEPOINT sp_find_existing');
+                try {
+                    existingTrades = await queryRunner.manager.find(TradeEntity, {
+                        select: ['id', 'ticket', 'contractId'],
+                        where: [
+                            ...(tickets.length > 0 ? [{ ticket: In(tickets), accountId }] : []),
+                            ...(contractIds.length > 0 ? [{ contractId: In(contractIds), accountId }] : [])
+                        ]
+                    });
+                } catch (findErr) {
+                    await queryRunner.query('ROLLBACK TO SAVEPOINT sp_find_existing');
+                    const rawRows = await queryRunner.query(
+                        `SELECT ticket, "contractId" FROM trades WHERE account_id::text = $1`,
+                        [accountId]
+                    ).catch(() => []);
+                    existingTrades = rawRows || [];
+                }
+            }
             const existingTickets = new Set(existingTrades.map(t => t.ticket?.toString()).filter(Boolean));
             const existingContracts = new Set(existingTrades.map(t => t.contractId?.toString()).filter(Boolean));
             const seenInBatch = new Set<string>();
@@ -533,18 +545,67 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                             await queryRunner.manager.save(TradeEntity, singleTrade);
                         } catch (singleErr) {
                             await queryRunner.query('ROLLBACK TO SAVEPOINT sp_single_trade');
-                            this.logger.warn(`Skipped single trade ${singleTrade.ticket}: ${singleErr.message}`);
+                            await queryRunner.query('SAVEPOINT sp_raw_sql_trade');
+                            try {
+                                await queryRunner.query(
+                                    `INSERT INTO trades (
+                                        account_id, ticket, "contractId", symbol, type,
+                                        volume, open_price, close_price, profit, commission,
+                                        swap, "netPnl", sl, tp, open_time, close_time,
+                                        status, magic, comment, session, "dataQuality", import_log_id
+                                    ) VALUES (
+                                        $1, $2, $3, $4, $5,
+                                        $6, $7, $8, $9, $10,
+                                        $11, $12, $13, $14, $15, $16,
+                                        $17, $18, $19, $20, $21, $22
+                                    )`,
+                                    [
+                                        singleTrade.accountId,
+                                        singleTrade.ticket,
+                                        singleTrade.contractId,
+                                        singleTrade.symbol || 'Unknown',
+                                        singleTrade.type || 'BUY',
+                                        Number(singleTrade.volume || 0),
+                                        Number(singleTrade.openPrice || 0),
+                                        Number(singleTrade.closePrice || 0),
+                                        Number(singleTrade.profit || 0),
+                                        Number(singleTrade.commission || 0),
+                                        Number(singleTrade.swap || 0),
+                                        Number(singleTrade.netPnl || 0),
+                                        singleTrade.sl ?? null,
+                                        singleTrade.tp ?? null,
+                                        singleTrade.openTime,
+                                        singleTrade.closeTime ?? null,
+                                        singleTrade.status || 'CLOSED',
+                                        singleTrade.magic ?? 0,
+                                        singleTrade.comment ?? null,
+                                        singleTrade.session ?? null,
+                                        singleTrade.dataQuality || 'ok',
+                                        singleTrade.importLogId ?? null,
+                                    ]
+                                );
+                            } catch (rawSqlErr) {
+                                await queryRunner.query('ROLLBACK TO SAVEPOINT sp_raw_sql_trade');
+                                this.logger.warn(`Skipped single trade ${singleTrade.ticket}: ${rawSqlErr.message}`);
+                            }
                         }
                     }
                 }
                 
                 // Fetch saved records with generated IDs
-                const savedTrades = await queryRunner.manager.find(TradeEntity, {
-                    where: {
-                        accountId,
-                        contractId: In(tradesToSave.map(t => t.contractId))
-                    }
-                });
+                let savedTrades: TradeEntity[] = [];
+                await queryRunner.query('SAVEPOINT sp_fetch_saved');
+                try {
+                    savedTrades = await queryRunner.manager.find(TradeEntity, {
+                        where: {
+                            accountId,
+                            contractId: In(tradesToSave.map(t => t.contractId))
+                        }
+                    });
+                } catch (fetchSavedErr) {
+                    await queryRunner.query('ROLLBACK TO SAVEPOINT sp_fetch_saved');
+                    this.logger.warn(`Fallback to in-memory trades for downstream replication: ${fetchSavedErr.message}`);
+                }
 
                 tradesForDownstream = savedTrades.length > 0 ? savedTrades : tradesToSave;
             }

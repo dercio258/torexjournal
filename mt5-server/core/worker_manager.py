@@ -45,6 +45,9 @@ class WorkerManager:
         self._last_flush_ts: float = 0.0
         # Deduplicação local de tarefas (task_id -> timestamp de processamento)
         self._processed_tasks: dict[str, float] = {}
+        # Controle de cooldown individual por conta (evita thrashing e reduz frequência de contas $0.00 ociosas)
+        self._account_last_sync_ts: dict[int, float] = {}
+        self._account_idle_map: dict[int, bool] = {}
 
     def _ensure_registered(self) -> bool:
         if self.is_registered:
@@ -114,10 +117,10 @@ class WorkerManager:
             self._ensure_registered()
             self._send_heartbeat()
 
-        # 3. WATCHDOG & SINCRONIZAÇÃO INCREMENTAL ROUND-ROBIN (a cada sync_interval_seconds)
+        # 3. WATCHDOG & SINCRONIZAÇÃO INCREMENTAL ROUND-ROBIN (a cada sync_interval_seconds APÓS concluir o ciclo anterior)
         if current_ts - self._last_sync_ts >= settings.sync_interval_seconds:
-            self._last_sync_ts = time.time()
             self._run_watchdog_and_sync_cycle()
+            self._last_sync_ts = time.time()
 
         # 4. FLUSH DO BUFFER OFFLINE SQLITE (a cada 15s)
         if current_ts - self._last_flush_ts >= 15.0:
@@ -276,12 +279,13 @@ class WorkerManager:
             except Exception:
                 pass
 
+        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(task.accountId)
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
             server=normalized_server,
             password=password,
-            path=settings.mt5_default_path,
+            path=isolated_path,
             progress_callback=_report_progress,
         )
 
@@ -369,12 +373,13 @@ class WorkerManager:
 
         self.process_manager.stop_terminal(task.accountId)
         time.sleep(2)
+        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(acc.account_id)
         restarted = self.sync_engine.connect_account(
             account_id=acc.account_id,
             login=acc.login,
             server=acc.server,
             password=acc.password,
-            path=settings.mt5_default_path,
+            path=isolated_path,
         )
         if restarted:
             summary = self._sync_single_account(acc.account_id) or {}
@@ -412,11 +417,12 @@ class WorkerManager:
         for account_id in active_ids:
             if not self.is_running:
                 break
-            # Preempção cooperativa: checa se chegou tarefa urgente do usuário entre uma conta e outra
             now = time.time()
-            if now - self._last_poll_ts >= settings.poll_interval_seconds:
-                self._last_poll_ts = now
-                self._poll_and_execute_tasks()
+            last_acc_sync = self._account_last_sync_ts.get(account_id, 0.0)
+            is_idle = self._account_idle_map.get(account_id, False)
+            min_cooldown = 180.0 if is_idle else max(float(settings.sync_interval_seconds), 15.0)
+            if now - last_acc_sync < min_cooldown:
+                continue
 
             self._sync_single_account(account_id)
 
@@ -433,7 +439,9 @@ class WorkerManager:
             return None
 
         try:
-            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
+            self._account_last_sync_ts[account_id] = time.time()
+            isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(account_id)
+            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")
@@ -542,6 +550,15 @@ class WorkerManager:
                     max(acc.last_deal_ticket, deals_payload.lastDealTicket),
                     last_deal_time=acc.last_deal_time,
                 )
+
+            bal_val = float(summary.get("balance", 0.0) or 0.0)
+            eq_val = float(summary.get("equity", 0.0) or 0.0)
+            open_pos_cnt = int(summary.get("openPositionsCount", 0) or 0)
+            synced_tr_cnt = int(summary.get("syncedTradesCount", 0) or 0)
+            self._account_idle_map[account_id] = (
+                bal_val <= 0.0 and eq_val <= 0.0 and open_pos_cnt == 0 and synced_tr_cnt == 0
+            )
+            self._account_last_sync_ts[account_id] = time.time()
 
             return summary
 
