@@ -428,20 +428,42 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     : (isTradeClosed ? parsedOpen : null);
                 const computedDataQuality = t.dataQuality || (isTradeClosed && !hasValidCloseTime ? 'partial' : 'ok');
 
+                const safeNum = (val: any, fallback = 0): number => {
+                    const n = Number(val);
+                    return Number.isFinite(n) ? n : fallback;
+                };
+                const rawMagic = safeNum(t.magic, 0);
+                const safeMagic = rawMagic >= -2147483648 && rawMagic <= 2147483647 ? Math.trunc(rawMagic) : 0;
+                const safeProfit = safeNum(t.profit, 0);
+                const safeCommission = safeNum(t.commission, 0);
+                const safeSwap = safeNum(t.swap, 0);
+                const safeNetPnl = t.netPnl !== undefined && t.netPnl !== null
+                    ? safeNum(t.netPnl, safeProfit + safeCommission + safeSwap)
+                    : (safeProfit + safeCommission + safeSwap);
+
                 const newTrade: TradeEntity = this.tradeRepo.create({
-                    ...t,
-                    type: normalizedType,
+                    accountId: accountId,
                     ticket: ticket,
                     contractId: contractId,
-                    accountId: accountId,
-                    sl: t.sl !== undefined && t.sl !== null && Number(t.sl) > 0 ? Number(t.sl) : null,
-                    tp: t.tp !== undefined && t.tp !== null && Number(t.tp) > 0 ? Number(t.tp) : null,
+                    symbol: (t.symbol || 'Unknown').toString().substring(0, 100),
+                    type: normalizedType,
+                    volume: safeNum(t.volume, 0),
+                    openPrice: safeNum(t.openPrice, 0),
+                    closePrice: safeNum(t.closePrice, 0),
+                    profit: safeProfit,
+                    commission: safeCommission,
+                    swap: safeSwap,
+                    netPnl: safeNetPnl,
+                    sl: t.sl !== undefined && t.sl !== null && safeNum(t.sl, 0) > 0 ? safeNum(t.sl, 0) : null,
+                    tp: t.tp !== undefined && t.tp !== null && safeNum(t.tp, 0) > 0 ? safeNum(t.tp, 0) : null,
                     openTime: parsedOpen,
                     closeTime: finalCloseTime,
                     status: isTradeClosed ? 'CLOSED' : (t.status || 'OPEN'),
-                    netPnl: t.netPnl !== undefined ? t.netPnl : (Number(t.profit || 0) + Number(t.commission || 0) + Number(t.swap || 0)),
+                    magic: safeMagic,
+                    comment: t.comment ? t.comment.toString().substring(0, 255) : null,
+                    session: t.session || null,
                     dataQuality: computedDataQuality
-                } as any) as unknown as TradeEntity;
+                } as Partial<TradeEntity>) as TradeEntity;
 
                 // Ensure entity type is correctly cast
                 tradesToSave.push(newTrade);
@@ -462,24 +484,28 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     }
                 }
                 if (targetUserId) {
-                    let accountName = '';
-                    if (accountId) {
-                        const acc = await this.accountRepo.findOne({ where: { id: accountId } });
-                        if (acc) accountName = acc.name || acc.broker || '';
-                    }
+                    try {
+                        let accountName = '';
+                        if (accountId) {
+                            const acc = await this.accountRepo.findOne({ where: { id: accountId } });
+                            if (acc) accountName = acc.name || acc.broker || '';
+                        }
 
-                    const log = this.importLogRepo.create({
-                        userId: targetUserId,
-                        accountId: accountId || null,
-                        method: importMethod,
-                        status: ImportStatus.SUCCESS,
-                        tradesCount: tradesToSave.length,
-                        details: accountName 
-                            ? `Importadas ${tradesToSave.length} operações na conta "${accountName}"`
-                            : `Importadas ${tradesToSave.length} operações via ${importMethod}`
-                    });
-                    const savedLog = await queryRunner.manager.save(log);
-                    finalLogId = savedLog.id;
+                        const log = this.importLogRepo.create({
+                            userId: targetUserId,
+                            accountId: accountId || null,
+                            method: importMethod,
+                            status: ImportStatus.SUCCESS,
+                            tradesCount: tradesToSave.length,
+                            details: accountName 
+                                ? `Importadas ${tradesToSave.length} operações na conta "${accountName}"`
+                                : `Importadas ${tradesToSave.length} operações via ${importMethod}`
+                        });
+                        const savedLog = await this.importLogRepo.save(log);
+                        finalLogId = savedLog.id;
+                    } catch (logErr) {
+                        this.logger.warn(`Could not persist importLog (continuing trade save): ${logErr.message}`);
+                    }
                 }
 
                 if (finalLogId) {
@@ -488,14 +514,29 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                     }
                 }
 
-                // Insert with ON CONFLICT DO NOTHING so concurrent syncs never overwrite user journal annotations
-                await queryRunner.manager
-                    .createQueryBuilder()
-                    .insert()
-                    .into(TradeEntity)
-                    .values(tradesToSave)
-                    .orIgnore()
-                    .execute();
+                // Insert with ON CONFLICT DO NOTHING and fallback per-trade savepoint so a single constraint quirk never aborts the batch
+                await queryRunner.query('SAVEPOINT sp_batch_trades');
+                try {
+                    await queryRunner.manager
+                        .createQueryBuilder()
+                        .insert()
+                        .into(TradeEntity)
+                        .values(tradesToSave)
+                        .orIgnore()
+                        .execute();
+                } catch (batchErr) {
+                    await queryRunner.query('ROLLBACK TO SAVEPOINT sp_batch_trades');
+                    this.logger.warn(`Batch insert fallback triggered for account ${accountId}: ${batchErr.message}`);
+                    for (const singleTrade of tradesToSave) {
+                        await queryRunner.query('SAVEPOINT sp_single_trade');
+                        try {
+                            await queryRunner.manager.save(TradeEntity, singleTrade);
+                        } catch (singleErr) {
+                            await queryRunner.query('ROLLBACK TO SAVEPOINT sp_single_trade');
+                            this.logger.warn(`Skipped single trade ${singleTrade.ticket}: ${singleErr.message}`);
+                        }
+                    }
+                }
                 
                 // Fetch saved records with generated IDs
                 const savedTrades = await queryRunner.manager.find(TradeEntity, {
@@ -547,35 +588,45 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
 
                 // Invalidate Dashboard Cache immediately so trades reflect in all charts and stats
                 if (targetUserId) {
-                    await this.dashboardService.invalidateUserCache(targetUserId);
+                    try {
+                        await this.dashboardService.invalidateUserCache(targetUserId);
+                    } catch (cacheErr) {
+                        this.logger.warn(`Cache invalidation failed: ${cacheErr.message}`);
+                    }
                 }
 
                 // Notifications
                 if (targetUserId) {
-                    const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: targetUserId } });
-                    if (user && user.email) {
-                        this.emailQueue.add('trade-imported', {
-                            email: user.email,
-                            name: user.name,
-                            count: tradesToSave.length,
-                            method: importMethod
-                        }).catch(e => this.logger.warn(`Could not queue email: ${e.message}`));
+                    try {
+                        const user = await this.dataSource.getRepository(UserEntity).findOne({ where: { id: targetUserId } });
+                        if (user && user.email) {
+                            this.emailQueue.add('trade-imported', {
+                                email: user.email,
+                                name: user.name,
+                                count: tradesToSave.length,
+                                method: importMethod
+                            }).catch(e => this.logger.warn(`Could not queue email: ${e.message}`));
 
-                        this.notificationsService.create(targetUserId, {
-                            title: 'Sincronização de Trades',
-                            message: `${tradesToSave.length} novos trades foram sincronizados via ${importMethod}.`,
-                            type: NotificationType.SYSTEM
-                        }).catch(e => this.logger.warn(`Could not create notification: ${e.message}`));
+                            this.notificationsService.create(targetUserId, {
+                                title: 'Sincronização de Trades',
+                                message: `${tradesToSave.length} novos trades foram sincronizados via ${importMethod}.`,
+                                type: NotificationType.SYSTEM
+                            }).catch(e => this.logger.warn(`Could not create notification: ${e.message}`));
 
-                        // Professional Alerts
-                        if (accountId) {
-                            await this.processProfessionalAlerts(targetUserId, accountId, tradesToSave);
-                            
-                            this.behavioralQueue.add('analyze-user-behavior', { userId: targetUserId, accountId }, {
-                                delay: 2000,
-                                removeOnComplete: true
-                            }).catch(e => this.logger.warn(`Failed to queue behavioral analysis: ${e.message}`));
+                            // Professional Alerts
+                            if (accountId) {
+                                await this.processProfessionalAlerts(targetUserId, accountId, tradesToSave).catch(e =>
+                                    this.logger.warn(`Professional alerts warning: ${e.message}`)
+                                );
+                                
+                                this.behavioralQueue.add('analyze-user-behavior', { userId: targetUserId, accountId }, {
+                                    delay: 2000,
+                                    removeOnComplete: true
+                                }).catch(e => this.logger.warn(`Failed to queue behavioral analysis: ${e.message}`));
+                            }
                         }
+                    } catch (notifErr) {
+                        this.logger.warn(`Post-import notification warning: ${notifErr.message}`);
                     }
                 }
 

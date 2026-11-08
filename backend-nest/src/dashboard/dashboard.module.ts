@@ -4,6 +4,7 @@ import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 import { SessionService } from './session.service';
 import { TradeEntity } from '../mt5/trade.entity';
+import { PositionEntity } from '../mt5/position.entity';
 import { AccountEntity } from '../account/account.entity';
 
 import { TechnicalJournal } from './technical-journal.entity';
@@ -19,7 +20,7 @@ import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([TradeEntity, AccountEntity, MentalLog, TechnicalJournal, BacktestSession, UserEntity]),
+        TypeOrmModule.forFeature([TradeEntity, PositionEntity, AccountEntity, MentalLog, TechnicalJournal, BacktestSession, UserEntity]),
         EmailModule,
         NotificationsModule,
         PaymentModule

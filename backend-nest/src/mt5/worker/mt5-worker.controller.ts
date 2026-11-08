@@ -51,20 +51,20 @@ export class Mt5WorkerController {
 
     @Post('sync/trades')
     @HttpCode(200)
-    async syncTrades(@Body() body: { accountId: number; login?: string; trades?: any[]; deals?: any[]; lastDealTicket?: number }) {
+    async syncTrades(@Body() body: { accountId: number; login?: string; server?: string; trades?: any[]; deals?: any[]; lastDealTicket?: number }) {
         const deals = body.trades || body.deals || [];
         const login = body.login || body.accountId?.toString();
-        return this.workerService.syncTrades(body.accountId, login, deals, body.lastDealTicket);
+        return this.workerService.syncTrades(body.accountId, login, deals, body.lastDealTicket, body.server);
     }
 
     @Post('sync/positions')
     @HttpCode(200)
-    async syncPositions(@Body() body: { accountId: number; login?: string; positions: any[]; skipped?: boolean }) {
+    async syncPositions(@Body() body: { accountId: number; login?: string; server?: string; positions: any[]; skipped?: boolean }) {
         if (body?.skipped) {
             return { success: true, skipped: true };
         }
         const login = body.login || body.accountId?.toString();
-        return this.workerService.syncPositions(body.accountId, login, body.positions);
+        return this.workerService.syncPositions(body.accountId, login, body.positions, body.server);
     }
 
     @Post('sync/orders')

@@ -337,11 +337,38 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
     const worker = cloudState?.worker;
     const acc = cloudState?.account;
     const activeTask = cloudState?.activeTask;
+    const openPositions: any[] = cloudState?.positions || [];
     const recentTrades: any[] = cloudState?.recentTrades || [];
     const totalTradesCount: number = cloudState?.totalTradesCount ?? acc?.totalTradesCount ?? 0;
+    const openPositionsCount: number = openPositions.length || (acc?.openPositionsCount ?? 0);
+    const totalOperationsCount: number = openPositionsCount + totalTradesCount;
     const auditLogs: any[] = cloudState?.auditLogs || [];
     const recentEvents: any[] = cloudState?.recentEvents || [];
     const isAccConnected = acc?.isConnected || acc?.connectionState === 'CONNECTED';
+
+    const allSyncedOperations = useMemo(() => {
+        const mappedOpen = openPositions.map((pos: any) => ({
+            id: pos.id || `pos-${pos.ticket}`,
+            ticket: pos.ticket,
+            symbol: pos.symbol,
+            type: (pos.type || 'BUY').toString().toUpperCase().includes('SELL') ? 'SELL' : 'BUY',
+            volume: Number(pos.volume || 0),
+            openPrice: Number(pos.openPrice ?? pos.priceOpen ?? 0),
+            closePrice: Number(pos.currentPrice ?? pos.priceCurrent ?? pos.openPrice ?? 0),
+            openTime: pos.openTime || pos.time || null,
+            closeTime: null,
+            profit: Number(pos.profit || 0),
+            netPnl: Number(pos.profit || 0),
+            status: 'OPEN',
+            isOpenPosition: true,
+        }));
+        const mappedClosed = recentTrades.map((tr: any) => ({
+            ...tr,
+            status: 'CLOSED',
+            isOpenPosition: false,
+        }));
+        return [...mappedOpen, ...mappedClosed];
+    }, [openPositions, recentTrades]);
 
     const syncedMt5Accounts = useMemo(() => {
         const fromCloud: any[] = Array.isArray(cloudState?.mt5Accounts) ? cloudState.mt5Accounts : [];
@@ -918,7 +945,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step4Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step3Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-[#111319] border-white/[0.05] text-slate-500'}`}>
                                     <span className="font-bold block">4. Operações</span>
-                                    <span>{step4Done ? `${totalTradesCount} trade(s) importado(s)` : 'Importando...'}</span>
+                                    <span>
+                                        {step4Done
+                                            ? `${totalOperationsCount} sincronizada(s) (${openPositionsCount} abertas, ${totalTradesCount} fechadas)`
+                                            : 'Importando...'}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -965,7 +996,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 </div>
                                 <p className="text-xs text-slate-400 mt-0.5">
                                     {acc.company || acc.server || acc.broker}
-                                    {acc.accountHolderName ? ` • ${acc.accountHolderName}` : ''}
+                                    {acc.accountHolderName && acc.accountHolderName !== 'null null' && acc.accountHolderName !== 'null'
+                                        ? ` • ${acc.accountHolderName}`
+                                        : ''}
                                 </p>
                                 {acc.statusMessage && (
                                     <p className="text-xs text-indigo-300 mt-1">
@@ -1012,15 +1045,15 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
-                            <span className="text-xs text-slate-400 block">Trades Importados</span>
+                            <span className="text-xs text-slate-400 block">Trades Fechados</span>
                             <span className="font-bold text-indigo-400 text-base">
-                                {totalTradesCount} operações
+                                {totalTradesCount} {totalTradesCount === 1 ? 'operação' : 'operações'}
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-[#08090C] border border-white/[0.05]">
                             <span className="text-xs text-slate-400 block">Posições em Aberto</span>
                             <span className="font-bold text-slate-100 text-base">
-                                {acc.openPositionsCount ?? 0} ativas
+                                {openPositionsCount} {openPositionsCount === 1 ? 'ativa' : 'ativas'}
                             </span>
                         </div>
                     </div>
@@ -1039,24 +1072,30 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 </Card>
             )}
 
-            {/* Painel de Trades Importados da Conta */}
+            {/* Painel de Operações Sincronizadas da Conta (Posições em Aberto + Trades Fechados) */}
             {acc && acc.mt5Id && (
                 <Card className="p-6 bg-[#111319] border-white/[0.08] shadow-xl">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                        <div className="flex flex-wrap items-center gap-2.5">
                             <FileCheck size={18} className="text-emerald-400" />
                             <h3 className="text-base font-bold text-slate-100">
-                                Operações Sincronizadas ({totalTradesCount})
+                                Operações Sincronizadas ({totalOperationsCount})
                             </h3>
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                {openPositionsCount} em aberto
+                            </span>
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                {totalTradesCount} fechada(s)
+                            </span>
                         </div>
                         <span className="text-xs text-slate-400">
                             Conta #{acc.mt5Id}
                         </span>
                     </div>
 
-                    {recentTrades.length === 0 ? (
+                    {allSyncedOperations.length === 0 ? (
                         <div className="p-6 text-center rounded-xl bg-[#08090C] border border-white/[0.05] text-slate-400 text-sm">
-                            Nenhuma operação fechada encontrada nesta conta até o momento. Assim que novas operações forem encerradas, elas aparecerão aqui automaticamente.
+                            Nenhuma operação encontrada nesta conta até o momento. Assim que novas posições ou trades forem sincronizados, eles aparecerão aqui automaticamente.
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -1066,18 +1105,20 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                         <th className="py-2.5 px-3">Ticket</th>
                                         <th className="py-2.5 px-3">Ativo</th>
                                         <th className="py-2.5 px-3">Tipo</th>
+                                        <th className="py-2.5 px-3">Status</th>
                                         <th className="py-2.5 px-3">Volume</th>
-                                        <th className="py-2.5 px-3">Preço</th>
-                                        <th className="py-2.5 px-3">Data Fechamento</th>
+                                        <th className="py-2.5 px-3">Preço (Ent. → Atual/Saída)</th>
+                                        <th className="py-2.5 px-3">Data</th>
                                         <th className="py-2.5 px-3 text-right">Resultado</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/[0.04]">
-                                    {recentTrades.map((trade: any) => {
+                                    {allSyncedOperations.map((trade: any) => {
                                         const pnl = Number(trade.netPnl ?? trade.profit ?? 0);
                                         const isWin = pnl >= 0;
+                                        const isOpen = trade.isOpenPosition || (trade.status || '').toUpperCase() === 'OPEN';
                                         return (
-                                            <tr key={trade.id || trade.ticket} className="hover:bg-white/[0.02]">
+                                            <tr key={`${isOpen ? 'open' : 'closed'}-${trade.id || trade.ticket}`} className="hover:bg-white/[0.02]">
                                                 <td className="py-2.5 px-3 font-mono text-slate-300">
                                                     #{trade.ticket || trade.contractId}
                                                 </td>
@@ -1097,6 +1138,18 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                         )}
                                                         {trade.type}
                                                     </span>
+                                                </td>
+                                                <td className="py-2.5 px-3">
+                                                    {isOpen ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                                                            ABERTA
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300 border border-white/[0.08]">
+                                                            FECHADA
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="py-2.5 px-3 text-slate-300">
                                                     {Number(trade.volume || 0).toFixed(2)}

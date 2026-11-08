@@ -733,9 +733,9 @@ export class Mt5WorkerService implements OnModuleInit {
         };
     }
 
-    async syncPositions(accountIdNum: number, login: string, positions: any[]) {
+    async syncPositions(accountIdNum: number, login: string, positions: any[], server?: string) {
         const cleanLogin = (login || accountIdNum || '').toString().trim();
-        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum);
+        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum, server);
         if (!account) {
             return { success: false, message: 'Account not found' };
         }
@@ -827,9 +827,9 @@ export class Mt5WorkerService implements OnModuleInit {
         return { success: true, count: orders ? orders.length : 0 };
     }
 
-    async syncTrades(accountIdNum: number, login: string, deals: any[], lastDealTicket?: number) {
+    async syncTrades(accountIdNum: number, login: string, deals: any[], lastDealTicket?: number, server?: string) {
         const cleanLogin = (login || accountIdNum || '').toString().trim();
-        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum);
+        const account = await this.findAccountByLoginOrId(cleanLogin, accountIdNum, server);
         if (!account) {
             this.logger.warn(`Conta ${cleanLogin} não encontrada para inserção de trades.`);
             return { success: false, message: 'Account not found' };
@@ -851,7 +851,7 @@ export class Mt5WorkerService implements OnModuleInit {
         });
 
         if (tradingDeals.length === 0) {
-            return { success: true, count: 0 };
+            return { success: true, count: 0, lastTicket: lastDealTicket };
         }
 
         const normalizedTrades = tradingDeals.map((deal) => {
@@ -900,6 +900,11 @@ export class Mt5WorkerService implements OnModuleInit {
             account.userId,
             account.id
         );
+
+        if (existingTel) {
+            existingTel.lastSyncedTradesCount = (existingTel.lastSyncedTradesCount || 0) + (result?.count || 0);
+            this.accountTelemetry.set(cleanLogin, existingTel);
+        }
 
         return { success: true, saved: result.count, lastTicket: lastDealTicket };
     }

@@ -153,7 +153,34 @@ async function runAuditFixes() {
         await pg.query('COMMIT');
         console.log('[OK] Transacao PostgreSQL concluida com sucesso!\n');
 
-        // 7. C2 & M3: Criar indices no PostgreSQL
+        // 7. C2, M3 & Schema Hardening: Alargar precisao numerica para sinteticos/cripto e criar indices no PostgreSQL
+        const schemaStatements = [
+            `ALTER TABLE trades DROP CONSTRAINT IF EXISTS "UQ_9fa6efcc9af8e74e1abcb1a6e91"`,
+            `ALTER TABLE trades ALTER COLUMN open_price TYPE numeric(18,5)`,
+            `ALTER TABLE trades ALTER COLUMN close_price TYPE numeric(18,5)`,
+            `ALTER TABLE trades ALTER COLUMN sl TYPE numeric(18,5)`,
+            `ALTER TABLE trades ALTER COLUMN tp TYPE numeric(18,5)`,
+            `ALTER TABLE trades ALTER COLUMN volume TYPE numeric(18,2)`,
+            `ALTER TABLE trades ALTER COLUMN profit TYPE numeric(18,2)`,
+            `ALTER TABLE trades ALTER COLUMN commission TYPE numeric(18,2)`,
+            `ALTER TABLE trades ALTER COLUMN swap TYPE numeric(18,2)`,
+            `ALTER TABLE trades ALTER COLUMN net_pnl TYPE numeric(18,2)`,
+            `ALTER TABLE positions ALTER COLUMN open_price TYPE numeric(18,5)`,
+            `ALTER TABLE positions ALTER COLUMN current_price TYPE numeric(18,5)`,
+            `ALTER TABLE positions ALTER COLUMN sl TYPE numeric(18,5)`,
+            `ALTER TABLE positions ALTER COLUMN tp TYPE numeric(18,5)`,
+            `ALTER TABLE positions ALTER COLUMN volume TYPE numeric(18,2)`,
+            `ALTER TABLE positions ALTER COLUMN profit TYPE numeric(18,2)`
+        ];
+
+        for (const sql of schemaStatements) {
+            try {
+                await pg.query(sql);
+            } catch (e) {
+                console.warn(`[AVISO SCHEMA] ${sql} -> ${e.message}`);
+            }
+        }
+
         const indexStatements = [
             `CREATE INDEX IF NOT EXISTS idx_trades_account_close_time ON trades (account_id, close_time)`,
             `CREATE INDEX IF NOT EXISTS idx_trades_account_status ON trades (account_id, status)`,
@@ -161,6 +188,7 @@ async function runAuditFixes() {
             `CREATE INDEX IF NOT EXISTS idx_positions_account_id ON positions (account_id)`,
             `CREATE INDEX IF NOT EXISTS idx_accounts_user_mt5_id ON accounts (user_id, mt5_id)`,
             `CREATE UNIQUE INDEX IF NOT EXISTS uq_accounts_user_mt5_server ON accounts (user_id, mt5_id, LOWER(broker)) WHERE mt5_id IS NOT NULL AND mt5_id <> ''`,
+            `CREATE UNIQUE INDEX IF NOT EXISTS uq_trades_account_contract ON trades (account_id, "contractId") WHERE "contractId" IS NOT NULL`,
             `CREATE INDEX IF NOT EXISTS idx_import_logs_user_account ON import_logs ("userId", account_id, "createdAt" DESC)`
         ];
 

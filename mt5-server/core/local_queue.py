@@ -79,17 +79,45 @@ class LocalQueue:
                 logger.error(f"Erro ao limpar itens da conta {acc_str} no buffer offline: {e}")
 
     def enqueue(self, endpoint: str, payload: Dict[str, Any]):
-        """Adiciona um payload não entregue à fila de buffer offline."""
+        """Adiciona um payload não entregue à fila de buffer offline (com deduplicação por endpoint + conta)."""
         with self._lock:
             try:
+                acc_key = str(payload.get("login") or payload.get("accountId") or "").strip() if isinstance(payload, dict) else ""
+                payload_json = json.dumps(payload)
                 with self._get_connection() as conn:
                     cursor = conn.cursor()
+                    if acc_key:
+                        cursor.execute(
+                            """
+                            SELECT id FROM offline_buffer
+                            WHERE endpoint = ?
+                              AND (status IS NULL OR status = 'PENDING')
+                              AND payload LIKE ?
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (endpoint, f"%{acc_key}%")
+                        )
+                        existing = cursor.fetchone()
+                        if existing:
+                            cursor.execute(
+                                """
+                                UPDATE offline_buffer
+                                SET payload = ?, attempts = 0, next_retry_at = 0
+                                WHERE id = ?
+                                """,
+                                (payload_json, existing[0])
+                            )
+                            conn.commit()
+                            logger.info(f"Payload atualizado no buffer offline (deduplicado ID {existing[0]}): {endpoint} [conta={acc_key}]")
+                            return
+
                     cursor.execute(
                         """
                         INSERT INTO offline_buffer (endpoint, payload, attempts, status, next_retry_at)
                         VALUES (?, ?, 0, 'PENDING', 0)
                         """,
-                        (endpoint, json.dumps(payload))
+                        (endpoint, payload_json)
                     )
                     conn.commit()
                 logger.info(f"Payload enfileirado no buffer offline: {endpoint}")

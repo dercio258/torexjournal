@@ -108,7 +108,7 @@ export const Trades = () => {
             if (typeFilter !== 'ALL' && trade.type !== typeFilter) return false;
 
             // Status
-            if (statusFilter !== 'ALL' && (trade.status || 'Closed') !== statusFilter) return false;
+            if (statusFilter !== 'ALL' && (trade.status || 'CLOSED').toUpperCase() !== statusFilter.toUpperCase()) return false;
 
             // Date Range
             if (dateRange.start) {
@@ -387,10 +387,16 @@ export const Trades = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedTrades.map((trade) => (
+                                paginatedTrades.map((trade) => {
+                                    const isOpenPos = (trade.status || '').toUpperCase() === 'OPEN';
+                                    return (
                                     <tr
-                                        key={trade.id}
-                                        onClick={() => navigate(`/trades/${trade.id}`)}
+                                        key={`${trade.status || 'CLOSED'}-${trade.id}-${trade.ticket}`}
+                                        onClick={() => {
+                                            if (!isOpenPos && trade.id) {
+                                                navigate(`/trades/${trade.id}`);
+                                            }
+                                        }}
                                         className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group cursor-pointer"
                                     >
                                         {isConsolidated && (
@@ -402,7 +408,7 @@ export const Trades = () => {
                                          )}
                                          <td className="p-4 text-slate-500 dark:text-slate-400 font-mono text-xs">#{trade.ticket}</td>
                                          <td className="p-4 text-slate-600 dark:text-slate-400 whitespace-nowrap text-xs">
-                                             {new Date(trade.closeTime).toLocaleString('pt-BR')}
+                                             {new Date(trade.closeTime || trade.openTime || Date.now()).toLocaleString('pt-BR')}
                                          </td>
                                          <td className="p-4 font-bold text-slate-900 dark:text-slate-200">{trade.symbol}</td>
                                          <td className="p-4">
@@ -417,7 +423,9 @@ export const Trades = () => {
                                              {(trade.commission + trade.swap).toFixed(2)}
                                          </td>
                                          <td className="p-4 text-center">
-                                             {trade.profit > 0 ? (
+                                             {isOpenPos ? (
+                                                 <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">ABERTA</span>
+                                             ) : trade.profit > 0 ? (
                                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">WIN</span>
                                              ) : trade.profit < 0 ? (
                                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400">LOSS</span>
@@ -434,7 +442,8 @@ export const Trades = () => {
                                              </button>
                                          </td>
                                      </tr>
-                                 ))
+                                    );
+                                })
                              )}
                          </tbody>
                      </table>

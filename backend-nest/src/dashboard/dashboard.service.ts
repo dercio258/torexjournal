@@ -4,6 +4,7 @@ import { Repository, Between, LessThanOrEqual, MoreThanOrEqual, In } from 'typeo
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { TradeEntity } from '../mt5/trade.entity';
+import { PositionEntity } from '../mt5/position.entity';
 import { AccountEntity } from '../account/account.entity';
 import { MentalLog } from './mental-log.entity';
 import { TechnicalJournal } from './technical-journal.entity';
@@ -18,6 +19,8 @@ export class DashboardService {
     constructor(
         @InjectRepository(TradeEntity)
         private tradeRepo: Repository<TradeEntity>,
+        @InjectRepository(PositionEntity)
+        private positionRepo: Repository<PositionEntity>,
         @InjectRepository(AccountEntity)
         private accountRepo: Repository<AccountEntity>,
         @InjectRepository(MentalLog)
@@ -89,48 +92,93 @@ export class DashboardService {
     }
 
     async getTrades(userId: string, accountId?: string, endDate?: string, limit = 100) {
-        const ver = await this.getUserCacheVersion(userId);
-        const cacheKey = `dashboard:trades:${userId}:v${ver}:${accountId || 'all'}:${endDate || 'all'}:${limit}`;
-        try {
-            const cached = await this.cacheManager.get<any[]>(cacheKey);
-            if (cached) {
-                return cached;
-            }
-        } catch (err) {
-            console.warn(`[DashboardService] Cache get failed for trades: ${err.message}`);
-        }
-
         const { accountIds, accounts } = await this.validateUserAccount(userId, accountId);
         if (accountIds.length === 0) return [];
 
-        const whereClause: any = { accountId: In(accountIds), status: 'CLOSED' };
-        if (endDate) {
-            whereClause.closeTime = LessThanOrEqual(new Date(endDate));
-        }
+        const accMap = new Map(accounts.map(a => [a.id, a]));
 
-        const trades = await this.tradeRepo.find({
-            where: whereClause,
-            order: { closeTime: 'DESC' },
-            take: limit
+        // Posições abertas em tempo real (sempre frescas, sem cache, para refletir PnL flutuante do MT5)
+        const openPositions = await this.positionRepo.find({
+            where: { accountId: In(accountIds) },
+            order: { openTime: 'DESC' }
         });
 
-        // Enriquecer com identificadores de conta para a visão consolidada
-        const accMap = new Map(accounts.map(a => [a.id, a]));
-        const enrichedTrades = trades.map(t => {
-            const acc = accMap.get(t.accountId);
+        const mappedOpenPositions = openPositions.map(p => {
+            const acc = accMap.get(p.accountId);
+            const rawType = (p.type || 'BUY').toString().toUpperCase();
+            const normalizedType = rawType.includes('SELL') || rawType.includes('PUT') ? 'SELL' : 'BUY';
+            const openTime = p.openTime || p.updatedAt || new Date();
+            const floatingProfit = Number(p.profit || 0);
             return {
-                ...t,
+                id: p.id || `pos-${p.ticket}`,
+                accountId: p.accountId,
+                ticket: p.ticket,
+                contractId: p.ticket,
+                symbol: p.symbol,
+                type: normalizedType,
+                volume: Number(p.volume || 0),
+                openPrice: Number(p.openPrice || 0),
+                closePrice: Number(p.currentPrice || p.openPrice || 0),
+                currentPrice: Number(p.currentPrice || p.openPrice || 0),
+                profit: floatingProfit,
+                commission: 0,
+                swap: 0,
+                netPnl: floatingProfit,
+                sl: p.sl ? Number(p.sl) : null,
+                tp: p.tp ? Number(p.tp) : null,
+                openTime: openTime,
+                closeTime: openTime,
+                status: 'OPEN',
+                isOpenPosition: true,
                 accountName: acc?.name || 'Conta',
                 accountBroker: acc?.broker || 'Corretora'
             };
         });
 
+        const ver = await this.getUserCacheVersion(userId);
+        const cacheKey = `dashboard:trades:closed:${userId}:v${ver}:${accountId || 'all'}:${endDate || 'all'}:${limit}`;
+        let enrichedClosedTrades: any[] | null = null;
         try {
-            await this.cacheManager.set(cacheKey, enrichedTrades, 300000); // 5 minutes cache
+            const cached = await this.cacheManager.get<any[]>(cacheKey);
+            if (cached) {
+                enrichedClosedTrades = cached;
+            }
         } catch (err) {
-            console.warn(`[DashboardService] Cache set failed for trades: ${err.message}`);
+            console.warn(`[DashboardService] Cache get failed for trades: ${err.message}`);
         }
-        return enrichedTrades;
+
+        if (!enrichedClosedTrades) {
+            const whereClause: any = { accountId: In(accountIds), status: 'CLOSED' };
+            if (endDate) {
+                whereClause.closeTime = LessThanOrEqual(new Date(endDate));
+            }
+
+            const trades = await this.tradeRepo.find({
+                where: whereClause,
+                order: { closeTime: 'DESC' },
+                take: limit
+            });
+
+            // Enriquecer com identificadores de conta para a visão consolidada
+            enrichedClosedTrades = trades.map(t => {
+                const acc = accMap.get(t.accountId);
+                return {
+                    ...t,
+                    status: 'CLOSED',
+                    isOpenPosition: false,
+                    accountName: acc?.name || 'Conta',
+                    accountBroker: acc?.broker || 'Corretora'
+                };
+            });
+
+            try {
+                await this.cacheManager.set(cacheKey, enrichedClosedTrades, 300000); // 5 minutes cache
+            } catch (err) {
+                console.warn(`[DashboardService] Cache set failed for trades: ${err.message}`);
+            }
+        }
+
+        return [...mappedOpenPositions, ...enrichedClosedTrades];
     }
 
     async getPerformance(userId: string, accountId?: string, startDate?: string, endDate?: string) {
