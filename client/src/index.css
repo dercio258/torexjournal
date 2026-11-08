@@ -3,7 +3,73 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   TOREX JOURNAL DESIGN SYSTEM (DARK FINTECH + TRADING TERMINAL)
+   TOREX JOURNAL DESIGN TOKENS (v2 — semantic, theme-aware)
+   --------------------------------------------------------------------------
+   Single source of truth. Values are RGB channels so Tailwind opacity
+   modifiers work (e.g. `bg-surface/80`). Consumed via tailwind.config.js
+   (`canvas`, `surface`, `raised`, `fg`, `line`, `accent`, `danger`).
+
+   - Default (and `html.dark`) = dark palette.
+   - `html.light` swaps to the light palette.
+   - `.theme-dark` forces the dark palette on a subtree regardless of the
+     global theme (brand pages: landing, login, register) without touching
+     the <html> class, so the user's theme preference is never clobbered.
+
+   New code should use these tokens, never raw hex values.
+   ========================================================================== */
+
+:root,
+html.dark,
+.theme-dark {
+    --ds-canvas: 8 9 12;
+    --ds-canvas-subtle: 12 13 18;
+    --ds-surface: 17 19 25;
+    --ds-surface-2: 22 24 34;
+    --ds-surface-3: 28 31 44;
+    --ds-raised: 14 16 23;
+
+    --ds-fg: 243 244 246;
+    --ds-fg-muted: 156 163 175;
+    --ds-fg-subtle: 107 114 128;
+    --ds-fg-disabled: 75 85 99;
+
+    --ds-line: 255 255 255;
+
+    --ds-accent: 16 185 129;
+    --ds-accent-hover: 52 211 153;
+    --ds-accent-fg: 52 211 153;
+    --ds-on-accent: 4 17 12;
+
+    --ds-danger: 244 63 94;
+    --ds-danger-fg: 251 113 133;
+    --ds-warning: 245 158 11;
+
+    color-scheme: dark;
+}
+
+html.light {
+    --ds-canvas: 248 250 252;
+    --ds-canvas-subtle: 241 245 249;
+    --ds-surface: 255 255 255;
+    --ds-surface-2: 248 250 252;
+    --ds-surface-3: 226 232 240;
+    --ds-raised: 255 255 255;
+
+    --ds-fg: 15 23 42;
+    --ds-fg-muted: 71 85 105;
+    --ds-fg-subtle: 100 116 139;
+    --ds-fg-disabled: 148 163 184;
+
+    --ds-line: 15 23 42;
+
+    --ds-accent-fg: 5 150 105;
+    --ds-danger-fg: 225 29 72;
+
+    color-scheme: light;
+}
+
+/* ==========================================================================
+   LEGACY DESIGN VARIABLES (v1) — kept for existing pages, do not extend.
    ========================================================================== */
 
 :root,
@@ -261,16 +327,16 @@ html.light .text-\[\#6B7280\] {
     color: #64748b !important;
 }
 
-html.light input:not([type="checkbox"]):not([type="radio"]),
-html.light select,
-html.light textarea {
+html.light input:not([type="checkbox"]):not([type="radio"]):not(.ds-control),
+html.light select:not(.ds-control),
+html.light textarea:not(.ds-control) {
     background-color: #ffffff !important;
     border-color: #cbd5e1 !important;
     color: #0f172a !important;
 }
 
-html.light input::placeholder,
-html.light textarea::placeholder {
+html.light input:not(.ds-control)::placeholder,
+html.light textarea:not(.ds-control)::placeholder {
     color: #94a3b8 !important;
 }
 
