@@ -216,19 +216,49 @@ class SyncEngine:
             logger.debug(f"Limpeza preventiva de liveupdate ignorada: {e}")
 
     @staticmethod
-    def _kill_stuck_terminals(target_path: Optional[str] = None):
-        """Encerra apenas o processo terminal64.exe da instância alvo (ou órfão) sem derrubar outras contas isoladas."""
+    def _kill_duplicate_or_instance_terminals(keep_path: Optional[str] = None):
+        """
+        No MT5 Build 6296+, o servidor MCP/IPC faz bind fixo em 127.0.0.1:22346.
+        Se houver mais de um terminal64.exe aberto (ex: instances/acc_*), ocorre erro 10048 (bind error on 127.0.0.1:22346)
+        e esgota os 2 GB de RAM da VPS. Este método encerra imediatamente qualquer instância secundária em instances/acc_*.
+        """
         import os
-        norm_target = os.path.normcase(os.path.abspath(target_path)) if target_path else None
+        norm_keep = os.path.normcase(os.path.abspath(keep_path)) if keep_path else None
+        running_procs = []
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                if 'terminal64' not in name:
+                    continue
+                exe_path = proc.info.get('exe') or ''
+                norm_exe = os.path.normcase(os.path.abspath(exe_path)) if exe_path else ''
+                if 'instances' in norm_exe or (norm_keep and norm_exe and norm_exe != norm_keep):
+                    logger.warning(
+                        f"Encerrando instância secundária terminal64.exe (PID: {proc.info['pid']}, Path: {exe_path}) "
+                        f"para liberar a porta IPC 127.0.0.1:22346 e memória RAM..."
+                    )
+                    proc.kill()
+                else:
+                    running_procs.append(proc)
+            except Exception:
+                pass
+
+        if len(running_procs) > 1:
+            for extra_proc in running_procs[1:]:
+                try:
+                    logger.warning(f"Encerrando processo terminal64.exe duplicado (PID: {extra_proc.pid}) para liberar porta 22346...")
+                    extra_proc.kill()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _kill_stuck_terminals(target_path: Optional[str] = None):
+        """Encerra processos terminal64.exe presos que possam estar bloqueando a porta IPC 127.0.0.1:22346."""
         for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
                 name = proc.info.get('name') or ''
                 if 'terminal64' in name.lower():
-                    exe_path = proc.info.get('exe') or ''
-                    if norm_target and exe_path:
-                        if os.path.normcase(os.path.abspath(exe_path)) != norm_target:
-                            continue
-                    logger.warning(f"Encerrando processo terminal64 (PID: {proc.info['pid']}, Path: {exe_path}) para reinicialização limpa...")
+                    logger.warning(f"Encerrando processo terminal64 (PID: {proc.info['pid']}) para liberar porta 127.0.0.1:22346...")
                     proc.kill()
             except Exception:
                 pass
@@ -362,23 +392,19 @@ class SyncEngine:
                 self.connected_account = account_id
                 return True
 
+            from config.settings import settings
+            self._kill_duplicate_or_instance_terminals(keep_path=settings.mt5_default_path or path)
             self._dismiss_mt5_dialogs()
             login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
             server_clean = self._normalize_broker_server(server)
 
-            import os
-            same_terminal = True
-            if path and self.active_terminal_path:
-                same_terminal = os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(self.active_terminal_path))
-
-            if same_terminal:
-                try:
-                    info = mt5.account_info()
-                    if self._is_account_authenticated(info, login_clean, server_clean):
-                        self.connected_account = account_id
-                        return True
-                except Exception:
-                    pass
+            try:
+                info = mt5.account_info()
+                if self._is_account_authenticated(info, login_clean, server_clean):
+                    self.connected_account = account_id
+                    return True
+            except Exception:
+                pass
 
             return self.connect_account(
                 account_id,
@@ -412,55 +438,40 @@ class SyncEngine:
                 logger.info(f"Servidor da corretora normalizado automaticamente: '{server}' -> '{server_clean}'")
             pass_clean = str(password).strip() if password else ""
             from config.settings import settings
-            term_path = path or settings.mt5_default_path
+            term_path = settings.mt5_default_path or path
 
             # Se o executável estiver em C:\Program Files, portable=True exige UAC para gravar na pasta.
             use_portable = "program files" not in (term_path or "").lower()
 
+            # Encerra qualquer instância secundária (instances/acc_*) que cause conflito na porta 127.0.0.1:22346 (erro 10048)
+            self._kill_duplicate_or_instance_terminals(keep_path=term_path)
             # Remove qualquer atualização automática pendente que trave o Pipe Server (-10003) e fecha popups
             self._clean_pending_liveupdate()
             self._dismiss_mt5_dialogs()
 
-            switching_terminal = bool(
-                term_path
-                and self.active_terminal_path
-                and os.path.normcase(os.path.abspath(term_path)) != os.path.normcase(os.path.abspath(self.active_terminal_path))
-            )
-
-            # Passo 1: Verifica se o IPC já está ativo no terminal isolado correto ou anexa a ele
+            # Passo 1: Verifica se o IPC já está ativo no terminal principal ou anexa a ele (SEM chamar mt5.shutdown()!)
             init_ok = False
             try:
-                if switching_terminal and term_path:
-                    init_ok = self._run_with_dialog_watchdog(
-                        lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
-                    )
+                term_info = mt5.terminal_info()
+                if term_info is not None and isinstance(getattr(term_info, "name", None), str):
+                    init_ok = True
                 else:
-                    term_info = mt5.terminal_info()
-                    if term_info is not None and isinstance(getattr(term_info, "name", None), str):
-                        if term_path and not self.active_terminal_path:
-                            init_ok = self._run_with_dialog_watchdog(
-                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
-                            )
-                        else:
-                            init_ok = True
-                    else:
-                        if progress_callback:
-                            progress_callback(f"Conectando ao canal IPC do terminal MT5 isolado para conta {login_clean}...")
-                        if term_path:
-                            init_ok = self._run_with_dialog_watchdog(
-                                lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
-                            )
-                        if not init_ok:
-                            init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000))
+                    if progress_callback:
+                        progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
+                    init_ok = self._run_with_dialog_watchdog(lambda: mt5.initialize(timeout=15000))
+                    if not init_ok and term_path:
+                        init_ok = self._run_with_dialog_watchdog(
+                            lambda: mt5.initialize(path=term_path, portable=use_portable, timeout=25000)
+                        )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se o terminal isolado da conta não responder, reinicia apenas o processo dele
+            # Passo 2: Se o terminal principal não responder, reinicia o processo terminal64.exe
             if not init_ok:
-                logger.info(f"Inicializando terminal MT5 isolado para conta {login_clean} via: {term_path}")
+                logger.info(f"Nenhum terminal ativo respondeu. Inicializando MT5 via: {term_path}")
                 if progress_callback:
-                    progress_callback(f"Inicializando processo MetaTrader 5 isolado na VPS para {login_clean}@{server_clean}...")
-                self._kill_stuck_terminals(target_path=term_path)
+                    progress_callback(f"Inicializando processo MetaTrader 5 na VPS para {login_clean}@{server_clean}...")
+                self._kill_stuck_terminals()
                 self._clean_pending_liveupdate()
                 time.sleep(2.0)
                 try:

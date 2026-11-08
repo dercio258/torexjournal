@@ -74,15 +74,15 @@ def main():
         logger.error("Biblioteca MetaTrader5 não encontrada neste ambiente Python. Execute na VPS Windows!")
         sys.exit(1)
 
-    isolated_path = proc_manager.get_or_prepare_isolated_terminal_exe(account_id)
-    logger.info(f"Conectando ao terminal MT5 para conta {login_arg}@{server} (Executável: {isolated_path})...")
+    sync_engine._kill_duplicate_or_instance_terminals(keep_path=settings.mt5_default_path)
+    logger.info(f"Conectando ao terminal MT5 principal para conta {login_arg}@{server} (Executável: {settings.mt5_default_path})...")
 
     connected = sync_engine.connect_account(
         account_id=account_id,
         login=login_arg,
         server=server,
         password=password,
-        path=isolated_path,
+        path=settings.mt5_default_path,
     )
 
     if not connected:

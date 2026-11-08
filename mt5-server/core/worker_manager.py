@@ -281,13 +281,12 @@ class WorkerManager:
             except Exception:
                 pass
 
-        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(task.accountId)
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
             login=task.login,
             server=normalized_server,
             password=password,
-            path=isolated_path,
+            path=settings.mt5_default_path,
             progress_callback=_report_progress,
         )
 
@@ -375,13 +374,12 @@ class WorkerManager:
 
         self.process_manager.stop_terminal(task.accountId)
         time.sleep(2)
-        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(acc.account_id)
         restarted = self.sync_engine.connect_account(
             account_id=acc.account_id,
             login=acc.login,
             server=acc.server,
             password=acc.password,
-            path=isolated_path,
+            path=settings.mt5_default_path,
         )
         if restarted:
             summary = self._sync_single_account(acc.account_id) or {}
@@ -416,13 +414,24 @@ class WorkerManager:
                 message=f"Terminal da conta {acc_id} inativo. Auto-recovery acionado no ciclo de sync."
             ))
 
+        # Verifica se há pelo menos uma conta ativa com saldo/posições para manter Sticky Session nela
+        has_funded_active = any(not self._account_idle_map.get(aid, False) for aid in active_ids if aid in self._account_idle_map)
+
         for account_id in active_ids:
             if not self.is_running:
                 break
             now = time.time()
             last_acc_sync = self._account_last_sync_ts.get(account_id, 0.0)
             is_idle = self._account_idle_map.get(account_id, False)
-            min_cooldown = 180.0 if is_idle else max(float(settings.sync_interval_seconds), 15.0)
+            # Se a conta está com saldo $0.00 e 0 posições (ex: 408953138) e existe outra conta ativa operando (ex: 6371945),
+            # aplica cooldown de 30 minutos (1800s) para NÃO deslogar a conta ativa do terminal único MT5 (porta 22346)!
+            if is_idle and has_funded_active:
+                min_cooldown = 1800.0
+            elif len(active_ids) > 1:
+                min_cooldown = 90.0
+            else:
+                min_cooldown = max(float(settings.sync_interval_seconds), 15.0)
+
             if now - last_acc_sync < min_cooldown:
                 continue
 
@@ -442,8 +451,7 @@ class WorkerManager:
 
         try:
             self._account_last_sync_ts[account_id] = time.time()
-            isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(account_id)
-            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
+            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, settings.mt5_default_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")
