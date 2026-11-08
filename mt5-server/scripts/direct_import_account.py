@@ -22,11 +22,23 @@ O que este script faz:
 import os
 import sys
 import datetime
+import subprocess
 from pathlib import Path
 
 # Garante que a raiz do mt5-server esteja no PYTHONPATH
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
+
+# Auto-detecta o ambiente virtual (.venv / venv) na VPS Windows caso o usuário chame 'python' global
+try:
+    import loguru  # noqa: F401
+except ImportError:
+    for venv_dir in (".venv", "venv", "env"):
+        candidate = ROOT_DIR / venv_dir / "Scripts" / "python.exe"
+        if candidate.exists() and Path(sys.executable).resolve() != candidate.resolve():
+            print(f"[INFO] Redirecionando execução para o ambiente virtual: {candidate}")
+            res = subprocess.run([str(candidate)] + sys.argv)
+            sys.exit(res.returncode)
 
 from loguru import logger
 from config.settings import settings
