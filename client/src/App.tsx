@@ -19,6 +19,7 @@ const queryClient = new QueryClient({
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { TwoFactorVerify } from './pages/TwoFactorVerify';
+import { ForgotPassword } from './pages/ForgotPassword';
 import { Dashboard } from './pages/Dashboard';
 import { Journal } from './pages/Journal';
 import { Payments } from './pages/Payments';
@@ -84,6 +85,11 @@ function App() {
                             <Route path="/login" element={
                                 <GuestRoute>
                                     <Login />
+                                </GuestRoute>
+                            } />
+                            <Route path="/forgot-password" element={
+                                <GuestRoute>
+                                    <ForgotPassword />
                                 </GuestRoute>
                             } />
                             <Route path="/2fa" element={
