@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Search, Globe } from 'lucide-react';
+import { COUNTRIES } from '../../constants/countries';
 
 interface Country {
     name: string;
@@ -24,31 +25,18 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
     const [isLoading, setIsLoading] = useState(true);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
-    // Fetch countries on mount
+    // Countries come from the bundled catalog (no third-party API at runtime).
     useEffect(() => {
-        const fetchCountries = async () => {
-            try {
-                const res = await fetch('https://restcountries.com/v3.1/all?fields=name,idd,flags,cca2');
-                const data = await res.json();
-                const mapped = data.map((c: any) => ({
-                    name: c.name.common,
-                    iso2: c.cca2,
-                    callingCode: c.idd.root + (c.idd.suffixes?.length === 1 ? c.idd.suffixes[0] : ''),
-                    flag: c.flags.svg
-                })).sort((a: any, b: any) => a.name.localeCompare(b.name));
-                
-                setCountries(mapped);
-
-                const mz = mapped.find((c: any) => c.iso2 === 'MZ') || mapped[0];
-                if (mz) setSelectedCountry(mz);
-            } catch (err) {
-                console.error('Failed to load countries', err);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        fetchCountries();
+        const mapped: Country[] = COUNTRIES.map((c) => ({
+            name: c.name,
+            iso2: c.iso2,
+            iso3: '',
+            callingCode: c.dialCode,
+            flag: c.flagUrl,
+        }));
+        setCountries(mapped);
+        setSelectedCountry(mapped.find((c) => c.iso2 === 'MZ') || mapped[0]);
+        setIsLoading(false);
     }, []);
 
     // Close dropdown on click outside
@@ -65,13 +53,9 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
     // Update parent when country or phone changes
     useEffect(() => {
         if (selectedCountry) {
-            // Check if phone already starts with calling code to avoid double prefix
-            // Variables removed because they are never read locally
-            onChange?.(phoneNumber);
-            // But we keep display logic simple
-            const fullNumber = `${selectedCountry.callingCode}${phoneNumber}`;
-            onChange(fullNumber);
+            onChange(`${selectedCountry.callingCode}${phoneNumber}`);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedCountry, phoneNumber]);
 
     const handleSelect = (country: Country) => {
