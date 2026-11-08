@@ -716,13 +716,14 @@ export class Mt5WorkerService implements OnModuleInit {
                 t => t.login === cleanLogin && (t.status === WorkerTaskStatus.RECEIVED || t.status === WorkerTaskStatus.IN_PROGRESS)
             );
             if (!activeForLogin) {
-                this.enqueueTask({
-                    type: WorkerTaskType.FORCE_FULL_SYNC,
-                    accountId: this.deriveNumericAccountId(cleanLogin, accountInfo.accountId),
-                    login: cleanLogin,
-                    server: accountInfo.server || account.broker || '',
-                    priority: 2,
-                });
+                this.createAccountTask(
+                    WorkerTaskType.FORCE_FULL_SYNC,
+                    cleanLogin,
+                    accountInfo.server || account.broker || '',
+                    undefined,
+                    accountInfo.accountId,
+                    { priority: 2 }
+                );
                 this.logger.log(`[AUTO-RECONCILE] Enfileirado FORCE_FULL_SYNC automático para recuperar todo o histórico da conta ${cleanLogin}.`);
             }
         }
