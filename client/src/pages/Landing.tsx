@@ -27,11 +27,20 @@ export const Landing = () => {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'reports' | 'trades' | 'calendar' | 'emotions'>('reports');
 
-    // Strictly enforce authentic dark mode on the landing page
+    // Landing is dark-only (its markup still uses legacy hex classes). Force dark
+    // while mounted and restore the user's theme on leave so it isn't clobbered.
+    // TODO(design-system): migrate to tokens + `.theme-dark` scope and drop this.
     useEffect(() => {
         const root = document.documentElement;
+        const wasLight = root.classList.contains('light');
         root.classList.add('dark');
         root.classList.remove('light');
+        return () => {
+            if (wasLight) {
+                root.classList.remove('dark');
+                root.classList.add('light');
+            }
+        };
     }, []);
 
     useEffect(() => {
