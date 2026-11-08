@@ -17,6 +17,7 @@ interface Trade {
     volume: number;
     rawProfit?: number;
     profit: number;
+    netProfit?: number;
     openPrice: number;
     closePrice: number;
     sl?: number;
@@ -64,7 +65,8 @@ export const Trades = () => {
                     type: t.type,
                     volume: Number(t.volume),
                     rawProfit: Number(t.profit),
-                    profit: Number(t.profit) + Number(t.commission) + Number(t.swap),
+                    profit: Number(t.profit),
+                    netProfit: Number(t.profit) + Number(t.commission) + Number(t.swap),
                     openPrice: Number(t.openPrice),
                     closePrice: Number(t.closePrice),
                     sl: Number(t.sl || 0),
@@ -431,9 +433,9 @@ export const Trades = () => {
                                          </td>
                                          <td className={`p-4 text-right font-bold font-mono ${trade.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                              <div>{trade.profit >= 0 ? '+' : ''}{trade.profit.toFixed(2)}</div>
-                                             {trade.rawProfit !== undefined && Math.abs(trade.profit - trade.rawProfit) > 0.005 && (
+                                             {trade.netProfit !== undefined && Math.abs(trade.netProfit - trade.profit) > 0.005 && (
                                                  <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
-                                                     Bruto MT5: {trade.rawProfit >= 0 ? '+' : ''}{trade.rawProfit.toFixed(2)}
+                                                     Líq: {trade.netProfit >= 0 ? '+' : ''}{trade.netProfit.toFixed(2)}
                                                  </div>
                                              )}
                                          </td>

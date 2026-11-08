@@ -183,6 +183,19 @@ async function main() {
                 console.log(`      • Soma Comissões    : $${sumComm.toFixed(2)}`);
                 console.log(`      • Soma Swap         : $${sumSwap.toFixed(2)}`);
                 console.log(`      • Soma PnL Líquido  : $${sumNet.toFixed(2)}`);
+
+                // Corrige automaticamente initial_balance da conta se estiver divergente do (balance - sumNet)
+                const currentBal = Number(acc.balance || 0);
+                const currentInit = Number(acc.initial_balance ?? acc.initialBalance ?? 0);
+                const expectedInit = Number((currentBal - sumNet).toFixed(2));
+                if (currentBal > 0 && expectedInit > 0 && Math.abs(currentInit - expectedInit) > 1) {
+                    const initCol = accCols.has('initial_balance') ? 'initial_balance' : '"initialBalance"';
+                    await client.query(
+                        `UPDATE accounts SET ${initCol} = $1 WHERE id = $2`,
+                        [expectedInit, acc.id]
+                    );
+                    console.log(`      ✅ Saldo Inicial (InitialBalance) corrigido automaticamente de $${currentInit.toFixed(2)} para $${expectedInit.toFixed(2)}!`);
+                }
             }
 
             if (logCols.size > 0) {

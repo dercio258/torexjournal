@@ -1114,8 +1114,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 </thead>
                                 <tbody className="divide-y divide-white/[0.04]">
                                     {allSyncedOperations.map((trade: any) => {
-                                        const pnl = Number(trade.netPnl ?? trade.profit ?? 0);
-                                        const isWin = pnl >= 0;
+                                        const grossPnl = Number(trade.profit ?? trade.netPnl ?? 0);
+                                        const netPnl = Number(trade.netPnl ?? (Number(trade.profit || 0) + Number(trade.commission || 0) + Number(trade.swap || 0)));
+                                        const isWin = grossPnl >= 0;
                                         const isOpen = trade.isOpenPosition || (trade.status || '').toUpperCase() === 'OPEN';
                                         return (
                                             <tr key={`${isOpen ? 'open' : 'closed'}-${trade.id || trade.ticket}`} className="hover:bg-white/[0.02]">
@@ -1167,7 +1168,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 <td className={`py-2.5 px-3 text-right font-bold ${
                                                     isWin ? 'text-emerald-400' : 'text-rose-400'
                                                 }`}>
-                                                    {isWin ? '+' : ''}{pnl.toFixed(2)} {acc.currency || 'USD'}
+                                                    <div>{isWin ? '+' : ''}{grossPnl.toFixed(2)} {acc.currency || 'USD'}</div>
+                                                    {Math.abs(netPnl - grossPnl) > 0.005 && (
+                                                        <div className="text-[10px] font-normal text-slate-400">
+                                                            Líq: {netPnl >= 0 ? '+' : ''}{netPnl.toFixed(2)}
+                                                        </div>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
