@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check } from 'lucide-react';
+import { StatusPill } from '../ui/StatusPill';
 
 interface AuthAsideProps {
     eyebrow?: string;
@@ -11,12 +12,7 @@ interface AuthAsideProps {
 /** Brand column next to auth forms (desktop only). Content comes from props. */
 export const AuthAside = ({ eyebrow, title, description, highlights }: AuthAsideProps) => (
     <div className="space-y-8 pr-6">
-        {eyebrow && (
-            <span className="inline-flex items-center gap-2 rounded-pill border border-accent/30 bg-surface px-3.5 py-1.5 text-xs font-semibold text-accent-fg backdrop-blur-md">
-                <span aria-hidden className="h-2 w-2 rounded-full bg-accent-fg motion-safe:animate-pulse" />
-                {eyebrow}
-            </span>
-        )}
+        {eyebrow && <StatusPill>{eyebrow}</StatusPill>}
 
         <h2 className="text-5xl font-extrabold leading-[1.15] tracking-tight text-fg">{title}</h2>
 

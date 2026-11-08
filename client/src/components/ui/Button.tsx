@@ -32,6 +32,8 @@ const buttonVariants = cva(
                 lg: 'h-12 rounded-control px-5 text-sm',
             },
             fullWidth: { true: 'w-full' },
+            /** Fully rounded (marketing CTAs). */
+            pill: { true: 'rounded-full' },
         },
         compoundVariants: [{ variant: 'link', className: 'h-auto px-0 py-0' }],
         defaultVariants: { variant: 'primary', size: 'md' },
@@ -49,10 +51,10 @@ export interface ButtonProps
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ children, variant, size, fullWidth, isLoading, icon, iconRight, className, disabled, ...props }, ref) => (
+    ({ children, variant, size, fullWidth, pill, isLoading, icon, iconRight, className, disabled, ...props }, ref) => (
         <button
             ref={ref}
-            className={cn(buttonVariants({ variant, size, fullWidth }), className)}
+            className={cn(buttonVariants({ variant, size, fullWidth, pill }), className)}
             disabled={isLoading || disabled}
             aria-busy={isLoading || undefined}
             {...props}
