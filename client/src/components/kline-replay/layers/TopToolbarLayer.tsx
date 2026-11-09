@@ -17,7 +17,6 @@ interface TopToolbarLayerProps {
     layoutMode: ChartLayoutMode;
     activeIndicatorsCount: number;
     dataSource: DataSourceMode;
-    activeSourceLabel: string;
     onSelectSymbol: (sym: SymbolInfo) => void;
     onSelectPeriod: (per: Period) => void;
     onSelectSecondaryPeriod: (per: Period) => void;
@@ -41,7 +40,6 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
     layoutMode,
     activeIndicatorsCount,
     dataSource,
-    activeSourceLabel,
     onSelectSymbol,
     onSelectPeriod,
     onSelectSecondaryPeriod,
@@ -204,9 +202,10 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                         onChange={e => onChangeDataSource(e.target.value as DataSourceMode)}
                         className="bg-transparent font-semibold focus:outline-none cursor-pointer"
                     >
-                        <option value="TRADINGVIEW">API: TradingView ({activeSourceLabel})</option>
-                        <option value="BINANCE_LIVE">API: Binance Live WS</option>
-                        <option value="MT5_BACKEND">API: MT5 / Oanda</option>
+                        <option value="TRADINGVIEW">Fonte: TradingView</option>
+                        <option value="MT5_BACKEND">Fonte: OANDA</option>
+                        <option value="BINANCE_LIVE">Fonte: Binance (só cripto, ao vivo)</option>
+                        <option value="DEMO">Demo (dados simulados)</option>
                     </select>
                 </div>
 

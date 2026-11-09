@@ -2,7 +2,28 @@ import { KLineData } from 'klinecharts';
 import { Datafeed, SymbolInfo, Period, DatafeedSubscribeCallback } from '@klinecharts/pro';
 import api from '../api';
 
-export type DataSourceMode = 'TRADINGVIEW' | 'BINANCE_LIVE' | 'MT5_BACKEND';
+/**
+ * Each mode is ONE source. There is no silent cross-source fallback: if the
+ * chosen feed fails, loading fails and the UI says so. `DEMO` is the only
+ * mode with generated prices and it is always labelled as such.
+ */
+export type DataSourceMode = 'TRADINGVIEW' | 'BINANCE_LIVE' | 'MT5_BACKEND' | 'DEMO';
+
+export interface FeedStats {
+    source: string;
+    /** True only in DEMO mode: prices are generated, not market data. */
+    synthetic: boolean;
+    totalBars: number;
+    replayIndex: number;
+    replayActive: boolean;
+}
+
+export class FeedUnavailableError extends Error {
+    constructor(public readonly mode: DataSourceMode, message: string) {
+        super(message);
+        this.name = 'FeedUnavailableError';
+    }
+}
 
 export const DEFAULT_SYMBOLS: SymbolInfo[] = [
     {
@@ -106,16 +127,20 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
     },
 ];
 
+/**
+ * Binance only lists crypto. Forex/gold "equivalents" (PAXG, EURUSDT) are
+ * different instruments with different prices, so they are NOT mapped.
+ */
 const BINANCE_TICKER_MAP: Record<string, string> = {
     BTCUSD: 'BTCUSDT',
     BTCUSDT: 'BTCUSDT',
     ETHUSD: 'ETHUSDT',
     ETHUSDT: 'ETHUSDT',
     SOLUSD: 'SOLUSDT',
-    XAUUSD: 'PAXGUSDT',
-    EURUSD: 'EURUSDT',
-    GBPUSD: 'GBPUSDT',
+    SOLUSDT: 'SOLUSDT',
 };
+
+export const binancePairOf = (ticker: string): string | undefined => BINANCE_TICKER_MAP[ticker.toUpperCase()];
 
 const BASE_MARKET_CONFIG: Record<string, { price: number; volatility: number; decimals: number }> = {
     XAUUSD: { price: 2652.40, volatility: 3.2, decimals: 2 },
@@ -167,36 +192,68 @@ export function periodToMs(period: Period): number {
     }
 }
 
+/** OANDA granularity: M1, M5, M15, M30, H1, H4, D, W, M. */
+export function periodToOandaGranularity(period: Period): string {
+    const { multiplier, timespan } = period;
+    if (timespan === 'minute') return [1, 5, 15, 30].includes(multiplier) ? `M${multiplier}` : 'M15';
+    if (timespan === 'hour') return [1, 2, 4, 6, 8, 12].includes(multiplier) ? `H${multiplier}` : 'H1';
+    if (timespan === 'day') return 'D';
+    if (timespan === 'week') return 'W';
+    if (timespan === 'month') return 'M';
+    return 'M15';
+}
+
+const MODE_LABEL: Record<DataSourceMode, string> = {
+    TRADINGVIEW: 'TradingView',
+    BINANCE_LIVE: 'Binance',
+    MT5_BACKEND: 'OANDA',
+    DEMO: 'Demo (dados simulados)',
+};
+
 interface CacheEntry {
     candles: KLineData[];
     source: string;
+    synthetic: boolean;
     fetchedAt: number;
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 24;
+const DEFAULT_BARS = 350;
+
+type CandleListener = (candle: KLineData, stats: FeedStats) => void;
+
+const toKLine = (c: any): KLineData => ({
+    timestamp: Number(c.timestamp ?? (typeof c.time === 'number' ? (c.time < 1e10 ? c.time * 1000 : c.time) : new Date(c.time).getTime())),
+    open: Number(c.open),
+    high: Number(c.high),
+    low: Number(c.low),
+    close: Number(c.close),
+    volume: Number(c.volume || 0),
+});
+
+const errorMessage = (e: any): string => e?.response?.data?.message || e?.message || 'erro desconhecido';
 
 export class CustomKLineDatafeed implements Datafeed {
     private mode: DataSourceMode = 'TRADINGVIEW';
     private ws: WebSocket | null = null;
-    private liveTimer: ReturnType<typeof setInterval> | null = null;
     private activeCallback: DatafeedSubscribeCallback | null = null;
+    /** Bars per request (set from the user's plan). */
+    private maxBars = DEFAULT_BARS;
 
-    // In-memory LRU Cache for instant timeframe switching & multi-chart sync
+    // In-memory LRU cache for instant timeframe switching & multi-chart sync
     private historyCache: Map<string, CacheEntry> = new Map();
 
-    // Replay & Timestamp Synchronization state
+    // Replay & timestamp synchronization state
     private fullHistory: KLineData[] = [];
     private replayActive: boolean = false;
     private replayIndex: number = 0;
     private replayCutoffTimestamp: number | null = null;
-    private onCandleUpdateListener?: (candle: KLineData, stats: { source: string; totalBars: number; replayIndex: number; replayActive: boolean }) => void;
-    private lastSourceUsed: string = 'TradingView API';
+    private onCandleUpdateListener?: CandleListener;
+    private lastSourceUsed: string = MODE_LABEL.TRADINGVIEW;
+    private lastSynthetic = false;
 
-    constructor(
-        initialMode: DataSourceMode = 'TRADINGVIEW',
-        onCandleUpdate?: (candle: KLineData, stats: { source: string; totalBars: number; replayIndex: number; replayActive: boolean }) => void
-    ) {
+    constructor(initialMode: DataSourceMode = 'TRADINGVIEW', onCandleUpdate?: CandleListener) {
         this.mode = initialMode;
         this.onCandleUpdateListener = onCandleUpdate;
     }
@@ -209,8 +266,16 @@ export class CustomKLineDatafeed implements Datafeed {
         return this.mode;
     }
 
+    public setMaxBars(bars: number) {
+        if (Number.isFinite(bars) && bars >= 50) this.maxBars = Math.floor(bars);
+    }
+
     public getLastSourceUsed(): string {
         return this.lastSourceUsed;
+    }
+
+    public isSynthetic(): boolean {
+        return this.lastSynthetic;
     }
 
     public getFullHistory(): KLineData[] {
@@ -234,6 +299,16 @@ export class CustomKLineDatafeed implements Datafeed {
             currentCandle,
             replayTimestamp: currentCandle?.timestamp || this.replayCutoffTimestamp,
         };
+    }
+
+    private emit(candle: KLineData, replay: boolean) {
+        this.onCandleUpdateListener?.(candle, {
+            source: replay ? `${this.lastSourceUsed} · Replay` : this.lastSourceUsed,
+            synthetic: this.lastSynthetic,
+            totalBars: this.fullHistory.length,
+            replayIndex: this.replayIndex,
+            replayActive: replay,
+        });
     }
 
     /**
@@ -272,14 +347,7 @@ export class CustomKLineDatafeed implements Datafeed {
             const last = visible[visible.length - 1];
             if (last) {
                 this.replayCutoffTimestamp = last.timestamp;
-                if (this.onCandleUpdateListener) {
-                    this.onCandleUpdateListener(last, {
-                        source: `${this.lastSourceUsed} (Replay)`,
-                        totalBars: this.fullHistory.length,
-                        replayIndex: this.replayIndex,
-                        replayActive: true,
-                    });
-                }
+                this.emit(last, true);
             }
             return visible;
         } else {
@@ -287,14 +355,7 @@ export class CustomKLineDatafeed implements Datafeed {
             this.replayCutoffTimestamp = null;
             this.replayIndex = Math.max(0, this.fullHistory.length - 1);
             const last = this.fullHistory[this.fullHistory.length - 1];
-            if (last && this.onCandleUpdateListener) {
-                this.onCandleUpdateListener(last, {
-                    source: this.lastSourceUsed,
-                    totalBars: this.fullHistory.length,
-                    replayIndex: this.replayIndex,
-                    replayActive: false,
-                });
-            }
+            if (last) this.emit(last, false);
             return this.fullHistory;
         }
     }
@@ -321,14 +382,7 @@ export class CustomKLineDatafeed implements Datafeed {
             if (this.activeCallback && nextCandle) {
                 this.activeCallback(nextCandle);
             }
-            if (nextCandle && this.onCandleUpdateListener) {
-                this.onCandleUpdateListener(nextCandle, {
-                    source: `${this.lastSourceUsed} (Replay)`,
-                    totalBars: this.fullHistory.length,
-                    replayIndex: this.replayIndex,
-                    replayActive: this.replayIndex < this.fullHistory.length - 1,
-                });
-            }
+            if (nextCandle) this.emit(nextCandle, true);
             return nextCandle;
         }
         return null;
@@ -388,97 +442,60 @@ export class CustomKLineDatafeed implements Datafeed {
         return localMatches;
     }
 
-    private async fetchOrGetCachedCandles(
-        symbol: SymbolInfo,
-        period: Period,
-        from?: number,
-        to?: number
-    ): Promise<KLineData[]> {
-        const tf = periodToTimeframe(period);
-        const cacheKey = `${this.mode}:${symbol.ticker}:${tf}`;
-        const cached = this.historyCache.get(cacheKey);
+    /** One request to the source selected by `mode`. Throws FeedUnavailableError on failure. */
+    private async fetchFromSource(symbol: SymbolInfo, period: Period, to: number): Promise<{ candles: KLineData[]; source: string; synthetic: boolean }> {
+        const bars = this.maxBars;
+        const from = to - bars * periodToMs(period);
 
-        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.candles.length > 0) {
-            // Refresh LRU order
-            this.historyCache.delete(cacheKey);
-            this.historyCache.set(cacheKey, cached);
-            this.lastSourceUsed = cached.source;
-            return cached.candles;
-        }
-
-        let candles: KLineData[] = [];
-
-        // 1. Try TradingView Backend API if mode === 'TRADINGVIEW'
-        if (this.mode === 'TRADINGVIEW') {
-            try {
-                const res = await api.get('/tradingview/candles', {
-                    params: {
-                        symbol: symbol.exchange && symbol.exchange !== 'TV' ? `${symbol.exchange}:${symbol.ticker}` : symbol.ticker,
-                        timeframe: tf,
-                        range: 350,
-                        from,
-                        to,
-                    },
-                });
-                if (Array.isArray(res.data) && res.data.length > 0) {
-                    candles = res.data.map((c: any) => ({
-                        timestamp: c.timestamp || (c.time ? c.time * 1000 : Date.now()),
-                        open: Number(c.open),
-                        high: Number(c.high),
-                        low: Number(c.low),
-                        close: Number(c.close),
-                        volume: Number(c.volume || 0),
-                        turnover: Number(c.turnover || (c.close * (c.volume || 1))),
-                    }));
-                    this.lastSourceUsed = 'TradingView API';
+        switch (this.mode) {
+            case 'TRADINGVIEW': {
+                try {
+                    const res = await api.get('/tradingview/candles', {
+                        params: {
+                            symbol: symbol.exchange && symbol.exchange !== 'TV' ? `${symbol.exchange}:${symbol.ticker}` : symbol.ticker,
+                            timeframe: periodToTimeframe(period),
+                            range: bars,
+                            to,
+                        },
+                    });
+                    const raw = Array.isArray(res.data) ? res.data : res.data?.candles;
+                    if (!Array.isArray(raw) || raw.length === 0) throw new Error('sem barras para este ativo/timeframe');
+                    return { candles: raw.map(toKLine), source: MODE_LABEL.TRADINGVIEW, synthetic: false };
+                } catch (e) {
+                    throw new FeedUnavailableError(this.mode, `TradingView indisponível: ${errorMessage(e)}`);
                 }
-            } catch (_) {
-                // Will fallback to Binance or MT5/Synthetic
             }
-        }
 
-        // 2. Try MT5 / Oanda Backend API if mode === 'MT5_BACKEND'
-        if (candles.length === 0 && this.mode === 'MT5_BACKEND') {
-            try {
-                const fromIso = new Date(from || Date.now() - 7 * 86400000).toISOString();
-                const toIso = new Date(to || Date.now()).toISOString();
-                const res = await api.get('/market-data/candles', {
-                    params: {
-                        symbol: symbol.ticker,
-                        from: fromIso,
-                        to: toIso,
-                        granularity: `M${period.multiplier || 5}`,
-                    },
-                });
-                if (Array.isArray(res.data) && res.data.length > 0) {
-                    candles = res.data.map((c: any) => ({
-                        timestamp: typeof c.time === 'number' ? (c.time < 10000000000 ? c.time * 1000 : c.time) : new Date(c.time).getTime(),
-                        open: Number(c.open),
-                        high: Number(c.high),
-                        low: Number(c.low),
-                        close: Number(c.close),
-                        volume: Number(c.volume || 100),
-                        turnover: Number(c.close) * Number(c.volume || 100),
-                    }));
-                    this.lastSourceUsed = 'MT5 / Oanda Feed';
+            case 'MT5_BACKEND': {
+                try {
+                    const res = await api.get('/market-data/candles', {
+                        params: {
+                            symbol: symbol.ticker,
+                            from: new Date(from).toISOString(),
+                            to: new Date(to).toISOString(),
+                            granularity: periodToOandaGranularity(period),
+                        },
+                    });
+                    if (!Array.isArray(res.data) || res.data.length === 0) throw new Error('sem barras para este ativo/timeframe');
+                    return { candles: res.data.map(toKLine), source: MODE_LABEL.MT5_BACKEND, synthetic: false };
+                } catch (e) {
+                    throw new FeedUnavailableError(this.mode, `OANDA indisponível: ${errorMessage(e)}`);
                 }
-            } catch (_) {
-                // Fallback below
             }
-        }
 
-        // 3. Try Public Binance REST API (for Crypto, Gold PAXG, EUR, GBP or when BINANCE_LIVE is selected)
-        const binancePair = BINANCE_TICKER_MAP[symbol.ticker.toUpperCase()];
-        if (candles.length === 0 && (this.mode === 'BINANCE_LIVE' || binancePair)) {
-            const targetPair = binancePair || 'BTCUSDT';
-            try {
-                const interval = periodToBinanceInterval(period);
-                const url = `https://api.binance.com/api/v3/klines?symbol=${targetPair}&interval=${interval}&limit=350`;
-                const response = await fetch(url);
-                if (response.ok) {
+            case 'BINANCE_LIVE': {
+                const pair = binancePairOf(symbol.ticker);
+                if (!pair) {
+                    throw new FeedUnavailableError(this.mode, `${symbol.ticker} não é negociado na Binance (só cripto). Use TradingView ou OANDA.`);
+                }
+                try {
+                    const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${to}&limit=${Math.min(bars, 1000)}`;
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const raw = await response.json();
-                    if (Array.isArray(raw) && raw.length > 0 && (binancePair || this.mode === 'BINANCE_LIVE')) {
-                        candles = raw.map((k: any[]) => ({
+                    if (!Array.isArray(raw) || raw.length === 0) throw new Error('sem barras');
+                    return {
+                        candles: raw.map((k: any[]) => ({
                             timestamp: Number(k[0]),
                             open: parseFloat(k[1]),
                             high: parseFloat(k[2]),
@@ -486,39 +503,51 @@ export class CustomKLineDatafeed implements Datafeed {
                             close: parseFloat(k[4]),
                             volume: parseFloat(k[5]),
                             turnover: parseFloat(k[7]),
-                        }));
-                        this.lastSourceUsed = binancePair ? `Binance Live (${targetPair})` : 'Binance API';
-                    }
+                        })),
+                        source: `${MODE_LABEL.BINANCE_LIVE} (${pair})`,
+                        synthetic: false,
+                    };
+                } catch (e) {
+                    throw new FeedUnavailableError(this.mode, `Binance indisponível: ${errorMessage(e)}`);
                 }
-            } catch (_) {
-                // Fallback to local generator
             }
+
+            case 'DEMO':
+            default:
+                return { candles: this.generateDemoCandles(symbol.ticker, period, bars, to), source: MODE_LABEL.DEMO, synthetic: true };
+        }
+    }
+
+    private async fetchOrGetCachedCandles(symbol: SymbolInfo, period: Period): Promise<KLineData[]> {
+        const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${periodToTimeframe(period)}:${this.maxBars}`;
+        const cached = this.historyCache.get(cacheKey);
+
+        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.candles.length > 0) {
+            this.historyCache.delete(cacheKey); // refresh LRU order
+            this.historyCache.set(cacheKey, cached);
+            this.lastSourceUsed = cached.source;
+            this.lastSynthetic = cached.synthetic;
+            return cached.candles;
         }
 
-        // 4. Guaranteed High-Precision Fallback so chart is never empty
-        if (candles.length === 0) {
-            candles = this.generateRealisticCandles(symbol.ticker, period, 350, to);
-            this.lastSourceUsed = 'Simulador Institucional (Offline/Demo)';
-        }
+        const { candles, source, synthetic } = await this.fetchFromSource(symbol, period, Date.now());
+        const sorted = candles
+            .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close) && Number.isFinite(c.timestamp))
+            .sort((a, b) => a.timestamp - b.timestamp);
+        this.lastSourceUsed = source;
+        this.lastSynthetic = synthetic;
 
-        candles.sort((a, b) => a.timestamp - b.timestamp);
-
-        // Save in LRU Cache
         if (this.historyCache.size >= MAX_CACHE_ENTRIES) {
             const oldestKey = this.historyCache.keys().next().value;
             if (oldestKey) this.historyCache.delete(oldestKey);
         }
-        this.historyCache.set(cacheKey, {
-            candles,
-            source: this.lastSourceUsed,
-            fetchedAt: Date.now(),
-        });
-
-        return candles;
+        this.historyCache.set(cacheKey, { candles: sorted, source, synthetic, fetchedAt: Date.now() });
+        return sorted;
     }
 
-    async getHistoryKLineData(symbol: SymbolInfo, period: Period, from: number, to: number): Promise<KLineData[]> {
-        const candles = await this.fetchOrGetCachedCandles(symbol, period, from, to);
+    /** `from`/`to` from the Datafeed interface are ignored: the window is sized by period x plan bars. */
+    async getHistoryKLineData(symbol: SymbolInfo, period: Period, _from?: number, _to?: number): Promise<KLineData[]> {
+        const candles = await this.fetchOrGetCachedCandles(symbol, period);
         this.fullHistory = candles;
 
         if (this.replayActive && candles.length > 20) {
@@ -527,91 +556,49 @@ export class CustomKLineDatafeed implements Datafeed {
 
         this.replayIndex = Math.max(0, candles.length - 1);
         const last = candles[candles.length - 1];
-        if (last && this.onCandleUpdateListener) {
-            this.onCandleUpdateListener(last, {
-                source: this.lastSourceUsed,
-                totalBars: candles.length,
-                replayIndex: this.replayIndex,
-                replayActive: false,
-            });
-        }
-
+        if (last) this.emit(last, false);
         return candles;
     }
 
+    /**
+     * Live updates only come from a real stream (Binance mode, crypto). Other
+     * modes stay static until reloaded: no simulated ticks.
+     */
     subscribe(symbol: SymbolInfo, period: Period, callback: DatafeedSubscribeCallback): void {
         this.activeCallback = callback;
         this.stopLiveStream();
 
-        // In Replay mode, candles only advance when the user clicks Step or Play
-        if (this.replayActive) {
-            return;
-        }
+        if (this.replayActive || this.mode !== 'BINANCE_LIVE') return;
+        const pair = binancePairOf(symbol.ticker);
+        if (!pair) return;
 
-        const binancePair = BINANCE_TICKER_MAP[symbol.ticker.toUpperCase()];
-        if (binancePair) {
-            try {
-                const interval = periodToBinanceInterval(period);
-                const streamName = `${binancePair.toLowerCase()}@kline_${interval}`;
-                this.ws = new WebSocket(`wss://stream.binance.com:9443/ws/${streamName}`);
-                this.ws.onmessage = (event) => {
-                    if (this.replayActive) return;
-                    try {
-                        const msg = JSON.parse(event.data);
-                        if (msg.k) {
-                            const k = msg.k;
-                            const bar: KLineData = {
-                                timestamp: Number(k.t),
-                                open: parseFloat(k.o),
-                                high: parseFloat(k.h),
-                                low: parseFloat(k.l),
-                                close: parseFloat(k.c),
-                                volume: parseFloat(k.v),
-                                turnover: parseFloat(k.q),
-                            };
-                            this.updateLatestHistoryBar(bar);
-                            callback(bar);
-                            if (this.onCandleUpdateListener) {
-                                this.onCandleUpdateListener(bar, {
-                                    source: this.lastSourceUsed,
-                                    totalBars: this.fullHistory.length,
-                                    replayIndex: this.fullHistory.length - 1,
-                                    replayActive: false,
-                                });
-                            }
-                        }
-                    } catch (_) {}
-                };
-                return;
-            } catch (_) {}
-        }
-
-        // Simulated real-time micro-tick updates for non-Binance symbols when not in Replay Mode
-        const cfg = BASE_MARKET_CONFIG[symbol.ticker.toUpperCase()] || { price: 100, volatility: 0.5, decimals: 2 };
-        this.liveTimer = setInterval(() => {
-            if (this.replayActive || this.fullHistory.length === 0) return;
-            const last = { ...this.fullHistory[this.fullHistory.length - 1] };
-            const microStep = (Math.random() - 0.498) * (cfg.volatility * 0.08);
-            const nextClose = Number((last.close + microStep).toFixed(cfg.decimals));
-            last.close = nextClose;
-            if (nextClose > last.high) last.high = nextClose;
-            if (nextClose < last.low) last.low = nextClose;
-            last.volume = (last.volume || 100) + Math.round(Math.random() * 5);
-
-            this.fullHistory[this.fullHistory.length - 1] = last;
-            callback(last);
-            if (this.onCandleUpdateListener) {
-                this.onCandleUpdateListener(last, {
-                    source: this.lastSourceUsed,
-                    totalBars: this.fullHistory.length,
-                    replayIndex: this.fullHistory.length - 1,
-                    replayActive: false,
-                });
-            }
-        }, 1500);
+        try {
+            const streamName = `${pair.toLowerCase()}@kline_${periodToBinanceInterval(period)}`;
+            this.ws = new WebSocket(`wss://stream.binance.com:9443/ws/${streamName}`);
+            this.ws.onmessage = (event) => {
+                if (this.replayActive) return;
+                try {
+                    const k = JSON.parse(event.data)?.k;
+                    if (!k) return;
+                    const bar: KLineData = {
+                        timestamp: Number(k.t),
+                        open: parseFloat(k.o),
+                        high: parseFloat(k.h),
+                        low: parseFloat(k.l),
+                        close: parseFloat(k.c),
+                        volume: parseFloat(k.v),
+                        turnover: parseFloat(k.q),
+                    };
+                    this.updateLatestHistoryBar(bar);
+                    this.replayIndex = this.fullHistory.length - 1;
+                    callback(bar);
+                    this.emit(bar, false);
+                } catch (_) {}
+            };
+        } catch (_) {}
     }
 
-    unsubscribe(_symbol: SymbolInfo, _period: Period): void {
+    unsubscribe(_symbol?: SymbolInfo, _period?: Period): void {
         this.stopLiveStream();
     }
 
@@ -619,10 +606,6 @@ export class CustomKLineDatafeed implements Datafeed {
         if (this.ws) {
             try { this.ws.close(); } catch (_) {}
             this.ws = null;
-        }
-        if (this.liveTimer) {
-            clearInterval(this.liveTimer);
-            this.liveTimer = null;
         }
     }
 
@@ -640,17 +623,18 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * Generates deterministic multi-timeframe coherent candles anchored to 15m epochs
-     * so 15m, 1h and 4h charts align in price and timestamp during offline/demo simulation.
+     * DEMO mode only. Deterministic generated series, always surfaced in the
+     * UI as simulated data, never used as a fallback for a real feed.
      */
-    private generateRealisticCandles(ticker: string, period: Period, count: number, toTs?: number): KLineData[] {
+    private generateDemoCandles(ticker: string, period: Period, count: number, toTs: number): KLineData[] {
         const clean = ticker.replace(/^.*:/, '').toUpperCase();
         const cfg = BASE_MARKET_CONFIG[clean] || { price: 100.0, volatility: 0.8, decimals: 2 };
         const stepMs = periodToMs(period);
-        const end = toTs && toTs > 1000000000000 ? toTs : Date.now();
-        const alignedEnd = Math.floor(end / stepMs) * stepMs;
+        const alignedEnd = Math.floor(toTs / stepMs) * stepMs;
+        // Scale per-bar volatility with the timeframe (~sqrt(t) from a 15m base).
+        const vol = cfg.volatility * Math.sqrt(stepMs / (15 * 60 * 1000));
 
-        let seed = clean.split('').reduce((a, b) => a + b.charCodeAt(0), 0) + 1337;
+        let seed = clean.split('').reduce((a, b) => a + b.charCodeAt(0), 0) + stepMs / 60000;
         const rand = () => {
             seed = (seed * 1664525 + 1013904223) % 4294967296;
             return seed / 4294967296;
@@ -658,17 +642,14 @@ export class CustomKLineDatafeed implements Datafeed {
 
         const bars: KLineData[] = [];
         let price = cfg.price;
-
         for (let i = count; i >= 0; i--) {
             const ts = alignedEnd - i * stepMs;
-            const swing = Math.sin(i / 18) * cfg.volatility * 0.3;
-            const change = (rand() - 0.495) * cfg.volatility + swing * 0.15;
+            const swing = Math.sin(i / 18) * vol * 0.3;
             const open = price;
-            const close = Math.max(cfg.price * 0.25, open + change);
-            const high = Math.max(open, close) + rand() * cfg.volatility * 0.7;
-            const low = Math.min(open, close) - rand() * cfg.volatility * 0.7;
+            const close = Math.max(cfg.price * 0.25, open + (rand() - 0.495) * vol + swing * 0.15);
+            const high = Math.max(open, close) + rand() * vol * 0.7;
+            const low = Math.min(open, close) - rand() * vol * 0.7;
             const volume = Math.round(120 + rand() * 1200);
-
             bars.push({
                 timestamp: ts,
                 open: Number(open.toFixed(cfg.decimals)),
@@ -676,11 +657,9 @@ export class CustomKLineDatafeed implements Datafeed {
                 low: Number(low.toFixed(cfg.decimals)),
                 close: Number(close.toFixed(cfg.decimals)),
                 volume,
-                turnover: Number((close * volume).toFixed(2)),
             });
             price = close;
         }
-
         return bars;
     }
 }

@@ -1,8 +1,17 @@
-import { Controller, Get, Query, Req, UseGuards, InternalServerErrorException } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { TradingViewService } from './tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
+
+const DAY_MS = 86_400_000;
+
+/** Replay history allowance per plan. Enforced on the server, not just displayed. */
+export const REPLAY_LIMITS: Record<PlanTier, { maxDays: number; maxBars: number }> = {
+    [PlanTier.FREE]: { maxDays: 15, maxBars: 350 },
+    [PlanTier.BASIC]: { maxDays: 45, maxBars: 800 },
+    [PlanTier.PREMIUM]: { maxDays: 365, maxBars: 2500 },
+};
 
 @Controller('tradingview')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -13,23 +22,23 @@ export class TradingViewController {
         private readonly planPermissionService: PlanPermissionService,
     ) { }
 
+    private async limitsFor(req: any) {
+        const userId = req?.user?.id || req?.user?.userId;
+        const tier: PlanTier = userId ? await this.planPermissionService.getUserPlan(userId) : PlanTier.FREE;
+        const limits = REPLAY_LIMITS[tier] ?? REPLAY_LIMITS[PlanTier.FREE];
+        return { tier, ...limits, earliestTs: Date.now() - limits.maxDays * DAY_MS };
+    }
+
     @Get('replay-limits')
     async getReplayLimits(@Req() req: any) {
-        const userId = req?.user?.id || req?.user?.userId;
-        const tier = userId ? await this.planPermissionService.getUserPlan(userId) : PlanTier.FREE;
-        const maxDays = tier === PlanTier.PREMIUM ? 365 : tier === PlanTier.BASIC ? 45 : 15;
-        const maxBars = tier === PlanTier.PREMIUM ? 2500 : tier === PlanTier.BASIC ? 800 : 350;
-        const earliestDate = new Date(Date.now() - maxDays * 86400000).toLocaleDateString('en-US', {
-            month: '2-digit',
-            day: '2-digit',
-            year: 'numeric',
-        });
-
+        const { tier, maxDays, maxBars, earliestTs } = await this.limitsFor(req);
         return {
             tier,
             maxDays,
             maxBars,
-            earliestDate,
+            earliestTs,
+            // ISO date; the client formats it in the user's locale.
+            earliestDate: new Date(earliestTs).toISOString().slice(0, 10),
             isPaid: tier === PlanTier.PREMIUM || tier === PlanTier.BASIC,
         };
     }
@@ -52,19 +61,21 @@ export class TradingViewController {
         @Query('from') from?: string,
         @Query('to') to?: string,
     ) {
+        const { maxBars, earliestTs } = await this.limitsFor(req);
+        const requested = parseInt(range, 10) || maxBars;
+        const toTs = to ? parseInt(to, 10) : undefined;
+        // `from` can only narrow the window, never extend it past the plan.
+        const fromTs = from ? Math.max(parseInt(from, 10) || 0, earliestTs) : earliestTs;
+
         try {
-            const userId = req?.user?.id || req?.user?.userId;
-            const tier = userId ? await this.planPermissionService.getUserPlan(userId) : PlanTier.FREE;
-            const maxAllowedBars = tier === PlanTier.PREMIUM ? 2500 : tier === PlanTier.BASIC ? 800 : 350;
-
-            const requestedRange = parseInt(range, 10) || 350;
-            const rangeNum = Math.min(Math.max(50, requestedRange), maxAllowedBars);
-            const fromTs = from ? parseInt(from, 10) : undefined;
-            const toTs = to ? parseInt(to, 10) : undefined;
-
-            return await this.tvService.getCandles(symbol, timeframe, rangeNum, fromTs, toTs);
+            return await this.tvService.getCandles(symbol, timeframe, {
+                range: Math.min(Math.max(50, requested), maxBars),
+                toTs,
+                earliestTs: fromTs,
+            });
         } catch (error) {
-            throw new InternalServerErrorException(error.message);
+            // Explicit outage: the client shows "feed indisponível" instead of fake prices.
+            throw new ServiceUnavailableException(`Feed TradingView indisponível: ${error.message}`);
         }
     }
 

@@ -11,7 +11,7 @@ import {
 } from 'klinecharts';
 import { X } from 'lucide-react';
 import api from '../api';
-import { CustomKLineDatafeed, DataSourceMode, DEFAULT_SYMBOLS } from '../services/klineDatafeed';
+import { CustomKLineDatafeed, DataSourceMode, DEFAULT_SYMBOLS, FeedUnavailableError } from '../services/klineDatafeed';
 import { SymbolInfo, Period } from '@klinecharts/pro';
 import { ReplayOrder, TIMEFRAMES, AVAILABLE_INDICATORS } from './kline-replay/types';
 import { ensureCustomOverlays } from './kline-replay/overlays/registerCustomOverlays';
@@ -76,11 +76,13 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const [planLimits, setPlanLimits] = useState<{
         tier: string;
         maxDays: number;
+        maxBars: number;
         earliestDate: string;
         isPaid: boolean;
     }>(() => ({
         tier: 'FREE',
         maxDays: 15,
+        maxBars: 350,
         earliestDate: new Date(Date.now() - 15 * 86400000).toLocaleDateString('en-US', {
             month: '2-digit',
             day: '2-digit',
@@ -94,6 +96,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             .then(res => {
                 if (res?.data?.tier) {
                     setPlanLimits(res.data);
+                    datafeedRef.current?.setMaxBars(res.data.maxBars);
                 }
             })
             .catch(() => {});
@@ -104,6 +107,9 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const [layoutMode, setLayoutMode] = useState<ChartLayoutMode>(saved?.layoutMode || '1x1');
     const [dataSource, setDataSource] = useState<DataSourceMode>('TRADINGVIEW');
     const [activeSourceLabel, setActiveSourceLabel] = useState<string>('TradingView');
+    const [isSynthetic, setIsSynthetic] = useState<boolean>(false);
+    const [feedError, setFeedError] = useState<string | null>(null);
+    const [feedLoading, setFeedLoading] = useState<boolean>(false);
 
     // Symbol & Period (Primary + Secondary for 1x2 Split-Screen)
     const [currentSymbol, setCurrentSymbol] = useState<SymbolInfo>(() => {
@@ -440,11 +446,22 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         if (!chart || !df) return;
 
         df.setMode(mode);
+        df.unsubscribe();
         chart.setPriceVolumePrecision(sym.pricePrecision ?? 2, sym.volumePrecision ?? 0);
 
-        const now = Date.now();
-        const from = now - 350 * 15 * 60 * 1000;
-        await df.getHistoryKLineData(sym, per, from, now);
+        setFeedLoading(true);
+        try {
+            await df.getHistoryKLineData(sym, per);
+            setFeedError(null);
+        } catch (e) {
+            // Never fall back to generated prices: show the outage and an empty chart.
+            setFeedError(e instanceof FeedUnavailableError ? e.message : 'Não foi possível carregar o histórico.');
+            chart.clearData();
+            setLatestBar(null);
+            return;
+        } finally {
+            setFeedLoading(false);
+        }
 
         const barsToRender = df.setReplayMode(isReplay, 0.72, preserveTimestamp && syncEnabled);
         chart.applyNewData(barsToRender, barsToRender.length > 0);
@@ -511,6 +528,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
 
         const df = new CustomKLineDatafeed(dataSource, (candle, stats) => {
             setActiveSourceLabel(stats.source);
+            setIsSynthetic(stats.synthetic);
             evaluateOrdersOnCandle(candle);
         });
         datafeedRef.current = df;
@@ -1053,6 +1071,24 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 </div>
             )}
 
+            {/* FEED STATUS: outages and simulated data are always explicit */}
+            {feedError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-danger/40 bg-danger/10 px-4 py-2 text-xs text-danger-fg">
+                    <strong className="font-semibold">Feed indisponível.</strong>
+                    <span>{feedError}</span>
+                    <span className="text-fg-muted">Nenhum preço simulado foi usado no lugar. Tente outra fonte ou o modo Demo.</span>
+                </div>
+            ) : isSynthetic ? (
+                <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
+                    <strong className="font-semibold">Modo Demo:</strong>
+                    <span>os preços são gerados e não representam o mercado. Use apenas para treinar a interface.</span>
+                </div>
+            ) : feedLoading ? (
+                <div role="status" className="rounded-xl border border-line bg-surface-2 px-4 py-2 text-xs text-fg-muted">
+                    A carregar histórico…
+                </div>
+            ) : null}
+
             <div className={`rounded-2xl overflow-hidden border shadow-2xl select-none transition-colors ${
                 isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-[#131722] border-slate-800 text-slate-100'
             }`}>
@@ -1065,7 +1101,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                     layoutMode={layoutMode}
                     activeIndicatorsCount={activeIndicators.length}
                     dataSource={dataSource}
-                    activeSourceLabel={activeSourceLabel}
                     onSelectSymbol={handleSelectSymbol}
                     onSelectPeriod={handleSelectPeriod}
                     onSelectSecondaryPeriod={handleSelectSecondaryPeriod}

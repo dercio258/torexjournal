@@ -63,17 +63,25 @@ const TIMEFRAME_MAP: Record<string, string> = {
     'M': '1M',
 };
 
-const BASE_PRICES: Record<string, { price: number; volatility: number }> = {
-    XAUUSD: { price: 2650.0, volatility: 3.5 },
-    EURUSD: { price: 1.0845, volatility: 0.0012 },
-    GBPUSD: { price: 1.2940, volatility: 0.0015 },
-    USDJPY: { price: 152.30, volatility: 0.22 },
-    BTCUSD: { price: 72400.0, volatility: 240.0 },
-    ETHUSD: { price: 2680.0, volatility: 18.0 },
-    US30: { price: 42350.0, volatility: 65.0 },
-    NAS100: { price: 20280.0, volatility: 45.0 },
-    SPX500: { price: 5820.0, volatility: 12.0 },
-};
+/** Hard ceiling of bars per request, regardless of plan. */
+const MAX_BARS_PER_REQUEST = 5000;
+
+export interface CandleQuery {
+    /** Bars requested (already clamped to the user's plan by the controller). */
+    range: number;
+    /** Last bar timestamp (ms). Defaults to now. */
+    toTs?: number;
+    /** Bars older than this (ms) are dropped: enforces the plan's history window. */
+    earliestTs?: number;
+}
+
+export interface CandleResponse {
+    candles: any[];
+    /** Always a real market source: this service never fabricates prices. */
+    source: 'tradingview';
+    tvSymbol: string;
+    timeframe: string;
+}
 
 @Injectable()
 export class TradingViewService {
@@ -117,7 +125,7 @@ export class TradingViewService {
 
         try {
             const results = await TradingView.search(query, type, exchange);
-            await this.cacheManager.set(cacheKey, results, 3600);
+            await this.cacheManager.set(cacheKey, results, 3_600_000); // 1h (ms)
             return results;
         } catch (error) {
             this.logger.warn(`Fallback symbol search for "${query}": ${error.message}`);
@@ -137,121 +145,75 @@ export class TradingViewService {
         }
     }
 
-    async getCandles(symbol: string, timeframe: string = '1H', range: number = 300, fromTs?: number, toTs?: number) {
+    /**
+     * Real candles from TradingView. Throws when the feed is unavailable:
+     * the caller must surface the outage instead of receiving made-up prices.
+     */
+    async getCandles(symbol: string, timeframe: string = '1H', query: CandleQuery): Promise<CandleResponse> {
         const tvSymbol = this.normalizeSymbol(symbol);
         const tvTimeframe = this.normalizeTimeframe(timeframe);
-        const cacheKey = `tv_candles:${tvSymbol}:${tvTimeframe}:${range}`;
-        const cached = await this.cacheManager.get<any[]>(cacheKey);
-        if (cached && cached.length > 0) {
-            return cached;
-        }
-
-        try {
-            const candles = await new Promise<any[]>((resolve, reject) => {
-                let settled = false;
-                const client = new TradingView.Client();
-                const chart = new client.Session.Chart();
-
-                const timer = setTimeout(() => {
-                    if (!settled) {
-                        settled = true;
-                        try { client.end(); } catch (_) {}
-                        reject(new Error('TradingView WebSocket timeout'));
-                    }
-                }, 6500);
-
-                chart.setMarket(tvSymbol, {
-                    timeframe: tvTimeframe,
-                    range: Math.min(Math.max(range, 50), 1000),
-                });
-
-                chart.onUpdate(() => {
-                    if (settled || !chart.periods || chart.periods.length === 0) return;
-                    settled = true;
-                    clearTimeout(timer);
-
-                    const sorted = [...chart.periods]
-                        .sort((a, b) => a.time - b.time)
-                        .map(p => ({
-                            timestamp: p.time * 1000,
-                            time: p.time,
-                            open: Number(p.open),
-                            high: Number(p.max),
-                            low: Number(p.min),
-                            close: Number(p.close),
-                            volume: Number(p.volume || 0),
-                            turnover: Number((p.close * (p.volume || 1)).toFixed(2)),
-                        }));
-
-                    try { client.end(); } catch (_) {}
-                    resolve(sorted);
-                });
-
-                chart.onError((err) => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    try { client.end(); } catch (_) {}
-                    reject(err);
-                });
-            });
-
-            if (candles && candles.length > 0) {
-                await this.cacheManager.set(cacheKey, candles, 60000);
-                return candles;
-            }
-        } catch (error) {
-            this.logger.warn(`TradingView live fetch failed for ${tvSymbol} (${tvTimeframe}), using deterministic fallback: ${error.message}`);
-        }
-
-        return this.generateFallbackCandles(symbol, timeframe, range, toTs);
-    }
-
-    private generateFallbackCandles(symbol: string, timeframe: string, count: number = 300, toTs?: number) {
-        const cleanSym = (symbol || 'EURUSD').replace(/^.*:/, '').toUpperCase();
-        const cfg = BASE_PRICES[cleanSym] || { price: 100.0, volatility: 0.8 };
         const intervalMs = this.getIntervalMs(timeframe);
-        const endTimestamp = toTs && toTs > 1000000000000 ? toTs : Date.now();
-        const alignedEnd = Math.floor(endTimestamp / intervalMs) * intervalMs;
+        const range = Math.min(Math.max(Math.floor(query.range) || 300, 50), MAX_BARS_PER_REQUEST);
+        const now = Date.now();
+        const toTs = query.toTs && query.toTs > 1e12 ? Math.min(query.toTs, now) : now;
+        // Bucket `to` to the bar interval so near-identical requests share a cache entry.
+        const toBucket = Math.floor(toTs / intervalMs) * intervalMs;
+        const cacheKey = `tv_candles:${tvSymbol}:${tvTimeframe}:${range}:${toBucket}:${query.earliestTs ?? 0}`;
 
-        const candles: any[] = [];
-        let currentPrice = cfg.price;
-        let seed = cleanSym.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + intervalMs;
+        const cached = await this.cacheManager.get<CandleResponse>(cacheKey);
+        if (cached?.candles?.length) return cached;
 
-        const pseudoRandom = () => {
-            seed = (seed * 1664525 + 1013904223) % 4294967296;
-            return seed / 4294967296;
-        };
+        const raw = await new Promise<any[]>((resolve, reject) => {
+            let settled = false;
+            const client = new TradingView.Client();
+            const chart = new client.Session.Chart();
+            const finish = (fn: () => void) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                try { client.end(); } catch (_) {}
+                fn();
+            };
 
-        const decimals = cfg.price < 10 ? 5 : 2;
+            const timer = setTimeout(() => finish(() => reject(new Error('TradingView WebSocket timeout'))), 8000);
 
-        for (let i = count; i >= 0; i--) {
-            const ts = alignedEnd - i * intervalMs;
-            const wave = Math.sin(i / 14) * (cfg.volatility * 0.35);
-            const delta = (pseudoRandom() - 0.495) * cfg.volatility + wave * 0.15;
-            const open = currentPrice;
-            const close = Math.max(cfg.price * 0.2, open + delta);
-            const wickUp = pseudoRandom() * cfg.volatility * 0.75;
-            const wickDown = pseudoRandom() * cfg.volatility * 0.75;
-            const high = Math.max(open, close) + wickUp;
-            const low = Math.min(open, close) - wickDown;
-            const volume = Math.round(150 + pseudoRandom() * 1400);
-
-            candles.push({
-                timestamp: ts,
-                time: Math.floor(ts / 1000),
-                open: Number(open.toFixed(decimals)),
-                high: Number(high.toFixed(decimals)),
-                low: Number(low.toFixed(decimals)),
-                close: Number(close.toFixed(decimals)),
-                volume,
-                turnover: Number((close * volume).toFixed(2)),
+            chart.setMarket(tvSymbol, {
+                timeframe: tvTimeframe as any,
+                range,
+                // Library expects seconds; omit when "now" so the live edge is returned.
+                ...(toTs < now - intervalMs ? { to: Math.floor(toTs / 1000) } : {}),
             });
 
-            currentPrice = close;
+            chart.onUpdate(() => {
+                if (!chart.periods || chart.periods.length === 0) return;
+                const periods = [...chart.periods];
+                finish(() => resolve(periods));
+            });
+
+            chart.onError((...err: any[]) => finish(() => reject(new Error(err.map(String).join(' ') || 'TradingView error'))));
+        });
+
+        const candles = raw
+            .map(p => ({
+                timestamp: p.time * 1000,
+                open: Number(p.open),
+                high: Number(p.max),
+                low: Number(p.min),
+                close: Number(p.close),
+                volume: Number(p.volume || 0),
+            }))
+            .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close))
+            .filter(c => !query.earliestTs || c.timestamp >= query.earliestTs)
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+        if (candles.length === 0) {
+            throw new Error(`TradingView returned no bars for ${tvSymbol} (${tvTimeframe}) in the allowed window`);
         }
 
-        return candles;
+        const result: CandleResponse = { candles, source: 'tradingview', tvSymbol, timeframe: tvTimeframe };
+        // cache-manager v7 TTL is in milliseconds.
+        await this.cacheManager.set(cacheKey, result, 60_000);
+        return result;
     }
 
     async getQuote(symbol: string) {
