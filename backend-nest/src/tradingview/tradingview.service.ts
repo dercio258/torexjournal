@@ -1,7 +1,11 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import TradingView from '@mathieuc/tradingview';
+import * as TradingViewPkg from '@mathieuc/tradingview';
+
+const TradingView: any = (TradingViewPkg as any)?.Client
+    ? TradingViewPkg
+    : (TradingViewPkg as any)?.default || TradingViewPkg;
 
 const DEFAULT_SYMBOL_MAP: Record<string, string> = {
     XAUUSD: 'OANDA:XAUUSD',
