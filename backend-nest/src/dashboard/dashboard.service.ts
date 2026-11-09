@@ -207,6 +207,8 @@ export class DashboardService {
                     byMood: [],
                     bySetup: [],
                     bySession: [],
+                    bySymbol: [],
+                    byWeekday: [],
                     isConsolidated: false,
                     targetAccount: null,
                     currencies: ['USD'],
@@ -237,7 +239,10 @@ export class DashboardService {
             const dailyMap = new Map<string, number>();
             const moodMap = new Map<string, { count: number; pnl: number }>();
             const setupMap = new Map<string, { count: number; pnl: number }>();
-            const sessionMap = new Map<string, { count: number; pnl: number }>();
+            const sessionMap = new Map<string, { count: number; wins: number; pnl: number }>();
+            // Per-symbol and per-weekday breakdowns over the same filtered, closed trades
+            const symbolMap = new Map<string, { count: number; wins: number; losses: number; pnl: number }>();
+            const weekdayMap = new Map<number, { count: number; wins: number; pnl: number }>();
 
             const totalTrades = trades.length;
             if (totalTrades === 0) {
@@ -252,6 +257,8 @@ export class DashboardService {
                     byMood: [],
                     bySetup: [],
                     bySession: [],
+                    bySymbol: [],
+                    byWeekday: [],
                     isConsolidated,
                     currencies: [...new Set(accounts.map(a => a.currency || 'USD'))],
                     hasMultipleCurrencies: false,
@@ -338,8 +345,24 @@ export class DashboardService {
                 setupMap.set(setup, { count: sData.count + 1, pnl: sData.pnl + pnl });
 
                 const session = t.session || 'Unknown';
-                const sessData = sessionMap.get(session) || { count: 0, pnl: 0 };
-                sessionMap.set(session, { count: sessData.count + 1, pnl: sessData.pnl + pnl });
+                const sessData = sessionMap.get(session) || { count: 0, wins: 0, pnl: 0 };
+                sessionMap.set(session, { count: sessData.count + 1, wins: sessData.wins + (pnl > 0 ? 1 : 0), pnl: sessData.pnl + pnl });
+
+                const symbol = String(t.symbol || 'Unknown').trim();
+                const symData = symbolMap.get(symbol) || { count: 0, wins: 0, losses: 0, pnl: 0 };
+                symbolMap.set(symbol, {
+                    count: symData.count + 1,
+                    wins: symData.wins + (pnl > 0 ? 1 : 0),
+                    losses: symData.losses + (pnl < 0 ? 1 : 0),
+                    pnl: symData.pnl + pnl,
+                });
+
+                if (t.closeTime) {
+                    // UTC, consistent with the dailyPnL buckets above (0 = Sunday)
+                    const weekday = new Date(t.closeTime).getUTCDay();
+                    const wd = weekdayMap.get(weekday) || { count: 0, wins: 0, pnl: 0 };
+                    weekdayMap.set(weekday, { count: wd.count + 1, wins: wd.wins + (pnl > 0 ? 1 : 0), pnl: wd.pnl + pnl });
+                }
             }
 
             const winRate = (wins / totalTrades) * 100;
@@ -459,7 +482,13 @@ export class DashboardService {
                 distribution: { wins, losses, breakeven: breakevens },
                 byMood: Array.from(moodMap.entries()).map(([mood, data]) => ({ mood, count: data.count, pnl: Number(data.pnl.toFixed(2)) })),
                 bySetup: Array.from(setupMap.entries()).map(([setup, data]) => ({ setup, count: data.count, pnl: Number(data.pnl.toFixed(2)) })),
-                bySession: Array.from(sessionMap.entries()).map(([session, data]) => ({ session, count: data.count, pnl: Number(data.pnl.toFixed(2)) })),
+                bySession: Array.from(sessionMap.entries()).map(([session, data]) => ({ session, count: data.count, wins: data.wins, pnl: Number(data.pnl.toFixed(2)) })),
+                bySymbol: Array.from(symbolMap.entries())
+                    .map(([symbol, d]) => ({ symbol, count: d.count, wins: d.wins, losses: d.losses, pnl: Number(d.pnl.toFixed(2)) }))
+                    .sort((a, b) => b.count - a.count),
+                byWeekday: Array.from(weekdayMap.entries())
+                    .map(([weekday, d]) => ({ weekday, count: d.count, wins: d.wins, pnl: Number(d.pnl.toFixed(2)) }))
+                    .sort((a, b) => a.weekday - b.weekday),
                 isConsolidated,
                 currencies,
                 hasMultipleCurrencies,
@@ -1002,11 +1031,11 @@ export class DashboardService {
         const dailyMap = new Map<string, { date: string, pnl: number, trades: number, wins: number, losses: number }>();
         const symbolMap = new Map<string, { symbol: string, trades: number, wins: number, losses: number, pnl: number, volume: number }>();
         const sessionMap = new Map<string, { session: string, trades: number, wins: number, pnl: number }>();
-        const dayOfWeekMap = new Map<string, { day: string, trades: number, wins: number, pnl: number }>();
+        const dayOfWeekMap = new Map<string, { day: string, weekday: number, trades: number, wins: number, pnl: number }>();
 
         const daysNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
         for (let i = 1; i <= 5; i++) {
-            dayOfWeekMap.set(daysNames[i], { day: daysNames[i], trades: 0, wins: 0, pnl: 0 });
+            dayOfWeekMap.set(daysNames[i], { day: daysNames[i], weekday: i, trades: 0, wins: 0, pnl: 0 });
         }
 
         const accMap = new Map(accounts.map(a => [a.id, a]));
@@ -1098,9 +1127,13 @@ export class DashboardService {
 
             // By Day of Week
             if (t.closeTime) {
-                const dayIndex = new Date(t.closeTime).getDay();
+                // UTC, consistent with the daily buckets. Weekend days appear only when traded.
+                const dayIndex = new Date(t.closeTime).getUTCDay();
                 const dayName = daysNames[dayIndex];
-                if (dayOfWeekMap.has(dayName)) {
+                if (!dayOfWeekMap.has(dayName)) {
+                    dayOfWeekMap.set(dayName, { day: dayName, weekday: dayIndex, trades: 0, wins: 0, pnl: 0 });
+                }
+                {
                     const dItem = dayOfWeekMap.get(dayName)!;
                     dItem.trades += 1;
                     dItem.pnl += netPnl;
@@ -1161,7 +1194,7 @@ export class DashboardService {
             ...d,
             pnl: Number(d.pnl.toFixed(2)),
             winRate: d.trades > 0 ? Number(((d.wins / d.trades) * 100).toFixed(1)) : 0
-        }));
+        })).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7)); // Mon..Sun
 
         const dailyPnL = Array.from(dailyMap.values()).map(d => ({
             ...d,
