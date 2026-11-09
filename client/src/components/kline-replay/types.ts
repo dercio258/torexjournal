@@ -11,11 +11,24 @@ export interface ReplayOrder {
     lots: number;
     riskAmount: number;
     rrRatio: number;
+    /** CLOSED = pending order cancelled before filling. */
     status: 'PENDING' | 'OPEN' | 'WIN' | 'LOSS' | 'CLOSED';
     exitPrice?: number;
+    exitReason?: 'SL' | 'TP' | 'MANUAL';
+    /** Net of commission. */
     pnl: number;
+    rMultiple?: number;
+    /** Price units added to the bid to get the ask. */
+    spread?: number;
+    /** Account currency, charged once per trade. */
+    commission?: number;
+    /** Bar timestamp at placement; the order is evaluated from the NEXT bar. */
     openedAt: number;
     closedAt?: number;
+    /** User intent, replayed by the engine (undone on rewind past it). */
+    manualCloseAt?: number;
+    manualClosePrice?: number;
+    cancelledAt?: number;
 }
 
 export const TIMEFRAMES: Period[] = [

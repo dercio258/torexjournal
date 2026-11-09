@@ -11,6 +11,9 @@ export type DataSourceMode = 'TRADINGVIEW' | 'BINANCE_LIVE' | 'MT5_BACKEND' | 'D
 
 export interface FeedStats {
     source: string;
+    /** Instrument/timeframe the loaded history belongs to. */
+    ticker: string;
+    periodText: string;
     /** True only in DEMO mode: prices are generated, not market data. */
     synthetic: boolean;
     totalBars: number;
@@ -252,6 +255,8 @@ export class CustomKLineDatafeed implements Datafeed {
     private onCandleUpdateListener?: CandleListener;
     private lastSourceUsed: string = MODE_LABEL.TRADINGVIEW;
     private lastSynthetic = false;
+    private historyTicker = '';
+    private historyPeriodText = '';
 
     constructor(initialMode: DataSourceMode = 'TRADINGVIEW', onCandleUpdate?: CandleListener) {
         this.mode = initialMode;
@@ -301,8 +306,15 @@ export class CustomKLineDatafeed implements Datafeed {
         };
     }
 
+    /** Instrument/timeframe of `getFullHistory()`. */
+    public getContext() {
+        return { ticker: this.historyTicker, periodText: this.historyPeriodText };
+    }
+
     private emit(candle: KLineData, replay: boolean) {
         this.onCandleUpdateListener?.(candle, {
+            ticker: this.historyTicker,
+            periodText: this.historyPeriodText,
             source: replay ? `${this.lastSourceUsed} · Replay` : this.lastSourceUsed,
             synthetic: this.lastSynthetic,
             totalBars: this.fullHistory.length,
@@ -549,6 +561,8 @@ export class CustomKLineDatafeed implements Datafeed {
     async getHistoryKLineData(symbol: SymbolInfo, period: Period, _from?: number, _to?: number): Promise<KLineData[]> {
         const candles = await this.fetchOrGetCachedCandles(symbol, period);
         this.fullHistory = candles;
+        this.historyTicker = symbol.ticker;
+        this.historyPeriodText = period.text ?? periodToTimeframe(period);
 
         if (this.replayActive && candles.length > 20) {
             return this.setReplayMode(true, 0.72, true);

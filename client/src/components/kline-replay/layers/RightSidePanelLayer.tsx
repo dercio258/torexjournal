@@ -8,10 +8,11 @@ interface RightSidePanelLayerProps {
     orderSide: 'BUY' | 'SELL';
     orderType: 'MARKET' | 'LIMIT';
     limitEntryPrice: string;
-    lots: number;
     riskPercent: number;
     slDistancePct: number;
     rrTarget: number;
+    spread: number;
+    commission: number;
     journalNotes: string;
     simBalance: number;
     floatingPnl: number;
@@ -22,10 +23,11 @@ interface RightSidePanelLayerProps {
     onSetOrderSide: (side: 'BUY' | 'SELL') => void;
     onSetOrderType: (type: 'MARKET' | 'LIMIT') => void;
     onSetLimitEntryPrice: (val: string) => void;
-    onSetLots: (val: number) => void;
     onSetRiskPercent: (val: number) => void;
     onSetSlDistancePct: (val: number) => void;
     onSetRrTarget: (val: number) => void;
+    onSetSpread: (val: number) => void;
+    onSetCommission: (val: number) => void;
     onSetJournalNotes: (val: string) => void;
     onExecuteOrder: () => void;
     onSaveSession: () => void;
@@ -39,10 +41,11 @@ export const RightSidePanelLayer: React.FC<RightSidePanelLayerProps> = memo(({
     orderSide,
     orderType,
     limitEntryPrice,
-    lots,
     riskPercent,
     slDistancePct,
     rrTarget,
+    spread,
+    commission,
     journalNotes,
     simBalance,
     floatingPnl,
@@ -53,10 +56,11 @@ export const RightSidePanelLayer: React.FC<RightSidePanelLayerProps> = memo(({
     onSetOrderSide,
     onSetOrderType,
     onSetLimitEntryPrice,
-    onSetLots,
     onSetRiskPercent,
     onSetSlDistancePct,
     onSetRrTarget,
+    onSetSpread,
+    onSetCommission,
     onSetJournalNotes,
     onExecuteOrder,
     onSaveSession,
@@ -134,13 +138,13 @@ export const RightSidePanelLayer: React.FC<RightSidePanelLayerProps> = memo(({
 
                             <div className="grid grid-cols-2 gap-2 text-xs">
                                 <div className="space-y-1">
-                                    <label className="font-semibold opacity-75">Lotes:</label>
+                                    <label className="font-semibold opacity-75" title="Diferença ask − bid, em unidades de preço. Compra paga na entrada, venda na saída.">Spread (preço):</label>
                                     <input
                                         type="number"
-                                        step="0.1"
-                                        min="0.01"
-                                        value={lots}
-                                        onChange={e => onSetLots(parseFloat(e.target.value) || 0.1)}
+                                        step="any"
+                                        min="0"
+                                        value={spread}
+                                        onChange={e => onSetSpread(Math.max(0, parseFloat(e.target.value) || 0))}
                                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent font-mono font-bold"
                                     />
                                 </div>
@@ -183,6 +187,19 @@ export const RightSidePanelLayer: React.FC<RightSidePanelLayerProps> = memo(({
                                         <option value={4}>1:4</option>
                                     </select>
                                 </div>
+                            </div>
+
+                            <div className="space-y-1 text-xs">
+                                <label className="font-semibold opacity-75">Comissão por trade ($):</label>
+                                <input
+                                    type="number"
+                                    step="0.5"
+                                    min="0"
+                                    value={commission}
+                                    onChange={e => onSetCommission(Math.max(0, parseFloat(e.target.value) || 0))}
+                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent font-mono font-bold"
+                                />
+                                <p className="text-[10.5px] opacity-60">Tamanho calculado pelo risco %: o stop custa exatamente o risco definido.</p>
                             </div>
 
                             <button

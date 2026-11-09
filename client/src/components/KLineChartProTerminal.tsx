@@ -11,9 +11,10 @@ import {
 } from 'klinecharts';
 import { X } from 'lucide-react';
 import api from '../api';
-import { CustomKLineDatafeed, DataSourceMode, DEFAULT_SYMBOLS, FeedUnavailableError } from '../services/klineDatafeed';
+import { CustomKLineDatafeed, DataSourceMode, DEFAULT_SYMBOLS, FeedUnavailableError, FeedStats } from '../services/klineDatafeed';
 import { SymbolInfo, Period } from '@klinecharts/pro';
 import { ReplayOrder, TIMEFRAMES, AVAILABLE_INDICATORS } from './kline-replay/types';
+import { createOrder, recomputeOrders, computeStats } from './kline-replay/engine';
 import { ensureCustomOverlays } from './kline-replay/overlays/registerCustomOverlays';
 import { TopToolbarLayer, ChartLayoutMode } from './kline-replay/layers/TopToolbarLayer';
 import { LeftDrawingLayer } from './kline-replay/layers/LeftDrawingLayer';
@@ -30,9 +31,12 @@ interface PersistedReplayState {
     secondaryPeriodText?: string;
     layoutMode?: ChartLayoutMode;
     chartTheme?: 'light' | 'dark';
-    simBalance?: number;
     orders?: ReplayOrder[];
     journalNotes?: string;
+    /** Replay cutoff at save time, so restored orders line up with the chart. */
+    replayTimestamp?: number | null;
+    spread?: number;
+    commission?: number;
 }
 
 function loadPersistedState(): PersistedReplayState | null {
@@ -96,7 +100,12 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             .then(res => {
                 if (res?.data?.tier) {
                     setPlanLimits(res.data);
-                    datafeedRef.current?.setMaxBars(res.data.maxBars);
+                    const df = datafeedRef.current;
+                    if (df && Number(res.data.maxBars) > 350) {
+                        df.setMaxBars(res.data.maxBars);
+                        const { currentSymbol: sym, currentPeriod: per, dataSource: mode, replayActive: rp } = liveRef.current;
+                        loadChartDataRef.current?.(sym, per, mode, rp, true);
+                    }
                 }
             })
             .catch(() => {});
@@ -160,13 +169,15 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
     const [limitEntryPrice, setLimitEntryPrice] = useState<string>('');
     const [riskPercent, setRiskPercent] = useState<number>(1.0);
-    const [lots, setLots] = useState<number>(1.0);
+    const [lots] = useState<number>(1.0); // informational only: size comes from risk %
     const [slDistancePct, setSlDistancePct] = useState<number>(0.30);
     const [rrTarget, setRrTarget] = useState<number>(2.0);
     const [journalNotes, setJournalNotes] = useState<string>(saved?.journalNotes || '');
+    const [spread, setSpread] = useState<number>(saved?.spread ?? 0);
+    const [commission, setCommission] = useState<number>(saved?.commission ?? 0);
 
-    // Simulation Portfolio
-    const [simBalance, setSimBalance] = useState<number>(saved?.simBalance ?? initialBalance);
+    // Simulation portfolio. Orders are the single source of truth; the balance
+    // is derived from closed trades, so StrictMode double-invocation is harmless.
     const [orders, setOrders] = useState<ReplayOrder[]>(saved?.orders || []);
     const [savingSession, setSavingSession] = useState<boolean>(false);
     const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
@@ -180,17 +191,26 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 secondaryPeriodText: secondaryPeriod.text,
                 layoutMode,
                 chartTheme,
-                simBalance,
                 orders,
                 journalNotes,
+                replayTimestamp: replayActive ? latestBar?.timestamp ?? null : null,
+                spread,
+                commission,
             };
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
         } catch (_) {}
-    }, [currentSymbol.ticker, currentPeriod.text, secondaryPeriod.text, layoutMode, chartTheme, simBalance, orders, journalNotes]);
+    }, [currentSymbol.ticker, currentPeriod.text, secondaryPeriod.text, layoutMode, chartTheme, orders, journalNotes, replayActive, latestBar?.timestamp, spread, commission]);
 
     useEffect(() => {
         cutCandleModeRef.current = cutCandleMode;
     }, [cutCandleMode]);
+
+    // Always-current values for callbacks registered once (chart actions, feed listener).
+    const liveRef = useRef({ currentSymbol, currentPeriod, secondaryPeriod, dataSource, replayActive, syncEnabled });
+    liveRef.current = { currentSymbol, currentPeriod, secondaryPeriod, dataSource, replayActive, syncEnabled };
+    const loadChartDataRef = useRef<((sym: SymbolInfo, per: Period, mode: DataSourceMode, isReplay: boolean, preserve?: boolean) => Promise<void>) | null>(null);
+    const syncSecondaryRef = useRef<((sym: SymbolInfo, per: Period, ts: number | null) => void) | null>(null);
+    const lastCutoffRef = useRef<{ key: string; ts: number } | null>(null);
 
     // Apply Chart Theme Styles
     const applyChartTheme = useCallback((chart: Chart, theme: 'light' | 'dark') => {
@@ -340,97 +360,21 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         secChart.applyNewData(bars, bars.length > 0);
     }, [syncEnabled]);
 
-    // Evaluate Orders on Candle Update
-    const evaluateOrdersOnCandle = useCallback((candle: KLineData) => {
+    // Re-derive orders from the engine whenever the visible cutoff changes.
+    // Rewind = cutoff moved backwards on the same instrument/timeframe.
+    const onFeedCandle = useCallback((candle: KLineData, stats: FeedStats) => {
         setLatestBar(candle);
         legendOverlayRef.current?.updateLegend(candle, null, null);
+        const df = datafeedRef.current;
+        if (!df || !stats.ticker) return;
 
-        setOrders(prev => {
-            if (prev.length === 0) return prev;
-            let balanceDelta = 0;
-            let changed = false;
+        const key = `${stats.ticker}:${stats.periodText}`;
+        const prev = lastCutoffRef.current;
+        const rewind = !!prev && prev.key === key && candle.timestamp < prev.ts;
+        lastCutoffRef.current = { key, ts: candle.timestamp };
 
-            const updated = prev.map(ord => {
-                let currentStatus = ord.status;
-                if (currentStatus === 'PENDING') {
-                    if (candle.low <= ord.entryPrice && candle.high >= ord.entryPrice) {
-                        currentStatus = 'OPEN';
-                        changed = true;
-                    } else {
-                        return ord;
-                    }
-                }
-
-                if (currentStatus !== 'OPEN') return ord;
-
-                if (ord.side === 'BUY') {
-                    if (candle.low <= ord.stopLoss) {
-                        const loss = -ord.riskAmount;
-                        balanceDelta += loss;
-                        changed = true;
-                        return {
-                            ...ord,
-                            status: 'LOSS' as const,
-                            exitPrice: ord.stopLoss,
-                            pnl: Number(loss.toFixed(2)),
-                            closedAt: candle.timestamp,
-                        };
-                    }
-                    if (candle.high >= ord.takeProfit) {
-                        const gain = ord.riskAmount * ord.rrRatio;
-                        balanceDelta += gain;
-                        changed = true;
-                        return {
-                            ...ord,
-                            status: 'WIN' as const,
-                            exitPrice: ord.takeProfit,
-                            pnl: Number(gain.toFixed(2)),
-                            closedAt: candle.timestamp,
-                        };
-                    }
-                    const slDist = Math.max(Math.abs(ord.entryPrice - ord.stopLoss), 0.00001);
-                    const rMult = (candle.close - ord.entryPrice) / slDist;
-                    const nextPnl = Number((ord.riskAmount * rMult).toFixed(2));
-                    if (nextPnl !== ord.pnl) changed = true;
-                    return { ...ord, status: 'OPEN' as const, pnl: nextPnl };
-                } else {
-                    if (candle.high >= ord.stopLoss) {
-                        const loss = -ord.riskAmount;
-                        balanceDelta += loss;
-                        changed = true;
-                        return {
-                            ...ord,
-                            status: 'LOSS' as const,
-                            exitPrice: ord.stopLoss,
-                            pnl: Number(loss.toFixed(2)),
-                            closedAt: candle.timestamp,
-                        };
-                    }
-                    if (candle.low <= ord.takeProfit) {
-                        const gain = ord.riskAmount * ord.rrRatio;
-                        balanceDelta += gain;
-                        changed = true;
-                        return {
-                            ...ord,
-                            status: 'WIN' as const,
-                            exitPrice: ord.takeProfit,
-                            pnl: Number(gain.toFixed(2)),
-                            closedAt: candle.timestamp,
-                        };
-                    }
-                    const slDist = Math.max(Math.abs(ord.stopLoss - ord.entryPrice), 0.00001);
-                    const rMult = (ord.entryPrice - candle.close) / slDist;
-                    const nextPnl = Number((ord.riskAmount * rMult).toFixed(2));
-                    if (nextPnl !== ord.pnl) changed = true;
-                    return { ...ord, status: 'OPEN' as const, pnl: nextPnl };
-                }
-            });
-
-            if (balanceDelta !== 0) {
-                setSimBalance(b => Number((b + balanceDelta).toFixed(2)));
-            }
-            return changed ? updated : prev;
-        });
+        const candles = df.getFullHistory();
+        setOrders(cur => recomputeOrders(cur, { symbol: stats.ticker, candles, uptoTs: candle.timestamp, rewind }));
     }, []);
 
     // Load Chart Data (with Phase 4 Timestamp Preservation across Timeframes)
@@ -481,6 +425,9 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         });
     }, [syncEnabled, secondaryPeriod, syncSecondaryChart]);
 
+    loadChartDataRef.current = loadChartData;
+    syncSecondaryRef.current = syncSecondaryChart;
+
     // Initialize Primary Chart & ResizeObserver
     useEffect(() => {
         const el = chartDivRef.current;
@@ -520,7 +467,8 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                     setCutCandleMode(false);
                     const last = sliced[sliced.length - 1];
                     if (last && secondaryChartRef.current) {
-                        syncSecondaryChart(currentSymbol, secondaryPeriod, last.timestamp);
+                        const { currentSymbol: sym, secondaryPeriod: sec } = liveRef.current;
+                        syncSecondaryRef.current?.(sym, sec, last.timestamp);
                     }
                 }
             }
@@ -529,11 +477,18 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         const df = new CustomKLineDatafeed(dataSource, (candle, stats) => {
             setActiveSourceLabel(stats.source);
             setIsSynthetic(stats.synthetic);
-            evaluateOrdersOnCandle(candle);
+            onFeedCandle(candle, stats);
         });
         datafeedRef.current = df;
 
-        loadChartData(currentSymbol, currentPeriod, dataSource, replayActive, false);
+        loadChartData(currentSymbol, currentPeriod, dataSource, replayActive, false).then(() => {
+            // Resume where the saved session stopped, so restored orders match the chart.
+            const ts = saved?.replayTimestamp;
+            if (!ts || !replayActive || chartRef.current !== chart) return;
+            if (!df.getFullHistory().some(c => c.timestamp <= ts)) return;
+            lastCutoffRef.current = null; // a restore is not a rewind
+            chart.applyNewData(df.setReplayTimestamp(ts));
+        });
 
         const resizeObserver = new ResizeObserver(() => {
             requestAnimationFrame(() => chart.resize());
@@ -852,41 +807,30 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     }, []);
 
     const executeOrderWithSide = useCallback((forcedSide?: 'BUY' | 'SELL') => {
-        const sideToUse = forcedSide || orderSide;
-        const currentClose = latestBar?.close || 2650;
-        const entry = orderType === 'MARKET' ? currentClose : (parseFloat(limitEntryPrice) || currentClose);
-        const decimals = currentSymbol.pricePrecision ?? (entry < 10 ? 5 : 2);
+        if (!latestBar) return; // nothing loaded (feed down): no price to trade at
+        const side = forcedSide || orderSide;
+        const bid = latestBar.close;
+        const price = orderType === 'MARKET' ? bid : (parseFloat(limitEntryPrice) || bid);
+        const decimals = currentSymbol.pricePrecision ?? (price < 10 ? 5 : 2);
+        const realized = computeStats(orders, initialBalance).realizedBalance;
 
-        const riskUsd = Number(((simBalance * riskPercent) / 100).toFixed(2));
-        const slDist = entry * (slDistancePct / 100);
-        const tpDist = slDist * rrTarget;
-
-        const stopLoss = sideToUse === 'BUY'
-            ? Number((entry - slDist).toFixed(decimals))
-            : Number((entry + slDist).toFixed(decimals));
-
-        const takeProfit = sideToUse === 'BUY'
-            ? Number((entry + tpDist).toFixed(decimals))
-            : Number((entry - tpDist).toFixed(decimals));
-
-        const newOrder: ReplayOrder = {
-            id: `#${Math.floor(100000 + Math.random() * 900000)}`,
+        const order = createOrder({
             symbol: currentSymbol.ticker,
-            side: sideToUse,
+            side,
             orderType,
-            entryPrice: Number(entry.toFixed(decimals)),
-            stopLoss,
-            takeProfit,
-            lots,
-            riskAmount: riskUsd,
+            price,
+            slDistance: price * (slDistancePct / 100),
             rrRatio: rrTarget,
-            status: orderType === 'MARKET' ? 'OPEN' : 'PENDING',
-            pnl: 0,
-            openedAt: latestBar?.timestamp || Date.now(),
-        };
+            riskAmount: Number(((realized * riskPercent) / 100).toFixed(2)),
+            lots,
+            spread: Math.max(0, spread || 0),
+            commission: Math.max(0, commission || 0),
+            openedAt: latestBar.timestamp,
+            decimals,
+        }, `#${Math.floor(100000 + Math.random() * 900000)}`);
 
-        setOrders(prev => [newOrder, ...prev]);
-    }, [latestBar, orderType, limitEntryPrice, currentSymbol, simBalance, riskPercent, slDistancePct, rrTarget, orderSide, lots]);
+        setOrders(prev => [order, ...prev]);
+    }, [latestBar, orderType, limitEntryPrice, currentSymbol, orders, initialBalance, riskPercent, slDistancePct, rrTarget, orderSide, lots, spread, commission]);
 
     const handleExecuteOrder = useCallback(() => {
         executeOrderWithSide();
@@ -895,12 +839,12 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const handleResetSimulation = useCallback(() => {
         setAutoPlaying(false);
         setOrders([]);
-        setSimBalance(initialBalance);
         setJournalNotes('');
+        lastCutoffRef.current = null;
         try {
             localStorage.removeItem(LOCAL_STORAGE_KEY);
         } catch (_) {}
-    }, [initialBalance]);
+    }, []);
 
     // Global Keyboard Shortcuts (Phase 3)
     useEffect(() => {
@@ -942,25 +886,25 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     }, [handleTogglePlay, handleStepForward, handleStepBackward, executeOrderWithSide]);
 
     const handleCloseOrCancelOrder = useCallback((id: string) => {
-        setOrders(prev =>
-            prev.map(ord => {
-                if (ord.id !== id) return ord;
-                if (ord.status === 'OPEN') {
-                    setSimBalance(b => Number((b + ord.pnl).toFixed(2)));
-                    return {
-                        ...ord,
-                        status: ord.pnl >= 0 ? 'WIN' : 'LOSS',
-                        exitPrice: latestBar?.close || ord.entryPrice,
-                        closedAt: latestBar?.timestamp || Date.now(),
-                    };
+        const df = datafeedRef.current;
+        const bar = df?.getReplayState().currentCandle;
+        if (!df || !bar) return;
+        const { ticker } = df.getContext();
+
+        setOrders(prev => recomputeOrders(
+            prev.map(o => {
+                if (o.id !== id) return o;
+                if (o.status === 'PENDING') return { ...o, cancelledAt: bar.timestamp };
+                if (o.status !== 'OPEN') return o;
+                if (o.symbol !== ticker) {
+                    // Chart shows another instrument: close at its last marked P&L.
+                    return { ...o, status: o.pnl >= 0 ? 'WIN' : 'LOSS', exitReason: 'MANUAL', closedAt: bar.timestamp };
                 }
-                if (ord.status === 'PENDING') {
-                    return { ...ord, status: 'CLOSED' };
-                }
-                return ord;
-            })
-        );
-    }, [latestBar]);
+                return { ...o, manualCloseAt: bar.timestamp, manualClosePrice: bar.close };
+            }),
+            { symbol: ticker, candles: df.getFullHistory(), uptoTs: bar.timestamp, rewind: false },
+        ));
+    }, []);
 
     const handleToggleIndicator = (code: string, pane: string) => {
         const chart = chartRef.current;
@@ -976,14 +920,11 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         }
     };
 
+    const stats = useMemo(() => computeStats(orders, initialBalance), [orders, initialBalance]);
     const openPositions = useMemo(() => orders.filter(o => o.status === 'OPEN'), [orders]);
-    const historyOrders = useMemo(() => orders.filter(o => o.status === 'WIN' || o.status === 'LOSS' || o.status === 'CLOSED'), [orders]);
-    const floatingPnl = useMemo(() => openPositions.reduce((s, o) => s + o.pnl, 0), [openPositions]);
-    const netProfit = useMemo(() => Number((simBalance - initialBalance + floatingPnl).toFixed(2)), [simBalance, initialBalance, floatingPnl]);
-    const winRate = useMemo(() => {
-        const wins = historyOrders.filter(o => o.pnl > 0).length;
-        return historyOrders.length > 0 ? Number(((wins / historyOrders.length) * 100).toFixed(1)) : 0;
-    }, [historyOrders]);
+    const floatingPnl = useMemo(() => Number(openPositions.reduce((s, o) => s + o.pnl, 0).toFixed(2)), [openPositions]);
+    const simBalance = stats.realizedBalance;
+    const netProfit = Number((stats.netProfit + floatingPnl).toFixed(2));
 
     const handleSaveReplaySession = useCallback(async () => {
         if (!onSaveReplaySession) return;
@@ -998,16 +939,27 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                     initialBalance,
                     riskPercent,
                     rrTarget,
+                    spread,
+                    commission,
                     timeframe: currentPeriod.text,
                     dataSource,
+                    dataSourceLabel: activeSourceLabel,
+                    syntheticData: isSynthetic,
                 },
                 results: {
                     initialBalance,
                     finalBalance: Number((simBalance + floatingPnl).toFixed(2)),
-                    simulatedNetProfit: netProfit,
-                    simulatedTrades: orders.length,
-                    simulatedWinRate: winRate,
-                    simulatedProfitFactor: 2.0,
+                    simulatedNetProfit: stats.netProfit,
+                    floatingPnl,
+                    simulatedTrades: stats.trades,
+                    simulatedWins: stats.wins,
+                    simulatedLosses: stats.losses,
+                    simulatedWinRate: stats.winRate,
+                    simulatedProfitFactor: stats.profitFactor,
+                    expectancy: stats.expectancy,
+                    avgR: stats.avgR,
+                    maxDrawdown: stats.maxDrawdown,
+                    maxDrawdownPct: stats.maxDrawdownPct,
                 },
                 notes: journalNotes || `Sessão de Replay em ${currentSymbol.ticker} (${accountName})`,
             });
@@ -1016,7 +968,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         } finally {
             setSavingSession(false);
         }
-    }, [onSaveReplaySession, currentSymbol.ticker, currentPeriod.text, initialBalance, riskPercent, rrTarget, dataSource, simBalance, floatingPnl, netProfit, orders.length, winRate, journalNotes, accountName]);
+    }, [onSaveReplaySession, currentSymbol.ticker, currentPeriod.text, initialBalance, riskPercent, rrTarget, spread, commission, dataSource, activeSourceLabel, isSynthetic, simBalance, floatingPnl, stats, journalNotes, accountName]);
 
     const isLight = chartTheme === 'light';
     const decimals = currentSymbol.pricePrecision ?? 2;
@@ -1215,10 +1167,13 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                         orderSide={orderSide}
                         orderType={orderType}
                         limitEntryPrice={limitEntryPrice}
-                        lots={lots}
                         riskPercent={riskPercent}
                         slDistancePct={slDistancePct}
                         rrTarget={rrTarget}
+                        spread={spread}
+                        commission={commission}
+                        onSetSpread={setSpread}
+                        onSetCommission={setCommission}
                         journalNotes={journalNotes}
                         simBalance={simBalance}
                         floatingPnl={floatingPnl}
@@ -1229,7 +1184,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                         onSetOrderSide={setOrderSide}
                         onSetOrderType={setOrderType}
                         onSetLimitEntryPrice={setLimitEntryPrice}
-                        onSetLots={setLots}
                         onSetRiskPercent={setRiskPercent}
                         onSetSlDistancePct={setSlDistancePct}
                         onSetRrTarget={setRrTarget}
