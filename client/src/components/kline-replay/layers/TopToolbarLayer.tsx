@@ -60,11 +60,11 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
 
     return (
         <div className={`h-12 px-3 flex items-center justify-between border-b text-xs overflow-x-auto no-scrollbar ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#131722] border-slate-800'
+            'bg-surface border-line'
         }`}>
             {/* Left Group */}
             <div className="flex items-center gap-1.5 shrink-0">
-                <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white font-black text-xs shadow-sm mr-1 shrink-0">
+                <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-accent-on font-black text-xs shadow-sm mr-1 shrink-0">
                     T
                 </div>
 
@@ -76,7 +76,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                             setLayoutDropdownOpen(false);
                         }}
                         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
-                            isLight ? 'hover:bg-slate-100 text-slate-900' : 'hover:bg-slate-800 text-white'
+                            'hover:bg-surface-2 text-fg'
                         }`}
                     >
                         <span>{currentSymbol.ticker}</span>
@@ -85,7 +85,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
 
                     {symbolDropdownOpen && (
                         <div className={`fixed sm:absolute left-3 sm:left-0 top-14 sm:top-full mt-1 w-64 rounded-xl border shadow-2xl z-50 py-1.5 ${
-                            isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                            'bg-surface border-line'
                         }`}>
                             {DEFAULT_SYMBOLS.map(sym => (
                                 <button
@@ -96,15 +96,15 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                     }}
                                     className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs cursor-pointer ${
                                         currentSymbol.ticker === sym.ticker
-                                            ? 'bg-indigo-500/10 text-indigo-600 font-bold'
-                                            : isLight ? 'hover:bg-slate-50 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                                            ? 'bg-accent/10 text-accent-fg font-bold'
+                                            : 'hover:bg-surface-2 text-fg-muted'
                                     }`}
                                 >
                                     <div>
                                         <span className="font-bold block">{sym.ticker}</span>
                                         <span className="text-[10px] opacity-60">{sym.name}</span>
                                     </div>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-500/10 font-mono">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-3 font-mono">
                                         {sym.exchange}
                                     </span>
                                 </button>
@@ -113,7 +113,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                     )}
                 </div>
 
-                <div className={`h-5 w-px mx-1 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+                <div className={`h-5 w-px mx-1 ${'bg-surface-3'}`} />
 
                 {/* Timeframe Pills */}
                 <div className="flex items-center gap-0.5">
@@ -125,12 +125,8 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                 onClick={() => onSelectPeriod(tf)}
                                 className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                                     active
-                                        ? isLight
-                                            ? 'bg-slate-100 text-slate-900 font-bold shadow-2xs'
-                                            : 'bg-slate-800 text-white font-bold'
-                                        : isLight
-                                            ? 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                            : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+                                        ? 'bg-surface-2 text-fg font-bold shadow-2xs'
+                                        : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
                                 }`}
                             >
                                 {tf.text}
@@ -139,13 +135,13 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                     })}
                 </div>
 
-                <div className={`h-5 w-px mx-1 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+                <div className={`h-5 w-px mx-1 ${'bg-surface-3'}`} />
 
                 {/* Candle Style */}
                 <button
                     onClick={onCycleCandleStyle}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                     title="Alternar Estilo de Vela"
                 >
@@ -156,25 +152,25 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onOpenIndicators}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                 >
                     <span className="italic font-serif font-bold text-sm">fx</span>
                     <span>Indicators</span>
                     {activeIndicatorsCount > 0 && (
-                        <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-indigo-500 text-white font-bold">
+                        <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-accent text-accent-on font-bold">
                             {activeIndicatorsCount}
                         </span>
                     )}
                 </button>
 
-                <div className={`h-5 w-px mx-1 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+                <div className={`h-5 w-px mx-1 ${'bg-surface-3'}`} />
 
                 {/* Undo / Clear */}
                 <button
                     onClick={onUndoDrawing}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-slate-800 text-slate-400'
+                        'hover:bg-surface-2 text-fg-subtle'
                     }`}
                     title="Desfazer último desenho"
                 >
@@ -183,7 +179,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onClearDrawings}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-slate-800 text-slate-400'
+                        'hover:bg-surface-2 text-fg-subtle'
                     }`}
                     title="Limpar desenhos"
                 >
@@ -194,9 +190,9 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
             {/* Right Group */}
             <div className="flex items-center gap-2 shrink-0 ml-2">
                 <div className={`hidden md:flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] ${
-                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900 border-slate-800'
+                    'bg-surface-2 border-line'
                 }`}>
-                    <Database size={12} className="text-indigo-500" />
+                    <Database size={12} className="text-accent-fg" />
                     <select
                         value={dataSource}
                         onChange={e => onChangeDataSource(e.target.value as DataSourceMode)}
@@ -218,10 +214,8 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                         }}
                         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
                             layoutMode === '1x2'
-                                ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 font-bold'
-                                : isLight
-                                    ? 'border-slate-200 text-slate-700 hover:bg-slate-50'
-                                    : 'border-slate-800 text-slate-300 hover:bg-slate-800'
+                                ? 'border-accent bg-accent/10 text-accent-fg font-bold'
+                                : 'border-line text-fg-muted hover:bg-surface-2'
                         }`}
                         title="Alternar Layout Multi-Timeframe (1x1 ou 1x2 Split)"
                     >
@@ -232,7 +226,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
 
                     {layoutDropdownOpen && (
                         <div className={`fixed sm:absolute right-4 sm:right-0 top-14 sm:top-full mt-1 w-64 rounded-xl border p-2 shadow-2xl z-50 ${
-                            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-700 text-white'
+                            'bg-surface border-line text-fg'
                         }`}>
                             <div className="text-[10px] font-bold uppercase tracking-wider opacity-50 px-2 py-1">
                                 Modo de Visualização
@@ -244,8 +238,8 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                 }}
                                 className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between text-xs cursor-pointer ${
                                     layoutMode === '1x1'
-                                        ? 'bg-indigo-500/10 text-indigo-600 font-bold'
-                                        : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                                        ? 'bg-accent/10 text-accent-fg font-bold'
+                                        : 'hover:bg-surface-2'
                                 }`}
                             >
                                 <span className="flex items-center gap-2">
@@ -261,8 +255,8 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                 }}
                                 className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between text-xs cursor-pointer mt-0.5 ${
                                     layoutMode === '1x2'
-                                        ? 'bg-indigo-500/10 text-indigo-600 font-bold'
-                                        : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                                        ? 'bg-accent/10 text-accent-fg font-bold'
+                                        : 'hover:bg-surface-2'
                                 }`}
                             >
                                 <span className="flex items-center gap-2">
@@ -271,7 +265,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                 {layoutMode === '1x2' && <span>✓</span>}
                             </button>
 
-                            <div className="border-t my-2 border-slate-200 dark:border-slate-800" />
+                            <div className="border-t my-2 border-line" />
                             <div className="text-[10px] font-bold uppercase tracking-wider opacity-50 px-2 py-1">
                                 Timeframe do 2º Gráfico (Direita)
                             </div>
@@ -285,8 +279,8 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                                         }}
                                         className={`flex-1 py-1 rounded text-[11px] font-bold cursor-pointer ${
                                             secondaryPeriod.text === tf.text
-                                                ? 'bg-indigo-600 text-white'
-                                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                                ? 'bg-accent text-accent-on'
+                                                : 'bg-surface-2 text-fg-muted'
                                         }`}
                                     >
                                         {tf.text}
@@ -302,7 +296,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                     <button
                         onClick={() => setShortcutsOpen(v => !v)}
                         className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                            isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                            'hover:bg-surface-2 text-fg-muted'
                         }`}
                         title="Atalhos de Teclado do Replay"
                     >
@@ -310,15 +304,15 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                     </button>
                     {shortcutsOpen && (
                         <div className={`absolute right-0 top-full mt-1 w-64 rounded-xl border p-3 shadow-2xl z-50 text-[11px] space-y-1.5 ${
-                            isLight ? 'bg-white border-slate-200 text-slate-700' : 'bg-slate-900 border-slate-700 text-slate-200'
+                            'bg-surface border-line text-fg-muted'
                         }`}>
                             <div className="font-bold text-xs mb-1">Atalhos de Teclado</div>
-                            <div className="flex justify-between"><span>Play / Pause Replay</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">Espaço</kbd></div>
-                            <div className="flex justify-between"><span>Avançar +1 Vela</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">→</kbd></div>
-                            <div className="flex justify-between"><span>Voltar -1 Vela</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">←</kbd></div>
-                            <div className="flex justify-between"><span>Compra Rápida (Buy)</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">Alt + B</kbd></div>
-                            <div className="flex justify-between"><span>Venda Rápida (Sell)</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">Alt + S</kbd></div>
-                            <div className="flex justify-between"><span>Fechar Painéis</span><kbd className="px-1.5 py-0.5 rounded bg-slate-500/15 font-mono">Esc</kbd></div>
+                            <div className="flex justify-between"><span>Play / Pause Replay</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">Espaço</kbd></div>
+                            <div className="flex justify-between"><span>Avançar +1 Vela</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">→</kbd></div>
+                            <div className="flex justify-between"><span>Voltar -1 Vela</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">←</kbd></div>
+                            <div className="flex justify-between"><span>Compra Rápida (Buy)</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">Alt + B</kbd></div>
+                            <div className="flex justify-between"><span>Venda Rápida (Sell)</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">Alt + S</kbd></div>
+                            <div className="flex justify-between"><span>Fechar Painéis</span><kbd className="px-1.5 py-0.5 rounded bg-surface-3 font-mono">Esc</kbd></div>
                         </div>
                     )}
                 </div>
@@ -327,7 +321,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onResetSimulation}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                     title="Resetar Simulação e Saldo"
                 >
@@ -337,7 +331,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onToggleTheme}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                     title={isLight ? 'Tema Escuro' : 'Tema Claro'}
                 >
@@ -347,7 +341,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onToggleTradeDrawer}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                     title="Configurações / Boleta"
                 >
@@ -357,7 +351,7 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 <button
                     onClick={onScreenshot}
                     className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                        isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-300'
+                        'hover:bg-surface-2 text-fg-muted'
                     }`}
                     title="Capturar Screenshot"
                 >

@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 
 interface LeftDrawingLayerProps {
-    isLight: boolean;
     cutCandleMode: boolean;
     magnetMode: boolean;
     drawingsLocked: boolean;
@@ -19,7 +18,6 @@ interface LeftDrawingLayerProps {
 }
 
 export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
-    isLight,
     cutCandleMode,
     magnetMode,
     drawingsLocked,
@@ -40,15 +38,15 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
     return (
         <div className={`w-11 shrink-0 flex flex-col items-center py-2 gap-1 border-r z-20 relative ${
-            isLight ? 'bg-white border-slate-200 text-slate-700' : 'bg-[#131722] border-slate-800 text-slate-300'
+            'bg-surface border-line text-fg-muted'
         }`}>
             {/* Crosshair */}
             <button
                 onClick={() => setActiveToolGroup(null)}
                 className={`p-2 rounded-lg transition-colors cursor-pointer ${
                     activeToolGroup === null && !cutCandleMode
-                        ? 'bg-indigo-500/15 text-indigo-600'
-                        : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        ? 'bg-accent/15 text-accent-fg'
+                        : 'hover:bg-surface-2'
                 }`}
                 title="Cursor Cruz (Crosshair)"
             >
@@ -60,7 +58,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 <button
                     onClick={() => setActiveToolGroup(g => (g === 'lines' ? null : 'lines'))}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                        activeToolGroup === 'lines' ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        activeToolGroup === 'lines' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                     }`}
                     title="Linhas de Tendência, Horizontal e Canal"
                 >
@@ -68,7 +66,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 </button>
                 {activeToolGroup === 'lines' && (
                     <div className={`absolute left-full top-0 ml-1 w-52 rounded-xl border shadow-2xl py-1.5 z-50 text-xs ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                        'bg-surface border-line'
                     }`}>
                         {[
                             { id: 'straightLine', label: 'Linha de Tendência' },
@@ -82,7 +80,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                                 key={item.id}
                                 onClick={() => handlePick(item.id)}
                                 className={`w-full px-3 py-1.5 text-left cursor-pointer ${
-                                    isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                                    'hover:bg-surface-2 text-fg-muted'
                                 }`}
                             >
                                 {item.label}
@@ -97,7 +95,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 <button
                     onClick={() => setActiveToolGroup(g => (g === 'fib' ? null : 'fib'))}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                        activeToolGroup === 'fib' ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        activeToolGroup === 'fib' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                     }`}
                     title="Retração de Fibonacci, Extensão, Leque e Gann"
                 >
@@ -105,7 +103,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 </button>
                 {activeToolGroup === 'fib' && (
                     <div className={`absolute left-full top-0 ml-1 w-56 rounded-xl border shadow-2xl py-1.5 z-50 text-xs ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                        'bg-surface border-line'
                     }`}>
                         {[
                             { id: 'fibonacciLine', label: 'Retração de Fibonacci (Completa)' },
@@ -120,7 +118,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                                 key={item.id}
                                 onClick={() => handlePick(item.id)}
                                 className={`w-full px-3 py-1.5 text-left cursor-pointer ${
-                                    isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                                    'hover:bg-surface-2 text-fg-muted'
                                 }`}
                             >
                                 {item.label}
@@ -135,7 +133,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 <button
                     onClick={() => setActiveToolGroup(g => (g === 'patterns' ? null : 'patterns'))}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                        activeToolGroup === 'patterns' ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        activeToolGroup === 'patterns' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                     }`}
                     title="Padrões Harmônicos e Ondas de Elliott"
                 >
@@ -143,7 +141,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 </button>
                 {activeToolGroup === 'patterns' && (
                     <div className={`absolute left-full top-0 ml-1 w-56 rounded-xl border shadow-2xl py-1.5 z-50 text-xs ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                        'bg-surface border-line'
                     }`}>
                         {[
                             { id: 'abcd', label: 'Padrão Harmônico ABCD' },
@@ -156,7 +154,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                                 key={item.id}
                                 onClick={() => handlePick(item.id)}
                                 className={`w-full px-3 py-1.5 text-left cursor-pointer ${
-                                    isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                                    'hover:bg-surface-2 text-fg-muted'
                                 }`}
                             >
                                 {item.label}
@@ -171,7 +169,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 <button
                     onClick={() => setActiveToolGroup(g => (g === 'position' ? null : 'position'))}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                        activeToolGroup === 'position' ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        activeToolGroup === 'position' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                     }`}
                     title="Projeção Posição Comprada (Long) / Vendida (Short)"
                 >
@@ -182,24 +180,24 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 </button>
                 {activeToolGroup === 'position' && (
                     <div className={`absolute left-full top-0 ml-1 w-56 rounded-xl border shadow-2xl py-1.5 z-50 text-xs ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                        'bg-surface border-line'
                     }`}>
                         <button
                             onClick={() => handlePick('tvLongPosition')}
                             className={`w-full px-3 py-2 text-left flex items-center gap-2 cursor-pointer ${
-                                isLight ? 'hover:bg-slate-100 text-emerald-600 font-semibold' : 'hover:bg-slate-800 text-emerald-400 font-semibold'
+                                'hover:bg-surface-2 text-accent-fg font-semibold'
                             }`}
                         >
-                            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" />
+                            <span className="w-2.5 h-2.5 rounded-xs bg-data-pos" />
                             Posição Comprada (Long R:R)
                         </button>
                         <button
                             onClick={() => handlePick('tvShortPosition')}
                             className={`w-full px-3 py-2 text-left flex items-center gap-2 cursor-pointer ${
-                                isLight ? 'hover:bg-slate-100 text-rose-600 font-semibold' : 'hover:bg-slate-800 text-rose-400 font-semibold'
+                                'hover:bg-surface-2 text-danger-fg font-semibold'
                             }`}
                         >
-                            <span className="w-2.5 h-2.5 rounded-xs bg-rose-500" />
+                            <span className="w-2.5 h-2.5 rounded-xs bg-data-neg" />
                             Posição Vendida (Short R:R)
                         </button>
                     </div>
@@ -211,7 +209,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 <button
                     onClick={() => setActiveToolGroup(g => (g === 'shapes' ? null : 'shapes'))}
                     className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                        activeToolGroup === 'shapes' ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                        activeToolGroup === 'shapes' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                     }`}
                     title="Retângulo (Order Block), Círculo e Triângulo"
                 >
@@ -219,7 +217,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                 </button>
                 {activeToolGroup === 'shapes' && (
                     <div className={`absolute left-full top-0 ml-1 w-52 rounded-xl border shadow-2xl py-1.5 z-50 text-xs ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'
+                        'bg-surface border-line'
                     }`}>
                         {[
                             { id: 'rect', label: 'Retângulo (Order Block / FVG)' },
@@ -231,7 +229,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
                                 key={item.id}
                                 onClick={() => handlePick(item.id)}
                                 className={`w-full px-3 py-1.5 text-left cursor-pointer ${
-                                    isLight ? 'hover:bg-slate-100 text-slate-700' : 'hover:bg-slate-800 text-slate-200'
+                                    'hover:bg-surface-2 text-fg-muted'
                                 }`}
                             >
                                 {item.label}
@@ -243,7 +241,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
             <button
                 onClick={() => handlePick('simpleAnnotation')}
-                className={`p-2 rounded-lg transition-colors cursor-pointer ${isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'}`}
+                className={`p-2 rounded-lg transition-colors cursor-pointer ${'hover:bg-surface-2'}`}
                 title="Texto / Anotação"
             >
                 <Type size={16} />
@@ -251,7 +249,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
             <button
                 onClick={() => handlePick('simpleTag')}
-                className={`p-2 rounded-lg transition-colors cursor-pointer ${isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'}`}
+                className={`p-2 rounded-lg transition-colors cursor-pointer ${'hover:bg-surface-2'}`}
                 title="Marcador de Preço"
             >
                 <Smile size={16} />
@@ -259,7 +257,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
             <button
                 onClick={() => handlePick('priceLine')}
-                className={`p-2 rounded-lg transition-colors cursor-pointer ${isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'}`}
+                className={`p-2 rounded-lg transition-colors cursor-pointer ${'hover:bg-surface-2'}`}
                 title="Régua de Nível de Preço"
             >
                 <Ruler size={16} />
@@ -267,18 +265,18 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
             <button
                 onClick={onZoomIn}
-                className={`p-2 rounded-lg transition-colors cursor-pointer ${isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'}`}
+                className={`p-2 rounded-lg transition-colors cursor-pointer ${'hover:bg-surface-2'}`}
                 title="Aumentar Zoom"
             >
                 <ZoomIn size={16} />
             </button>
 
-            <div className={`w-6 h-px my-1 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+            <div className={`w-6 h-px my-1 ${'bg-surface-3'}`} />
 
             <button
                 onClick={onToggleMagnet}
                 className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                    magnetMode ? 'bg-indigo-500/15 text-indigo-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                    magnetMode ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2'
                 }`}
                 title="Modo Ímã"
             >
@@ -288,7 +286,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
             <button
                 onClick={onToggleLock}
                 className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                    drawingsLocked ? 'bg-amber-500/15 text-amber-600' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                    drawingsLocked ? 'bg-amber-500/15 text-amber-600' : 'hover:bg-surface-2'
                 }`}
                 title="Travar Desenhos"
             >
@@ -298,7 +296,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
             <button
                 onClick={onToggleVisible}
                 className={`p-2 rounded-lg transition-colors cursor-pointer ${
-                    !drawingsVisible ? 'bg-rose-500/15 text-rose-500' : isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
+                    !drawingsVisible ? 'bg-danger/10 text-danger-fg' : 'hover:bg-surface-2'
                 }`}
                 title="Mostrar / Ocultar Desenhos"
             >
@@ -307,7 +305,7 @@ export const LeftDrawingLayer: React.FC<LeftDrawingLayerProps> = memo(({
 
             <button
                 onClick={onClearDrawings}
-                className={`p-2 rounded-lg transition-colors cursor-pointer text-rose-500 ${isLight ? 'hover:bg-rose-50' : 'hover:bg-rose-950/30'}`}
+                className={`p-2 rounded-lg transition-colors cursor-pointer text-danger-fg ${'hover:bg-danger/10'}`}
                 title="Apagar Todos os Desenhos"
             >
                 <Trash2 size={15} />

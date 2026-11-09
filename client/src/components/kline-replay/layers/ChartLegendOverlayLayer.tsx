@@ -7,7 +7,6 @@ export interface ChartLegendOverlayRef {
 }
 
 interface ChartLegendOverlayLayerProps {
-    isLight: boolean;
     ticker: string;
     periodText: string;
     decimals: number;
@@ -19,7 +18,6 @@ interface ChartLegendOverlayLayerProps {
 
 export const ChartLegendOverlayLayer = memo(
     forwardRef<ChartLegendOverlayRef, ChartLegendOverlayLayerProps>(({
-        isLight,
         ticker,
         periodText,
         decimals,
@@ -45,13 +43,13 @@ export const ChartLegendOverlayLayer = memo(
             ? (((activeBar.close - activeBar.open) / activeBar.open) * 100).toFixed(2)
             : '0.00';
         const isBull = activeBar ? activeBar.close >= activeBar.open : true;
-        const colorCls = isBull ? 'text-[#26a69a]' : 'text-[#ef5350]';
+        const colorCls = isBull ? 'text-accent-fg' : 'text-danger-fg';
 
         return (
             <>
                 {/* Cut-Candle Mode Banner */}
                 {cutCandleMode && (
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-bold shadow-lg flex items-center gap-2">
+                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full bg-accent text-accent-on text-xs font-bold shadow-lg flex items-center gap-2">
                         <Scissors size={14} />
                         <span>Clique em qualquer vela do gráfico para cortar o Replay naquele ponto</span>
                         <button onClick={onCancelCutCandle} className="ml-1 opacity-80 hover:opacity-100 cursor-pointer">
@@ -63,10 +61,10 @@ export const ChartLegendOverlayLayer = memo(
                 {/* Top-Left Symbol & OHLC Legend */}
                 <div className="absolute left-3 top-2.5 z-10 pointer-events-none space-y-0.5">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`font-bold text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                        <span className={`font-bold text-sm ${'text-fg'}`}>
                             {ticker.slice(0, 3)} / {ticker.slice(3) || 'USD'} · {periodText.replace('m', '')} · Torex
                         </span>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                        <span className="w-2 h-2 rounded-full bg-data-pos inline-block" />
                         {activeBar && (
                             <div className="flex items-center gap-2 font-mono text-[11px]">
                                 <span>
@@ -91,7 +89,7 @@ export const ChartLegendOverlayLayer = memo(
                         )}
                     </div>
                     <div className="text-[11px] opacity-70 font-mono">
-                        Volume <span className="font-semibold text-[#ef5350]">{activeBar?.volume || 0}</span>
+                        Volume <span className="font-semibold text-danger-fg">{activeBar?.volume || 0}</span>
                     </div>
                 </div>
 
@@ -100,7 +98,7 @@ export const ChartLegendOverlayLayer = memo(
                     <button
                         onClick={() => onQuickLimitOrderAtPrice(crosshairPrice.toFixed(decimals))}
                         style={{ transform: `translate3d(0, ${Math.max(20, Math.min(520, crosshairY - 11))}px, 0)` }}
-                        className="absolute right-16 top-0 z-20 w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold shadow cursor-pointer hover:bg-indigo-600 transition-colors will-change-transform"
+                        className="absolute right-16 top-0 z-20 w-5 h-5 rounded-full bg-fg text-canvas flex items-center justify-center text-xs font-bold shadow cursor-pointer hover:bg-accent-hover transition-colors will-change-transform"
                         title={`Criar Ordem Limit em ${crosshairPrice.toFixed(decimals)}`}
                     >
                         +
@@ -109,7 +107,7 @@ export const ChartLegendOverlayLayer = memo(
 
                 {/* Bottom-Left TV Badge */}
                 <div className={`absolute left-3 bottom-8 z-10 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow-md pointer-events-none ${
-                    isLight ? 'bg-white text-slate-900 border border-slate-200' : 'bg-slate-800 text-white border border-slate-700'
+                    'bg-surface text-fg border border-line'
                 }`}>
                     TV
                 </div>

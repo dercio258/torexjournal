@@ -11,6 +11,8 @@ import {
 } from 'klinecharts';
 import { X } from 'lucide-react';
 import api from '../api';
+import { useTheme } from '../context/ThemeContext';
+import { useChartTheme } from '../hooks/useChartTheme';
 import { CustomKLineDatafeed, DataSourceMode, DEFAULT_SYMBOLS, FeedUnavailableError, FeedStats } from '../services/klineDatafeed';
 import { SymbolInfo, Period } from '@klinecharts/pro';
 import { ReplayOrder, TIMEFRAMES, AVAILABLE_INDICATORS } from './kline-replay/types';
@@ -30,7 +32,6 @@ interface PersistedReplayState {
     periodText?: string;
     secondaryPeriodText?: string;
     layoutMode?: ChartLayoutMode;
-    chartTheme?: 'light' | 'dark';
     orders?: ReplayOrder[];
     journalNotes?: string;
     /** Replay cutoff at save time, so restored orders line up with the chart. */
@@ -87,11 +88,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         tier: 'FREE',
         maxDays: 15,
         maxBars: 350,
-        earliestDate: new Date(Date.now() - 15 * 86400000).toLocaleDateString('en-US', {
-            month: '2-digit',
-            day: '2-digit',
-            year: 'numeric',
-        }),
+        earliestDate: new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10),
         isPaid: false,
     }));
 
@@ -112,7 +109,9 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     }, []);
 
     // Theme, Layout & Data Source
-    const [chartTheme, setChartTheme] = useState<'light' | 'dark'>(saved?.chartTheme || 'light');
+    // Chart follows the app theme; canvas colors come from the design tokens.
+    const { theme: chartTheme, toggleTheme } = useTheme();
+    const ct = useChartTheme();
     const [layoutMode, setLayoutMode] = useState<ChartLayoutMode>(saved?.layoutMode || '1x1');
     const [dataSource, setDataSource] = useState<DataSourceMode>('TRADINGVIEW');
     const [activeSourceLabel, setActiveSourceLabel] = useState<string>('TradingView');
@@ -190,7 +189,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 periodText: currentPeriod.text,
                 secondaryPeriodText: secondaryPeriod.text,
                 layoutMode,
-                chartTheme,
                 orders,
                 journalNotes,
                 replayTimestamp: replayActive ? latestBar?.timestamp ?? null : null,
@@ -199,7 +197,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             };
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
         } catch (_) {}
-    }, [currentSymbol.ticker, currentPeriod.text, secondaryPeriod.text, layoutMode, chartTheme, orders, journalNotes, replayActive, latestBar?.timestamp, spread, commission]);
+    }, [currentSymbol.ticker, currentPeriod.text, secondaryPeriod.text, layoutMode, orders, journalNotes, replayActive, latestBar?.timestamp, spread, commission]);
 
     useEffect(() => {
         cutCandleModeRef.current = cutCandleMode;
@@ -213,141 +211,73 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const lastCutoffRef = useRef<{ key: string; ts: number } | null>(null);
 
     // Apply Chart Theme Styles
-    const applyChartTheme = useCallback((chart: Chart, theme: 'light' | 'dark') => {
-        const isLight = theme === 'light';
+    const applyChartTheme = useCallback((chart: Chart, _theme?: string) => {
+        const withAlpha = (c: string, a: number) => c.replace(/,\s*[\d.]+\)$/, `, ${a})`);
+        const grid = { show: true, size: 1, color: ct.grid, style: LineType.Solid };
+        const crossLine = { show: true, style: LineType.Dashed, dashedValue: [4, 4], size: 1, color: ct.tick };
+        // Inverted chip (fg on canvas) reads in both themes.
+        const crossText = {
+            show: true, color: ct.background, backgroundColor: ct.tooltipTitle, size: 11,
+            paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 3,
+        };
         chart.setStyles({
-            grid: {
-                show: true,
-                horizontal: {
-                    show: true,
-                    size: 1,
-                    color: isLight ? '#f0f3fa' : '#1e222d',
-                    style: LineType.Dashed,
-                    dashedValue: [3, 3],
-                },
-                vertical: {
-                    show: true,
-                    size: 1,
-                    color: isLight ? '#f0f3fa' : '#1e222d',
-                    style: LineType.Dashed,
-                    dashedValue: [3, 3],
-                },
-            },
+            grid: { show: true, horizontal: grid, vertical: { ...grid, show: false } },
             candle: {
                 type: candleStyle,
                 bar: {
-                    upColor: '#26a69a',
-                    downColor: '#ef5350',
-                    noChangeColor: '#888888',
-                    upBorderColor: '#26a69a',
-                    downBorderColor: '#ef5350',
-                    noChangeBorderColor: '#888888',
-                    upWickColor: '#26a69a',
-                    downWickColor: '#ef5350',
-                    noChangeWickColor: '#888888',
+                    upColor: ct.pos, downColor: ct.neg, noChangeColor: ct.tick,
+                    upBorderColor: ct.pos, downBorderColor: ct.neg, noChangeBorderColor: ct.tick,
+                    upWickColor: ct.pos, downWickColor: ct.neg, noChangeWickColor: ct.tick,
                 },
+                area: {
+                    lineColor: ct.series1,
+                    backgroundColor: [
+                        { offset: 0, color: withAlpha(ct.series1, 0.01) },
+                        { offset: 1, color: withAlpha(ct.series1, 0.18) },
+                    ],
+                } as any,
                 priceMark: {
                     show: true,
                     high: { show: false },
                     low: { show: false },
                     last: {
                         show: true,
-                        upColor: '#26a69a',
-                        downColor: '#ef5350',
-                        noChangeColor: '#888888',
-                        line: {
-                            show: true,
-                            style: LineType.Dashed,
-                            dashedValue: [4, 4],
-                            size: 1,
-                        },
+                        upColor: ct.pos,
+                        downColor: ct.neg,
+                        noChangeColor: ct.tick,
+                        line: { show: true, style: LineType.Dashed, dashedValue: [4, 4], size: 1 },
                         text: {
-                            show: true,
-                            size: 11,
-                            paddingLeft: 6,
-                            paddingTop: 4,
-                            paddingRight: 6,
-                            paddingBottom: 4,
-                            color: '#ffffff',
-                            borderRadius: 3,
+                            show: true, size: 11, color: '#ffffff', borderRadius: 3,
+                            paddingLeft: 6, paddingTop: 4, paddingRight: 6, paddingBottom: 4,
                         },
                     },
                 },
                 tooltip: { showRule: 'none' as any },
             },
             indicator: {
-                bars: [
-                    {
-                        upColor: 'rgba(38, 166, 154, 0.42)',
-                        downColor: 'rgba(239, 83, 80, 0.42)',
-                        noChangeColor: 'rgba(136, 136, 136, 0.42)',
-                    },
-                ],
+                bars: [{ upColor: withAlpha(ct.pos, 0.45), downColor: withAlpha(ct.neg, 0.45), noChangeColor: withAlpha(ct.tick, 0.45) }],
                 tooltip: { showRule: 'none' as any },
             },
             xAxis: {
                 show: true,
-                axisLine: { show: true, color: isLight ? '#e0e3eb' : '#2a2e39', size: 1 },
-                tickText: { show: true, color: isLight ? '#131722' : '#b2b5be', size: 11 },
+                axisLine: { show: true, color: ct.gridStrong, size: 1 },
+                tickText: { show: true, color: ct.tick, size: 11 },
                 tickLine: { show: false },
             },
             yAxis: {
                 show: true,
                 axisLine: { show: false },
-                tickText: { show: true, color: isLight ? '#131722' : '#b2b5be', size: 11 },
+                tickText: { show: true, color: ct.tick, size: 11 },
                 tickLine: { show: false },
             },
-            separator: {
-                size: 1,
-                color: isLight ? '#e0e3eb' : '#2a2e39',
-            },
+            separator: { size: 1, color: ct.gridStrong },
             crosshair: {
                 show: true,
-                horizontal: {
-                    show: true,
-                    line: {
-                        show: true,
-                        style: LineType.Dashed,
-                        dashedValue: [4, 4],
-                        size: 1,
-                        color: isLight ? '#787b86' : '#9598a1',
-                    },
-                    text: {
-                        show: true,
-                        color: '#ffffff',
-                        backgroundColor: '#131722',
-                        size: 11,
-                        paddingLeft: 6,
-                        paddingRight: 6,
-                        paddingTop: 3,
-                        paddingBottom: 3,
-                        borderRadius: 3,
-                    },
-                },
-                vertical: {
-                    show: true,
-                    line: {
-                        show: true,
-                        style: LineType.Dashed,
-                        dashedValue: [4, 4],
-                        size: 1,
-                        color: isLight ? '#787b86' : '#9598a1',
-                    },
-                    text: {
-                        show: true,
-                        color: '#ffffff',
-                        backgroundColor: '#131722',
-                        size: 11,
-                        paddingLeft: 6,
-                        paddingRight: 6,
-                        paddingTop: 3,
-                        paddingBottom: 3,
-                        borderRadius: 3,
-                    },
-                },
+                horizontal: { show: true, line: crossLine, text: crossText },
+                vertical: { show: true, line: crossLine, text: crossText },
             },
         });
-    }, [candleStyle]);
+    }, [candleStyle, ct]);
 
     // Sync Secondary Chart in 1x2 Split-Screen Mode
     const syncSecondaryChart = useCallback(async (sym: SymbolInfo, secPer: Period, cutoffTs: number | null) => {
@@ -584,7 +514,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 lock: true,
                 styles: {
                     line: {
-                        color: ord.side === 'BUY' ? '#2563eb' : '#9333ea',
+                        color: ct.label,
                         size: 1.5,
                         style: LineType.Solid,
                     },
@@ -598,7 +528,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 lock: true,
                 styles: {
                     line: {
-                        color: '#ef5350',
+                        color: ct.neg,
                         size: 1,
                         style: LineType.Dashed,
                         dashedValue: [4, 4],
@@ -613,7 +543,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 lock: true,
                 styles: {
                     line: {
-                        color: '#26a69a',
+                        color: ct.pos,
                         size: 1,
                         style: LineType.Dashed,
                         dashedValue: [4, 4],
@@ -622,7 +552,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             });
             if (typeof tpId === 'string') orderOverlayIdsRef.current.push(tpId);
         });
-    }, [activeOrdersSignature]);
+    }, [activeOrdersSignature, ct]);
 
     // Memoized Callbacks for Layers
     const handleSelectSymbol = useCallback((sym: SymbolInfo) => {
@@ -793,12 +723,12 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const handleScreenshot = useCallback(() => {
         const chart = chartRef.current;
         if (!chart) return;
-        const url = chart.getConvertPictureUrl(true, 'jpeg', chartTheme === 'light' ? '#ffffff' : '#131722');
+        const url = chart.getConvertPictureUrl(true, 'jpeg', ct.background);
         const a = document.createElement('a');
         a.href = url;
         a.download = `Backtest_${currentSymbol.ticker}_${currentPeriod.text}.jpg`;
         a.click();
-    }, [chartTheme, currentSymbol.ticker, currentPeriod.text]);
+    }, [ct.background, currentSymbol.ticker, currentPeriod.text]);
 
     const handleQuickLimitOrderAtPrice = useCallback((priceStr: string) => {
         setOrderType('LIMIT');
@@ -974,49 +904,47 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const decimals = currentSymbol.pricePrecision ?? 2;
 
     const formattedReplayClock = useMemo(() => {
-        if (!latestBar?.timestamp) return 'Fri, Oct 23, 2026 02:00 (GMT+2)';
-        return (
-            new Date(latestBar.timestamp).toLocaleString('en-US', {
-                weekday: 'short',
-                month: 'short',
-                day: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-            }) + ' (GMT+2)'
-        );
+        if (!latestBar?.timestamp) return '—';
+        const d = new Date(latestBar.timestamp);
+        const when = d.toLocaleString('pt-BR', {
+            weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        });
+        let tz = '';
+        try {
+            tz = new Intl.DateTimeFormat('pt-BR', { timeZoneName: 'shortOffset' }).formatToParts(d).find(p => p.type === 'timeZoneName')?.value || '';
+        } catch (_) {}
+        return tz ? `${when} (${tz})` : when;
     }, [latestBar?.timestamp]);
+
+    const earliestLabel = useMemo(() => {
+        const d = new Date(`${planLimits.earliestDate}T00:00:00`);
+        return Number.isNaN(d.getTime()) ? planLimits.earliestDate : d.toLocaleDateString('pt-BR');
+    }, [planLimits.earliestDate]);
 
     return (
         <div className="space-y-2.5">
-            {/* TOP PLAN HISTORY BANNER (Traynio Reference Style) */}
+            {/* PLAN HISTORY BANNER */}
             {showPlanBanner && (
-                <div className={`px-4 py-2 rounded-xl border flex items-center justify-between text-xs transition-colors ${
-                    isLight
-                        ? 'bg-[#f4f6f9] border-slate-200/80 text-slate-600'
-                        : 'bg-[#1a1f2e] border-slate-800 text-slate-300'
-                }`}>
-                    <div>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-4 py-2 text-xs text-fg-muted">
+                    <p>
                         {planLimits.isPaid ? (
                             <>
-                                <span className="font-bold text-indigo-600 dark:text-indigo-400">{planLimits.tier} Plan:</span>{' '}
-                                <span>Histórico completo desbloqueado ({planLimits.maxDays} dias a partir de {planLimits.earliestDate}) · Fonte: <strong>{activeSourceLabel}</strong></span>
+                                <span className="font-semibold text-fg">Plano {planLimits.tier}:</span>{' '}
+                                histórico de {planLimits.maxDays} dias (desde {earliestLabel}), até {planLimits.maxBars} velas por carregamento · Fonte:{' '}
+                                <strong className="text-fg">{activeSourceLabel}</strong>
                             </>
                         ) : (
                             <>
-                                <span>Free account: the chart shows the last {planLimits.maxDays} days, from {planLimits.earliestDate}. A </span>
-                                <a href="/pricing" className="underline font-semibold text-slate-800 dark:text-white hover:text-indigo-600">
-                                    paid plan
-                                </a>
-                                <span> unlocks the full history.</span>
+                                Conta gratuita: o gráfico mostra os últimos {planLimits.maxDays} dias (desde {earliestLabel}), até {planLimits.maxBars} velas.{' '}
+                                <a href="/pricing" className="font-semibold text-fg underline hover:text-accent-fg">Um plano pago</a> desbloqueia o histórico completo.
                             </>
                         )}
-                    </div>
+                    </p>
                     <button
                         onClick={() => setShowPlanBanner(false)}
-                        className="p-0.5 rounded hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer opacity-60 hover:opacity-100"
+                        className="shrink-0 cursor-pointer rounded p-0.5 text-fg-subtle hover:bg-surface-3 hover:text-fg"
                         title="Ocultar aviso"
+                        aria-label="Ocultar aviso"
                     >
                         <X size={14} />
                     </button>
@@ -1041,9 +969,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 </div>
             ) : null}
 
-            <div className={`rounded-2xl overflow-hidden border shadow-2xl select-none transition-colors ${
-                isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-[#131722] border-slate-800 text-slate-100'
-            }`}>
+            <div className="select-none overflow-hidden rounded-2xl border border-line bg-surface text-fg shadow-lg">
                 {/* LAYER 1: TOP TOOLBAR */}
                 <TopToolbarLayer
                     isLight={isLight}
@@ -1062,7 +988,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                     onUndoDrawing={handleUndoDrawing}
                     onClearDrawings={handleClearDrawings}
                     onChangeDataSource={handleChangeDataSource}
-                    onToggleTheme={() => setChartTheme(t => (t === 'light' ? 'dark' : 'light'))}
+                    onToggleTheme={toggleTheme}
                     onToggleTradeDrawer={() => setRightDrawer(d => (d === 'trade' ? 'none' : 'trade'))}
                     onResetSimulation={handleResetSimulation}
                     onScreenshot={handleScreenshot}
@@ -1072,7 +998,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 <div className="relative flex h-[520px] md:h-[600px]">
                     {/* LAYER 2: LEFT DRAWING SIDEBAR */}
                     <LeftDrawingLayer
-                        isLight={isLight}
                         cutCandleMode={cutCandleMode}
                         magnetMode={magnetMode}
                         drawingsLocked={drawingsLocked}
@@ -1088,11 +1013,10 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                     {/* CENTER CANVAS AREA (Supports 1x1 Single or 1x2 Split-Screen Multi-Timeframe) */}
                     <div className="flex-1 relative flex overflow-hidden">
                         {/* PRIMARY CHART CONTAINER */}
-                        <div className={`relative h-full ${layoutMode === '1x2' ? 'w-1/2 border-r border-slate-200 dark:border-slate-800' : 'w-full'}`}>
+                        <div className={`relative h-full ${layoutMode === '1x2' ? 'w-1/2 border-r border-line' : 'w-full'}`}>
                             {/* LAYER 3: 60FPS ISOLATED LEGEND & CROSSHAIR (+) BUTTON */}
                             <ChartLegendOverlayLayer
                                 ref={legendOverlayRef}
-                                isLight={isLight}
                                 ticker={currentSymbol.ticker}
                                 periodText={currentPeriod.text}
                                 decimals={decimals}
@@ -1111,18 +1035,18 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                             <div className="relative w-1/2 h-full">
                                 <div className="absolute top-2.5 left-3 z-20 flex items-center gap-2 pointer-events-auto">
                                     <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
-                                        isLight ? 'bg-white/90 border-slate-200 text-slate-800' : 'bg-slate-900/90 border-slate-700 text-white'
+                                        'bg-surface/90 border-line text-fg'
                                     }`}>
                                         {currentSymbol.ticker} · {secondaryPeriod.text} {syncEnabled ? '(Sync ✓)' : ''}
                                     </span>
-                                    <div className="flex items-center gap-0.5 bg-black/5 dark:bg-white/5 p-0.5 rounded-md">
+                                    <div className="flex items-center gap-0.5 bg-black/5 p-0.5 rounded-md dark:bg-white/5">
                                         {TIMEFRAMES.map(tf => (
                                             <button
                                                 key={tf.text}
                                                 onClick={() => handleSelectSecondaryPeriod(tf)}
                                                 className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
                                                     secondaryPeriod.text === tf.text
-                                                        ? 'bg-indigo-600 text-white'
+                                                        ? 'bg-accent text-accent-on'
                                                         : ' opacity-70 hover:opacity-100'
                                                 }`}
                                             >
@@ -1137,7 +1061,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
 
                         {/* LAYER 4: GPU-ACCELERATED FLOATING REPLAY BAR */}
                         <FloatingReplayBarLayer
-                            isLight={isLight}
                             autoPlaying={autoPlaying}
                             replaySpeedLabel={replaySpeedLabel}
                             syncEnabled={syncEnabled}
@@ -1161,7 +1084,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
 
                     {/* LAYER 5: RIGHT SLIDE-OVER & ACTION BAR */}
                     <RightSidePanelLayer
-                        isLight={isLight}
                         ticker={currentSymbol.ticker}
                         rightDrawer={rightDrawer}
                         orderSide={orderSide}
@@ -1196,7 +1118,6 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
 
                 {/* LAYER 6: BOTTOM POSITIONS / PENDING / HISTORY DOCK */}
                 <BottomDockLayer
-                    isLight={isLight}
                     orders={orders}
                     simBalance={simBalance}
                     floatingPnl={floatingPnl}
@@ -1209,9 +1130,9 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 {indicatorModalOpen && (
                     <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-50">
                         <div className={`w-96 rounded-2xl border p-5 shadow-2xl ${
-                            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-700 text-white'
+                            'bg-surface border-line text-fg'
                         }`}>
-                            <div className="flex items-center justify-between border-b pb-3 mb-3 border-slate-200 dark:border-slate-800">
+                            <div className="flex items-center justify-between border-b pb-3 mb-3 border-line">
                                 <h3 className="font-bold text-sm">Indicadores Técnicos (fx)</h3>
                                 <button onClick={() => setIndicatorModalOpen(false)} className="cursor-pointer opacity-60 hover:opacity-100">
                                     <X size={16} />
@@ -1226,8 +1147,8 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                                             onClick={() => handleToggleIndicator(ind.code, ind.pane)}
                                             className={`w-full px-3 py-2 rounded-xl text-xs flex items-center justify-between cursor-pointer border transition-colors ${
                                                 isAdded
-                                                    ? 'bg-indigo-500/10 border-indigo-500/40 text-indigo-600 dark:text-indigo-300 font-bold'
-                                                    : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
+                                                    ? 'bg-accent/10 border-accent/40 text-accent-fg font-bold'
+                                                    : 'border-transparent hover:bg-surface-2'
                                             }`}
                                         >
                                             <span>{ind.name}</span>

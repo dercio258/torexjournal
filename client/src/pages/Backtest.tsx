@@ -166,10 +166,10 @@ export const Backtest = () => {
                 <div>
                     <h1 className="text-2xl md:text-3xl font-black text-fg flex items-center gap-2.5 tracking-tight">
                         <FlaskConical className="text-accent-fg" size={28} />
-                        Laboratório de Backtesting & KLineChart Pro
+                        Laboratório de Backtesting
                     </h1>
                     <p className="text-fg-muted text-sm mt-0.5">
-                        Gráfico interativo com Fibonacci, Replay de Velas (TradingView / Binance / MT5) e otimização de conta.
+                        Replay de mercado vela a vela com ferramentas de desenho, simulação sobre o histórico da conta e estratégias quantitativas.
                     </p>
                 </div>
 
@@ -220,18 +220,18 @@ export const Backtest = () => {
                     onClick={() => setActiveTab('kline_pro')}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'kline_pro'
-                            ? 'border-emerald-500 text-accent-fg'
+                            ? 'border-accent text-accent-fg'
                             : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
                     <LineChart size={16} />
-                    Gráfico Pro & Replay (KLineChart Pro)
+                    Replay de mercado
                 </button>
                 <button
                     onClick={() => { setActiveTab('what_if'); setSimulationResult(null); }}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'what_if'
-                            ? 'border-emerald-500 text-accent-fg'
+                            ? 'border-accent text-accent-fg'
                             : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
@@ -242,7 +242,7 @@ export const Backtest = () => {
                     onClick={() => { setActiveTab('strategy_lab'); setSimulationResult(null); }}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'strategy_lab'
-                            ? 'border-emerald-500 text-accent-fg'
+                            ? 'border-accent text-accent-fg'
                             : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
@@ -253,7 +253,7 @@ export const Backtest = () => {
                     onClick={() => setActiveTab('saved_history')}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
                         activeTab === 'saved_history'
-                            ? 'border-emerald-500 text-accent-fg'
+                            ? 'border-accent text-accent-fg'
                             : 'border-transparent text-fg-muted hover:text-fg'
                     }`}
                 >
