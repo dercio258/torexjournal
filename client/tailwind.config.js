@@ -48,6 +48,12 @@ export default {
                     DEFAULT: token('danger'),
                     fg: token('danger-fg'),
                 },
+                // Data-viz marks (never for text)
+                data: {
+                    pos: token('data-pos'),
+                    neg: token('data-neg'),
+                    1: token('data-1'),
+                },
 
                 // ---- Legacy v1 (hex, dark-only) — do not use in new code ----
                 background: {

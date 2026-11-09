@@ -24,6 +24,14 @@ export interface ChartTheme {
     tooltipBody: string;
     /** Chart background (for libs that paint their own). */
     background: string;
+    /** P&L polarity marks (validated pair). Pair with a sign/position cue. */
+    pos: string;
+    neg: string;
+    /** ~10% area washes for pos/neg. */
+    posWash: string;
+    negWash: string;
+    /** Single non-polar series (counts, volume). */
+    series1: string;
     isDark: boolean;
 }
 
@@ -42,6 +50,8 @@ export const resolveChartTheme = (isDark: boolean): ChartTheme => {
     const line = read('line', isDark ? '255 255 255' : '15 23 42');
     const raised = read('raised', isDark ? '14 16 23' : '255 255 255');
     const surface = read('surface', isDark ? '17 19 25' : '255 255 255');
+    const posC = read('data-pos', '14 165 160');
+    const negC = read('data-neg', '220 38 38');
 
     return {
         tick: rgb(subtle),
@@ -53,6 +63,11 @@ export const resolveChartTheme = (isDark: boolean): ChartTheme => {
         tooltipTitle: rgb(fg),
         tooltipBody: rgb(muted),
         background: rgb(surface),
+        pos: rgb(posC),
+        neg: rgb(negC),
+        posWash: rgb(posC, 0.12),
+        negWash: rgb(negC, 0.12),
+        series1: rgb(read('data-1', isDark ? '57 135 229' : '42 120 214')),
         isDark,
     };
 };

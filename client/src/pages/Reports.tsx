@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { Button } from '../components/ui/Button';
-import { OperationalRadars } from '../components/dashboard/charts/OperationalRadars';
+import { OperationalBreakdown, toSessionRows, toSymbolRows, toWeekdayRows } from '../components/dashboard/OperationalBreakdown';
 import { TradingCalendarView } from '../components/reports/TradingCalendarView';
 import { exportTradingDocument, DocumentFormat, TOREX_LOGO_URL } from '../utils/documentExporter';
 import api from '../api';
@@ -176,21 +176,15 @@ export const Reports = () => {
                 {
                     label: 'Resultado ($)',
                     data: reportData.equityCurve.map((pt: any) => pt.pnl),
-                    backgroundColor: reportData.equityCurve.map((pt: any) => 
-                        pt.pnl >= 0 ? 'rgba(16, 185, 129, 0.85)' : 'rgba(244, 63, 94, 0.85)'
-                    ),
-                    hoverBackgroundColor: reportData.equityCurve.map((pt: any) => 
-                        pt.pnl >= 0 ? '#10b981' : '#f43f5e'
-                    ),
-                    borderColor: reportData.equityCurve.map((pt: any) => 
-                        pt.pnl >= 0 ? '#059669' : '#e11d48'
-                    ),
-                    borderWidth: 1,
-                    borderRadius: 2
+                    backgroundColor: reportData.equityCurve.map((pt: any) => (pt.pnl >= 0 ? ct.pos : ct.neg)),
+                    borderWidth: 0,
+                    borderRadius: 4,
+                    borderSkipped: 'start' as const,
+                    maxBarThickness: 24
                 }
             ]
         };
-    }, [reportData?.equityCurve]);
+    }, [reportData?.equityCurve, ct]);
 
     // Chart.js: Curva de Lucro Acumulado (Line Chart)
     const cumulativeLineData = useMemo(() => {
@@ -206,49 +200,29 @@ export const Reports = () => {
                 {
                     label: 'Lucro Acumulado ($)',
                     data: reportData.equityCurve.map((pt: any) => pt.cumulativePnL),
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    borderColor: ct.pos,
+                    backgroundColor: ct.posWash,
                     borderWidth: 2,
                     fill: true,
                     pointRadius: reportData.equityCurve.length > 50 ? 0 : 2.5,
                     pointHoverRadius: 4,
-                    pointBackgroundColor: '#10b981',
+                    pointBackgroundColor: ct.pos,
+                    pointBorderColor: ct.background,
                     tension: 0.25
                 }
             ]
         };
-    }, [reportData?.equityCurve]);
+    }, [reportData?.equityCurve, ct]);
 
     // Operational Radar Metrics (Symbol & Session)
-    const operationalInstrumentsData = useMemo(() => {
-        if (!reportData?.bySymbol || !Array.isArray(reportData.bySymbol)) return [];
-        return reportData.bySymbol.map((s: any) => {
-            const total = Number(s.trades) || 0;
-            const wins = s.wins !== undefined ? Number(s.wins) : (s.winRate ? Math.round((Number(s.winRate) / 100) * total) : 0);
-            const losses = s.losses !== undefined ? Number(s.losses) : Math.max(0, total - wins);
-            return {
-                symbol: s.symbol,
-                wins,
-                losses,
-                total: total || (wins + losses),
-                pnl: s.pnl !== undefined ? Number(s.pnl) : undefined
-            };
-        }).sort((a: any, b: any) => b.total - a.total).slice(0, 6);
-    }, [reportData?.bySymbol]);
-
-    const operationalSessionsData = useMemo(() => {
-        if (!reportData?.bySession || !Array.isArray(reportData.bySession)) return [];
-        const totalTrades = reportData.bySession.reduce((acc: number, s: any) => acc + (Number(s.trades) || 0), 0) || 1;
-        return reportData.bySession.map((s: any) => {
-            const count = Number(s.trades) || 0;
-            return {
-                name: s.session,
-                percent: (count / totalTrades) * 100,
-                pnl: Number(s.pnl) || 0,
-                count
-            };
-        });
-    }, [reportData?.bySession]);
+    const breakdown = useMemo(
+        () => ({
+            symbols: toSymbolRows(reportData?.bySymbol),
+            sessions: toSessionRows(reportData?.bySession),
+            weekdays: toWeekdayRows(reportData?.byDayOfWeek),
+        }),
+        [reportData?.bySymbol, reportData?.bySession, reportData?.byDayOfWeek]
+    );
 
     // Configuração com Linha de Zero Destacada (Losses abaixo de zero)
     const zeroBaselineChartOptions = useMemo(() => ({
@@ -726,19 +700,14 @@ export const Reports = () => {
                             <div className="flex items-center justify-between">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-fg flex items-center gap-1.5 font-mono">
                                     <Activity size={14} className="text-emerald-500 dark:text-emerald-400" />
-                                    Detalhamento Operacional (Radares)
+                                    Detalhamento Operacional
                                 </h3>
                                 <span className="text-[10px] text-fg-subtle dark:text-[#6B7280] font-mono">
                                     Ativos, Sessões e Dias da Semana
                                 </span>
                             </div>
 
-                            <OperationalRadars
-                                instrumentsData={operationalInstrumentsData}
-                                sessionsData={operationalSessionsData}
-                                trades={reportData.trades}
-                                dailyPnL={reportData.dailyPnL}
-                            />
+                            <OperationalBreakdown {...breakdown} />
                         </div>
 
                         {/* Trade Ledger Table */}

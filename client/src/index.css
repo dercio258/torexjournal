@@ -46,6 +46,12 @@ html.dark,
 
     --ds-shadow-alpha: 0.55;
 
+    /* Data-viz marks (validated: CVD ΔE 15.3, >=3:1 on both chart surfaces).
+       P&L polarity always ships with a secondary cue (sign, side of the zero line). */
+    --ds-data-pos: 14 165 160;
+    --ds-data-neg: 220 38 38;
+    --ds-data-1: 57 135 229;
+
     color-scheme: dark;
 }
 
@@ -69,6 +75,8 @@ html.light {
     --ds-danger-fg: 225 29 72;
 
     --ds-shadow-alpha: 0.10;
+
+    --ds-data-1: 42 120 214;
 
     color-scheme: light;
 }

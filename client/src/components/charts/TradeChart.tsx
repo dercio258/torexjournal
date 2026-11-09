@@ -117,11 +117,11 @@ export const TradeChart = ({ symbol, openTime, closeTime, type }: TradeChartProp
 
         // @ts-ignore
         const candlestickSeries = chart.addCandlestickSeries({
-            upColor: '#10b981', // Emerald 500
-            downColor: '#ef4444', // Red 500
+            upColor: ct.pos,
+            downColor: ct.neg,
             borderVisible: false,
-            wickUpColor: '#10b981',
-            wickDownColor: '#ef4444',
+            wickUpColor: ct.pos,
+            wickDownColor: ct.neg,
         });
 
         chartRef.current = chart;

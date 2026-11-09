@@ -52,9 +52,9 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
         datasets: [
             {
                 data: [stats?.wins || 0, stats?.losses || 0],
-                backgroundColor: ['#10b981', '#f43f5e'],
-                borderColor: ['#064e3b', '#881337'],
-                borderWidth: 1,
+                backgroundColor: [ct.pos, ct.neg],
+                borderColor: ct.background,
+                borderWidth: 2,
             },
         ],
     };
@@ -65,7 +65,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
         const pnlByDay = new Array(7).fill(0);
 
         trades.forEach(t => {
-            const day = new Date(t.close_time).getDay();
+            const day = new Date(t.close_time).getUTCDay(); // UTC, like the backend
             pnlByDay[day] += t.profit;
         });
 
@@ -75,12 +75,13 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
                 {
                     label: 'PnL',
                     data: pnlByDay,
-                    backgroundColor: pnlByDay.map(v => v >= 0 ? '#10b981' : '#f43f5e'),
+                    backgroundColor: pnlByDay.map(v => v >= 0 ? ct.pos : ct.neg),
                     borderRadius: 4,
+                    maxBarThickness: 24,
                 }
             ]
         };
-    }, [trades]);
+    }, [trades, ct]);
 
     if (!stats) {
         return (
