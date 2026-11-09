@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { 
-    Calendar, Search, RefreshCw, 
+import {
+    Calendar, Search, RefreshCw,
     X, Info
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
@@ -43,6 +43,34 @@ const CURRENCY_COUNTRY_MAP: Record<string, { flag: string; country: string }> = 
     XAU: { flag: '🪙', country: 'Ouro Spot' },
     BTC: { flag: '₿', country: 'Bitcoin' },
 };
+
+/** Event timestamp as a Date. ISO strings carry their zone; "YYYY-MM-DD HH:mm" is taken as local. */
+const eventDate = (evt: { eventDate?: string | null; time?: string | null }): Date | null => {
+    const raw = evt.eventDate || evt.time;
+    if (!raw) return null;
+    const d = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T'));
+    return isNaN(d.getTime()) ? null : d;
+};
+const hasTime = (evt: { eventDate?: string | null; time?: string | null }) => /[T ]\d{2}:\d{2}/.test(evt.eventDate || evt.time || '');
+/** YYYY-MM-DD in the user's local timezone. */
+const localDayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (d: Date, n: number) => {
+    const c = new Date(d);
+    c.setDate(c.getDate() + n);
+    return c;
+};
+const eventDayKey = (evt: { eventDate?: string | null; time?: string | null }) => {
+    const d = eventDate(evt);
+    return d ? localDayKey(d) : null;
+};
+
+/** Impact = severity. Light/dark text steps chosen for >= 4.5:1 on each surface; always labeled. */
+const IMPACT = {
+    HIGH: { label: 'Alto', badge: 'text-danger-fg bg-danger/10 border-danger/25', active: 'bg-danger text-white', idle: 'text-danger-fg hover:bg-danger/10' },
+    MEDIUM: { label: 'Médio', badge: 'text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/30', active: 'bg-amber-500 text-slate-950', idle: 'text-amber-700 dark:text-amber-400 hover:bg-amber-500/10' },
+    LOW: { label: 'Baixo', badge: 'text-blue-700 dark:text-blue-400 bg-blue-500/10 border-blue-500/25', active: 'bg-blue-600 text-white', idle: 'text-blue-700 dark:text-blue-400 hover:bg-blue-500/10' },
+} as const;
+const impactOf = (raw?: string | null) => IMPACT[(raw || 'MEDIUM').toUpperCase() as keyof typeof IMPACT] ?? IMPACT.MEDIUM;
 
 const EconomicCalendar: React.FC = () => {
     const { selectedAccountId } = useAccount();
@@ -129,16 +157,11 @@ const EconomicCalendar: React.FC = () => {
         return 'EQUAL';
     };
 
-    // Filter events
+    // Filter events (all day boundaries in the user's local timezone — same as the times shown)
     const filteredEvents = useMemo(() => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-        const nextWeek = new Date();
-        nextWeek.setDate(nextWeek.getDate() + 7);
-        const nextWeekStr = nextWeek.toISOString().split('T')[0];
+        const todayStr = localDayKey(new Date());
+        const tomorrowStr = localDayKey(addDays(new Date(), 1));
+        const nextWeekStr = localDayKey(addDays(new Date(), 7));
 
         return events.filter(evt => {
             // Search
@@ -163,9 +186,8 @@ const EconomicCalendar: React.FC = () => {
             }
 
             // Period Filter
-            const rawTime = evt.eventDate || evt.time;
-            if (rawTime) {
-                const eventDateStr = rawTime.split('T')[0].split(' ')[0];
+            const eventDateStr = eventDayKey(evt);
+            if (eventDateStr) {
                 if (periodFilter === 'today' && eventDateStr !== todayStr) return false;
                 if (periodFilter === 'tomorrow' && eventDateStr !== tomorrowStr) return false;
                 if (periodFilter === 'this_week' && (eventDateStr < todayStr || eventDateStr > nextWeekStr)) return false;
@@ -179,8 +201,7 @@ const EconomicCalendar: React.FC = () => {
     const groupedEvents = useMemo(() => {
         const groups: Record<string, EconomicEvent[]> = {};
         for (const evt of filteredEvents) {
-            const rawTime = evt.eventDate || evt.time;
-            const dateStr = rawTime ? rawTime.split('T')[0].split(' ')[0] : 'Próximos';
+            const dateStr = eventDayKey(evt) || 'Próximos';
             if (!groups[dateStr]) groups[dateStr] = [];
             groups[dateStr].push(evt);
         }
@@ -188,9 +209,7 @@ const EconomicCalendar: React.FC = () => {
         // Sort by time within each date
         Object.keys(groups).forEach(dateKey => {
             groups[dateKey].sort((a, b) => {
-                const timeA = a.eventDate || a.time || '';
-                const timeB = b.eventDate || b.time || '';
-                return timeA.localeCompare(timeB);
+                return (eventDate(a)?.getTime() ?? 0) - (eventDate(b)?.getTime() ?? 0);
             });
         });
 
@@ -198,7 +217,11 @@ const EconomicCalendar: React.FC = () => {
     }, [filteredEvents]);
 
     const sortedDates = Object.keys(groupedEvents).sort();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = localDayKey(new Date());
+    const tzLabel = useMemo(() => {
+        const offset = -new Date().getTimezoneOffset() / 60;
+        return `GMT${offset >= 0 ? '+' : ''}${offset}`;
+    }, []);
 
     const handleOpenDetail = (evt: EconomicEvent) => {
         setSelectedEvent(evt);
@@ -211,11 +234,11 @@ const EconomicCalendar: React.FC = () => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-line">
                 <div>
                     <h1 className="text-xl font-bold text-fg flex items-center gap-2">
-                        <Calendar size={20} className="text-emerald-500" />
+                        <Calendar size={20} className="text-accent-fg" />
                         Calendário Econômico
                     </h1>
                     <p className="text-xs text-fg-muted mt-0.5">
-                        Divulgações e notícias macroeconômicas publicadas
+                        Divulgações macroeconômicas · horários no seu fuso ({tzLabel})
                     </p>
                 </div>
 
@@ -235,7 +258,7 @@ const EconomicCalendar: React.FC = () => {
             </div>
 
             {/* Simplified Filter Toolbar */}
-            <div className="bg-surface/60 border border-line rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="bg-surface border border-line rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
                 {/* Search Input */}
                 <div className="relative flex-1 min-w-[200px] max-w-xs">
                     <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
@@ -244,11 +267,11 @@ const EconomicCalendar: React.FC = () => {
                         placeholder="Buscar notícia..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-canvas border border-line text-xs rounded-lg pl-8 pr-7 py-1.5 text-fg placeholder:text-fg-subtle focus:outline-none focus:border-emerald-500"
+                        className="w-full bg-canvas border border-line text-xs rounded-lg pl-8 pr-7 py-1.5 text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent"
                     />
                     {searchTerm && (
-                        <button 
-                            onClick={() => setSearchTerm('')} 
+                        <button
+                            onClick={() => setSearchTerm('')}
                             className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg/80"
                         >
                             <X size={12} />
@@ -269,7 +292,7 @@ const EconomicCalendar: React.FC = () => {
                             onClick={() => setPeriodFilter(tab.id as any)}
                             className={`px-2.5 py-1 rounded text-xs font-medium transition-all ${
                                 periodFilter === tab.id
-                                    ? 'bg-emerald-600 text-white shadow-sm'
+                                    ? 'bg-surface-2 text-fg shadow-sm ring-1 ring-line-strong'
                                     : 'text-fg-muted hover:text-fg'
                             }`}
                         >
@@ -292,7 +315,7 @@ const EconomicCalendar: React.FC = () => {
                     <button
                         onClick={() => setImpactFilter('HIGH')}
                         className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                            impactFilter === 'HIGH' ? 'bg-rose-500 text-white' : 'text-danger-fg hover:bg-rose-500/10'
+                            impactFilter === 'HIGH' ? IMPACT.HIGH.active : IMPACT.HIGH.idle
                         }`}
                     >
                         Alto
@@ -300,7 +323,7 @@ const EconomicCalendar: React.FC = () => {
                     <button
                         onClick={() => setImpactFilter('MEDIUM')}
                         className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                            impactFilter === 'MEDIUM' ? 'bg-amber-500 text-slate-950' : 'text-amber-400 hover:bg-amber-500/10'
+                            impactFilter === 'MEDIUM' ? IMPACT.MEDIUM.active : IMPACT.MEDIUM.idle
                         }`}
                     >
                         Médio
@@ -308,7 +331,7 @@ const EconomicCalendar: React.FC = () => {
                     <button
                         onClick={() => setImpactFilter('LOW')}
                         className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                            impactFilter === 'LOW' ? 'bg-blue-500 text-white' : 'text-blue-400 hover:bg-blue-500/10'
+                            impactFilter === 'LOW' ? IMPACT.LOW.active : IMPACT.LOW.idle
                         }`}
                     >
                         Baixo
@@ -320,7 +343,7 @@ const EconomicCalendar: React.FC = () => {
                     <select
                         value={currencyFilter}
                         onChange={(e) => setCurrencyFilter(e.target.value)}
-                        className="bg-canvas border border-line text-fg/80 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                        className="bg-canvas border border-line text-fg text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent cursor-pointer"
                     >
                         <option value="ALL">Todas Moedas</option>
                         {availableCurrencies.map(c => (
@@ -339,23 +362,23 @@ const EconomicCalendar: React.FC = () => {
                     Carregando calendário econômico...
                 </div>
             ) : sortedDates.length === 0 ? (
-                <div className="py-20 text-center space-y-3 bg-surface/30 rounded-xl border border-line p-8">
-                    <Calendar size={36} className="mx-auto text-slate-600" />
+                <div className="py-20 text-center space-y-3 bg-surface rounded-xl border border-line p-8">
+                    <Calendar size={36} className="mx-auto text-fg-subtle" />
                     <h3 className="text-sm font-semibold text-fg">
                         Nenhum evento econômico cadastrado
                     </h3>
                     <p className="text-fg-muted text-xs max-w-sm mx-auto">
                         Não há notícias ou dados publicados para os filtros selecionados. Novos eventos adicionados pelo admin aparecerão aqui.
                     </p>
-                    <Button 
-                        variant="secondary" 
+                    <Button
+                        variant="secondary"
                         onClick={() => {
                             setSearchTerm('');
                             setImpactFilter('ALL');
                             setCurrencyFilter('ALL');
                             setPeriodFilter('all');
                             fetchCalendar(true);
-                        }} 
+                        }}
                         className="text-xs py-1 px-3 mt-2"
                     >
                         Limpar Filtros
@@ -369,32 +392,32 @@ const EconomicCalendar: React.FC = () => {
                         const isToday = todayStr === dateStr;
 
                         return (
-                            <div 
-                                key={dateStr} 
-                                className="bg-surface/50 border border-line rounded-xl overflow-hidden"
+                            <div
+                                key={dateStr}
+                                className="bg-surface border border-line rounded-xl overflow-hidden"
                             >
                                 {/* Clean Date Header */}
                                 <div className={`px-4 py-2.5 border-b border-line flex items-center justify-between ${
-                                    isToday ? 'bg-emerald-950/20' : 'bg-canvas/40'
+                                    isToday ? 'bg-accent/[0.06]' : 'bg-canvas'
                                 }`}>
                                     <div className="flex items-center gap-2">
-                                        <div className={`w-2 h-2 rounded-full ${isToday ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                                        <div className={`w-2 h-2 rounded-full ${isToday ? 'bg-accent' : 'bg-fg-subtle/40'}`} />
                                         <h3 className="text-xs font-bold text-fg capitalize">
                                             {dateObj.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                                         </h3>
                                         {isToday && (
-                                            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-accent-fg text-[10px] font-bold uppercase">
+                                            <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent-fg text-[10px] font-bold uppercase">
                                                 Hoje
                                             </span>
                                         )}
                                     </div>
                                     <span className="text-[11px] text-fg-subtle font-mono">
-                                        {dayEvents.length} evento(s)
+                                        {dayEvents.length} {dayEvents.length === 1 ? 'evento' : 'eventos'}
                                     </span>
                                 </div>
 
                                 {/* Table Column Headers (Desktop) */}
-                                <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-fg-subtle bg-canvas/20 border-b border-line">
+                                <div className="hidden md:grid grid-cols-12 gap-3 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-fg-subtle bg-canvas border-b border-line">
                                     <div className="col-span-1">Hora</div>
                                     <div className="col-span-2">Moeda</div>
                                     <div className="col-span-2">Impacto</div>
@@ -407,24 +430,12 @@ const EconomicCalendar: React.FC = () => {
                                 {/* Event Rows */}
                                 <div className="divide-y divide-line">
                                     {dayEvents.map((evt) => {
-                                        const impactStr = (evt.impact || 'MEDIUM').toUpperCase();
-                                        const impactBadge = 
-                                            impactStr === 'HIGH' ? 'text-danger-fg bg-rose-500/10 border-rose-500/20' :
-                                            impactStr === 'MEDIUM' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
-                                            'text-blue-400 bg-blue-500/10 border-blue-500/20';
+                                        const impact = impactOf(evt.impact);
 
-                                        const rawTime = evt.eventDate || evt.time;
-                                        let timeDisplay = '--:--';
-                                        if (rawTime) {
-                                            if (rawTime.includes('T')) {
-                                                const d = new Date(rawTime);
-                                                if (!isNaN(d.getTime())) {
-                                                    timeDisplay = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                                                }
-                                            } else if (rawTime.includes(' ')) {
-                                                timeDisplay = rawTime.split(' ')[1].slice(0, 5);
-                                            }
-                                        }
+                                        const evDate = eventDate(evt);
+                                        const timeDisplay = evDate && hasTime(evt)
+                                            ? evDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                                            : '--:--';
 
                                         const currencyInfo = getCurrencyInfo(evt.currency);
                                         const comparison = compareActualVsForecast(evt.actual, evt.forecast);
@@ -433,10 +444,10 @@ const EconomicCalendar: React.FC = () => {
                                             <div
                                                 key={evt.id}
                                                 onClick={() => handleOpenDetail(evt)}
-                                                className="px-4 py-3 md:py-2.5 grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-3 items-center hover:bg-surface-2/30 cursor-pointer transition-colors text-xs"
+                                                className="px-4 py-3 md:py-2.5 grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-3 items-center hover:bg-surface-2 cursor-pointer transition-colors text-xs"
                                             >
                                                 {/* Time */}
-                                                <div className="md:col-span-1 font-mono font-semibold text-fg/80">
+                                                <div className="md:col-span-1 font-mono font-semibold text-fg tabular-nums">
                                                     {timeDisplay}
                                                 </div>
 
@@ -453,8 +464,8 @@ const EconomicCalendar: React.FC = () => {
 
                                                 {/* Impact */}
                                                 <div className="md:col-span-2">
-                                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${impactBadge}`}>
-                                                        {impactStr === 'HIGH' ? 'Alto' : impactStr === 'MEDIUM' ? 'Médio' : 'Baixo'}
+                                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${impact.badge}`}>
+                                                        {impact.label}
                                                     </span>
                                                 </div>
 
@@ -464,7 +475,7 @@ const EconomicCalendar: React.FC = () => {
                                                         {evt.title || evt.event}
                                                     </span>
                                                     {evt.status === 'COMPLETED' && (
-                                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/15 text-accent-fg flex-shrink-0">
+                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-accent/15 text-accent-fg flex-shrink-0">
                                                             Publicado
                                                         </span>
                                                     )}
@@ -473,25 +484,25 @@ const EconomicCalendar: React.FC = () => {
                                                 {/* Actual */}
                                                 <div className="md:col-span-1 text-right font-mono">
                                                     <span className="md:hidden text-fg-subtle mr-2 text-[10px]">Atual:</span>
-                                                    <span className={`font-bold ${
-                                                        evt.actual 
-                                                            ? comparison === 'HIGHER' ? 'text-accent-fg' :
-                                                              comparison === 'LOWER' ? 'text-danger-fg' :
-                                                              'text-fg'
-                                                            : 'text-slate-600'
-                                                    }`}>
+                                                    <span className={`font-bold ${evt.actual ? 'text-fg' : 'text-fg-subtle'}`}>
                                                         {evt.actual ? `${evt.actual}${evt.unit ? ` ${evt.unit}` : ''}` : '—'}
                                                     </span>
+                                                    {evt.actual && comparison && comparison !== 'EQUAL' && (
+                                                        <span className="ml-1 text-[10px] text-fg-subtle" title={comparison === 'HIGHER' ? 'Acima da previsão' : 'Abaixo da previsão'}>
+                                                            <span aria-hidden>{comparison === 'HIGHER' ? '▲' : '▼'}</span>
+                                                            <span className="sr-only">{comparison === 'HIGHER' ? 'acima da previsão' : 'abaixo da previsão'}</span>
+                                                        </span>
+                                                    )}
                                                 </div>
 
                                                 {/* Forecast */}
-                                                <div className="md:col-span-1 text-right font-mono text-fg/80">
+                                                <div className="md:col-span-1 text-right font-mono text-fg-muted tabular-nums">
                                                     <span className="md:hidden text-fg-subtle mr-2 text-[10px]">Prev:</span>
                                                     {evt.forecast ? `${evt.forecast}${evt.unit ? ` ${evt.unit}` : ''}` : '—'}
                                                 </div>
 
                                                 {/* Previous */}
-                                                <div className="md:col-span-1 text-right font-mono text-fg-muted">
+                                                <div className="md:col-span-1 text-right font-mono text-fg-subtle tabular-nums">
                                                     <span className="md:hidden text-fg-subtle mr-2 text-[10px]">Ant:</span>
                                                     {evt.previous ? `${evt.previous}${evt.unit ? ` ${evt.unit}` : ''}` : '—'}
                                                 </div>
@@ -522,19 +533,19 @@ const EconomicCalendar: React.FC = () => {
                                         {selectedEvent.currency} - {selectedEvent.country || getCurrencyInfo(selectedEvent.currency).country}
                                     </div>
                                     <div className="text-[11px] text-fg-muted">
-                                        Impacto: <strong className="text-fg">{selectedEvent.impact}</strong>
+                                        Impacto: <strong className="text-fg">{impactOf(selectedEvent.impact).label}</strong>
                                     </div>
                                 </div>
                             </div>
                             <div className="text-right font-mono">
                                 <div className="text-xs font-bold text-fg">
                                     {selectedEvent.eventDate || selectedEvent.time ? (
-                                        new Date(selectedEvent.eventDate || selectedEvent.time || '').toLocaleString('pt-BR')
+                                        (eventDate(selectedEvent)?.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) ?? '--')
                                     ) : '--'}
                                 </div>
                                 <span className={`inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    selectedEvent.status === 'COMPLETED' || selectedEvent.actual 
-                                        ? 'bg-emerald-500/20 text-accent-fg' 
+                                    selectedEvent.status === 'COMPLETED' || selectedEvent.actual
+                                        ? 'bg-accent/15 text-accent-fg' 
                                         : 'bg-surface-2 text-fg-muted'
                                 }`}>
                                     {selectedEvent.status === 'COMPLETED' || selectedEvent.actual ? 'Divulgado' : 'Agendado'}
@@ -546,7 +557,7 @@ const EconomicCalendar: React.FC = () => {
                         <div className="grid grid-cols-3 gap-2">
                             <div className="p-3 rounded-lg bg-canvas border border-line text-center">
                                 <span className="text-[10px] uppercase font-bold text-fg-subtle block mb-1">Atual</span>
-                                <div className={`text-base font-bold font-mono ${selectedEvent.actual ? 'text-accent-fg' : 'text-slate-600'}`}>
+                                <div className={`text-base font-bold font-mono ${selectedEvent.actual ? 'text-fg' : 'text-fg-subtle'}`}>
                                     {selectedEvent.actual ? `${selectedEvent.actual}${selectedEvent.unit ? ` ${selectedEvent.unit}` : ''}` : '—'}
                                 </div>
                             </div>
