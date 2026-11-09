@@ -262,17 +262,25 @@ A integração do **KLineChart Pro** foi implementada e já está disponível na
 
 2. **Adaptador Multi-API (`CustomKLineDatafeed`):**
    - Arquivo: [`client/src/services/klineDatafeed.ts`](file:///e:/TRADING%20COSSA/client/src/services/klineDatafeed.ts)
-   - Permite alternar em tempo real com 1 clique entre **3 fontes de dados**:
-     - **`TradingView API`:** Consome o módulo [`TradingViewService`](file:///e:/TRADING%20COSSA/backend-nest/src/tradingview/tradingview.service.ts) (`@mathieuc/tradingview`) no backend NestJS (`/api/tradingview/candles` e `/api/tradingview/search`).
-     - **`Binance Real-Time (WS)`:** Consome velas históricas e WebSocket em tempo real direto da Binance (`BTCUSD`, `ETHUSD`, Ouro via `PAXGUSDT`, `EURUSDT`, `GBPUSDT`).
-     - **`MT5 / Oanda Feed`:** Consome o endpoint `/api/market-data/candles` do backend.
-     - **Fallback Institucional Garantido:** Caso o backend esteja offline ou sem internet, gera séries determinísticas realistas para que o gráfico nunca fique em branco.
+   - Cada modo usa **uma única fonte**, sem trocar para outra em silêncio:
+     - **`TradingView`:** módulo [`TradingViewService`](file:///e:/TRADING%20COSSA/backend-nest/src/tradingview/tradingview.service.ts) (`@mathieuc/tradingview`, não oficial) via `/api/tradingview/candles` e `/api/tradingview/search`. Os limites de dias e velas do plano são aplicados no servidor (`REPLAY_LIMITS`).
+     - **`OANDA`:** endpoint `/api/market-data/candles` (granularidade M1…D derivada do timeframe).
+     - **`Binance`:** só cripto real (BTC, ETH, SOL), histórico REST + WebSocket ao vivo. Ouro e forex **não** são mapeados para PAXG/EURUSDT (são instrumentos diferentes).
+     - **`Demo`:** série gerada, sempre sinalizada na interface como dados simulados.
+     - **Sem fallback sintético:** se a fonte escolhida falhar, o backend responde 503 e o terminal mostra "Feed indisponível"; nunca são usados preços inventados no lugar.
 
 3. **Terminal Gráfico + Replay de Velas + Boleta de Execução (`KLineChartProTerminal`):**
    - Arquivo: [`client/src/components/KLineChartProTerminal.tsx`](file:///e:/TRADING%20COSSA/client/src/components/KLineChartProTerminal.tsx)
    - **Tradução Completa (`pt-BR`):** Todas as ferramentas de Fibonacci (Retração, Extensão, Espiral, Círculo, Leque), Caixa de Gann, Ondas de Elliott (3, 5, 8), Padrões Harmônicos (ABCD, XABCD) e +25 indicadores traduzidos para português.
    - **Modo Replay Vela-a-Vela:** Permite cortar o histórico, avançar `+1 Vela` manualmente ou dar `Auto Play` (`1x`, `2x`, `5x`).
-   - **Boleta de Compra/Venda com Stop Loss e Take Profit Automáticos:** Executa ordens no preço da vela atual, verifica intrabarra (`High`/`Low`) se atingiu o *Stop Loss* ou *Take Profit* a cada vela avançada e salva a sessão no histórico de backtest da conta.
+   - **Boleta de Compra/Venda com Stop Loss e Take Profit Automáticos:** Executa ordens no preço da vela atual (com spread e comissão opcionais) e salva a sessão no histórico de backtest da conta.
+
+4. **Motor de execução puro (`client/src/components/kline-replay/engine.ts`):**
+   - O estado de cada ordem é **derivado** reexecutando a intenção sobre todas as velas entre a abertura e o ponto atual do replay. Saltos (jump / cortar vela) avaliam as velas intermédias; voltar no tempo desfaz entradas, fechos e ordens "do futuro".
+   - Modelo bid/ask: o gráfico mostra o BID; compra entra no ASK (bid + spread) e sai no BID; venda o inverso. Comissão por trade descontada do P&L.
+   - Regras conservadoras: se a mesma vela toca stop e alvo, conta o stop; gap através do stop sai na abertura.
+   - O saldo é derivado dos trades fechados (sem efeitos colaterais no React, seguro em StrictMode).
+   - Estatísticas reais gravadas na sessão: profit factor, drawdown máximo, expectativa, R médio.
 
 ---
 
