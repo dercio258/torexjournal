@@ -134,3 +134,6 @@ env/
 backend-nest/wa_auth/
 wa_auth/
 C:\MT5_INSTANCES/
+
+# Cloned upstream source (reference only, not part of the build)
+klinecharts-pro/

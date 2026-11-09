@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { 
     FlaskConical, Play, Save, History, Activity, TrendingUp,
-    Briefcase, RefreshCw, CheckCircle2, Sliders, BarChart2, Sparkles
+    Briefcase, RefreshCw, CheckCircle2, Sliders, BarChart2, Sparkles, LineChart
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { Button } from '../components/ui/Button';
+import { KLineChartProTerminal } from '../components/KLineChartProTerminal';
 import api from '../api';
 
 export const Backtest = () => {
     const { selectedAccountId, selectedAccount, accounts, isConsolidated, selectAccount } = useAccount();
 
-    const [activeTab, setActiveTab] = useState<'what_if' | 'strategy_lab' | 'saved_history'>('what_if');
+    const [activeTab, setActiveTab] = useState<'kline_pro' | 'what_if' | 'strategy_lab' | 'saved_history'>('kline_pro');
     const [running, setRunning] = useState(false);
     const [saving, setSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
@@ -150,6 +151,12 @@ export const Backtest = () => {
         }
     };
 
+    const handleSaveKLineReplaySession = async (sessionPayload: any) => {
+        await api.post('/dashboard/backtest/save', sessionPayload, {
+            params: { accountId: selectedAccountId !== 'all' ? selectedAccountId : undefined }
+        });
+    };
+
     const comparison = simulationResult?.comparison;
 
     return (
@@ -159,10 +166,10 @@ export const Backtest = () => {
                 <div>
                     <h1 className="text-2xl md:text-3xl font-black text-fg flex items-center gap-2.5 tracking-tight">
                         <FlaskConical className="text-accent-fg" size={28} />
-                        Laboratório de Backtesting
+                        Laboratório de Backtesting & KLineChart Pro
                     </h1>
                     <p className="text-fg-muted text-sm mt-0.5">
-                        Simule hipóteses sobre o histórico real da conta ou teste estratégias quantitativas.
+                        Gráfico interativo com Fibonacci, Replay de Velas (TradingView / Binance / MT5) e otimização de conta.
                     </p>
                 </div>
 
@@ -208,7 +215,18 @@ export const Backtest = () => {
             </header>
 
             {/* Mode Navigation Tabs */}
-            <div className="flex items-center gap-2 border-b border-line">
+            <div className="flex flex-wrap items-center gap-2 border-b border-line">
+                <button
+                    onClick={() => setActiveTab('kline_pro')}
+                    className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
+                        activeTab === 'kline_pro'
+                            ? 'border-emerald-500 text-accent-fg'
+                            : 'border-transparent text-fg-muted hover:text-fg'
+                    }`}
+                >
+                    <LineChart size={16} />
+                    Gráfico Pro & Replay (KLineChart Pro)
+                </button>
                 <button
                     onClick={() => { setActiveTab('what_if'); setSimulationResult(null); }}
                     className={`flex items-center gap-2 px-5 py-3 text-sm font-bold border-b-2 transition-all cursor-pointer ${
@@ -243,6 +261,15 @@ export const Backtest = () => {
                     Simulações Salvas
                 </button>
             </div>
+
+            {/* TAB 0: KLINECHART PRO INTERACTIVE TERMINAL & REPLAY */}
+            {activeTab === 'kline_pro' && (
+                <KLineChartProTerminal
+                    initialBalance={selectedAccount?.initialBalance || selectedAccount?.balance || 10000}
+                    accountName={selectedAccount?.name || 'Todas as Contas'}
+                    onSaveReplaySession={handleSaveKLineReplaySession}
+                />
+            )}
 
             {/* TAB 1: WHAT-IF HISTORICAL SIMULATION */}
             {activeTab === 'what_if' && (

@@ -10,6 +10,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "@klinecharts/pro": "^0.1.1",
         "@paypal/react-paypal-js": "^8.9.2",
         "@tanstack/react-query": "^5.90.21",
         "@tanstack/react-query-devtools": "^5.91.3",
@@ -21,6 +22,7 @@
         "emoji-picker-react": "^4.18.0",
         "framer-motion": "^12.36.0",
         "html2canvas": "^1.4.1",
+        "klinecharts": "^9.8.12",
         "lightweight-charts": "^5.1.0",
         "lucide-react": "^0.363.0",
         "react": "^18.2.0",
