@@ -17,11 +17,12 @@ import {
     Tooltip,
     Legend
 } from 'chart.js';
-import { PerformanceRadar } from '../components/dashboard/charts/PerformanceRadar';
-import { DailyPnLChart } from '../components/dashboard/charts/DailyPnLChart';
-import { OperationalRadars } from '../components/dashboard/charts/OperationalRadars';
+import { PnLChart } from '../components/charts/PnLChart';
+import { PerformanceScores } from '../components/dashboard/PerformanceScores';
+import { OperationalBreakdown, toSessionRows, toSymbolRows, toWeekdayRows } from '../components/dashboard/OperationalBreakdown';
 import { detectPnLStatus, WinrateGauge, WinRateGaugeChart, ProfitFactorDonut } from '../components/dashboard/StatsWidgets';
-import { useDashboardStats, useSubscriptionStatus, useTradesFallback } from '../hooks/useDashboard';
+import { useDashboardStats, useSubscriptionStatus } from '../hooks/useDashboard';
+import { buttonVariants } from '../components/ui/Button';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 import { PropFirmProgressCard } from '../components/dashboard/PropFirmProgressCard';
@@ -58,7 +59,7 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue 
                     {trend && (
                         <span className={`inline-flex items-center gap-0.5 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
                             isUp 
-                                ? 'bg-emerald-500/10 text-accent-fg' 
+                                ? 'bg-accent/10 text-accent-fg' 
                                 : 'bg-rose-500/10 text-danger-fg'
                         }`}>
                             {isUp ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
@@ -204,7 +205,6 @@ export const Dashboard = () => {
     }, [dateRange.value, customStart, customEnd]);
 
     const { data: stats, isLoading: isStatsLoading, refetch: refetchStats } = useDashboardStats(queryDates.start, queryDates.end, selectedAccountId);
-    const { data: tradesFallback } = useTradesFallback(selectedAccountId);
 
     const handleDateFilter = (range: string) => {
         let label = 'Tudo';
@@ -238,82 +238,15 @@ export const Dashboard = () => {
         setShowDatePicker(false);
     };
 
-    // --- Memoized Calculations ---
-    const sessionsData = useMemo(() => {
-        if (!stats?.bySession) return [];
-
-        const rawSessions = stats.bySession;
-        const currentHour = new Date().getUTCHours();
-        const isLondon = currentHour >= 8 && currentHour < 17;
-        const isNY = currentHour >= 13 && currentHour < 22;
-        const isAsian = currentHour >= 0 && currentHour < 9;
-        const isSydney = currentHour >= 21 || currentHour < 6;
-
-        const standardSessions = ['London', 'New York', 'Asian', 'Sydney'];
-        const existingSessions = rawSessions.map((s: any) => s.session);
-
-        const mergedSessions = [...rawSessions];
-        standardSessions.forEach(s => {
-            if (!existingSessions.some((es: string) => es.toLowerCase().includes(s.toLowerCase()))) {
-                mergedSessions.push({ session: s, count: 0, pnl: 0 });
-            }
-        });
-
-        const totalSessionTrades = mergedSessions.reduce((acc: number, s: any) => acc + (s.count || 0), 0);
-
-        return mergedSessions.map((s: any) => {
-            const raw = (s.session || '').toLowerCase();
-            const name = raw.includes('asian') || raw.includes('asia') || raw.includes('tokyo') ? 'Ásia' :
-                raw.includes('london') ? 'Londres' :
-                raw.includes('new york') || raw.includes('ny') ? 'Nova Iorque' :
-                raw.includes('sydney') ? 'Sydney' : s.session;
-
-            return {
-                name,
-                percent: totalSessionTrades ? ((s.count || 0) / totalSessionTrades) * 100 : 0,
-                pnl: s.pnl || 0,
-                count: s.count || 0,
-                active: (s.session.includes('London') && isLondon) ||
-                    (s.session.includes('New York') && isNY) ||
-                    (s.session.includes('Sydney') && isSydney) ||
-                    ((s.session.includes('Tokyo') || s.session.includes('Asia') || s.session.includes('Asian')) && isAsian)
-            };
-        });
-    }, [stats?.bySession]);
-
-    const instrumentsData = useMemo(() => {
-        if (stats?.bySymbol) {
-            return stats.bySymbol
-                .map((s: any) => ({ 
-                    symbol: s.symbol, 
-                    wins: s.wins || 0, 
-                    losses: s.losses || 0, 
-                    total: (s.wins || 0) + (s.losses || 0),
-                    pnl: s.pnl !== undefined ? Number(s.pnl) : undefined
-                }))
-                .sort((a: any, b: any) => b.total - a.total)
-                .slice(0, 5);
-        }
-
-        if (Array.isArray(tradesFallback)) {
-            const instrumentMap = new Map<string, { wins: number, losses: number, pnl: number }>();
-            tradesFallback.forEach((t: any) => {
-                const profit = Number(t.profit) + Number(t.commission) + Number(t.swap);
-                const symbol = t.symbol.replace(/m$/, '');
-                if (!instrumentMap.has(symbol)) instrumentMap.set(symbol, { wins: 0, losses: 0, pnl: 0 });
-                const inst = instrumentMap.get(symbol)!;
-                inst.pnl += profit;
-                if (profit > 0.1) inst.wins++;
-                else if (profit < -0.1) inst.losses++;
-            });
-            return Array.from(instrumentMap.entries())
-                .map(([symbol, data]) => ({ symbol, ...data, total: data.wins + data.losses, pnl: Number(data.pnl.toFixed(2)) }))
-                .sort((a, b) => b.total - a.total)
-                .slice(0, 5);
-        }
-
-        return [];
-    }, [stats?.bySymbol, tradesFallback]);
+    // Breakdowns come from the same filtered, closed trades as every other dashboard number.
+    const breakdown = useMemo(
+        () => ({
+            symbols: toSymbolRows(stats?.bySymbol),
+            sessions: toSessionRows(stats?.bySession),
+            weekdays: toWeekdayRows(stats?.byWeekday),
+        }),
+        [stats?.bySymbol, stats?.bySession, stats?.byWeekday]
+    );
 
     const currentStats = stats || {
         totalPnL: 0,
@@ -322,6 +255,7 @@ export const Dashboard = () => {
         profitFactor: 0,
         radarMetrics: { consistency: 0, riskManagement: 0, discipline: 0, profitability: 0, winRate: 0 },
         dailyPnL: [],
+        tradePnL: [],
         distribution: { wins: 0, losses: 0, breakeven: 0 }
     };
 
@@ -340,12 +274,12 @@ export const Dashboard = () => {
             {subStatus && subStatus.daysLeft !== undefined && subStatus.daysLeft <= 5 && subStatus.daysLeft > 0 && (
                 <div className="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 animate-in fade-in duration-300">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-amber-500/20 rounded-lg text-amber-500 dark:text-amber-400">
+                        <div className="p-2 bg-amber-500/20 rounded-lg text-amber-600 dark:text-amber-400">
                             <RefreshCw className="w-4 h-4" />
                         </div>
                         <div>
                             <h3 className="text-fg font-bold text-xs sm:text-sm">Sua assinatura expira em {subStatus.daysLeft} dias!</h3>
-                            <p className="text-fg-subtle dark:text-slate-400 text-xs">Renove com um clique para manter seu histórico sincronizado.</p>
+                            <p className="text-fg-muted text-xs">Renove com um clique para manter seu histórico sincronizado.</p>
                         </div>
                     </div>
                     <button
@@ -366,7 +300,7 @@ export const Dashboard = () => {
                 {/* Toolbar: Segmented Filters + Refresh + Add Trade */}
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Segmented Date Pills */}
-                    <div className="flex bg-surface p-1 rounded-lg border border-line shadow-xs dark:shadow-none overflow-x-auto no-scrollbar gap-1">
+                    <div className="flex bg-surface p-1 rounded-lg border border-line overflow-x-auto no-scrollbar gap-1">
                         {[
                             { label: 'Tudo', val: 'all' },
                             { label: 'Ontem', val: 'yesterday' },
@@ -378,7 +312,7 @@ export const Dashboard = () => {
                                 onClick={() => handleDateFilter(opt.val)}
                                 className={`px-3 py-1 text-xs rounded-md transition-all cursor-pointer ${
  dateRange.value === opt.val 
- ? 'bg-emerald-50 dark:bg-[rgba(16,185,129,0.08)] border border-emerald-300 dark:border-[rgba(16,185,129,0.45)] text-emerald-700 dark:text-[#34D399] font-semibold shadow-xs' 
+ ? 'bg-accent/10 border border-accent/40 text-accent-fg font-semibold' 
  : 'text-fg-muted hover:text-fg hover:bg-surface-2 border border-transparent'
  }`}
                             >
@@ -391,7 +325,7 @@ export const Dashboard = () => {
                                 onClick={() => setShowDatePicker(true)}
                                 className={`p-1.5 rounded-md transition-colors cursor-pointer ${
  dateRange.value === 'custom' 
- ? 'text-emerald-700 dark:text-[#34D399] bg-emerald-50 dark:bg-[rgba(16,185,129,0.10)] border border-emerald-300 dark:border-[rgba(16,185,129,0.30)]' 
+ ? 'text-accent-fg bg-accent/10 border border-accent/40' 
  : 'text-fg-muted hover:text-fg hover:bg-surface-2 '
  }`}
                                 title="Selecionar Período Personalizado"
@@ -404,16 +338,16 @@ export const Dashboard = () => {
                     {/* Refresh Button */}
                     <button 
                         onClick={() => refetchStats()} 
-                        className="p-2 bg-surface hover:bg-surface-2 text-fg-muted hover:text-fg rounded-lg transition-all border border-line hover:border-emerald-500/40 active:scale-95 cursor-pointer shadow-xs dark:shadow-none"
+                        className="p-2 bg-surface hover:bg-surface-2 text-fg-muted hover:text-fg rounded-lg transition-all border border-line hover:border-accent/40 active:scale-95 cursor-pointer"
                         title="Atualizar Métricas"
                     >
-                        <RefreshCw size={14} className={isStatsLoading ? 'animate-spin text-emerald-500 dark:text-emerald-400' : ''} />
+                        <RefreshCw size={14} className={isStatsLoading ? 'animate-spin text-accent-fg' : ''} />
                     </button>
 
                     {/* Add Trade Link Button */}
                     <Link 
                         to="/add-trades"
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#10B981] hover:bg-[#34D399] text-[#04110C] rounded-full text-xs font-semibold transition-all hover:shadow-[0_0_20px_rgba(16,185,129,0.22)] active:scale-95"
+                        className={buttonVariants({ variant: 'brand', size: 'sm', pill: true, className: 'px-3.5' })}
                     >
                         <Plus size={14} strokeWidth={2.5} />
                         <span>Novo Trade</span>
@@ -439,16 +373,14 @@ export const Dashboard = () => {
                             const TrendIcon = pnlInfo.trendIcon;
 
                             return (
-                                <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
-                                    {/* Discreet top green accent line */}
-                                    <div className="absolute top-0 left-4 right-4 h-[2px] bg-emerald-500/80 rounded-full" />
+                                <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
 
                                     {/* Header / Label */}
                                     <div className="flex justify-between items-center w-full">
-                                        <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                        <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
                                             TOTAL P&L
                                         </span>
-                                        <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                                        <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
                                             <DollarSign size={14} />
                                         </div>
                                     </div>
@@ -472,16 +404,14 @@ export const Dashboard = () => {
                         })()}
 
                         {/* 2. Total Trades with WinrateGauge Chart */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-indigo-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
-                            {/* Discreet top indigo accent line */}
-                            <div className="absolute top-0 left-4 right-4 h-[2px] bg-indigo-500/80 rounded-full" />
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
                                     TOTAL TRADES
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-fg transition-colors">
                                     <Activity size={14} />
                                 </div>
                             </div>
@@ -498,16 +428,14 @@ export const Dashboard = () => {
                         </div>
 
                         {/* 3. Win Rate with WinRateGaugeChart */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-emerald-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
-                            {/* Discreet top green accent line */}
-                            <div className="absolute top-0 left-4 right-4 h-[2px] bg-emerald-500/80 rounded-full" />
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
                                     TAXA DE ACERTO
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-emerald-500 dark:group-hover:text-emerald-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
                                     <TrendingUp size={14} />
                                 </div>
                             </div>
@@ -525,8 +453,8 @@ export const Dashboard = () => {
                             <div className="flex items-center justify-center w-full">
                                 <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full ${
                                     currentStats.winRate >= 50 
-                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
-                                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                        ? 'bg-accent/10 text-accent-fg border border-accent/20' 
+                                        : 'bg-danger/10 text-danger-fg border border-danger/20'
                                 }`}>
                                     {currentStats.winRate >= 50 ? 'Consistente' : 'Ajustar'}
                                 </span>
@@ -534,16 +462,14 @@ export const Dashboard = () => {
                         </div>
 
                         {/* 4. Profit Factor with ProfitFactorDonut */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-amber-500/40 transition-all card-hover flex flex-col justify-between min-h-[195px] overflow-hidden group shadow-xs dark:shadow-none">
-                            {/* Discreet top amber accent line */}
-                            <div className="absolute top-0 left-4 right-4 h-[2px] bg-amber-500/80 rounded-full" />
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
 
                             {/* Header / Label */}
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-subtle dark:text-[#9CA3AF] uppercase tracking-[0.05em]">
+                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
                                     FATOR DE LUCRO
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-[#08090C] border border-line text-fg-subtle dark:text-[#6B7280] group-hover:text-amber-500 dark:group-hover:text-amber-400 transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-fg transition-colors">
                                     <BarChart3 size={14} />
                                 </div>
                             </div>
@@ -557,10 +483,10 @@ export const Dashboard = () => {
                             <div className="flex items-center justify-center w-full">
                                 <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full ${
                                     currentStats.profitFactor >= 1.5
-                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                        ? 'bg-accent/10 text-accent-fg border border-accent/20'
                                         : currentStats.profitFactor >= 1.0
-                                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                                        : 'bg-danger/10 text-danger-fg border border-danger/20'
                                 }`}>
                                     {currentStats.profitFactor >= 1.75 ? 'Excelente' : currentStats.profitFactor >= 1.3 ? 'Consistente' : currentStats.profitFactor >= 1.0 ? 'Moderado' : 'Atenção'}
                                 </span>
@@ -570,13 +496,8 @@ export const Dashboard = () => {
 
                     {/* MAIN PERFORMANCE SECTION (CHARTS) */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 items-stretch">
-                        <div className="lg:col-span-2 bg-surface border border-line rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
-                            <DailyPnLChart data={currentStats.dailyPnL} />
-                        </div>
-
-                        <div className="lg:col-span-1 bg-surface border border-line rounded-xl p-4 sm:p-5 card-hover h-[360px] sm:h-[380px] flex flex-col justify-between">
-                            <PerformanceRadar data={currentStats.radarMetrics} />
-                        </div>
+                        <PnLChart data={currentStats.dailyPnL} className="lg:col-span-2" />
+                        <PerformanceScores data={currentStats.radarMetrics} />
                     </div>
 
                     {/* INSTITUTIONAL OPERATIONAL BREAKDOWN (3 RADAR CARDS) */}
@@ -586,17 +507,12 @@ export const Dashboard = () => {
                                 <Activity size={14} className="text-accent-fg" />
                                 Detalhamento Operacional
                             </h2>
-                            <span className="text-[10px] text-fg-subtle font-mono">
-                                Ativos, Sessões e Dias da Semana
+                            <span className="text-[10px] text-fg-subtle">
+                                Resultado por ativo, sessão e dia · período selecionado
                             </span>
                         </div>
 
-                        <OperationalRadars
-                            instrumentsData={instrumentsData}
-                            sessionsData={sessionsData}
-                            trades={tradesFallback}
-                            dailyPnL={currentStats.dailyPnL}
-                        />
+                        <OperationalBreakdown {...breakdown} />
                     </div>
                 </>
             )}
@@ -606,7 +522,7 @@ export const Dashboard = () => {
                 <div className="fixed inset-0 bg-canvas/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                     <div className="bg-surface border border-line rounded-2xl p-5 shadow-2xl max-w-sm w-full space-y-4">
                         <div className="flex items-center gap-2.5">
-                            <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                            <div className="p-2 bg-accent/10 text-accent-fg rounded-lg">
                                 <Calendar size={18} />
                             </div>
                             <div>
@@ -622,7 +538,7 @@ export const Dashboard = () => {
                                     type="date"
                                     value={customStart}
                                     onChange={e => setCustomStart(e.target.value)}
-                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all font-mono"
                                 />
                             </div>
                             <div>
@@ -631,7 +547,7 @@ export const Dashboard = () => {
                                     type="date"
                                     value={customEnd}
                                     onChange={e => setCustomEnd(e.target.value)}
-                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all font-mono"
                                 />
                             </div>
                         </div>
@@ -646,7 +562,7 @@ export const Dashboard = () => {
                             <button
                                 onClick={handleCustomRangeApply}
                                 disabled={!customStart}
-                                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold transition-all shadow-sm active:scale-95"
+                                className={buttonVariants({ variant: 'brand', size: 'sm', className: 'flex-1 h-auto py-2' })}
                             >
                                 Aplicar
                             </button>

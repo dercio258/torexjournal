@@ -12,7 +12,7 @@ export const detectPnLStatus = (pnl: number) => {
             status: 'win' as const,
             textClass: 'text-accent-fg',
             glowColor: 'rgba(16, 185, 129, 0.16)',
-            badgeBg: 'bg-emerald-500/15 text-accent-fg',
+            badgeBg: 'bg-accent/10 text-accent-fg',
             badgeLabel: '+ Profit',
             formattedValue: `+$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
             trendIcon: ArrowUpRight,
@@ -23,7 +23,7 @@ export const detectPnLStatus = (pnl: number) => {
             status: 'loss' as const,
             textClass: 'text-danger-fg',
             glowColor: 'rgba(244, 63, 94, 0.16)',
-            badgeBg: 'bg-rose-500/15 text-danger-fg',
+            badgeBg: 'bg-danger/10 text-danger-fg',
             badgeLabel: '- Loss',
             formattedValue: `-$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
             trendIcon: ArrowDownRight,
@@ -58,23 +58,13 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
 
     const isHealthy = validPF >= 1.5;
     const isModerate = validPF >= 1.0 && validPF < 1.5;
-    const statusColor = isHealthy ? 'text-emerald-500 dark:text-emerald-400' : isModerate ? 'text-amber-500 dark:text-amber-400' : validPF > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-fg-muted';
+    const statusColor = isHealthy ? 'text-accent-fg' : isModerate ? 'text-amber-600 dark:text-amber-400' : validPF > 0 ? 'text-danger-fg' : 'text-fg-muted';
     const statusText = validPF >= 1.75 ? 'Excelente' : validPF >= 1.3 ? 'Consistente' : validPF >= 1.0 ? 'Moderado' : validPF > 0 ? 'Atenção' : 'Sem dados';
 
     return (
         <div className="flex items-center justify-center gap-3 py-0.5">
             <div className="relative flex items-center justify-center">
                 <svg width={size} height={size} className="transform -rotate-90">
-                    <defs>
-                        <linearGradient id="pfProfitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#10b981" />
-                            <stop offset="100%" stopColor="#059669" />
-                        </linearGradient>
-                        <linearGradient id="pfLossGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="#f43f5e" />
-                            <stop offset="100%" stopColor="#e11d48" />
-                        </linearGradient>
-                    </defs>
 
                     {/* Base circle (Loss / Track) */}
                     <circle
@@ -82,9 +72,9 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
                         cy={size / 2}
                         r={radius}
                         fill="transparent"
-                        stroke={validPF > 0 ? "url(#pfLossGrad)" : "currentColor"}
+                        stroke="currentColor"
                         strokeWidth={strokeWidth}
-                        className={`transition-all duration-700 ${validPF > 0 ? '' : 'text-fg dark:text-[#161822]'}`}
+                        className={`transition-all duration-700 ${validPF > 0 ? 'text-data-neg' : 'text-surface-3'}`}
                     />
 
                     {/* Profit segment */}
@@ -94,12 +84,12 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
                             cy={size / 2}
                             r={radius}
                             fill="transparent"
-                            stroke="url(#pfProfitGrad)"
+                            stroke="currentColor"
                             strokeWidth={strokeWidth}
                             strokeDasharray={`${profitStroke} ${circumference}`}
                             strokeDashoffset={0}
                             strokeLinecap="round"
-                            className="transition-all duration-1000 ease-out"
+                            className="text-data-pos transition-all duration-1000 ease-out"
                         />
                     )}
                 </svg>
@@ -109,7 +99,7 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
                     <span className={`text-base sm:text-lg font-black font-mono leading-none tracking-tight ${statusColor}`}>
                         {validPF.toFixed(2)}
                     </span>
-                    <span className="text-[8px] font-mono text-fg-muted dark:text-slate-500 uppercase font-bold mt-0.5">
+                    <span className="text-[9px] text-fg-subtle uppercase font-semibold mt-0.5">
                         PF
                     </span>
                 </div>
@@ -119,16 +109,16 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
             <div className="flex flex-col gap-1 font-mono text-[10px]">
                 <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    <span className="text-fg-subtle dark:text-slate-400">Ganhos:</span>
-                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{(profitRatio * 100).toFixed(0)}%</span>
+                    <span className="flex items-center gap-1 text-fg-subtle"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos" />Ganhos:</span>
+                    <span className="font-bold text-fg tabular-nums">{(profitRatio * 100).toFixed(0)}%</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                    <span className="text-fg-subtle dark:text-slate-400">Perdas:</span>
-                    <span className="font-bold text-rose-600 dark:text-rose-400">{(Math.max(0, 100 - profitRatio * 100)).toFixed(0)}%</span>
+                    <span className="flex items-center gap-1 text-fg-subtle"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg" />Perdas:</span>
+                    <span className="font-bold text-fg tabular-nums">{(Math.max(0, 100 - profitRatio * 100)).toFixed(0)}%</span>
                 </div>
-                <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded w-fit ${
-                    isHealthy ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : isModerate ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded w-fit ${
+                    isHealthy ? 'bg-accent/10 text-accent-fg' : isModerate ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400' : 'bg-danger/10 text-danger-fg'
                 }`}>
                     {statusText}
                 </span>
@@ -150,21 +140,12 @@ export const WinRateGaugeChart = ({ winRate = 0 }: { winRate: number; wins?: num
 
     const isConsistente = validWinRate >= 50;
     const isModerate = validWinRate >= 40 && validWinRate < 50;
-    const statusColor = isConsistente ? 'text-emerald-500 dark:text-emerald-400' : isModerate ? 'text-amber-500 dark:text-amber-400' : 'text-rose-500 dark:text-rose-400';
-    const strokeColor = isConsistente ? '#10b981' : isModerate ? '#f59e0b' : '#f43f5e';
+    const statusColor = isConsistente ? 'text-accent-fg' : isModerate ? 'text-amber-600 dark:text-amber-400' : 'text-danger-fg';
+    const strokeClass = isConsistente ? 'text-data-pos' : isModerate ? 'text-amber-500' : 'text-data-neg';
 
     return (
         <div className="flex flex-col items-center justify-center relative py-1">
             <svg width={width} height={height} className="overflow-visible">
-                <defs>
-                    <filter id="gaugeGlow" x="-20%" y="-20%" width="140%" height="140%">
-                        <feGaussianBlur stdDeviation="2.5" result="blur" />
-                        <feMerge>
-                            <feMergeNode in="blur" />
-                            <feMergeNode in="SourceGraphic" />
-                        </feMerge>
-                    </filter>
-                </defs>
 
                 {/* Base Track Arc */}
                 <path
@@ -173,25 +154,24 @@ export const WinRateGaugeChart = ({ winRate = 0 }: { winRate: number; wins?: num
                     stroke="currentColor"
                     strokeWidth={strokeWidth}
                     strokeLinecap="round"
-                    className="text-fg dark:text-[#161822]"
+                    className="text-surface-3"
                 />
 
                 {/* Progress Arc */}
                 <path
                     d="M 17 60 A 46 46 0 0 1 109 60"
                     fill="none"
-                    stroke={strokeColor}
+                    stroke="currentColor"
                     strokeWidth={strokeWidth}
                     strokeDasharray={`${progressStroke} ${circumference}`}
                     strokeLinecap="round"
-                    filter="url(#gaugeGlow)"
-                    className="transition-all duration-1000 ease-out"
+                    className={`transition-all duration-1000 ease-out ${strokeClass}`}
                 />
             </svg>
 
             {/* Value Perfectly Centered Inside Gauge Arc */}
             <div className="absolute inset-0 flex items-center justify-center pt-2">
-                <span className={`text-lg sm:text-xl font-bold font-mono leading-none tracking-tight ${statusColor} drop-shadow-sm`}>
+                <span className={`text-lg sm:text-xl font-bold font-mono leading-none tracking-tight ${statusColor}`}>
                     {validWinRate.toFixed(1)}%
                 </span>
             </div>
@@ -219,27 +199,22 @@ export const WinrateGauge = ({ wins = 0, losses = 0, breakeven = 0, trades = 0 }
     return (
         <div className="flex flex-col items-center justify-center relative py-3">
             <svg height={radius + 10} width={radius * 2} className="overflow-visible">
-                <defs>
-                    <filter id="glow-green">
-                        <feGaussianBlur stdDeviation="2" result="coloredBlur" />
-                        <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
-                    </filter>
-                </defs>
                 {/* Base de LOSS / Neutro se 0 trades */}
                 <path
                     d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
                     fill="none"
-                    stroke={totalCalculated === 0 ? "currentColor" : "#f43f5e"}
+                    stroke="currentColor"
                     strokeWidth={stroke}
                     strokeLinecap="round"
-                    className={totalCalculated === 0 ? "text-fg dark:text-[#161822]" : ""}
+                    className={totalCalculated === 0 ? "text-surface-3" : "text-data-neg"}
                 />
                 {/* Camada de BE (Amarelo) */}
                 {totalCalculated > 0 && beStroke > 0 && (
                     <path
                         d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
                         fill="none"
-                        stroke="#f59e0b"
+                        stroke="currentColor"
+                        className="text-amber-500"
                         strokeWidth={stroke}
                         strokeDasharray={`${(winStroke + beStroke)} ${circumference}`}
                         strokeLinecap="round"
@@ -251,32 +226,32 @@ export const WinrateGauge = ({ wins = 0, losses = 0, breakeven = 0, trades = 0 }
                     <path
                         d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
                         fill="none"
-                        stroke="#10b981"
+                        stroke="currentColor"
+                        className="text-data-pos"
                         strokeWidth={stroke}
                         strokeDasharray={`${winStroke} ${circumference}`}
                         strokeLinecap="round"
-                        filter="url(#glow-green)"
                         style={{ transition: 'stroke-dasharray 1s ease-in-out' }}
                     />
                 )}
             </svg>
             <div className="absolute top-11 flex flex-col items-center">
-                <span className="text-3xl font-black text-fg font-mono leading-none tracking-tighter">{trades}</span>
+                <span className="text-3xl font-bold text-fg leading-none tracking-tight">{trades}</span>
                 <span className="text-[9px] text-fg-subtle uppercase tracking-[0.2em] font-bold mt-1">Trades</span>
                 <div className="mt-2 flex items-center gap-2">
                     <div className="text-center">
-                        <span className="text-[9px] text-emerald-600 dark:text-emerald-500 font-black block leading-none">{(winPercent * 100).toFixed(0)}%</span>
-                        <span className="text-[6px] text-fg-subtle dark:text-slate-400 uppercase">Win</span>
+                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(winPercent * 100).toFixed(0)}%</span>
+                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos" />Win</span>
                     </div>
-                    <div className="w-px h-3 bg-slate-300 dark:bg-white/[0.08]" />
+                    <div className="w-px h-4 bg-line-strong" />
                     <div className="text-center">
-                        <span className="text-[9px] text-amber-600 dark:text-amber-500 font-black block leading-none">{(bePercent * 100).toFixed(0)}%</span>
-                        <span className="text-[6px] text-fg-subtle dark:text-slate-400 uppercase">BE</span>
+                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(bePercent * 100).toFixed(0)}%</span>
+                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />BE</span>
                     </div>
-                    <div className="w-px h-3 bg-slate-300 dark:bg-white/[0.08]" />
+                    <div className="w-px h-4 bg-line-strong" />
                     <div className="text-center">
-                        <span className="text-[9px] text-rose-600 dark:text-rose-500 font-black block leading-none">{(Math.max(0, 100 - (winPercent * 100) - (bePercent * 100))).toFixed(0)}%</span>
-                        <span className="text-[6px] text-fg-subtle dark:text-slate-400 uppercase">Loss</span>
+                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(Math.max(0, 100 - (winPercent * 100) - (bePercent * 100))).toFixed(0)}%</span>
+                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg" />Loss</span>
                     </div>
                 </div>
             </div>

@@ -13,11 +13,16 @@ export interface DashboardStats {
         profitability: number;
         winRate: number;
     };
-    dailyPnL: { date: string; value: number; ticket?: string }[];
+    /** One point per trading day (UTC), chronological. `date` = dd/mm label, `isoDate` = YYYY-MM-DD. */
+    dailyPnL: { date: string; isoDate: string; value: number }[];
+    /** Most recent closed trades (max 20), chronological. */
+    tradePnL: { date: string; value: number; ticket?: string }[];
     distribution: { wins: number; losses: number; breakeven: number };
     healthScore?: { score: number; details: any };
     bySession?: any[];
-    bySymbol?: any[];
+    bySymbol?: { symbol: string; count: number; wins: number; losses: number; pnl: number }[];
+    /** 0 = Sunday … 6 = Saturday (UTC). */
+    byWeekday?: { weekday: number; count: number; wins: number; pnl: number }[];
     isConsolidated?: boolean;
     currencies?: string[];
     hasMultipleCurrencies?: boolean;
@@ -63,19 +68,29 @@ export const useDashboardStats = (startDate: string, endDate: string, accountId?
 
             const data = perfRes.data;
             
-            // Transform data as needed
-            const mappedDaily = data.dailyPnL?.map((d: any) => ({
-                date: new Date(d.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-                value: isNaN(Number(d.value ?? d.pnl)) ? 0 : Number(d.value ?? d.pnl)
-            })) || [];
+            // Daily buckets come keyed by UTC date (YYYY-MM-DD); format the label in UTC too
+            // so a day never shifts across the user's local midnight.
+            const dailyPnL = (data.dailyPnL || [])
+                .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(d.date)))
+                .map((d: any) => {
+                    const iso = String(d.date);
+                    const value = Number(d.value ?? d.pnl);
+                    return { isoDate: iso, date: `${iso.slice(8, 10)}/${iso.slice(5, 7)}`, value: Number.isFinite(value) ? value : 0 };
+                })
+                .sort((a: any, b: any) => a.isoDate.localeCompare(b.isoDate));
+
+            const tradePnL = (data.tradePnL || [])
+                .filter((t: any) => t.date)
+                .map((t: any) => ({
+                    date: new Date(t.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+                    value: Number(t.value) || 0,
+                    ticket: t.ticket,
+                }));
 
             return {
                 ...data,
-                dailyPnL: data.tradePnL ? data.tradePnL.map((t: any) => ({
-                    date: new Date(t.date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
-                    value: Number(t.value) || 0,
-                    ticket: t.ticket
-                })).reverse() : mappedDaily,
+                dailyPnL,
+                tradePnL,
                 distribution: data.distribution || { wins: 0, losses: 0, breakeven: 0 },
                 healthScore: scoreRes?.data
             };
