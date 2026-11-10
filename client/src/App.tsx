@@ -34,8 +34,17 @@ import { EmotionalShare } from './pages/EmotionalShare';
 import EconomicCalendar from './pages/EconomicCalendar';
 import { Notifications } from './pages/Notifications';
 import { Network } from './pages/Network';
-import { Backtest } from './pages/Backtest';
 import { BacktestReplaySessionPage } from './pages/BacktestReplaySessionPage';
+import {
+    BacktestingLayout,
+    BacktestingIndexRedirect,
+    SessionsPage,
+    NewSessionPage,
+    SessionDetailPage,
+    StrategiesPage,
+    BacktestDashboardPage,
+    HypothesesPage,
+} from './pages/backtesting';
 import { Reports } from './pages/Reports';
 import { Leaderboard } from './pages/Leaderboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -185,10 +194,20 @@ function App() {
                                         <Route path="/reports" element={<Reports />} />
                                         <Route path="/trades" element={<Trades />} />
                                         <Route path="/trades/:id" element={<TradeDetails />} />
-                                        <Route path="/backtest" element={<Backtest />} />
-                                        <Route path="/backtesting" element={<Backtest />} />
-                                        <Route path="/backtesting/replay/:sessionId" element={<BacktestReplaySessionPage />} />
+                                        {/* Backtesting: hub pages share a layout; the replay terminal is full-width */}
+                                        <Route path="/backtest" element={<Navigate to="/backtesting" replace />} />
                                         <Route path="/backtest/replay/:sessionId" element={<BacktestReplaySessionPage />} />
+                                        <Route path="/backtesting/replay/:sessionId" element={<BacktestReplaySessionPage />} />
+                                        <Route path="/backtesting" element={<BacktestingLayout />}>
+                                            <Route index element={<BacktestingIndexRedirect />} />
+                                            <Route path="sessions" element={<SessionsPage />} />
+                                            <Route path="sessions/new" element={<NewSessionPage />} />
+                                            <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
+                                            <Route path="strategies" element={<StrategiesPage />} />
+                                            <Route path="dashboard" element={<BacktestDashboardPage />} />
+                                            <Route path="hypotheses" element={<HypothesesPage />} />
+                                            <Route path="*" element={<Navigate to="/backtesting/sessions" replace />} />
+                                        </Route>
                                     </Route>
 
                                     {/* Fallback */}

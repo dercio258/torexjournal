@@ -1288,6 +1288,23 @@ export class DashboardService {
             let realNetProfit = 0;
             let simPeakEquity = initialBalance;
             let simMaxDrawdown = 0;
+            // Real-account metrics, so the comparison is like for like.
+            let realWins = 0;
+            let realLosses = 0;
+            let realGrossProfit = 0;
+            let realGrossLoss = 0;
+            let realPeakEquity = initialBalance;
+            let realMaxDrawdown = 0;
+            let excludedTrades = 0;
+            let breakevenTrades = 0;
+
+            // Session tags hold every market open at the trade's OPEN hour, e.g.
+            // "Sydney / Tokyo" or "Tokyo / London": Asian = no London/NY overlap.
+            const isAsianTag = (tag: string) => {
+                const v = (tag || '').toLowerCase();
+                if (/london|new york|\bny\b/.test(v)) return false;
+                return /sydney|tokyo|asia/.test(v);
+            };
 
             const equityCurve: any[] = [];
             const simulatedTradeLog: any[] = [];
@@ -1296,13 +1313,32 @@ export class DashboardService {
                 const origPnl = (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0);
                 realNetProfit += origPnl;
                 realEquity += origPnl;
+                if (origPnl > 0) { realWins++; realGrossProfit += origPnl; }
+                else if (origPnl < 0) { realLosses++; realGrossLoss += -origPnl; }
+                if (realEquity > realPeakEquity) realPeakEquity = realEquity;
+                realMaxDrawdown = Math.max(realMaxDrawdown, realPeakEquity - realEquity);
 
                 const closeDate = t.closeTime ? new Date(t.closeTime) : null;
-                const isAsian = (t.session || '').toLowerCase() === 'asian';
-                const isFriday = closeDate ? closeDate.getDay() === 5 : false;
+                const isAsian = isAsianTag(t.session);
+                // Weekday in UTC, like the rest of the dashboard.
+                const isFriday = closeDate ? closeDate.getUTCDay() === 5 : false;
+                const dateStr = closeDate ? closeDate.toISOString().split('T')[0] : 'N/A';
 
-                if (excludeAsian && isAsian) continue;
-                if (excludeFridays && isFriday) continue;
+                if ((excludeAsian && isAsian) || (excludeFridays && isFriday)) {
+                    excludedTrades++;
+                    // Keep the point so both curves share the same x axis.
+                    equityCurve.push({
+                        date: dateStr,
+                        ticket: t.ticket || t.id,
+                        realEquity: Number(realEquity.toFixed(2)),
+                        simulatedEquity: Number(simEquity.toFixed(2)),
+                        realPnl: Number(origPnl.toFixed(2)),
+                        simulatedPnl: 0,
+                        excluded: true,
+                    });
+                    continue;
+                }
+                if (origPnl === 0) breakevenTrades++;
 
                 const riskAmount = simEquity * (riskPercent / 100);
                 let simulatedPnl = 0;
@@ -1322,7 +1358,6 @@ export class DashboardService {
                 const dd = simPeakEquity - simEquity;
                 if (dd > simMaxDrawdown) simMaxDrawdown = dd;
 
-                const dateStr = closeDate ? closeDate.toISOString().split('T')[0] : 'N/A';
                 equityCurve.push({
                     date: dateStr,
                     ticket: t.ticket || t.id,
@@ -1345,7 +1380,7 @@ export class DashboardService {
 
             const simTotalTrades = simWins + simLosses;
             const simWinRate = simTotalTrades > 0 ? Number(((simWins / simTotalTrades) * 100).toFixed(1)) : 0;
-            const simProfitFactor = simGrossLoss === 0 ? Number(simGrossProfit.toFixed(2)) : Number((simGrossProfit / simGrossLoss).toFixed(2));
+            const simProfitFactor = simGrossLoss === 0 ? null : Number((simGrossProfit / simGrossLoss).toFixed(2));
             const simNetProfit = Number((simEquity - initialBalance).toFixed(2));
             const simMaxDdPercent = simPeakEquity > 0 ? Number(((simMaxDrawdown / simPeakEquity) * 100).toFixed(1)) : 0;
 
@@ -1360,21 +1395,23 @@ export class DashboardService {
                 simulatedMaxDrawdown: Number(simMaxDrawdown.toFixed(2)),
                 simulatedMaxDrawdownPercent: simMaxDdPercent,
                 finalBalance: Number(simEquity.toFixed(2)),
-                initialBalance
+                initialBalance,
+                realWinRate: realWins + realLosses > 0 ? Number(((realWins / (realWins + realLosses)) * 100).toFixed(1)) : 0,
+                realProfitFactor: realGrossLoss === 0 ? null : Number((realGrossProfit / realGrossLoss).toFixed(2)),
+                realMaxDrawdown: Number(realMaxDrawdown.toFixed(2)),
+                realMaxDrawdownPercent: realPeakEquity > 0 ? Number(((realMaxDrawdown / realPeakEquity) * 100).toFixed(1)) : 0,
+                excludedTrades,
+                breakevenTrades,
             };
 
+            // Factual statements only: what changed and why, no claims we didn't measure.
             const insights: string[] = [];
-            if (simNetProfit > realNetProfit) {
-                insights.push(`A regra simulada aumentou o resultado da conta em +$${(simNetProfit - realNetProfit).toFixed(2)}.`);
-            } else {
-                insights.push(`O desempenho real da conta superou a regra estática de simulação.`);
-            }
-            if (excludeAsian) {
-                insights.push(`A filtragem da sessão Asiática protegeu a curva contra ruídos noturnos.`);
-            }
-            if (rrTarget >= 2) {
-                insights.push(`A relação R:R de 1:${rrTarget} gerou expectativa matemática fortemente positiva.`);
-            }
+            const delta = simNetProfit - realNetProfit;
+            insights.push(`${delta >= 0 ? 'A hipótese melhora' : 'A hipótese piora'} o resultado em ${delta >= 0 ? '+' : '−'}$${Math.abs(delta).toFixed(2)} face ao real.`);
+            if (excludedTrades > 0) insights.push(`${excludedTrades} de ${rawTrades.length} trades foram excluídos pelos filtros.`);
+            if (breakevenTrades > 0) insights.push(`${breakevenTrades} trades a zero ficaram sem resultado na simulação.`);
+            const breakEvenWr = 100 / (1 + rrTarget);
+            insights.push(`Com alvo 1:${rrTarget}, a taxa de acerto de equilíbrio é ${breakEvenWr.toFixed(1)}%; a amostra tem ${simWinRate}%.`);
 
             return {
                 mode: 'ACCOUNT_HISTORY',

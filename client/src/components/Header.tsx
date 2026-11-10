@@ -107,7 +107,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
         if (path === '/calendar') return 'Calendário Econômico';
         if (path === '/notifications') return 'Notificações';
         if (path === '/reports') return 'Relatórios';
-        if (path === '/backtest') return 'Backtest Lab';
+        if (path.startsWith('/backtesting/replay/')) return 'Replay';
+        if (path.startsWith('/backtest')) return 'Backtesting';
         if (path === '/add-trades') return 'Adicionar Trades';
         return 'Torex Journal';
     };
