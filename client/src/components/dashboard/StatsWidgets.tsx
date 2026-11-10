@@ -13,10 +13,10 @@ export const detectPnLStatus = (pnl: number) => {
             textClass: 'text-accent-fg',
             glowColor: 'rgba(16, 185, 129, 0.16)',
             badgeBg: 'bg-accent/10 text-accent-fg',
-            badgeLabel: '+ Profit',
+            badgeLabel: 'Resultado positivo',
             formattedValue: `+$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
             trendIcon: ArrowUpRight,
-            subtext: ''
+            subtext: 'Lucro líquido acumulado'
         };
     } else if (isLoss) {
         return {
@@ -24,10 +24,10 @@ export const detectPnLStatus = (pnl: number) => {
             textClass: 'text-danger-fg',
             glowColor: 'rgba(244, 63, 94, 0.16)',
             badgeBg: 'bg-danger/10 text-danger-fg',
-            badgeLabel: '- Loss',
+            badgeLabel: 'Resultado negativo',
             formattedValue: `-$${Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
             trendIcon: ArrowDownRight,
-            subtext: ''
+            subtext: 'Prejuízo líquido no período'
         };
     } else {
         return {
@@ -35,37 +35,59 @@ export const detectPnLStatus = (pnl: number) => {
             textClass: 'text-fg',
             glowColor: 'rgba(148, 163, 184, 0.05)',
             badgeBg: 'bg-surface-2 text-fg-muted',
-            badgeLabel: '0.00 BE',
+            badgeLabel: 'Neutro (0.00)',
             formattedValue: '$0.00',
             trendIcon: null,
-            subtext: ''
+            subtext: 'Sem variação no período'
         };
     }
 };
 
-// --- Donut Circular de Profit Factor ---
+// --- Donut Circular de Profit Factor (Sem micro-badges redundantes) ---
 export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }) => {
-    const size = 92;
+    const size = 84;
     const strokeWidth = 7;
-    const radius = (size - strokeWidth) / 2; // (92 - 7) / 2 = 42.5
-    const circumference = 2 * Math.PI * radius; // ~267.035
-    
-    // PF = GrossProfit / GrossLoss
-    // ratio = PF / (PF + 1). Se PF = 2.0 -> 2/3 = 66.7%. Se PF = 0.58 -> 36.7%. Se PF = 0 -> 0%
+    const radius = (size - strokeWidth) / 2;
+    const circumference = 2 * Math.PI * radius;
+
     const validPF = Math.max(0, Number(profitFactor) || 0);
     const profitRatio = validPF > 0 ? validPF / (validPF + 1) : 0;
     const profitStroke = profitRatio * circumference;
 
     const isHealthy = validPF >= 1.5;
     const isModerate = validPF >= 1.0 && validPF < 1.5;
-    const statusColor = isHealthy ? 'text-accent-fg' : isModerate ? 'text-amber-600 dark:text-amber-400' : validPF > 0 ? 'text-danger-fg' : 'text-fg-muted';
-    const statusText = validPF >= 1.75 ? 'Excelente' : validPF >= 1.3 ? 'Consistente' : validPF >= 1.0 ? 'Moderado' : validPF > 0 ? 'Atenção' : 'Sem dados';
+    const statusColor = isHealthy
+        ? 'text-accent-fg'
+        : isModerate
+          ? 'text-amber-600 dark:text-amber-400'
+          : validPF > 0
+            ? 'text-danger-fg'
+            : 'text-fg-muted';
+
+    const displayPF = validPF >= 99 ? '99+' : validPF.toFixed(2);
 
     return (
-        <div className="flex items-center justify-center gap-3 py-0.5">
-            <div className="relative flex items-center justify-center">
-                <svg width={size} height={size} className="transform -rotate-90">
+        <div className="flex items-center justify-between gap-4 w-full py-1">
+            <div className="flex flex-col">
+                <span className={`text-2xl sm:text-[28px] font-bold tabular-nums tracking-tight leading-none ${statusColor}`}>
+                    {displayPF}
+                </span>
+                <div className="mt-2.5 flex flex-col gap-1 text-xs tabular-nums">
+                    <div className="flex items-center gap-1.5 text-fg-muted">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos shrink-0" />
+                        <span>Ganhos:</span>
+                        <span className="font-semibold text-fg">{(profitRatio * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-fg-muted">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg shrink-0" />
+                        <span>Perdas:</span>
+                        <span className="font-semibold text-fg">{(Math.max(0, 100 - profitRatio * 100)).toFixed(0)}%</span>
+                    </div>
+                </div>
+            </div>
 
+            <div className="relative flex items-center justify-center shrink-0">
+                <svg width={size} height={size} className="transform -rotate-90">
                     {/* Base circle (Loss / Track) */}
                     <circle
                         cx={size / 2}
@@ -74,7 +96,7 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
                         fill="transparent"
                         stroke="currentColor"
                         strokeWidth={strokeWidth}
-                        className={`transition-all duration-700 ${validPF > 0 ? 'text-data-neg' : 'text-surface-3'}`}
+                        className={`transition-all duration-700 ${validPF > 0 ? 'text-data-neg/80' : 'text-surface-3'}`}
                     />
 
                     {/* Profit segment */}
@@ -94,165 +116,136 @@ export const ProfitFactorDonut = ({ profitFactor = 0 }: { profitFactor: number }
                     )}
                 </svg>
 
-                {/* Center text */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className={`text-base sm:text-lg font-black font-mono leading-none tracking-tight ${statusColor}`}>
-                        {validPF.toFixed(2)}
-                    </span>
-                    <span className="text-[9px] text-fg-subtle uppercase font-semibold mt-0.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
                         PF
                     </span>
                 </div>
             </div>
-
-            {/* Side legend */}
-            <div className="flex flex-col gap-1 font-mono text-[10px]">
-                <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    <span className="flex items-center gap-1 text-fg-subtle"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos" />Ganhos:</span>
-                    <span className="font-bold text-fg tabular-nums">{(profitRatio * 100).toFixed(0)}%</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                    <span className="flex items-center gap-1 text-fg-subtle"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg" />Perdas:</span>
-                    <span className="font-bold text-fg tabular-nums">{(Math.max(0, 100 - profitRatio * 100)).toFixed(0)}%</span>
-                </div>
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded w-fit ${
-                    isHealthy ? 'bg-accent/10 text-accent-fg' : isModerate ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400' : 'bg-danger/10 text-danger-fg'
-                }`}>
-                    {statusText}
-                </span>
-            </div>
         </div>
     );
 };
 
-// --- Gauge Semicircular de Taxa de Acerto ---
-export const WinRateGaugeChart = ({ winRate = 0 }: { winRate: number; wins?: number; losses?: number }) => {
-    const width = 126;
-    const height = 66;
-    const strokeWidth = 9;
-    const radius = 46;
-    const circumference = Math.PI * radius; // ~144.51 (semi-circle)
-    
+// --- Indicador de Taxa de Acerto Limpo e Proporcional ---
+export const WinRateGaugeChart = ({
+    winRate = 0,
+    wins = 0,
+    losses = 0,
+}: {
+    winRate: number;
+    wins?: number;
+    losses?: number;
+}) => {
     const validWinRate = Math.min(Math.max(Number(winRate) || 0, 0), 100);
-    const progressStroke = (validWinRate / 100) * circumference;
+    const totalDecided = (Number(wins) || 0) + (Number(losses) || 0);
 
     const isConsistente = validWinRate >= 50;
     const isModerate = validWinRate >= 40 && validWinRate < 50;
-    const statusColor = isConsistente ? 'text-accent-fg' : isModerate ? 'text-amber-600 dark:text-amber-400' : 'text-danger-fg';
-    const strokeClass = isConsistente ? 'text-data-pos' : isModerate ? 'text-amber-500' : 'text-data-neg';
+    const statusColor = isConsistente
+        ? 'text-accent-fg'
+        : isModerate
+          ? 'text-amber-600 dark:text-amber-400'
+          : totalDecided > 0
+            ? 'text-danger-fg'
+            : 'text-fg';
+    const barFill = isConsistente
+        ? 'bg-data-pos'
+        : isModerate
+          ? 'bg-amber-500'
+          : 'bg-data-neg';
 
     return (
-        <div className="flex flex-col items-center justify-center relative py-1">
-            <svg width={width} height={height} className="overflow-visible">
-
-                {/* Base Track Arc */}
-                <path
-                    d="M 17 60 A 46 46 0 0 1 109 60"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={strokeWidth}
-                    strokeLinecap="round"
-                    className="text-surface-3"
-                />
-
-                {/* Progress Arc */}
-                <path
-                    d="M 17 60 A 46 46 0 0 1 109 60"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={`${progressStroke} ${circumference}`}
-                    strokeLinecap="round"
-                    className={`transition-all duration-1000 ease-out ${strokeClass}`}
-                />
-            </svg>
-
-            {/* Value Perfectly Centered Inside Gauge Arc */}
-            <div className="absolute inset-0 flex items-center justify-center pt-2">
-                <span className={`text-lg sm:text-xl font-bold font-mono leading-none tracking-tight ${statusColor}`}>
+        <div className="flex flex-col justify-between w-full gap-3 py-1">
+            <div className="flex items-baseline justify-between gap-2">
+                <span className={`text-2xl sm:text-[28px] font-bold tabular-nums tracking-tight leading-none ${statusColor}`}>
                     {validWinRate.toFixed(1)}%
                 </span>
+                <span className="text-xs text-fg-subtle tabular-nums">
+                    {wins}W · {losses}L
+                </span>
+            </div>
+
+            <div className="space-y-1.5">
+                <div className="h-2 w-full rounded-full bg-surface-3 overflow-hidden">
+                    <div
+                        className={`h-full rounded-full transition-all duration-700 ease-out ${barFill}`}
+                        style={{ width: `${validWinRate}%` }}
+                    />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-fg-subtle">
+                    <span>Meta: 50%</span>
+                    <span className="tabular-nums">
+                        {totalDecided > 0 ? `${wins} de ${totalDecided} positivos` : 'Sem trades fechados'}
+                    </span>
+                </div>
             </div>
         </div>
     );
 };
 
-
-// --- Gauge de Proporção Profit vs Loss vs BE ---
+// --- Indicador de Distribuição de Trades (Win / BE / Loss) ---
 export const WinrateGauge = ({ wins = 0, losses = 0, breakeven = 0, trades = 0 }) => {
-    const radius = 80;
-    const stroke = 14;
-    const normalizedRadius = radius - stroke;
-    const circumference = normalizedRadius * Math.PI;
-
     const totalCalculated = wins + losses + breakeven;
-    const effectiveTotal = totalCalculated || 1; // Avoid div by zero
+    const effectiveTotal = totalCalculated || 1;
 
-    const winPercent = (wins / effectiveTotal);
-    const bePercent = (breakeven / effectiveTotal);
-
-    const winStroke = winPercent * circumference;
-    const beStroke = bePercent * circumference;
+    const winPercent = (wins / effectiveTotal) * 100;
+    const bePercent = (breakeven / effectiveTotal) * 100;
+    const lossPercent = Math.max(0, 100 - winPercent - bePercent);
 
     return (
-        <div className="flex flex-col items-center justify-center relative py-3">
-            <svg height={radius + 10} width={radius * 2} className="overflow-visible">
-                {/* Base de LOSS / Neutro se 0 trades */}
-                <path
-                    d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={stroke}
-                    strokeLinecap="round"
-                    className={totalCalculated === 0 ? "text-surface-3" : "text-data-neg"}
-                />
-                {/* Camada de BE (Amarelo) */}
-                {totalCalculated > 0 && beStroke > 0 && (
-                    <path
-                        d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
-                        fill="none"
-                        stroke="currentColor"
-                        className="text-amber-500"
-                        strokeWidth={stroke}
-                        strokeDasharray={`${(winStroke + beStroke)} ${circumference}`}
-                        strokeLinecap="round"
-                        style={{ transition: 'stroke-dasharray 1s ease-in-out' }}
-                    />
-                )}
-                {/* Sobreposição de PROFIT (Verde) */}
-                {totalCalculated > 0 && winStroke > 0 && (
-                    <path
-                        d={`M ${stroke},${radius} A ${normalizedRadius},${normalizedRadius} 0 0 1 ${radius * 2 - stroke},${radius}`}
-                        fill="none"
-                        stroke="currentColor"
-                        className="text-data-pos"
-                        strokeWidth={stroke}
-                        strokeDasharray={`${winStroke} ${circumference}`}
-                        strokeLinecap="round"
-                        style={{ transition: 'stroke-dasharray 1s ease-in-out' }}
-                    />
-                )}
-            </svg>
-            <div className="absolute top-11 flex flex-col items-center">
-                <span className="text-3xl font-bold text-fg leading-none tracking-tight">{trades}</span>
-                <span className="text-[9px] text-fg-subtle uppercase tracking-[0.2em] font-bold mt-1">Trades</span>
-                <div className="mt-2 flex items-center gap-2">
-                    <div className="text-center">
-                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(winPercent * 100).toFixed(0)}%</span>
-                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos" />Win</span>
-                    </div>
-                    <div className="w-px h-4 bg-line-strong" />
-                    <div className="text-center">
-                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(bePercent * 100).toFixed(0)}%</span>
-                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />BE</span>
-                    </div>
-                    <div className="w-px h-4 bg-line-strong" />
-                    <div className="text-center">
-                        <span className="text-[11px] text-fg font-bold block leading-none tabular-nums">{(Math.max(0, 100 - (winPercent * 100) - (bePercent * 100))).toFixed(0)}%</span>
-                        <span className="mt-0.5 flex items-center justify-center gap-1 text-[9px] text-fg-subtle uppercase"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg" />Loss</span>
-                    </div>
+        <div className="flex flex-col justify-between w-full gap-3 py-1">
+            <div className="flex items-baseline justify-between gap-2">
+                <span className="text-2xl sm:text-[28px] font-bold text-fg tabular-nums tracking-tight leading-none">
+                    {trades}
+                </span>
+                <span className="text-xs text-fg-subtle">
+                    {trades === 1 ? 'operação' : 'operações'}
+                </span>
+            </div>
+
+            <div className="space-y-2">
+                {/* Barra horizontal segmentada proporcional */}
+                <div className="h-2 w-full rounded-full bg-surface-3 overflow-hidden flex gap-0.5">
+                    {totalCalculated > 0 ? (
+                        <>
+                            {winPercent > 0 && (
+                                <div
+                                    className="h-full bg-data-pos transition-all duration-700"
+                                    style={{ width: `${winPercent}%` }}
+                                />
+                            )}
+                            {bePercent > 0 && (
+                                <div
+                                    className="h-full bg-amber-500 transition-all duration-700"
+                                    style={{ width: `${bePercent}%` }}
+                                />
+                            )}
+                            {lossPercent > 0 && (
+                                <div
+                                    className="h-full bg-data-neg transition-all duration-700"
+                                    style={{ width: `${lossPercent}%` }}
+                                />
+                            )}
+                        </>
+                    ) : (
+                        <div className="h-full w-full bg-surface-3" />
+                    )}
+                </div>
+
+                {/* Legenda compacta sem poluição */}
+                <div className="flex items-center justify-between text-[11px] text-fg-muted tabular-nums">
+                    <span className="inline-flex items-center gap-1">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-pos" />
+                        <strong className="font-semibold text-fg">{winPercent.toFixed(0)}%</strong> Win
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                        <strong className="font-semibold text-fg">{bePercent.toFixed(0)}%</strong> BE
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-data-neg" />
+                        <strong className="font-semibold text-fg">{lossPercent.toFixed(0)}%</strong> Loss
+                    </span>
                 </div>
             </div>
         </div>
@@ -267,11 +260,11 @@ export const InstrumentRow = ({ symbol, wins, losses }: { symbol: string, wins: 
         <div className="flex flex-col gap-1 py-1.5 px-2 -mx-2 rounded-lg hover:bg-surface-2/60 transition-colors group">
             <div className="flex justify-between items-center text-xs">
                 <div className="flex items-center gap-2">
-                    <span className="font-bold text-fg tracking-tight font-mono text-[11px] bg-surface-2 border border-line px-2 py-0.5 rounded text-center min-w-[56px]">{symbol}</span>
-                    <span className="text-[10px] text-fg-subtle font-mono">{total} {total === 1 ? 'trade' : 'trades'}</span>
+                    <span className="font-semibold text-fg tracking-tight text-[11px] bg-surface-2 border border-line px-2 py-0.5 rounded text-center min-w-[56px]">{symbol}</span>
+                    <span className="text-[11px] text-fg-subtle tabular-nums">{total} {total === 1 ? 'trade' : 'trades'}</span>
                 </div>
-                <div className="flex items-center gap-2 font-mono text-[10px]">
-                    <span className={`font-bold ${winPercent >= 50 ? 'text-accent-fg' : 'text-fg-muted'}`}>
+                <div className="flex items-center gap-2 tabular-nums text-[11px]">
+                    <span className={`font-semibold ${winPercent >= 50 ? 'text-accent-fg' : 'text-fg-muted'}`}>
                         {winPercent.toFixed(0)}%
                     </span>
                     <span className="text-fg-subtle">
@@ -298,12 +291,9 @@ export const SessionRow = ({ name, percent, pnl = 0, active = false }: { name: s
                 <span className={`text-[11px] font-semibold ${active ? "text-blue-400 font-bold" : "text-fg/80"}`}>
                     {name}
                 </span>
-                {active && (
-                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-blue-500/10 text-blue-400">Ativa</span>
-                )}
             </div>
-            <div className="flex items-center gap-2.5 font-mono text-[10px]">
-                <span className={`font-bold ${pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
+            <div className="flex items-center gap-2.5 tabular-nums text-[11px]">
+                <span className={`font-semibold ${pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                     {pnl >= 0 ? '+' : ''}${pnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-fg-muted font-medium">{percent.toFixed(1)}%</span>
@@ -353,7 +343,7 @@ export const TraderHealthWidget = ({ score = 100, details = {} as any }) => {
                         {score >= 80 ? <ShieldCheck size={16} className="text-accent-fg" /> : <ShieldAlert size={16} className={getScoreColor(score)} />}
                         <span className="text-xs font-bold text-fg">{title}</span>
                     </div>
-                    <span className={`text-xl font-black font-mono tracking-tight ${getScoreColor(score)}`}>{score}</span>
+                    <span className={`text-xl font-bold tabular-nums tracking-tight ${getScoreColor(score)}`}>{score}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -368,11 +358,11 @@ export const TraderHealthWidget = ({ score = 100, details = {} as any }) => {
                 <div className="grid grid-cols-2 gap-2 pt-0.5">
                     <div className="bg-canvas-subtle border border-line p-2 rounded-lg">
                         <span className="block text-[9px] text-fg-muted uppercase font-semibold tracking-wider">Alertas Ativos</span>
-                        <span className="text-xs font-bold font-mono text-fg">{details.totalAlerts || 0}</span>
+                        <span className="text-xs font-bold tabular-nums text-fg">{details.totalAlerts || 0}</span>
                     </div>
                     <div className="bg-canvas-subtle border border-line p-2 rounded-lg">
                         <span className="block text-[9px] text-fg-muted uppercase font-semibold tracking-wider">Severidade</span>
-                        <span className={`text-xs font-bold font-mono ${details.penalties?.critical > 0 ? 'text-danger-fg' : 'text-accent-fg'}`}>
+                        <span className={`text-xs font-bold ${details.penalties?.critical > 0 ? 'text-danger-fg' : 'text-accent-fg'}`}>
                             {details.penalties?.critical > 0 ? 'Crítica' : 'Estável'}
                         </span>
                     </div>
@@ -388,4 +378,3 @@ export const TraderHealthWidget = ({ score = 100, details = {} as any }) => {
         </div>
     );
 };
-

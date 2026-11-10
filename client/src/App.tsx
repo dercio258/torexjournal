@@ -35,6 +35,7 @@ import EconomicCalendar from './pages/EconomicCalendar';
 import { Notifications } from './pages/Notifications';
 import { Network } from './pages/Network';
 import { Backtest } from './pages/Backtest';
+import { BacktestReplaySessionPage } from './pages/BacktestReplaySessionPage';
 import { Reports } from './pages/Reports';
 import { Leaderboard } from './pages/Leaderboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -61,7 +62,6 @@ import { Privacy } from './pages/legal/Privacy';
 import { RiskDisclosure } from './pages/legal/RiskDisclosure';
 import { RefundPolicy } from './pages/legal/RefundPolicy';
 
-
 function App() {
     return (
         <QueryClientProvider client={queryClient}>
@@ -70,104 +70,134 @@ function App() {
                     <SocketProvider>
                         <AccountProvider>
                             <BrowserRouter>
-                        <Routes>
-                            {/* Public Routes */}
-                            <Route path="/" element={<Landing />} />
+                                <Routes>
+                                    {/* Public Routes */}
+                                    <Route path="/" element={<Landing />} />
 
-                            <Route path="/legal" element={<LegalHub />} />
-                            <Route path="/terms" element={<Terms />} />
-                            <Route path="/privacy" element={<Privacy />} />
-                            <Route path="/risk-disclosure" element={<RiskDisclosure />} />
-                            <Route path="/refund-policy" element={<RefundPolicy />} />
+                                    <Route path="/legal" element={<LegalHub />} />
+                                    <Route path="/terms" element={<Terms />} />
+                                    <Route path="/privacy" element={<Privacy />} />
+                                    <Route path="/risk-disclosure" element={<RiskDisclosure />} />
+                                    <Route path="/refund-policy" element={<RefundPolicy />} />
 
+                                    {/* Guest Routes (Redirect to Dashboard if logged in) */}
+                                    <Route
+                                        path="/login"
+                                        element={
+                                            <GuestRoute>
+                                                <Login />
+                                            </GuestRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/forgot-password"
+                                        element={
+                                            <GuestRoute>
+                                                <ForgotPassword />
+                                            </GuestRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/2fa"
+                                        element={
+                                            <GuestRoute>
+                                                <TwoFactorVerify />
+                                            </GuestRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/register"
+                                        element={
+                                            <GuestRoute>
+                                                <Register />
+                                            </GuestRoute>
+                                        }
+                                    />
+                                    <Route path="/auth/callback" element={<AuthCallback />} />
+                                    <Route
+                                        path="/complete-profile"
+                                        element={
+                                            <ProtectedRoute>
+                                                <CompleteProfile />
+                                            </ProtectedRoute>
+                                        }
+                                    />
 
-                            {/* Guest Routes (Redirect to Dashboard if logged in) */}
-                            <Route path="/login" element={
-                                <GuestRoute>
-                                    <Login />
-                                </GuestRoute>
-                            } />
-                            <Route path="/forgot-password" element={
-                                <GuestRoute>
-                                    <ForgotPassword />
-                                </GuestRoute>
-                            } />
-                            <Route path="/2fa" element={
-                                <GuestRoute>
-                                    <TwoFactorVerify />
-                                </GuestRoute>
-                            } />
-                            <Route path="/register" element={
-                                <GuestRoute>
-                                    <Register />
-                                </GuestRoute>
-                            } />
-                            <Route path="/auth/callback" element={<AuthCallback />} />
-                            <Route path="/complete-profile" element={
-                                <ProtectedRoute>
-                                    <CompleteProfile />
-                                </ProtectedRoute>
-                            } />
+                                    {/* Protected Standalone Routes (Pages that need auth but have custom layout) */}
+                                    <Route
+                                        path="/pricing"
+                                        element={
+                                            <ProtectedRoute>
+                                                <Pricing />
+                                            </ProtectedRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/checkout"
+                                        element={
+                                            <ProtectedRoute>
+                                                <Checkout />
+                                            </ProtectedRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/subscription/success"
+                                        element={
+                                            <ProtectedRoute>
+                                                <SubscriptionSuccess />
+                                            </ProtectedRoute>
+                                        }
+                                    />
 
-                            {/* Protected Standalone Routes (Pages that need auth but have custom layout) */}
-                            <Route path="/pricing" element={
-                                <ProtectedRoute>
-                                    <Pricing />
-                                </ProtectedRoute>
-                            } />
-                            <Route path="/checkout" element={
-                                <ProtectedRoute>
-                                    <Checkout />
-                                </ProtectedRoute>
-                            } />
-                            <Route path="/subscription/success" element={
-                                <ProtectedRoute>
-                                    <SubscriptionSuccess />
-                                </ProtectedRoute>
-                            } />
+                                    {/* Admin Routes */}
+                                    <Route path="/admin" element={<AdminLogin />} />
 
-                            {/* Admin Routes */}
-                            <Route path="/admin" element={<AdminLogin />} />
+                                    <Route element={<AdminLayout />}>
+                                        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                                        <Route path="/admin/users" element={<AdminUsers />} />
+                                        <Route path="/admin/notifications" element={<AdminNotifications />} />
+                                        <Route path="/admin/whatsapp" element={<AdminWhatsApp />} />
+                                        <Route path="/admin/finance" element={<AdminFinance />} />
+                                        <Route path="/admin/plans" element={<AdminPlans />} />
+                                        <Route path="/admin/calendar" element={<AdminCalendar />} />
+                                    </Route>
 
-                            <Route element={<AdminLayout />}>
-                                <Route path="/admin/dashboard" element={<AdminDashboard />} />
-                                <Route path="/admin/users" element={<AdminUsers />} />
-                                <Route path="/admin/notifications" element={<AdminNotifications />} />
-                                <Route path="/admin/whatsapp" element={<AdminWhatsApp />} />
-                                <Route path="/admin/finance" element={<AdminFinance />} />
-                                <Route path="/admin/plans" element={<AdminPlans />} />
-                                <Route path="/admin/calendar" element={<AdminCalendar />} />
-                            </Route>
+                                    {/* Protected App Routes (With Sidebar/Layout) */}
+                                    <Route
+                                        element={
+                                            <ProtectedRoute>
+                                                <MainLayout />
+                                            </ProtectedRoute>
+                                        }
+                                    >
+                                        <Route path="/dashboard" element={<Dashboard />} />
+                                        <Route path="/profile" element={<Profile />} />
+                                        <Route path="/journal" element={<Journal />} />
+                                        <Route path="/leaderboard" element={<Leaderboard />} />
+                                        <Route path="/payments" element={<Payments />} />
+                                        <Route path="/configuration" element={<Configuration />} />
+                                        <Route path="/network" element={<Network />} />
+                                        <Route path="/add-trades" element={<AddTrades />} />
+                                        <Route path="/emotional" element={<EmotionalManagement />} />
+                                        <Route path="/emotional/share" element={<EmotionalShare />} />
+                                        <Route path="/calendar" element={<EconomicCalendar />} />
+                                        <Route path="/notifications" element={<Notifications />} />
+                                        <Route path="/reports" element={<Reports />} />
+                                        <Route path="/trades" element={<Trades />} />
+                                        <Route path="/trades/:id" element={<TradeDetails />} />
+                                        <Route path="/backtest" element={<Backtest />} />
+                                        <Route path="/backtesting" element={<Backtest />} />
+                                        <Route path="/backtesting/replay/:sessionId" element={<BacktestReplaySessionPage />} />
+                                        <Route path="/backtest/replay/:sessionId" element={<BacktestReplaySessionPage />} />
+                                    </Route>
 
-
-
-                            {/* Protected App Routes (With Sidebar/Layout) */}
-                            <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
-                                <Route path="/dashboard" element={<Dashboard />} />
-                                <Route path="/profile" element={<Profile />} />
-                                <Route path="/journal" element={<Journal />} />
-                                <Route path="/leaderboard" element={<Leaderboard />} />
-                                <Route path="/payments" element={<Payments />} />
-                                <Route path="/configuration" element={<Configuration />} />
-                                <Route path="/network" element={<Network />} />
-                                <Route path="/add-trades" element={<AddTrades />} />
-                                <Route path="/emotional" element={<EmotionalManagement />} />
-                                <Route path="/emotional/share" element={<EmotionalShare />} />
-                                <Route path="/calendar" element={<EconomicCalendar />} />
-                                <Route path="/notifications" element={<Notifications />} />
-                                <Route path="/reports" element={<Reports />} />
-                                <Route path="/trades" element={<Trades />} />
-                                <Route path="/trades/:id" element={<TradeDetails />} />
-                                <Route path="/backtest" element={<Backtest />} />
-                            </Route>
-
-                            {/* Fallback */}
-                            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-                        </Routes>
-                    </BrowserRouter>
-                    </AccountProvider>
-                </SocketProvider>
-            </AuthProvider>
+                                    {/* Fallback */}
+                                    <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                                </Routes>
+                            </BrowserRouter>
+                        </AccountProvider>
+                    </SocketProvider>
+                </AuthProvider>
             </ThemeProvider>
             <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>

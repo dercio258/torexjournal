@@ -2,7 +2,7 @@ import React, { useState, memo } from 'react';
 import { SymbolInfo, Period } from '@klinecharts/pro';
 import {
     ChevronDown, AlignLeft, Undo2, Redo2, Database,
-    Moon, Sun, Settings, Camera, Columns2, Square, RotateCcw, Keyboard
+    Moon, Sun, Settings, Camera, Columns2, Square, RotateCcw, Keyboard, Maximize2, Minimize2, ArrowLeft
 } from 'lucide-react';
 import { DataSourceMode, DEFAULT_SYMBOLS } from '../../../services/klineDatafeed';
 import { TIMEFRAMES } from '../types';
@@ -30,6 +30,12 @@ interface TopToolbarLayerProps {
     onToggleTradeDrawer: () => void;
     onResetSimulation: () => void;
     onScreenshot: () => void;
+    isFullscreen?: boolean;
+    onToggleFullscreen?: () => void;
+    sessionName?: string;
+    strategyName?: string;
+    sessionPairs?: string[];
+    onBackToHub?: () => void;
 }
 
 export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
@@ -53,6 +59,12 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
     onToggleTradeDrawer,
     onResetSimulation,
     onScreenshot,
+    isFullscreen = false,
+    onToggleFullscreen,
+    sessionName,
+    strategyName,
+    sessionPairs,
+    onBackToHub,
 }) => {
     const [symbolDropdownOpen, setSymbolDropdownOpen] = useState(false);
     const [layoutDropdownOpen, setLayoutDropdownOpen] = useState(false);
@@ -64,9 +76,35 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
         }`}>
             {/* Left Group */}
             <div className="flex items-center gap-1.5 shrink-0">
-                <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-accent-on font-black text-xs shadow-sm mr-1 shrink-0">
-                    T
-                </div>
+                {onBackToHub ? (
+                    <button
+                        type="button"
+                        onClick={onBackToHub}
+                        title="Voltar para Central de Backtesting (Sessões & Estratégias)"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 border border-line text-fg font-bold text-[11px] cursor-pointer transition-colors mr-1 shrink-0"
+                    >
+                        <ArrowLeft size={13} className="text-accent-fg" />
+                        <span className="hidden sm:inline">Sessões</span>
+                    </button>
+                ) : (
+                    <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-accent-on font-black text-xs shadow-sm mr-1 shrink-0">
+                        T
+                    </div>
+                )}
+
+                {sessionName && (
+                    <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/10 border border-accent/25 mr-1 max-w-[220px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
+                        <span className="font-bold text-[11px] text-fg truncate" title={sessionName}>
+                            {sessionName}
+                        </span>
+                        {strategyName && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-surface-2 text-fg-muted font-semibold truncate max-w-[90px]">
+                                {strategyName}
+                            </span>
+                        )}
+                    </div>
+                )}
 
                 {/* Symbol Dropdown */}
                 <div className="relative">
@@ -84,31 +122,49 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                     </button>
 
                     {symbolDropdownOpen && (
-                        <div className={`fixed sm:absolute left-3 sm:left-0 top-14 sm:top-full mt-1 w-64 rounded-xl border shadow-2xl z-50 py-1.5 ${
+                        <div className={`fixed sm:absolute left-3 sm:left-0 top-14 sm:top-full mt-1 w-64 rounded-xl border shadow-2xl z-50 py-1.5 max-h-80 overflow-y-auto ${
                             'bg-surface border-line'
                         }`}>
-                            {DEFAULT_SYMBOLS.map(sym => (
-                                <button
-                                    key={sym.ticker}
-                                    onClick={() => {
-                                        setSymbolDropdownOpen(false);
-                                        onSelectSymbol(sym);
-                                    }}
-                                    className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs cursor-pointer ${
-                                        currentSymbol.ticker === sym.ticker
-                                            ? 'bg-accent/10 text-accent-fg font-bold'
-                                            : 'hover:bg-surface-2 text-fg-muted'
-                                    }`}
-                                >
-                                    <div>
-                                        <span className="font-bold block">{sym.ticker}</span>
-                                        <span className="text-[10px] opacity-60">{sym.name}</span>
-                                    </div>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-3 font-mono">
-                                        {sym.exchange}
-                                    </span>
-                                </button>
-                            ))}
+                            {sessionPairs && sessionPairs.length > 0 && (
+                                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-accent-fg border-b border-line/60 mb-1">
+                                    Pares da Sessão ({sessionPairs.join(' · ')})
+                                </div>
+                            )}
+                            {[
+                                ...DEFAULT_SYMBOLS.filter(s => sessionPairs?.includes(s.ticker)),
+                                ...DEFAULT_SYMBOLS.filter(s => !sessionPairs?.includes(s.ticker)),
+                            ].map(sym => {
+                                const isSessionPair = sessionPairs?.includes(sym.ticker);
+                                return (
+                                    <button
+                                        key={sym.ticker}
+                                        onClick={() => {
+                                            setSymbolDropdownOpen(false);
+                                            onSelectSymbol(sym);
+                                        }}
+                                        className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs cursor-pointer ${
+                                            currentSymbol.ticker === sym.ticker
+                                                ? 'bg-accent/10 text-accent-fg font-bold'
+                                                : 'hover:bg-surface-2 text-fg-muted'
+                                        }`}
+                                    >
+                                        <div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="font-bold">{sym.ticker}</span>
+                                                {isSessionPair && (
+                                                    <span className="text-[9px] px-1 py-0.2 rounded bg-accent/15 text-accent-fg font-bold">
+                                                        Sessão
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <span className="text-[10px] opacity-60">{sym.name}</span>
+                                        </div>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-3 font-mono">
+                                            {sym.exchange}
+                                        </span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -357,6 +413,20 @@ export const TopToolbarLayer: React.FC<TopToolbarLayerProps> = memo(({
                 >
                     <Camera size={15} />
                 </button>
+
+                {onToggleFullscreen && (
+                    <button
+                        onClick={onToggleFullscreen}
+                        className={`flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                            isFullscreen
+                                ? 'bg-accent text-accent-on font-bold shadow-xs'
+                                : 'hover:bg-surface-2 text-fg-muted'
+                        }`}
+                        title={isFullscreen ? 'Restaurar Painel (Esc)' : 'Expandir / Maximizar Painel de Backtest'}
+                    >
+                        {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                    </button>
+                )}
             </div>
         </div>
     );

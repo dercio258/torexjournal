@@ -18,9 +18,7 @@ import { useAuth } from '../context/AuthContext';
 // Modal de funcionalidade em desenvolvimento renderizado via Portal no centro da tela (document.body)
 const DevelopmentModal = ({ featureName, onClose }: { featureName: string; onClose: () => void }) => {
     let description = "Esta funcionalidade está sendo preparada com muito cuidado e estará disponível em breve para turbinar as suas análises.";
-    if (featureName === 'Backtest') {
-        description = "O Laboratório de Backtest permitirá simular, calibrar e testar suas estratégias de trading com base no histórico real de operações e dados de mercado. Esta ferramenta está em fase final de desenvolvimento e será liberada em breve.";
-    } else if (featureName === 'Relatórios') {
+    if (featureName === 'Relatórios') {
         description = "O sistema de Relatórios Avançados trará gráficos executivos de desempenho, análise de drawdown, curva de capital detalhada e estatísticas de consistência.";
     } else if (featureName === 'Calendário Econ.') {
         description = "O Calendário Econômico Inteligente manterá você atualizado sobre todos os eventos macroeconômicos de alto impacto diretamente integrados ao seu painel.";
@@ -87,7 +85,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
         { to: '/emotional', icon: <BrainCircuit size={16} />, label: 'Gestão Emocional' },
         { to: '/reports', icon: <TrendingUp size={16} />, label: 'Relatórios' },
         { to: '/calendar', icon: <CalendarDays size={16} />, label: 'Calendário Econ.' },
-        { to: '/backtest', icon: <FlaskConical size={16} />, label: 'Backtest', inDevelopment: true },
+        { to: '/backtesting', icon: <FlaskConical size={16} />, label: 'Backtesting' },
     ];
 
     const handleCloseDevModal = () => {
@@ -180,7 +178,7 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
                     {onClose && (
                         <button
                             onClick={onClose}
-                            className="md:hidden p-1.5 text-fg-subtle dark:text-slate-400 hover:text-fg bg-surface-2 rounded-lg cursor-pointer transition-colors"
+                            className="p-1.5 text-fg-subtle dark:text-slate-400 hover:text-fg bg-surface-2 rounded-lg cursor-pointer transition-colors"
                             title="Fechar menu"
                         >
                             <X size={16} />
@@ -206,4 +204,3 @@ export const Sidebar = ({ onClose }: { onClose?: () => void }) => {
         </>
     );
 };
-

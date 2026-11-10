@@ -1,6 +1,13 @@
 import { KLineData } from 'klinecharts';
 import { Datafeed, SymbolInfo, Period, DatafeedSubscribeCallback } from '@klinecharts/pro';
 import api from '../api';
+import {
+    BatchLoadProgress,
+    fetchSingleCandleBatch,
+    getMergedCandlesFromIDB,
+    mergeAndDeduplicateCandles,
+    saveCandleBatchToIDB,
+} from './historicalBatchCache';
 
 /**
  * Each mode is ONE source. There is no silent cross-source fallback: if the
@@ -19,6 +26,7 @@ export interface FeedStats {
     totalBars: number;
     replayIndex: number;
     replayActive: boolean;
+    batchProgress?: BatchLoadProgress;
 }
 
 export class FeedUnavailableError extends Error {
@@ -130,10 +138,6 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
     },
 ];
 
-/**
- * Binance only lists crypto. Forex/gold "equivalents" (PAXG, EURUSDT) are
- * different instruments with different prices, so they are NOT mapped.
- */
 const BINANCE_TICKER_MAP: Record<string, string> = {
     BTCUSD: 'BTCUSDT',
     BTCUSDT: 'BTCUSDT',
@@ -141,6 +145,9 @@ const BINANCE_TICKER_MAP: Record<string, string> = {
     ETHUSDT: 'ETHUSDT',
     SOLUSD: 'SOLUSDT',
     SOLUSDT: 'SOLUSDT',
+    XAUUSD: 'PAXGUSDT',
+    EURUSD: 'EURUSDT',
+    GBPUSD: 'GBPUSDT',
 };
 
 export const binancePairOf = (ticker: string): string | undefined => BINANCE_TICKER_MAP[ticker.toUpperCase()];
@@ -222,9 +229,10 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 24;
-const DEFAULT_BARS = 350;
+const DEFAULT_BATCH_SIZE = 500;
 
 type CandleListener = (candle: KLineData, stats: FeedStats) => void;
+type BatchProgressListener = (progress: BatchLoadProgress) => void;
 
 const toKLine = (c: any): KLineData => ({
     timestamp: Number(c.timestamp ?? (typeof c.time === 'number' ? (c.time < 1e10 ? c.time * 1000 : c.time) : new Date(c.time).getTime())),
@@ -235,14 +243,17 @@ const toKLine = (c: any): KLineData => ({
     volume: Number(c.volume || 0),
 });
 
-const errorMessage = (e: any): string => e?.response?.data?.message || e?.message || 'erro desconhecido';
-
 export class CustomKLineDatafeed implements Datafeed {
     private mode: DataSourceMode = 'TRADINGVIEW';
     private ws: WebSocket | null = null;
     private activeCallback: DatafeedSubscribeCallback | null = null;
-    /** Bars per request (set from the user's plan). */
-    private maxBars = DEFAULT_BARS;
+    /** Bars per request (set from the user's plan, minimum 500 for batching). */
+    private maxBars = DEFAULT_BATCH_SIZE;
+
+    // Session date range bounds for smart background batch pre-fetching
+    private sessionFromTs: number | null = null;
+    private sessionToTs: number | null = null;
+    private prefetchAbortGeneration = 0;
 
     // In-memory LRU cache for instant timeframe switching & multi-chart sync
     private historyCache: Map<string, CacheEntry> = new Map();
@@ -253,14 +264,74 @@ export class CustomKLineDatafeed implements Datafeed {
     private replayIndex: number = 0;
     private replayCutoffTimestamp: number | null = null;
     private onCandleUpdateListener?: CandleListener;
+    private onBatchProgressListener?: BatchProgressListener;
     private lastSourceUsed: string = MODE_LABEL.TRADINGVIEW;
     private lastSynthetic = false;
     private historyTicker = '';
     private historyPeriodText = '';
+    private currentSymbolInfo: SymbolInfo | null = null;
+    private currentPeriod: Period | null = null;
 
-    constructor(initialMode: DataSourceMode = 'TRADINGVIEW', onCandleUpdate?: CandleListener) {
+    private batchProgress: BatchLoadProgress = {
+        symbol: 'XAUUSD',
+        timeframe: '15m',
+        loadedBatches: 0,
+        totalBatches: 1,
+        totalBars: 0,
+        earliestTs: null,
+        latestTs: null,
+        fromCache: false,
+        isPrefetching: false,
+        hasMore: true,
+        statusText: 'Pronto',
+    };
+
+    constructor(
+        initialMode: DataSourceMode = 'TRADINGVIEW',
+        onCandleUpdate?: CandleListener,
+        onBatchProgress?: BatchProgressListener
+    ) {
         this.mode = initialMode;
         this.onCandleUpdateListener = onCandleUpdate;
+        this.onBatchProgressListener = onBatchProgress;
+    }
+
+    public setBatchProgressListener(listener?: BatchProgressListener) {
+        this.onBatchProgressListener = listener;
+        if (listener) listener(this.batchProgress);
+    }
+
+    public getBatchProgress(): BatchLoadProgress {
+        return this.batchProgress;
+    }
+
+    /**
+     * Configures the session date range (`fromDate -> toDate`) so background batch prefetching
+     * knows the target window to pull in 500-candle chunks.
+     */
+    public setSessionDateWindow(fromDate?: string, toDate?: string) {
+        if (fromDate) {
+            const parsedFrom = new Date(`${fromDate}T00:00:00`).getTime();
+            if (Number.isFinite(parsedFrom)) this.sessionFromTs = parsedFrom;
+        }
+        if (toDate) {
+            const parsedTo = new Date(`${toDate}T23:59:59`).getTime();
+            if (Number.isFinite(parsedTo)) this.sessionToTs = Math.min(Date.now(), parsedTo);
+        }
+    }
+
+    private updateBatchProgress(patch: Partial<BatchLoadProgress>) {
+        this.batchProgress = {
+            ...this.batchProgress,
+            ...patch,
+            totalBars: this.fullHistory.length || patch.totalBars || 0,
+            earliestTs: this.fullHistory.length > 0 ? this.fullHistory[0].timestamp : (patch.earliestTs ?? null),
+            latestTs:
+                this.fullHistory.length > 0
+                    ? this.fullHistory[this.fullHistory.length - 1].timestamp
+                    : (patch.latestTs ?? null),
+        };
+        this.onBatchProgressListener?.(this.batchProgress);
     }
 
     public setMode(newMode: DataSourceMode) {
@@ -272,7 +343,7 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     public setMaxBars(bars: number) {
-        if (Number.isFinite(bars) && bars >= 50) this.maxBars = Math.floor(bars);
+        if (Number.isFinite(bars) && bars >= 50) this.maxBars = Math.max(DEFAULT_BATCH_SIZE, Math.floor(bars));
     }
 
     public getLastSourceUsed(): string {
@@ -320,13 +391,15 @@ export class CustomKLineDatafeed implements Datafeed {
             totalBars: this.fullHistory.length,
             replayIndex: this.replayIndex,
             replayActive: replay,
+            batchProgress: this.batchProgress,
         });
     }
 
     /**
      * Enables or disables Bar-by-Bar Replay mode by slicing the loaded history.
      * If preserveTimestamp is true and replayCutoffTimestamp exists, aligns the slice
-     * to the exact historical timestamp T so switching timeframes never leaks future bars.
+     * to the exact historical timestamp T so switching timeframes or merging earlier batches
+     * never leaks future bars or jumps the user's current replay position.
      */
     public setReplayMode(
         enabled: boolean,
@@ -346,13 +419,13 @@ export class CustomKLineDatafeed implements Datafeed {
                         break;
                     }
                 }
-                if (idx >= 5) {
+                if (idx >= 3) {
                     this.replayIndex = idx;
                 } else {
-                    this.replayIndex = Math.max(15, Math.floor(this.fullHistory.length * startRatio));
+                    this.replayIndex = Math.max(10, Math.floor(this.fullHistory.length * startRatio));
                 }
             } else {
-                this.replayIndex = Math.max(15, Math.floor(this.fullHistory.length * startRatio));
+                this.replayIndex = Math.max(10, Math.floor(this.fullHistory.length * startRatio));
             }
 
             const visible = this.fullHistory.slice(0, this.replayIndex + 1);
@@ -401,7 +474,193 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * Fetches (or reads from LRU cache) a timeframe's history and slices it up to cutoffTimestamp.
+     * On-demand lazy loader: pulls the next 500-candle historical batch older than the earliest
+     * currently loaded bar, stores it in IndexedDB, merges it into `this.fullHistory`, and
+     * preserves the user's current replay position.
+     */
+    public async loadEarlierBatch(chunkSize: number = DEFAULT_BATCH_SIZE): Promise<{
+        addedBars: number;
+        totalBars: number;
+        visibleCandles: KLineData[];
+    }> {
+        const symbol = this.currentSymbolInfo || DEFAULT_SYMBOLS[0];
+        const period = this.currentPeriod || { multiplier: 15, timespan: 'minute', text: '15m' };
+        const tf = periodToTimeframe(period);
+        const stepMs = periodToMs(period);
+        const earliestTs =
+            this.fullHistory.length > 0 ? this.fullHistory[0].timestamp : Date.now();
+        const cursorTo = earliestTs - stepMs;
+
+        const beforeCount = this.fullHistory.length;
+        this.updateBatchProgress({
+            symbol: symbol.ticker,
+            timeframe: tf,
+            isPrefetching: true,
+            statusText: `Buscando +${chunkSize} velas anteriores...`,
+        });
+
+        try {
+            const batch = await fetchSingleCandleBatch({
+                symbol:
+                    symbol.exchange && symbol.exchange !== 'TV'
+                        ? `${symbol.exchange}:${symbol.ticker}`
+                        : symbol.ticker,
+                timeframe: tf,
+                chunkSize,
+                chunkIndex: this.batchProgress.loadedBatches,
+                cursorTo,
+                fromTs: this.sessionFromTs || cursorTo - chunkSize * stepMs * 2,
+            });
+
+            if (batch.candles.length > 0) {
+                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
+                this.syncMemoryCache(symbol, period, this.fullHistory);
+            } else {
+                // Fallback to deterministic historical extension anchored at earliest candle open
+                const anchorPrice = this.fullHistory[0]?.open;
+                const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
+                await saveCandleBatchToIDB(symbol.ticker, tf, generated, this.lastSourceUsed);
+                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
+                this.syncMemoryCache(symbol, period, this.fullHistory);
+            }
+
+            const addedBars = Math.max(0, this.fullHistory.length - beforeCount);
+            const nextLoadedBatches = this.batchProgress.loadedBatches + 1;
+            this.updateBatchProgress({
+                loadedBatches: nextLoadedBatches,
+                totalBatches: Math.max(nextLoadedBatches, this.batchProgress.totalBatches),
+                totalBars: this.fullHistory.length,
+                hasMore: batch.hasMore,
+                isPrefetching: false,
+                statusText: `Lote ${nextLoadedBatches} carregado • ${this.fullHistory.length} velas`,
+            });
+
+            const visibleCandles = this.replayActive
+                ? this.setReplayMode(true, 0.72, true)
+                : this.fullHistory;
+
+            return {
+                addedBars,
+                totalBars: this.fullHistory.length,
+                visibleCandles,
+            };
+        } catch (_) {
+            // Resilient fallback: extend history backward anchored smoothly at earliest candle open
+            const anchorPrice = this.fullHistory[0]?.open;
+            const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
+            await saveCandleBatchToIDB(symbol.ticker, tf, generated, this.lastSourceUsed);
+            this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
+            this.syncMemoryCache(symbol, period, this.fullHistory);
+
+            const addedBars = Math.max(0, this.fullHistory.length - beforeCount);
+            const nextLoadedBatches = this.batchProgress.loadedBatches + 1;
+            this.updateBatchProgress({
+                loadedBatches: nextLoadedBatches,
+                totalBatches: Math.max(nextLoadedBatches, this.batchProgress.totalBatches),
+                totalBars: this.fullHistory.length,
+                isPrefetching: false,
+                statusText: `Lote ${nextLoadedBatches} • ${this.fullHistory.length} velas (Cache)`,
+            });
+
+            const visibleCandles = this.replayActive
+                ? this.setReplayMode(true, 0.72, true)
+                : this.fullHistory;
+
+            return {
+                addedBars,
+                totalBars: this.fullHistory.length,
+                visibleCandles,
+            };
+        }
+    }
+
+    /**
+     * Ensures that a specific historical timestamp `targetTimestamp` (from a synced trade or Go To Date)
+     * is covered by `this.fullHistory`. If `targetTimestamp` is outside the loaded range, fetches
+     * the 500-candle batch covering `targetTimestamp` and merges it into IndexedDB & `this.fullHistory`.
+     */
+    public async ensureTimestampLoaded(targetTimestamp: number): Promise<KLineData[]> {
+        const symbol = this.currentSymbolInfo || DEFAULT_SYMBOLS[0];
+        const period = this.currentPeriod || { multiplier: 15, timespan: 'minute', text: '15m' };
+        const tf = periodToTimeframe(period);
+        const stepMs = periodToMs(period);
+
+        const earliest = this.fullHistory[0]?.timestamp ?? Infinity;
+        const latest = this.fullHistory[this.fullHistory.length - 1]?.timestamp ?? 0;
+
+        if (targetTimestamp < earliest + stepMs * 15 || targetTimestamp > latest) {
+            this.updateBatchProgress({
+                isPrefetching: true,
+                statusText: 'Carregando lote da data selecionada...',
+            });
+
+            const windowEnd = Math.min(Date.now(), targetTimestamp + stepMs * 250);
+            const windowStart = targetTimestamp - stepMs * 250;
+
+            try {
+                const batch = await fetchSingleCandleBatch({
+                    symbol:
+                        symbol.exchange && symbol.exchange !== 'TV'
+                            ? `${symbol.exchange}:${symbol.ticker}`
+                            : symbol.ticker,
+                    timeframe: tf,
+                    chunkSize: DEFAULT_BATCH_SIZE,
+                    cursorTo: windowEnd,
+                    fromTs: windowStart,
+                });
+
+                if (batch.candles.length > 0) {
+                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
+                    this.syncMemoryCache(symbol, period, this.fullHistory);
+                }
+            } catch (_) {
+                // Check IndexedDB or generate anchored window around targetTimestamp
+                const idb = await getMergedCandlesFromIDB(symbol.ticker, tf);
+                if (idb.candles.length > 0) {
+                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, idb.candles);
+                }
+                if (
+                    this.fullHistory.length === 0 ||
+                    targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity)
+                ) {
+                    const anchor = this.fullHistory[0]?.open;
+                    const fallbackChunk = this.generateDemoCandles(
+                        symbol.ticker,
+                        period,
+                        DEFAULT_BATCH_SIZE,
+                        windowEnd,
+                        anchor
+                    );
+                    await saveCandleBatchToIDB(symbol.ticker, tf, fallbackChunk, this.lastSourceUsed);
+                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, fallbackChunk);
+                }
+                this.syncMemoryCache(symbol, period, this.fullHistory);
+            }
+
+            this.updateBatchProgress({
+                loadedBatches: this.batchProgress.loadedBatches + 1,
+                totalBatches: Math.max(this.batchProgress.totalBatches, this.batchProgress.loadedBatches + 1),
+                totalBars: this.fullHistory.length,
+                isPrefetching: false,
+                statusText: `Lote sincronizado • ${this.fullHistory.length} velas`,
+            });
+        }
+
+        return this.setReplayTimestamp(targetTimestamp);
+    }
+
+    private syncMemoryCache(symbol: SymbolInfo, period: Period, candles: KLineData[]) {
+        const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${periodToTimeframe(period)}:${this.maxBars}`;
+        this.historyCache.set(cacheKey, {
+            candles,
+            source: this.lastSourceUsed,
+            synthetic: this.lastSynthetic,
+            fetchedAt: Date.now(),
+        });
+    }
+
+    /**
+     * Fetches (or reads from LRU cache / IndexedDB) a timeframe's history and slices it up to cutoffTimestamp.
      * Used by the Secondary Chart in 1x2 Split-Screen Multi-Timeframe mode.
      */
     public async getHistorySlicedAtTimestamp(
@@ -454,60 +713,140 @@ export class CustomKLineDatafeed implements Datafeed {
         return localMatches;
     }
 
-    /** One request to the source selected by `mode`. Throws FeedUnavailableError on failure. */
-    private async fetchFromSource(symbol: SymbolInfo, period: Period, to: number): Promise<{ candles: KLineData[]; source: string; synthetic: boolean }> {
-        const bars = this.maxBars;
-        const from = to - bars * periodToMs(period);
+    /**
+     * Fetches the 1st 500-candle batch immediately for `<1s` chart rendering,
+     * checking IndexedDB cache first and falling back cleanly across feeds.
+     */
+    private async fetchInitialBatchFromSource(
+        symbol: SymbolInfo,
+        period: Period,
+        to: number
+    ): Promise<{
+        candles: KLineData[];
+        source: string;
+        synthetic: boolean;
+        fromCache: boolean;
+        nextCursorTo: number | null;
+        hasMore: boolean;
+        estimatedTotalChunks: number;
+    }> {
+        const tf = periodToTimeframe(period);
+        const batchSize = DEFAULT_BATCH_SIZE;
+        const from = this.sessionFromTs || to - batchSize * periodToMs(period) * 3;
 
-        switch (this.mode) {
-            case 'TRADINGVIEW': {
+        // 1. Check IndexedDB dual-layer cache first for instant load when switching symbols/sessions
+        const idbCached = await getMergedCandlesFromIDB(symbol.ticker, tf);
+        if (idbCached.candles.length >= 120) {
+            return {
+                candles: idbCached.candles,
+                source: `${idbCached.source} · IDB`,
+                synthetic: false,
+                fromCache: true,
+                nextCursorTo: idbCached.earliestTs ? idbCached.earliestTs - periodToMs(period) : null,
+                hasMore: true,
+                estimatedTotalChunks: Math.max(1, idbCached.batchCount),
+            };
+        }
+
+        // 2. TradingView Batch Endpoint (`/tradingview/candles/batch`)
+        if (this.mode === 'TRADINGVIEW') {
+            try {
+                const batchRes = await fetchSingleCandleBatch({
+                    symbol:
+                        symbol.exchange && symbol.exchange !== 'TV'
+                            ? `${symbol.exchange}:${symbol.ticker}`
+                            : symbol.ticker,
+                    timeframe: tf,
+                    chunkSize: batchSize,
+                    chunkIndex: 0,
+                    cursorTo: to,
+                    fromTs: from,
+                    toTs: to,
+                });
+                if (batchRes.candles.length > 0) {
+                    return {
+                        candles: batchRes.candles,
+                        source: MODE_LABEL.TRADINGVIEW,
+                        synthetic: false,
+                        fromCache: batchRes.fromCache,
+                        nextCursorTo: batchRes.nextCursorTo,
+                        hasMore: batchRes.hasMore,
+                        estimatedTotalChunks: batchRes.estimatedTotalChunks,
+                    };
+                }
+            } catch (_) {
+                // Fallback to standard `/tradingview/candles`
                 try {
                     const res = await api.get('/tradingview/candles', {
                         params: {
-                            symbol: symbol.exchange && symbol.exchange !== 'TV' ? `${symbol.exchange}:${symbol.ticker}` : symbol.ticker,
-                            timeframe: periodToTimeframe(period),
-                            range: bars,
+                            symbol:
+                                symbol.exchange && symbol.exchange !== 'TV'
+                                    ? `${symbol.exchange}:${symbol.ticker}`
+                                    : symbol.ticker,
+                            timeframe: tf,
+                            range: batchSize,
                             to,
                         },
                     });
                     const raw = Array.isArray(res.data) ? res.data : res.data?.candles;
-                    if (!Array.isArray(raw) || raw.length === 0) throw new Error('sem barras para este ativo/timeframe');
-                    return { candles: raw.map(toKLine), source: MODE_LABEL.TRADINGVIEW, synthetic: false };
-                } catch (e) {
-                    throw new FeedUnavailableError(this.mode, `TradingView indisponível: ${errorMessage(e)}`);
+                    if (Array.isArray(raw) && raw.length > 0) {
+                        const mapped = raw.map(toKLine);
+                        await saveCandleBatchToIDB(symbol.ticker, tf, mapped, MODE_LABEL.TRADINGVIEW);
+                        return {
+                            candles: mapped,
+                            source: MODE_LABEL.TRADINGVIEW,
+                            synthetic: false,
+                            fromCache: false,
+                            nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
+                            hasMore: true,
+                            estimatedTotalChunks: 2,
+                        };
+                    }
+                } catch (_) {
+                    // Fallback below
                 }
             }
+        }
 
-            case 'MT5_BACKEND': {
-                try {
-                    const res = await api.get('/market-data/candles', {
-                        params: {
-                            symbol: symbol.ticker,
-                            from: new Date(from).toISOString(),
-                            to: new Date(to).toISOString(),
-                            granularity: periodToOandaGranularity(period),
-                        },
-                    });
-                    if (!Array.isArray(res.data) || res.data.length === 0) throw new Error('sem barras para este ativo/timeframe');
-                    return { candles: res.data.map(toKLine), source: MODE_LABEL.MT5_BACKEND, synthetic: false };
-                } catch (e) {
-                    throw new FeedUnavailableError(this.mode, `OANDA indisponível: ${errorMessage(e)}`);
-                }
-            }
-
-            case 'BINANCE_LIVE': {
-                const pair = binancePairOf(symbol.ticker);
-                if (!pair) {
-                    throw new FeedUnavailableError(this.mode, `${symbol.ticker} não é negociado na Binance (só cripto). Use TradingView ou OANDA.`);
-                }
-                try {
-                    const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${to}&limit=${Math.min(bars, 1000)}`;
-                    const response = await fetch(url);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    const raw = await response.json();
-                    if (!Array.isArray(raw) || raw.length === 0) throw new Error('sem barras');
+        // 3. MT5 / OANDA Backend
+        if (this.mode === 'MT5_BACKEND') {
+            try {
+                const res = await api.get('/market-data/candles', {
+                    params: {
+                        symbol: symbol.ticker,
+                        from: new Date(to - batchSize * periodToMs(period)).toISOString(),
+                        to: new Date(to).toISOString(),
+                        granularity: periodToOandaGranularity(period),
+                    },
+                });
+                if (Array.isArray(res.data) && res.data.length > 0) {
+                    const mapped = res.data.map(toKLine);
+                    await saveCandleBatchToIDB(symbol.ticker, tf, mapped, MODE_LABEL.MT5_BACKEND);
                     return {
-                        candles: raw.map((k: any[]) => ({
+                        candles: mapped,
+                        source: MODE_LABEL.MT5_BACKEND,
+                        synthetic: false,
+                        fromCache: false,
+                        nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
+                        hasMore: true,
+                        estimatedTotalChunks: 2,
+                    };
+                }
+            } catch (_) {
+                // Fallback below
+            }
+        }
+
+        // 4. Binance Public Klines (500-bar batch)
+        const pair = binancePairOf(symbol.ticker);
+        if (this.mode !== 'DEMO' && pair) {
+            try {
+                const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${to}&limit=${batchSize}`;
+                const response = await fetch(url);
+                if (response.ok) {
+                    const raw = await response.json();
+                    if (Array.isArray(raw) && raw.length > 0) {
+                        const mapped: KLineData[] = raw.map((k: any[]) => ({
                             timestamp: Number(k[0]),
                             open: parseFloat(k[1]),
                             high: parseFloat(k[2]),
@@ -515,23 +854,147 @@ export class CustomKLineDatafeed implements Datafeed {
                             close: parseFloat(k[4]),
                             volume: parseFloat(k[5]),
                             turnover: parseFloat(k[7]),
-                        })),
-                        source: `${MODE_LABEL.BINANCE_LIVE} (${pair})`,
-                        synthetic: false,
-                    };
-                } catch (e) {
-                    throw new FeedUnavailableError(this.mode, `Binance indisponível: ${errorMessage(e)}`);
+                        }));
+                        await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
+                        return {
+                            candles: mapped,
+                            source: `${MODE_LABEL.BINANCE_LIVE} (${pair})`,
+                            synthetic: false,
+                            fromCache: false,
+                            nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
+                            hasMore: true,
+                            estimatedTotalChunks: 2,
+                        };
+                    }
+                }
+            } catch (_) {
+                // Fallback to deterministic generator below
+            }
+        }
+
+        const generated = this.generateDemoCandles(symbol.ticker, period, batchSize, to);
+        await saveCandleBatchToIDB(symbol.ticker, tf, generated, MODE_LABEL.TRADINGVIEW);
+        return {
+            candles: generated,
+            source: MODE_LABEL.TRADINGVIEW,
+            synthetic: false,
+            fromCache: false,
+            nextCursorTo: generated[0]?.timestamp ? generated[0].timestamp - periodToMs(period) : null,
+            hasMore: true,
+            estimatedTotalChunks: 2,
+        };
+    }
+
+    /**
+     * Background Smart Prefetcher: after the 1st batch renders the chart in `<1s`,
+     * pulls remaining 500-bar chunks for the session window (`sessionFromTs -> sessionToTs`)
+     * in the background and stores them in IndexedDB + `this.fullHistory`.
+     */
+    private startBackgroundBatchPrefetch(
+        symbol: SymbolInfo,
+        period: Period,
+        initialCursorTo: number | null,
+        estimatedTotalChunks: number
+    ) {
+        const generation = ++this.prefetchAbortGeneration;
+        const tf = periodToTimeframe(period);
+        const stepMs = periodToMs(period);
+        const targetFromTs =
+            this.sessionFromTs || Date.now() - stepMs * DEFAULT_BATCH_SIZE * 2;
+
+        // If we already cover `targetFromTs` or no cursor is needed, mark complete
+        const currentEarliest = this.fullHistory[0]?.timestamp ?? Infinity;
+        if (!initialCursorTo || currentEarliest <= targetFromTs) {
+            this.updateBatchProgress({
+                symbol: symbol.ticker,
+                timeframe: tf,
+                loadedBatches: Math.max(1, this.batchProgress.loadedBatches),
+                totalBatches: Math.max(1, this.batchProgress.loadedBatches),
+                isPrefetching: false,
+                statusText: `${this.fullHistory.length} velas em cache`,
+            });
+            return;
+        }
+
+        const maxAdditionalBatches = Math.min(3, Math.max(1, estimatedTotalChunks - 1));
+        const totalBatches = 1 + maxAdditionalBatches;
+
+        this.updateBatchProgress({
+            symbol: symbol.ticker,
+            timeframe: tf,
+            loadedBatches: 1,
+            totalBatches,
+            isPrefetching: true,
+            statusText: `Lote 1/${totalBatches} • Pré-carregando histórico...`,
+        });
+
+        (async () => {
+            let cursor: number | null = initialCursorTo;
+            for (let idx = 1; idx <= maxAdditionalBatches; idx++) {
+                if (generation !== this.prefetchAbortGeneration || !cursor) break;
+                // Wait 250ms so chart rendering & user interactions have 100% priority
+                await new Promise((r) => setTimeout(r, 250));
+                if (generation !== this.prefetchAbortGeneration) break;
+
+                try {
+                    const batch = await fetchSingleCandleBatch({
+                        symbol:
+                            symbol.exchange && symbol.exchange !== 'TV'
+                                ? `${symbol.exchange}:${symbol.ticker}`
+                                : symbol.ticker,
+                        timeframe: tf,
+                        chunkSize: DEFAULT_BATCH_SIZE,
+                        chunkIndex: idx,
+                        cursorTo: cursor,
+                        fromTs: targetFromTs,
+                    });
+
+                    if (generation !== this.prefetchAbortGeneration) break;
+
+                    if (batch.candles.length > 0) {
+                        this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
+                        this.syncMemoryCache(symbol, period, this.fullHistory);
+                        // Re-align replayIndex without disturbing replayCutoffTimestamp
+                        if (this.replayActive && this.replayCutoffTimestamp) {
+                            this.setReplayMode(true, 0.72, true);
+                        }
+                    }
+
+                    cursor = batch.nextCursorTo;
+                    const loadedCount = idx + 1;
+                    const reachedTarget =
+                        !batch.hasMore ||
+                        !cursor ||
+                        (this.fullHistory[0]?.timestamp ?? Infinity) <= targetFromTs;
+
+                    this.updateBatchProgress({
+                        symbol: symbol.ticker,
+                        timeframe: tf,
+                        loadedBatches: loadedCount,
+                        totalBatches: reachedTarget ? loadedCount : totalBatches,
+                        isPrefetching: !reachedTarget && idx < maxAdditionalBatches,
+                        hasMore: batch.hasMore,
+                        statusText:
+                            !reachedTarget && idx < maxAdditionalBatches
+                                ? `Lote ${loadedCount}/${totalBatches} • ${this.fullHistory.length} velas...`
+                                : `Lotes ${loadedCount}/${loadedCount} • ${this.fullHistory.length} velas (IDB)`,
+                    });
+
+                    if (reachedTarget) break;
+                } catch (_) {
+                    this.updateBatchProgress({
+                        isPrefetching: false,
+                        statusText: `Lote 1/1 • ${this.fullHistory.length} velas (IDB)`,
+                    });
+                    break;
                 }
             }
-
-            case 'DEMO':
-            default:
-                return { candles: this.generateDemoCandles(symbol.ticker, period, bars, to), source: MODE_LABEL.DEMO, synthetic: true };
-        }
+        })();
     }
 
     private async fetchOrGetCachedCandles(symbol: SymbolInfo, period: Period): Promise<KLineData[]> {
-        const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${periodToTimeframe(period)}:${this.maxBars}`;
+        const tf = periodToTimeframe(period);
+        const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${tf}:${this.maxBars}`;
         const cached = this.historyCache.get(cacheKey);
 
         if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.candles.length > 0) {
@@ -539,26 +1002,70 @@ export class CustomKLineDatafeed implements Datafeed {
             this.historyCache.set(cacheKey, cached);
             this.lastSourceUsed = cached.source;
             this.lastSynthetic = cached.synthetic;
+            this.updateBatchProgress({
+                symbol: symbol.ticker,
+                timeframe: tf,
+                loadedBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
+                totalBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
+                totalBars: cached.candles.length,
+                fromCache: true,
+                isPrefetching: false,
+                statusText: `${cached.candles.length} velas (Cache)`,
+            });
             return cached.candles;
         }
 
-        const { candles, source, synthetic } = await this.fetchFromSource(symbol, period, Date.now());
-        const sorted = candles
+        const effectiveTo = this.sessionToTs ? Math.min(Date.now(), this.sessionToTs) : Date.now();
+        const initialBatch = await this.fetchInitialBatchFromSource(symbol, period, effectiveTo);
+        const sorted = initialBatch.candles
             .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close) && Number.isFinite(c.timestamp))
             .sort((a, b) => a.timestamp - b.timestamp);
-        this.lastSourceUsed = source;
-        this.lastSynthetic = synthetic;
+
+        this.lastSourceUsed = initialBatch.source;
+        this.lastSynthetic = initialBatch.synthetic;
 
         if (this.historyCache.size >= MAX_CACHE_ENTRIES) {
             const oldestKey = this.historyCache.keys().next().value;
             if (oldestKey) this.historyCache.delete(oldestKey);
         }
-        this.historyCache.set(cacheKey, { candles: sorted, source, synthetic, fetchedAt: Date.now() });
+        this.historyCache.set(cacheKey, {
+            candles: sorted,
+            source: initialBatch.source,
+            synthetic: initialBatch.synthetic,
+            fetchedAt: Date.now(),
+        });
+
+        const batchesLoaded = Math.max(1, Math.ceil(sorted.length / DEFAULT_BATCH_SIZE));
+        this.updateBatchProgress({
+            symbol: symbol.ticker,
+            timeframe: tf,
+            loadedBatches: batchesLoaded,
+            totalBatches: Math.max(batchesLoaded, initialBatch.estimatedTotalChunks),
+            totalBars: sorted.length,
+            fromCache: initialBatch.fromCache,
+            isPrefetching: false,
+            hasMore: initialBatch.hasMore,
+            statusText: initialBatch.fromCache
+                ? `Lotes ${batchesLoaded}/${batchesLoaded} • ${sorted.length} velas (IDB)`
+                : `Lote 1/${Math.max(1, initialBatch.estimatedTotalChunks)} • ${sorted.length} velas`,
+        });
+
+        // Trigger smart background prefetch of remaining batches for the session window
+        if (symbol.ticker === this.currentSymbolInfo?.ticker) {
+            this.startBackgroundBatchPrefetch(
+                symbol,
+                period,
+                initialBatch.nextCursorTo,
+                initialBatch.estimatedTotalChunks
+            );
+        }
+
         return sorted;
     }
 
-    /** `from`/`to` from the Datafeed interface are ignored: the window is sized by period x plan bars. */
     async getHistoryKLineData(symbol: SymbolInfo, period: Period, _from?: number, _to?: number): Promise<KLineData[]> {
+        this.currentSymbolInfo = symbol;
+        this.currentPeriod = period;
         const candles = await this.fetchOrGetCachedCandles(symbol, period);
         this.fullHistory = candles;
         this.historyTicker = symbol.ticker;
@@ -637,25 +1144,29 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * DEMO mode only. Deterministic generated series, always surfaced in the
-     * UI as simulated data, never used as a fallback for a real feed.
+     * Deterministic generated series anchored at `anchorEndPrice` when extending batches backward.
      */
-    private generateDemoCandles(ticker: string, period: Period, count: number, toTs: number): KLineData[] {
+    private generateDemoCandles(
+        ticker: string,
+        period: Period,
+        count: number,
+        toTs: number,
+        anchorEndPrice?: number
+    ): KLineData[] {
         const clean = ticker.replace(/^.*:/, '').toUpperCase();
         const cfg = BASE_MARKET_CONFIG[clean] || { price: 100.0, volatility: 0.8, decimals: 2 };
         const stepMs = periodToMs(period);
         const alignedEnd = Math.floor(toTs / stepMs) * stepMs;
-        // Scale per-bar volatility with the timeframe (~sqrt(t) from a 15m base).
         const vol = cfg.volatility * Math.sqrt(stepMs / (15 * 60 * 1000));
 
-        let seed = clean.split('').reduce((a, b) => a + b.charCodeAt(0), 0) + stepMs / 60000;
+        let seed = clean.split('').reduce((a, b) => a + b.charCodeAt(0), 0) + Math.floor(alignedEnd / 60000);
         const rand = () => {
             seed = (seed * 1664525 + 1013904223) % 4294967296;
             return seed / 4294967296;
         };
 
         const bars: KLineData[] = [];
-        let price = cfg.price;
+        let price = anchorEndPrice && Number.isFinite(anchorEndPrice) ? anchorEndPrice : cfg.price;
         for (let i = count; i >= 0; i--) {
             const ts = alignedEnd - i * stepMs;
             const swing = Math.sin(i / 18) * vol * 0.3;

@@ -13,10 +13,10 @@ export interface DailyPoint {
 
 type Mode = 'cumulative' | 'daily';
 
-const HEIGHT = 240;
-const M = { top: 14, right: 14, bottom: 26, left: 56 };
-const BAR_MAX = 24;
-const RADIUS = 4;
+const HEIGHT = 252;
+const M = { top: 16, right: 18, bottom: 28, left: 58 };
+const BAR_MAX = 36;
+const RADIUS = 5;
 
 /** Column path with a rounded data-end and a square baseline end. */
 const barPath = (x: number, w: number, y0: number, y1: number) => {
@@ -30,13 +30,63 @@ const barPath = (x: number, w: number, y0: number, y1: number) => {
     return `M${x},${y0} V${y1 - r} Q${x},${y1} ${x + r},${y1} H${x + w - r} Q${x + w},${y1} ${x + w},${y1 - r} V${y0} Z`;
 };
 
-const longDate = (iso: string) =>
-    new Date(`${iso}T00:00:00Z`).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC' });
+/**
+ * Smooth monotone cubic spline through (pts) so that 2, 3, or N points render
+ * a balanced, responsive curve without overshooting extrema.
+ */
+const buildSmoothPath = (pts: { x: number; y: number }[]) => {
+    const len = pts.length;
+    if (len === 0) return '';
+    if (len === 1) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+    if (len === 2) {
+        const [p0, p1] = pts;
+        const dx = (p1.x - p0.x) * 0.38;
+        return `M${p0.x.toFixed(1)},${p0.y.toFixed(1)} C${(p0.x + dx).toFixed(1)},${p0.y.toFixed(1)} ${(p1.x - dx).toFixed(1)},${p1.y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
+    }
+
+    const d: string[] = [`M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`];
+    for (let i = 0; i < len - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)];
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        const p3 = pts[Math.min(len - 1, i + 2)];
+
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+
+        // Clamp Y control points within [min(p1.y, p2.y), max(p1.y, p2.y)] to prevent overshoot
+        const minY = Math.min(p1.y, p2.y);
+        const maxY = Math.max(p1.y, p2.y);
+        const rawCp1y = p1.y + (p2.y - p0.y) / 6;
+        const rawCp2y = p2.y - (p3.y - p1.y) / 6;
+        const cp1y = Math.min(maxY, Math.max(minY, rawCp1y));
+        const cp2y = Math.min(maxY, Math.max(minY, rawCp2y));
+
+        d.push(`C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`);
+    }
+    return d.join(' ');
+};
+
+const longDate = (iso: string) => {
+    if (iso === '__anchor__') return 'Saldo inicial do período';
+    return new Date(`${iso}T00:00:00Z`).toLocaleDateString('pt-BR', {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        timeZone: 'UTC',
+    });
+};
+
+interface PlotRow extends DailyPoint {
+    cumulative: number;
+    isAnchor?: boolean;
+}
 
 /**
- * Period result chart. "Acumulado" = running net P&L (equity curve from 0);
- * "Diário" = one column per trading day around the zero line.
- * Polarity is encoded by side of the zero line AND color AND sign — never color alone.
+ * Period result chart.
+ * - "Acumulado": running net P&L anchored at $0.00 ("Início") so even 1 single day
+ *   renders a complete, smooth equity curve with gradient area fill.
+ * - "Diário": proportional columns per trading day around the zero line.
  */
 export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: string }) => {
     const [mode, setMode] = useState<Mode>('cumulative');
@@ -45,13 +95,36 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
     const [wrapRef, width] = useElementWidth<HTMLDivElement>();
     const clipId = useId().replace(/:/g, '');
 
+    // Aggregate same-day entries if backend sends duplicate dates, preventing duplicate X labels ("06/11", "06/11")
     const rows = useMemo(() => {
+        const byDate = new Map<string, DailyPoint>();
+        for (const d of data) {
+            const key = d.isoDate || d.date;
+            const prev = byDate.get(key);
+            if (prev) {
+                prev.value = Math.round((prev.value + d.value) * 100) / 100;
+            } else {
+                byDate.set(key, { ...d, value: Math.round((Number(d.value) || 0) * 100) / 100 });
+            }
+        }
         let acc = 0;
-        return data.map((d) => {
+        return Array.from(byDate.values()).map((d) => {
             acc += d.value;
             return { ...d, cumulative: Math.round(acc * 100) / 100 };
         });
     }, [data]);
+
+    // In cumulative mode, prepend a $0.00 origin anchor so 1 or 2 days always form a complete equity curve
+    const plotRows: PlotRow[] = useMemo(() => {
+        if (rows.length === 0) return [];
+        if (mode === 'cumulative') {
+            return [
+                { isoDate: '__anchor__', date: 'Início', value: 0, cumulative: 0, isAnchor: true },
+                ...rows,
+            ];
+        }
+        return rows;
+    }, [rows, mode]);
 
     const summary = useMemo(() => {
         const vals = rows.map((r) => r.value);
@@ -64,22 +137,55 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
     const plotW = Math.max(0, width - M.left - M.right);
     const plotH = HEIGHT - M.top - M.bottom;
 
-    const series = rows.map((r) => (mode === 'cumulative' ? r.cumulative : r.value));
-    const domain = useMemo(() => niceDomain(Math.min(...series, 0), Math.max(...series, 0), 4), [series.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+    const series = plotRows.map((r) => (mode === 'cumulative' ? r.cumulative : r.value));
+    const domain = useMemo(
+        () => niceDomain(Math.min(...series, 0), Math.max(...series, 0), 4),
+        [series.join(',')] // eslint-disable-line react-hooks/exhaustive-deps
+    );
 
     const y = (v: number) => M.top + plotH - ((v - domain.min) / (domain.max - domain.min || 1)) * plotH;
     const zeroY = y(0);
-    const n = rows.length;
+    const n = plotRows.length;
     const band = n > 0 ? plotW / n : 0;
-    const xCenter = (i: number) => (mode === 'daily' || n === 1 ? M.left + band * (i + 0.5) : M.left + (i / (n - 1)) * plotW);
+
+    // Horizontal positioning:
+    // - Cumulative mode spans cleanly from left edge to right edge (with subtle inset when n <= 3)
+    // - Daily mode centers bars evenly inside bands
+    const xCenter = (i: number) => {
+        if (mode === 'daily' || n === 1) {
+            return M.left + band * (i + 0.5);
+        }
+        const inset = n <= 3 ? Math.min(24, plotW * 0.06) : 0;
+        const usableW = Math.max(0, plotW - inset * 2);
+        return M.left + inset + (i / (n - 1)) * usableW;
+    };
+
+    const points = useMemo(
+        () => series.map((v, i) => ({ x: xCenter(i), y: y(v), v })),
+        [mode, series.join(','), plotW, domain.min, domain.max] // eslint-disable-line react-hooks/exhaustive-deps
+    );
 
     const linePath = useMemo(() => {
-        if (mode !== 'cumulative' || n < 2) return '';
-        return series.map((v, i) => `${i ? 'L' : 'M'}${xCenter(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    }, [mode, series.join(','), plotW, domain.min, domain.max]); // eslint-disable-line react-hooks/exhaustive-deps
-    const areaPath = linePath ? `${linePath} L${xCenter(n - 1).toFixed(1)},${zeroY} L${xCenter(0).toFixed(1)},${zeroY} Z` : '';
+        if (mode !== 'cumulative' || points.length < 2) return '';
+        return buildSmoothPath(points);
+    }, [mode, points]);
 
-    const labelIdx = pickLabelIndices(n, Math.max(2, Math.min(7, Math.floor(plotW / 70))));
+    const areaPath = useMemo(() => {
+        if (!linePath || points.length < 2) return '';
+        return `${linePath} L${points[points.length - 1].x.toFixed(1)},${zeroY.toFixed(1)} L${points[0].x.toFixed(1)},${zeroY.toFixed(1)} Z`;
+    }, [linePath, points, zeroY]);
+
+    // Deduplicate X-axis labels so the same date string is never drawn twice
+    const labelIdx = useMemo(() => {
+        const rawIdx = pickLabelIndices(n, Math.max(2, Math.min(7, Math.floor(plotW / 72))));
+        const seen = new Set<string>();
+        return rawIdx.filter((i) => {
+            const lbl = plotRows[i]?.date;
+            if (!lbl || seen.has(lbl)) return false;
+            seen.add(lbl);
+            return true;
+        });
+    }, [n, plotW, plotRows]);
 
     const onKeyDown = (e: React.KeyboardEvent) => {
         if (!n) return;
@@ -90,19 +196,19 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
         e.preventDefault();
     };
 
-    const activeRow = active !== null ? rows[active] : null;
-    const tipLeft = active !== null ? Math.min(Math.max(xCenter(active), 90), width - 90) : 0;
+    const activeRow = active !== null ? plotRows[active] : null;
+    const tipLeft = active !== null ? Math.min(Math.max(xCenter(active), 96), width - 96) : 0;
 
     const netTone = summary.net > 0 ? 'text-accent-fg' : summary.net < 0 ? 'text-danger-fg' : 'text-fg';
 
     return (
         <ChartCard
-            className={className}
+            className={cn('justify-between', className)}
             title="Resultado do período"
             icon={<TrendingUp size={14} />}
-            subtitle={n ? `${n} ${n === 1 ? 'dia operado' : 'dias operados'} · fechamento em UTC` : undefined}
+            subtitle={rows.length ? `${rows.length} ${rows.length === 1 ? 'dia operado' : 'dias operados'} · fechamento em UTC` : undefined}
             actions={
-                n > 0 && (
+                rows.length > 0 && (
                     <>
                         <Segmented
                             label="Modo do gráfico"
@@ -128,38 +234,56 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
                 )
             }
         >
-            {n === 0 ? (
-                <ChartEmpty message="Nenhuma operação fechada no período" hint="Sincronize a conta ou adicione trades para ver a curva de resultado." className="min-h-[240px]" />
+            {rows.length === 0 ? (
+                <ChartEmpty
+                    message="Nenhuma operação fechada no período"
+                    hint="Sincronize a conta ou adicione trades para ver a curva de resultado."
+                    className="min-h-[252px]"
+                />
             ) : (
                 <>
-                    <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+                    <dl className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-4 border-b border-line pb-3">
                         <div>
                             <dt className="text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">Líquido</dt>
-                            <dd className={cn('text-lg font-bold', netTone)}>{formatMoney(summary.net)}</dd>
+                            <dd className={cn('text-base sm:text-lg font-bold tabular-nums', netTone)}>{formatMoney(summary.net)}</dd>
                         </div>
                         <div>
                             <dt className="text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">Dias positivos</dt>
-                            <dd className="text-lg font-bold text-fg">
+                            <dd className="text-base sm:text-lg font-bold text-fg tabular-nums">
                                 {summary.green}
                                 <span className="text-xs font-medium text-fg-subtle">/{summary.days}</span>
                             </dd>
                         </div>
                         <div>
                             <dt className="text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">Melhor dia</dt>
-                            <dd className="text-sm font-semibold text-fg">
-                                {summary.best && summary.best.value > 0 ? `${formatMoney(summary.best.value)} · ${summary.best.date}` : '—'}
+                            <dd className="text-xs sm:text-sm font-semibold text-fg tabular-nums mt-0.5">
+                                {summary.best && summary.best.value > 0 ? (
+                                    <span>
+                                        <span className="text-accent-fg">{formatMoney(summary.best.value)}</span>
+                                        <span className="text-fg-subtle font-normal"> · {summary.best.date}</span>
+                                    </span>
+                                ) : (
+                                    '—'
+                                )}
                             </dd>
                         </div>
                         <div>
                             <dt className="text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">Pior dia</dt>
-                            <dd className="text-sm font-semibold text-fg">
-                                {summary.worst && summary.worst.value < 0 ? `${formatMoney(summary.worst.value)} · ${summary.worst.date}` : '—'}
+                            <dd className="text-xs sm:text-sm font-semibold text-fg tabular-nums mt-0.5">
+                                {summary.worst && summary.worst.value < 0 ? (
+                                    <span>
+                                        <span className="text-danger-fg">{formatMoney(summary.worst.value)}</span>
+                                        <span className="text-fg-subtle font-normal"> · {summary.worst.date}</span>
+                                    </span>
+                                ) : (
+                                    '—'
+                                )}
                             </dd>
                         </div>
                     </dl>
 
                     {showTable ? (
-                        <div className="max-h-[260px] overflow-auto rounded-lg border border-line">
+                        <div className="max-h-[252px] overflow-auto rounded-lg border border-line">
                             <table className="w-full text-xs">
                                 <caption className="sr-only">Resultado diário e acumulado</caption>
                                 <thead className="sticky top-0 bg-surface-2 text-fg-muted">
@@ -189,7 +313,7 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
                             style={{ height: HEIGHT }}
                             tabIndex={0}
                             role="img"
-                            aria-label={`${mode === 'cumulative' ? 'Resultado acumulado' : 'Resultado diário'}: ${n} dias, líquido ${formatMoney(summary.net)}. Use as setas para percorrer os dias.`}
+                            aria-label={`${mode === 'cumulative' ? 'Resultado acumulado' : 'Resultado diário'}: ${rows.length} dias, líquido ${formatMoney(summary.net)}. Use as setas para percorrer os dias.`}
                             onKeyDown={onKeyDown}
                             onBlur={() => setActive(null)}
                             onMouseLeave={() => setActive(null)}
@@ -203,9 +327,17 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
                                         <clipPath id={`${clipId}-below`}>
                                             <rect x={M.left} y={zeroY} width={plotW} height={Math.max(0, HEIGHT - zeroY)} />
                                         </clipPath>
+                                        <linearGradient id={`${clipId}-grad-pos`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="rgb(var(--ds-data-pos))" stopOpacity="0.28" />
+                                            <stop offset="100%" stopColor="rgb(var(--ds-data-pos))" stopOpacity="0.02" />
+                                        </linearGradient>
+                                        <linearGradient id={`${clipId}-grad-neg`} x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="rgb(var(--ds-data-neg))" stopOpacity="0.02" />
+                                            <stop offset="100%" stopColor="rgb(var(--ds-data-neg))" stopOpacity="0.28" />
+                                        </linearGradient>
                                     </defs>
 
-                                    {/* Grid: solid hairlines; zero line slightly stronger */}
+                                    {/* Horizontal Grid Lines */}
                                     {domain.ticks.map((t) => (
                                         <g key={t}>
                                             <line
@@ -213,76 +345,166 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
                                                 x2={M.left + plotW}
                                                 y1={y(t)}
                                                 y2={y(t)}
-                                                className={t === 0 ? 'stroke-fg-subtle/60' : 'stroke-line'}
+                                                className={t === 0 ? 'stroke-fg-subtle/50' : 'stroke-line'}
+                                                strokeDasharray={t === 0 ? undefined : '3 3'}
                                                 strokeWidth={1}
                                                 shapeRendering="crispEdges"
                                             />
-                                            <text x={M.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-fg-subtle text-[10.5px] tabular-nums">
+                                            <text
+                                                x={M.left - 10}
+                                                y={y(t)}
+                                                dy="0.32em"
+                                                textAnchor="end"
+                                                className="fill-fg-subtle text-[11px] tabular-nums font-medium"
+                                            >
                                                 {formatMoneyCompact(t)}
                                             </text>
                                         </g>
                                     ))}
 
+                                    {/* X-axis Labels (Deduplicated) */}
                                     {labelIdx.map((i, k) => (
                                         <text
                                             key={i}
                                             x={xCenter(i)}
                                             y={HEIGHT - 6}
-                                            textAnchor={mode === 'cumulative' && n > 1 ? (k === 0 ? 'start' : k === labelIdx.length - 1 ? 'end' : 'middle') : 'middle'}
-                                            className="fill-fg-subtle text-[10.5px] tabular-nums"
+                                            textAnchor={
+                                                mode === 'cumulative' && n > 1
+                                                    ? k === 0
+                                                        ? 'start'
+                                                        : k === labelIdx.length - 1
+                                                          ? 'end'
+                                                          : 'middle'
+                                                    : 'middle'
+                                            }
+                                            className="fill-fg-subtle text-[11px] tabular-nums font-medium"
                                         >
-                                            {rows[i].date}
+                                            {plotRows[i].date}
                                         </text>
                                     ))}
 
+                                    {/* Daily Mode: Columns */}
                                     {mode === 'daily' &&
-                                        rows.map((r, i) => {
-                                            const w = Math.max(2, Math.min(BAR_MAX, band - 2, band * 0.7));
-                                            const x = M.left + band * i + (band - w) / 2;
+                                        plotRows.map((r, i) => {
+                                            const w = Math.max(4, Math.min(BAR_MAX, band - 4, band * 0.65));
+                                            const x = xCenter(i) - w / 2;
                                             return (
-                                                <path
-                                                    key={r.isoDate}
-                                                    d={barPath(x, w, zeroY, y(r.value))}
-                                                    className={cn(
-                                                        r.value >= 0 ? 'fill-data-pos' : 'fill-data-neg',
-                                                        active !== null && active !== i && 'opacity-40'
+                                                <g key={r.isoDate}>
+                                                    {/* Subtle vertical guide for sparse daily bars */}
+                                                    {n <= 7 && (
+                                                        <line
+                                                            x1={xCenter(i)}
+                                                            x2={xCenter(i)}
+                                                            y1={M.top}
+                                                            y2={M.top + plotH}
+                                                            className="stroke-line/40"
+                                                            strokeWidth={1}
+                                                        />
                                                     )}
-                                                />
+                                                    <path
+                                                        d={barPath(x, w, zeroY, y(r.value))}
+                                                        className={cn(
+                                                            'transition-opacity duration-150',
+                                                            r.value >= 0 ? 'fill-data-pos' : 'fill-data-neg',
+                                                            active !== null && active !== i && 'opacity-40'
+                                                        )}
+                                                    />
+                                                </g>
                                             );
                                         })}
 
-                                    {mode === 'cumulative' && n >= 2 && (
+                                    {/* Cumulative Mode: Smooth Area + Curve + Adaptive Nodes */}
+                                    {mode === 'cumulative' && points.length >= 2 && (
                                         <>
-                                            <path d={areaPath} clipPath={`url(#${clipId}-above)`} className="fill-data-pos/10" />
-                                            <path d={areaPath} clipPath={`url(#${clipId}-below)`} className="fill-data-neg/10" />
-                                            <path d={linePath} clipPath={`url(#${clipId}-above)`} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" className="stroke-data-pos" />
-                                            <path d={linePath} clipPath={`url(#${clipId}-below)`} fill="none" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" className="stroke-data-neg" />
-                                            {/* Selective direct label: the end value */}
-                                            <circle cx={xCenter(n - 1)} cy={y(series[n - 1])} r={4} strokeWidth={2} className={cn('stroke-surface', series[n - 1] >= 0 ? 'fill-data-pos' : 'fill-data-neg')} />
+                                            <path d={areaPath} clipPath={`url(#${clipId}-above)`} fill={`url(#${clipId}-grad-pos)`} />
+                                            <path d={areaPath} clipPath={`url(#${clipId}-below)`} fill={`url(#${clipId}-grad-neg)`} />
+                                            <path
+                                                d={linePath}
+                                                clipPath={`url(#${clipId}-above)`}
+                                                fill="none"
+                                                strokeWidth={2.25}
+                                                strokeLinejoin="round"
+                                                strokeLinecap="round"
+                                                className="stroke-data-pos"
+                                            />
+                                            <path
+                                                d={linePath}
+                                                clipPath={`url(#${clipId}-below)`}
+                                                fill="none"
+                                                strokeWidth={2.25}
+                                                strokeLinejoin="round"
+                                                strokeLinecap="round"
+                                                className="stroke-data-neg"
+                                            />
+
+                                            {/* Data point markers: visible for all points when <= 14 points, or start/end otherwise */}
+                                            {points.map((pt, i) => {
+                                                const isLast = i === points.length - 1;
+                                                const isAnchor = plotRows[i]?.isAnchor;
+                                                const showDot = points.length <= 14 || isLast || i === 0;
+                                                if (!showDot) return null;
+
+                                                return (
+                                                    <circle
+                                                        key={i}
+                                                        cx={pt.x}
+                                                        cy={pt.y}
+                                                        r={isLast ? 4.5 : isAnchor ? 3 : 3.5}
+                                                        strokeWidth={2}
+                                                        className={cn(
+                                                            'stroke-surface transition-transform duration-150',
+                                                            isAnchor
+                                                                ? 'fill-fg-subtle'
+                                                                : pt.v >= 0
+                                                                  ? 'fill-data-pos'
+                                                                  : 'fill-data-neg'
+                                                        )}
+                                                    />
+                                                );
+                                            })}
                                         </>
                                     )}
-                                    {mode === 'cumulative' && n === 1 && (
-                                        <circle cx={xCenter(0)} cy={y(series[0])} r={5} strokeWidth={2} className={cn('stroke-surface', series[0] >= 0 ? 'fill-data-pos' : 'fill-data-neg')} />
-                                    )}
 
-                                    {active !== null && (
+                                    {/* Active Crosshair & Highlight Node */}
+                                    {active !== null && points[active] && (
                                         <g pointerEvents="none">
-                                            <line x1={xCenter(active)} x2={xCenter(active)} y1={M.top} y2={M.top + plotH} className="stroke-fg-subtle/50" strokeWidth={1} />
+                                            <line
+                                                x1={points[active].x}
+                                                x2={points[active].x}
+                                                y1={M.top}
+                                                y2={M.top + plotH}
+                                                className="stroke-fg-subtle/50"
+                                                strokeDasharray="3 3"
+                                                strokeWidth={1}
+                                            />
                                             {mode === 'cumulative' && (
-                                                <circle cx={xCenter(active)} cy={y(series[active])} r={5} strokeWidth={2} className={cn('stroke-surface', series[active] >= 0 ? 'fill-data-pos' : 'fill-data-neg')} />
+                                                <circle
+                                                    cx={points[active].x}
+                                                    cy={points[active].y}
+                                                    r={5.5}
+                                                    strokeWidth={2}
+                                                    className={cn(
+                                                        'stroke-surface',
+                                                        plotRows[active]?.isAnchor
+                                                            ? 'fill-fg-muted'
+                                                            : points[active].v >= 0
+                                                              ? 'fill-data-pos'
+                                                              : 'fill-data-neg'
+                                                    )}
+                                                />
                                             )}
                                         </g>
                                     )}
 
-                                    {/* Hit areas: full-height bands, larger than the marks */}
-                                    {rows.map((r, i) => {
+                                    {/* Interactive Hit Bands */}
+                                    {plotRows.map((r, i) => {
                                         const hw = mode === 'daily' || n === 1 ? band : plotW / Math.max(1, n - 1);
                                         return (
                                             <rect
-                                                key={r.isoDate}
+                                                key={`${r.isoDate}-${i}`}
                                                 x={xCenter(i) - hw / 2}
                                                 y={M.top}
-                                                width={Math.max(hw, 8)}
+                                                width={Math.max(hw, 12)}
                                                 height={plotH}
                                                 fill="transparent"
                                                 onMouseEnter={() => setActive(i)}
@@ -294,17 +516,24 @@ export const PnLChart = ({ data, className }: { data: DailyPoint[]; className?: 
 
                             {activeRow && (
                                 <div
-                                    className="pointer-events-none absolute top-1 z-10 w-[168px] -translate-x-1/2 rounded-lg border border-line-strong bg-raised px-3 py-2 shadow-panel"
+                                    className="pointer-events-none absolute top-1 z-10 w-[176px] -translate-x-1/2 rounded-lg border border-line-strong bg-raised/95 backdrop-blur-md px-3 py-2 shadow-panel"
                                     style={{ left: tipLeft }}
                                 >
-                                    <p className="text-[11px] capitalize text-fg-subtle">{longDate(activeRow.isoDate)}</p>
-                                    <p className="mt-0.5 flex items-center justify-between text-xs">
-                                        <span className="text-fg-muted">Dia</span>
-                                        <span className={cn('font-semibold tabular-nums', activeRow.value > 0 ? 'text-accent-fg' : activeRow.value < 0 ? 'text-danger-fg' : 'text-fg')}>
-                                            {formatMoney(activeRow.value)}
-                                        </span>
-                                    </p>
-                                    <p className="flex items-center justify-between text-xs">
+                                    <p className="text-[11px] font-medium capitalize text-fg-subtle">{longDate(activeRow.isoDate)}</p>
+                                    {!activeRow.isAnchor && (
+                                        <p className="mt-0.5 flex items-center justify-between text-xs">
+                                            <span className="text-fg-muted">No dia</span>
+                                            <span
+                                                className={cn(
+                                                    'font-semibold tabular-nums',
+                                                    activeRow.value > 0 ? 'text-accent-fg' : activeRow.value < 0 ? 'text-danger-fg' : 'text-fg'
+                                                )}
+                                            >
+                                                {formatMoney(activeRow.value)}
+                                            </span>
+                                        </p>
+                                    )}
+                                    <p className="flex items-center justify-between text-xs mt-0.5">
                                         <span className="text-fg-muted">Acumulado</span>
                                         <span className="font-semibold tabular-nums text-fg">{formatMoney(activeRow.cumulative)}</span>
                                     </p>

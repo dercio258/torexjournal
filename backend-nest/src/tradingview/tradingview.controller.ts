@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, UseGuards, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { TradingViewService } from './tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
@@ -77,6 +77,91 @@ export class TradingViewController {
             // Explicit outage: the client shows "feed indisponível" instead of fake prices.
             throw new ServiceUnavailableException(`Feed TradingView indisponível: ${error.message}`);
         }
+    }
+
+    /**
+     * Paginated 500-candle historical batch endpoint for Replay & Backtesting sessions.
+     * Supports cursor-based backward loading (`cursorTo`) and date-window bounding (`from`, `to`).
+     */
+    @Get('candles/batch')
+    async getCandlesBatch(
+        @Req() req: any,
+        @Query('symbol') symbol: string,
+        @Query('timeframe') timeframe: string = '15m',
+        @Query('chunkSize') chunkSize?: string,
+        @Query('chunkIndex') chunkIndex?: string,
+        @Query('cursorTo') cursorTo?: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+    ) {
+        const { maxBars, earliestTs } = await this.limitsFor(req);
+        const parsedChunkSize = Math.min(parseInt(chunkSize || '500', 10) || 500, Math.max(500, maxBars));
+        const parsedChunkIndex = parseInt(chunkIndex || '0', 10) || 0;
+        const parsedCursorTo = cursorTo ? parseInt(cursorTo, 10) : undefined;
+        const parsedTo = to ? parseInt(to, 10) : undefined;
+        const parsedFrom = from ? Math.max(parseInt(from, 10) || 0, earliestTs) : earliestTs;
+
+        try {
+            return await this.tvService.getCandlesBatch(symbol, timeframe, {
+                chunkSize: parsedChunkSize,
+                chunkIndex: parsedChunkIndex,
+                cursorTo: parsedCursorTo,
+                fromTs: parsedFrom,
+                toTs: parsedTo,
+                earliestTs,
+            });
+        } catch (error) {
+            throw new ServiceUnavailableException(`Falha ao carregar lote de velas TradingView: ${error.message}`);
+        }
+    }
+
+    /**
+     * Pre-warms server cache for multiple symbol/window batches during an MT5/Deriv Sync session creation.
+     */
+    @Post('candles/prefetch')
+    async prefetchBatches(
+        @Req() req: any,
+        @Body() body: {
+            items: Array<{
+                symbol: string;
+                timeframe?: string;
+                toTs?: number;
+                fromTs?: number;
+                chunkSize?: number;
+            }>;
+        },
+    ) {
+        const { earliestTs } = await this.limitsFor(req);
+        const items = Array.isArray(body?.items) ? body.items.slice(0, 8) : [];
+        const results: Array<{ symbol: string; timeframe: string; bars: number; ok: boolean }> = [];
+
+        for (const item of items) {
+            const tf = item.timeframe || '15m';
+            try {
+                const batch = await this.tvService.getCandlesBatch(item.symbol, tf, {
+                    chunkSize: item.chunkSize || 500,
+                    cursorTo: item.toTs,
+                    toTs: item.toTs,
+                    fromTs: item.fromTs,
+                    earliestTs,
+                });
+                results.push({
+                    symbol: item.symbol,
+                    timeframe: tf,
+                    bars: batch.candles.length,
+                    ok: true,
+                });
+            } catch (_) {
+                results.push({
+                    symbol: item.symbol,
+                    timeframe: tf,
+                    bars: 0,
+                    ok: false,
+                });
+            }
+        }
+
+        return { prefetched: results.filter(r => r.ok).length, results };
     }
 
     @Get('quote')

@@ -87,6 +87,17 @@ export interface CandleResponse {
     timeframe: string;
 }
 
+export interface CandleBatchResponse extends CandleResponse {
+    chunkSize: number;
+    chunkIndex: number;
+    estimatedTotalChunks: number;
+    earliestLoadedTs: number | null;
+    latestLoadedTs: number | null;
+    nextCursorTo: number | null;
+    hasMore: boolean;
+    fromCache: boolean;
+}
+
 @Injectable()
 export class TradingViewService {
     private readonly logger = new Logger(TradingViewService.name);
@@ -105,7 +116,7 @@ export class TradingViewService {
         return TIMEFRAME_MAP[tf] || TIMEFRAME_MAP[tf.toUpperCase()] || '60';
     }
 
-    private getIntervalMs(tf: string): number {
+    public getIntervalMs(tf: string): number {
         const norm = this.normalizeTimeframe(tf);
         switch (norm) {
             case '1': return 60 * 1000;
@@ -218,6 +229,91 @@ export class TradingViewService {
         // cache-manager v7 TTL is in milliseconds.
         await this.cacheManager.set(cacheKey, result, 60_000);
         return result;
+    }
+
+    /**
+     * Fetches a 500-candle historical batch (chunk) anchored at `cursorTo` (or `toTs`)
+     * down to `fromTs` (bounded by `earliestTs`), with server-side chunk caching (10 min TTL)
+     * and pagination cursor (`nextCursorTo`, `hasMore`) so the client can pre-fetch or lazy-load batches.
+     */
+    async getCandlesBatch(
+        symbol: string,
+        timeframe: string = '15m',
+        options: {
+            chunkSize?: number;
+            chunkIndex?: number;
+            cursorTo?: number;
+            fromTs?: number;
+            toTs?: number;
+            earliestTs?: number;
+        },
+    ): Promise<CandleBatchResponse> {
+        const tvSymbol = this.normalizeSymbol(symbol);
+        const tvTimeframe = this.normalizeTimeframe(timeframe);
+        const intervalMs = this.getIntervalMs(timeframe);
+        const chunkSize = Math.min(Math.max(Math.floor(options.chunkSize || 500), 100), 1500);
+        const chunkIndex = Math.max(0, Math.floor(options.chunkIndex || 0));
+        const now = Date.now();
+        const effectiveTo = options.cursorTo && options.cursorTo > 1e11
+            ? Math.min(options.cursorTo, now)
+            : (options.toTs && options.toTs > 1e11 ? Math.min(options.toTs, now) : now);
+        const effectiveFrom = options.fromTs && options.fromTs > 1e11
+            ? Math.max(options.fromTs, options.earliestTs || 0)
+            : (options.earliestTs || effectiveTo - chunkSize * intervalMs * 4);
+
+        const toBucket = Math.floor(effectiveTo / intervalMs) * intervalMs;
+        const batchCacheKey = `tv_batch:${tvSymbol}:${tvTimeframe}:${chunkSize}:${toBucket}`;
+
+        const cachedBatch = await this.cacheManager.get<CandleResponse>(batchCacheKey);
+        let candles: any[] = [];
+        let fromCache = false;
+
+        if (cachedBatch?.candles?.length) {
+            candles = cachedBatch.candles;
+            fromCache = true;
+        } else {
+            const fetched = await this.getCandles(symbol, timeframe, {
+                range: chunkSize,
+                toTs: effectiveTo,
+                earliestTs: options.earliestTs,
+            });
+            candles = fetched.candles;
+            // Historical batches are immutable once closed; cache for 10 minutes
+            await this.cacheManager.set(batchCacheKey, fetched, 600_000);
+        }
+
+        const filtered = candles
+            .filter(c => c.timestamp <= effectiveTo && (!options.earliestTs || c.timestamp >= options.earliestTs))
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+        const earliestLoadedTs = filtered.length > 0 ? filtered[0].timestamp : null;
+        const latestLoadedTs = filtered.length > 0 ? filtered[filtered.length - 1].timestamp : null;
+        const nextCursorTo = earliestLoadedTs ? earliestLoadedTs - intervalMs : null;
+        const hasMore = Boolean(
+            earliestLoadedTs &&
+            nextCursorTo &&
+            nextCursorTo > effectiveFrom &&
+            (!options.earliestTs || nextCursorTo > options.earliestTs) &&
+            filtered.length >= Math.min(50, chunkSize * 0.4),
+        );
+
+        const spanMs = Math.max(intervalMs * chunkSize, effectiveTo - effectiveFrom);
+        const estimatedTotalChunks = Math.max(1, Math.min(20, Math.ceil(spanMs / (chunkSize * intervalMs))));
+
+        return {
+            candles: filtered,
+            source: 'tradingview',
+            tvSymbol,
+            timeframe: tvTimeframe,
+            chunkSize,
+            chunkIndex,
+            estimatedTotalChunks,
+            earliestLoadedTs,
+            latestLoadedTs,
+            nextCursorTo: hasMore ? nextCursorTo : null,
+            hasMore,
+            fromCache,
+        };
     }
 
     async getQuote(symbol: string) {

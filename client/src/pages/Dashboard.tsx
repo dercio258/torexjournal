@@ -57,7 +57,7 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue 
                 <span className="text-xs sm:text-[13px] font-bold text-fg uppercase tracking-wide">{title}</span>
                 <div className="flex items-center gap-1.5">
                     {trend && (
-                        <span className={`inline-flex items-center gap-0.5 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                        <span className={`inline-flex items-center gap-0.5 text-[10px] tabular-nums font-semibold px-1.5 py-0.5 rounded ${
                             isUp 
                                 ? 'bg-accent/10 text-accent-fg' 
                                 : 'bg-rose-500/10 text-danger-fg'
@@ -73,7 +73,7 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend, trendValue 
             </div>
 
             <div>
-                <div className={`text-xl sm:text-2xl font-black font-mono tracking-tight ${
+                <div className={`text-xl sm:text-2xl font-bold tabular-nums tracking-tight ${
                     title.includes('Lucro') 
                         ? (value.includes('-') ? 'text-danger-fg' : 'text-accent-fg')
                         : 'text-fg'
@@ -263,7 +263,7 @@ export const Dashboard = () => {
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] bg-canvas gap-3">
                 <RefreshCw className="w-8 h-8 text-accent-fg animate-spin" />
-                <p className="text-xs text-fg-muted font-mono">Sincronizando métricas operacionais...</p>
+                <p className="text-xs text-fg-muted">Sincronizando métricas operacionais...</p>
             </div>
         );
     }
@@ -293,8 +293,8 @@ export const Dashboard = () => {
 
             {/* COMPACT TOOLBAR BAR: Segmented Pills + Refresh + Add Trade */}
             <div className="flex flex-wrap items-center justify-between gap-2 pb-0.5">
-                <div className="flex items-center gap-1.5 text-sm font-medium text-fg-muted ">
-                    <span>{greeting}, <strong className="font-semibold text-fg ">{displayName}</strong></span>
+                <div className="flex items-center gap-1.5 text-sm font-medium text-fg-muted">
+                    <span>{greeting}, <strong className="font-semibold text-fg">{displayName}</strong></span>
                 </div>
 
                 {/* Toolbar: Segmented Filters + Refresh + Add Trade */}
@@ -311,10 +311,10 @@ export const Dashboard = () => {
                                 key={opt.val}
                                 onClick={() => handleDateFilter(opt.val)}
                                 className={`px-3 py-1 text-xs rounded-md transition-all cursor-pointer ${
- dateRange.value === opt.val 
- ? 'bg-accent/10 border border-accent/40 text-accent-fg font-semibold' 
- : 'text-fg-muted hover:text-fg hover:bg-surface-2 border border-transparent'
- }`}
+                                    dateRange.value === opt.val 
+                                        ? 'bg-accent/10 border border-accent/40 text-accent-fg font-semibold' 
+                                        : 'text-fg-muted hover:text-fg hover:bg-surface-2 border border-transparent'
+                                }`}
                             >
                                 {opt.label}
                             </button>
@@ -324,10 +324,10 @@ export const Dashboard = () => {
                             <button
                                 onClick={() => setShowDatePicker(true)}
                                 className={`p-1.5 rounded-md transition-colors cursor-pointer ${
- dateRange.value === 'custom' 
- ? 'text-accent-fg bg-accent/10 border border-accent/40' 
- : 'text-fg-muted hover:text-fg hover:bg-surface-2 '
- }`}
+                                    dateRange.value === 'custom' 
+                                        ? 'text-accent-fg bg-accent/10 border border-accent/40' 
+                                        : 'text-fg-muted hover:text-fg hover:bg-surface-2'
+                                }`}
                                 title="Selecionar Período Personalizado"
                             >
                                 <Calendar size={13} />
@@ -365,59 +365,51 @@ export const Dashboard = () => {
                         currency={selectedAccount?.currency} 
                     />
 
-                    {/* 4 HIGH-PRIORITY METRIC CARDS IN A ROW ON DESKTOP */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* 4 HIGH-PRIORITY METRIC CARDS IN A ROW ON DESKTOP (CLEAN, NO MICRO-BADGES) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                         {/* 1. Total P&L */}
                         {(() => {
                             const pnlInfo = detectPnLStatus(currentStats.totalPnL);
                             const TrendIcon = pnlInfo.trendIcon;
 
                             return (
-                                <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
-
+                                <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[148px] overflow-hidden group">
                                     {/* Header / Label */}
                                     <div className="flex justify-between items-center w-full">
-                                        <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
-                                            TOTAL P&L
+                                        <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">
+                                            Total P&L
                                         </span>
-                                        <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
+                                        <div className="p-1.5 rounded-lg bg-canvas-subtle border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
                                             <DollarSign size={14} />
                                         </div>
                                     </div>
 
-                                    {/* Value - Centered */}
-                                    <div className="my-auto py-2 flex flex-col items-center justify-center text-center">
-                                        <span className={`text-2xl sm:text-[30px] font-bold font-mono tracking-tight leading-none ${pnlInfo.textClass}`}>
+                                    {/* Main Value & Clean Context Line */}
+                                    <div className="mt-3 flex flex-col justify-between gap-2">
+                                        <span className={`text-2xl sm:text-[28px] font-bold tabular-nums tracking-tight leading-none ${pnlInfo.textClass}`}>
                                             {pnlInfo.formattedValue}
                                         </span>
-                                    </div>
-
-                                    {/* Context / Badge - Centered */}
-                                    <div className="flex items-center justify-center w-full">
-                                        <span className={`inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full ${pnlInfo.badgeBg}`}>
-                                            {TrendIcon && <TrendIcon size={11} />}
-                                            {pnlInfo.badgeLabel}
-                                        </span>
+                                        <div className="flex items-center gap-1 text-[11px] text-fg-subtle">
+                                            {TrendIcon && <TrendIcon size={12} className={pnlInfo.textClass} />}
+                                            <span>{pnlInfo.subtext}</span>
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })()}
 
-                        {/* 2. Total Trades with WinrateGauge Chart */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
-
-                            {/* Header / Label */}
+                        {/* 2. Total Trades */}
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[148px] overflow-hidden group">
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
-                                    TOTAL TRADES
+                                <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">
+                                    Total Trades
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-fg transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas-subtle border border-line text-fg-subtle group-hover:text-fg transition-colors">
                                     <Activity size={14} />
                                 </div>
                             </div>
 
-                            {/* Gauge Chart - Centered */}
-                            <div className="my-auto flex flex-col items-center justify-center">
+                            <div className="mt-2">
                                 <WinrateGauge 
                                     wins={currentStats.distribution.wins} 
                                     losses={currentStats.distribution.losses} 
@@ -427,69 +419,39 @@ export const Dashboard = () => {
                             </div>
                         </div>
 
-                        {/* 3. Win Rate with WinRateGaugeChart */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
-
-                            {/* Header / Label */}
+                        {/* 3. Taxa de Acerto */}
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[148px] overflow-hidden group">
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
-                                    TAXA DE ACERTO
+                                <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">
+                                    Taxa de Acerto
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas-subtle border border-line text-fg-subtle group-hover:text-accent-fg transition-colors">
                                     <TrendingUp size={14} />
                                 </div>
                             </div>
 
-                            {/* Gauge Chart - Centered */}
-                            <div className="my-auto flex flex-col items-center justify-center py-1">
+                            <div className="mt-2">
                                 <WinRateGaugeChart 
                                     winRate={currentStats.winRate} 
                                     wins={currentStats.distribution.wins} 
                                     losses={currentStats.distribution.losses} 
                                 />
                             </div>
-
-                            {/* Context / Badge - Centered */}
-                            <div className="flex items-center justify-center w-full">
-                                <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full ${
-                                    currentStats.winRate >= 50 
-                                        ? 'bg-accent/10 text-accent-fg border border-accent/20' 
-                                        : 'bg-danger/10 text-danger-fg border border-danger/20'
-                                }`}>
-                                    {currentStats.winRate >= 50 ? 'Consistente' : 'Ajustar'}
-                                </span>
-                            </div>
                         </div>
 
-                        {/* 4. Profit Factor with ProfitFactorDonut */}
-                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[195px] overflow-hidden group">
-
-                            {/* Header / Label */}
+                        {/* 4. Fator de Lucro */}
+                        <div className="relative bg-surface border border-line rounded-xl p-4 sm:p-5 hover:border-line-strong transition-colors flex flex-col justify-between min-h-[148px] overflow-hidden group">
                             <div className="flex justify-between items-center w-full">
-                                <span className="text-[11px] font-semibold text-fg-muted uppercase tracking-[0.05em]">
-                                    FATOR DE LUCRO
+                                <span className="text-xs font-semibold text-fg-muted uppercase tracking-wider">
+                                    Fator de Lucro
                                 </span>
-                                <div className="p-1.5 rounded-lg bg-canvas border border-line text-fg-subtle group-hover:text-fg transition-colors">
+                                <div className="p-1.5 rounded-lg bg-canvas-subtle border border-line text-fg-subtle group-hover:text-fg transition-colors">
                                     <BarChart3 size={14} />
                                 </div>
                             </div>
 
-                            {/* Donut Chart - Centered */}
-                            <div className="my-auto flex flex-col items-center justify-center py-1">
+                            <div className="mt-1">
                                 <ProfitFactorDonut profitFactor={currentStats.profitFactor} />
-                            </div>
-
-                            {/* Context / Badge - Centered */}
-                            <div className="flex items-center justify-center w-full">
-                                <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full ${
-                                    currentStats.profitFactor >= 1.5
-                                        ? 'bg-accent/10 text-accent-fg border border-accent/20'
-                                        : currentStats.profitFactor >= 1.0
-                                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
-                                        : 'bg-danger/10 text-danger-fg border border-danger/20'
-                                }`}>
-                                    {currentStats.profitFactor >= 1.75 ? 'Excelente' : currentStats.profitFactor >= 1.3 ? 'Consistente' : currentStats.profitFactor >= 1.0 ? 'Moderado' : 'Atenção'}
-                                </span>
                             </div>
                         </div>
                     </div>
@@ -500,14 +462,14 @@ export const Dashboard = () => {
                         <PerformanceScores data={currentStats.radarMetrics} />
                     </div>
 
-                    {/* INSTITUTIONAL OPERATIONAL BREAKDOWN (3 RADAR CARDS) */}
+                    {/* INSTITUTIONAL OPERATIONAL BREAKDOWN */}
                     <div className="space-y-2.5">
                         <div className="flex items-center justify-between">
-                            <h2 className="text-xs font-bold uppercase tracking-wider text-fg flex items-center gap-1.5 font-mono">
+                            <h2 className="text-xs font-semibold uppercase tracking-wider text-fg flex items-center gap-1.5">
                                 <Activity size={14} className="text-accent-fg" />
                                 Detalhamento Operacional
                             </h2>
-                            <span className="text-[10px] text-fg-subtle">
+                            <span className="text-[11px] text-fg-subtle">
                                 Resultado por ativo, sessão e dia · período selecionado
                             </span>
                         </div>
@@ -538,7 +500,7 @@ export const Dashboard = () => {
                                     type="date"
                                     value={customStart}
                                     onChange={e => setCustomStart(e.target.value)}
-                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all tabular-nums"
                                 />
                             </div>
                             <div>
@@ -547,7 +509,7 @@ export const Dashboard = () => {
                                     type="date"
                                     value={customEnd}
                                     onChange={e => setCustomEnd(e.target.value)}
-                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all font-mono"
+                                    className="w-full bg-canvas border border-line rounded-lg text-xs p-2.5 text-fg focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all tabular-nums"
                                 />
                             </div>
                         </div>

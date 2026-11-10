@@ -23,10 +23,10 @@ const METRICS: { key: keyof PerformanceScoresProps['data']; label: string; hint:
 /** Severity band → status label + fill. Always shown with the number and label (never color alone). */
 const band = (v: number) =>
     v >= 60
-        ? { label: 'Bom', fill: 'bg-data-pos', text: 'text-accent-fg' }
+        ? { label: 'Consistente', fill: 'bg-data-pos', text: 'text-accent-fg' }
         : v >= 40
-          ? { label: 'Atenção', fill: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400' }
-          : { label: 'Fraco', fill: 'bg-data-neg', text: 'text-danger-fg' };
+          ? { label: 'Moderado', fill: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400' }
+          : { label: 'Em evolução', fill: 'bg-data-neg', text: 'text-danger-fg' };
 
 /** Replaces the radar: five 0–100 scores read faster and more precisely as meters. */
 export const PerformanceScores = ({ data }: PerformanceScoresProps) => {
@@ -36,13 +36,13 @@ export const PerformanceScores = ({ data }: PerformanceScoresProps) => {
 
     return (
         <ChartCard title="Score operacional" icon={<Gauge size={14} />} subtitle="Média de 5 indicadores (0–100)" className="h-full">
-            <div className="mb-4 flex items-baseline gap-2">
-                <span className="text-4xl font-bold text-fg">{overall}</span>
-                <span className="text-sm text-fg-subtle">/100</span>
+            <div className="mb-3 pb-3 border-b border-line flex items-baseline gap-1.5">
+                <span className="text-3xl sm:text-4xl font-bold text-fg tabular-nums tracking-tight leading-none">{overall}</span>
+                <span className="text-sm text-fg-subtle tabular-nums">/100</span>
                 <span className={cn('ml-auto text-xs font-semibold', ob.text)}>{ob.label}</span>
             </div>
 
-            <ul className="flex flex-1 flex-col justify-between gap-3">
+            <ul className="flex flex-1 flex-col justify-between gap-2.5">
                 {METRICS.map((m, i) => {
                     const v = values[i];
                     const b = band(v);
@@ -52,11 +52,12 @@ export const PerformanceScores = ({ data }: PerformanceScoresProps) => {
                                 <span className="text-xs font-semibold text-fg">{m.label}</span>
                                 <span className="text-xs font-semibold tabular-nums text-fg">
                                     {v}
-                                    <span className="sr-only"> de 100, {b.label}</span>
+                                    <span className="text-[11px] font-normal text-fg-subtle">/100</span>
+                                    <span className="sr-only">, {b.label}</span>
                                 </span>
                             </div>
                             <div
-                                className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
+                                className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-surface-2"
                                 role="meter"
                                 aria-label={m.label}
                                 aria-valuemin={0}
@@ -65,7 +66,7 @@ export const PerformanceScores = ({ data }: PerformanceScoresProps) => {
                             >
                                 <div className={cn('h-full rounded-full transition-[width] duration-500', b.fill)} style={{ width: `${v}%` }} />
                             </div>
-                            <p className="mt-0.5 text-[10.5px] text-fg-subtle">{m.hint}</p>
+                            <p className="mt-0.5 text-[11px] text-fg-subtle">{m.hint}</p>
                         </li>
                     );
                 })}

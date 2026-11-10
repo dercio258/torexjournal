@@ -44,7 +44,7 @@ const foldTail = (rows: BreakdownRow[], max: number): BreakdownRow[] => {
  */
 export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage = 'Sem trades no período' }: BreakdownBarsProps) => {
     const active = rows.filter((r) => r.count > 0 || r.pnl !== 0);
-    if (active.length === 0) return <ChartEmpty message={emptyMessage} className="min-h-[180px]" />;
+    if (active.length === 0) return <ChartEmpty message={emptyMessage} className="min-h-[190px]" />;
 
     const sorted = order === 'value' ? [...rows].filter((r) => r.count > 0).sort((a, b) => b.pnl - a.pnl) : rows;
     const shown = order === 'value' ? foldTail(sorted, maxRows) : sorted;
@@ -56,52 +56,75 @@ export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage
     const zero = hasNeg && hasPos ? 50 : hasNeg ? 100 : 0;
     const span = hasNeg && hasPos ? 50 : 100;
 
-    return (
-        <ul className="flex flex-col gap-2.5">
-            {shown.map((r) => {
-                const pct = (Math.abs(r.pnl) / maxAbs) * span;
-                const positive = r.pnl >= 0;
-                const empty = r.count === 0;
-                return (
-                    <li
-                        key={r.key}
-                        className="group rounded-md px-1 py-0.5 transition-colors hover:bg-fg/[0.03]"
-                        title={`${r.label}: ${formatMoney(r.pnl)} · ${r.count} trades${r.winRate !== undefined ? ` · ${r.winRate}% de acerto` : ''}`}
-                    >
-                        <div className="flex items-baseline justify-between gap-2">
-                            <span className={cn('truncate text-xs font-semibold', empty ? 'text-fg-subtle' : 'text-fg')}>{r.label}</span>
-                            <span
-                                className={cn(
-                                    'shrink-0 text-xs font-semibold tabular-nums',
-                                    empty ? 'text-fg-subtle' : r.pnl > 0 ? 'text-accent-fg' : r.pnl < 0 ? 'text-danger-fg' : 'text-fg'
-                                )}
-                            >
-                                {empty ? '—' : formatMoney(r.pnl)}
-                            </span>
-                        </div>
+    const bestRow = [...active].sort((a, b) => b.pnl - a.pnl)[0];
 
-                        <div className="relative mt-1 h-2 w-full" aria-hidden>
-                            {/* Track hairline + zero tick */}
-                            <span className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
-                            {hasNeg && hasPos && <span className="absolute top-[-2px] h-3 w-px bg-fg-subtle/50" style={{ left: `${zero}%` }} />}
-                            {!empty && pct > 0 && (
+    return (
+        <div className="flex flex-1 flex-col justify-between gap-3">
+            <ul className="flex flex-col gap-2.5">
+                {shown.map((r) => {
+                    const pct = (Math.abs(r.pnl) / maxAbs) * span;
+                    const positive = r.pnl >= 0;
+                    const empty = r.count === 0;
+                    return (
+                        <li
+                            key={r.key}
+                            className="group rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-2/60"
+                            title={`${r.label}: ${formatMoney(r.pnl)} · ${r.count} trades${r.winRate !== undefined ? ` · ${r.winRate}% de acerto` : ''}`}
+                        >
+                            <div className="flex items-baseline justify-between gap-2">
+                                <span className={cn('truncate text-xs font-semibold', empty ? 'text-fg-subtle' : 'text-fg')}>
+                                    {r.label}
+                                </span>
                                 <span
                                     className={cn(
-                                        'absolute inset-y-0',
-                                        positive ? 'rounded-r-[4px] bg-data-pos' : 'rounded-l-[4px] bg-data-neg'
+                                        'shrink-0 text-xs font-semibold tabular-nums',
+                                        empty ? 'text-fg-subtle' : r.pnl > 0 ? 'text-accent-fg' : r.pnl < 0 ? 'text-danger-fg' : 'text-fg'
                                     )}
-                                    style={positive ? { left: `${zero}%`, width: `max(${pct}%, 2px)` } : { right: `${100 - zero}%`, width: `max(${pct}%, 2px)` }}
-                                />
-                            )}
-                        </div>
+                                >
+                                    {empty ? '—' : formatMoney(r.pnl)}
+                                </span>
+                            </div>
 
-                        <p className="mt-0.5 text-[10.5px] text-fg-subtle tabular-nums">
-                            {empty ? 'sem trades' : `${r.count} ${r.count === 1 ? 'trade' : 'trades'}`}
-                            {!empty && r.winRate !== undefined && ` · ${r.winRate}% de acerto`}
-                        </p>
-                    </li>
-                );
-            })}
-        </ul>
+                            <div className="relative mt-1.5 h-2 w-full rounded-full bg-surface-2 overflow-hidden" aria-hidden>
+                                {hasNeg && hasPos && (
+                                    <span className="absolute inset-y-0 w-px bg-fg-subtle/50 z-10" style={{ left: `${zero}%` }} />
+                                )}
+                                {!empty && pct > 0 && (
+                                    <span
+                                        className={cn(
+                                            'absolute inset-y-0 transition-all duration-500',
+                                            positive ? 'rounded-r-full bg-data-pos' : 'rounded-l-full bg-data-neg',
+                                            !(hasNeg && hasPos) && 'rounded-full'
+                                        )}
+                                        style={
+                                            positive
+                                                ? { left: `${zero}%`, width: `max(${pct}%, 4px)` }
+                                                : { right: `${100 - zero}%`, width: `max(${pct}%, 4px)` }
+                                        }
+                                    />
+                                )}
+                            </div>
+
+                            <p className="mt-1 text-[11px] text-fg-subtle tabular-nums">
+                                {empty ? 'Sem operações' : `${r.count} ${r.count === 1 ? 'trade' : 'trades'}`}
+                                {!empty && r.winRate !== undefined && ` · ${r.winRate}% de acerto`}
+                            </p>
+                        </li>
+                    );
+                })}
+            </ul>
+
+            {bestRow && (
+                <div className="pt-2.5 border-t border-line flex items-center justify-between text-[11px] tabular-nums">
+                    <span className="text-fg-subtle">Destaque do período</span>
+                    <span className="font-semibold text-fg truncate max-w-[65%]">
+                        {bestRow.label.split(' · ')[0]}{' '}
+                        <span className={bestRow.pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}>
+                            ({formatMoney(bestRow.pnl)})
+                        </span>
+                    </span>
+                </div>
+            )}
+        </div>
     );
 };

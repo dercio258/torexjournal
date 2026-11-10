@@ -93,16 +93,34 @@ interface OperationalBreakdownProps {
 }
 
 /** "Detalhamento Operacional": P&L by asset, session and weekday for the selected period. */
-export const OperationalBreakdown = ({ symbols, sessions, weekdays }: OperationalBreakdownProps) => (
-    <div className="grid grid-cols-1 items-start gap-3.5 md:grid-cols-3">
-        <ChartCard title="Por ativo" icon={<BarChart2 size={14} />} subtitle={`${symbols.filter((s) => s.count > 0).length} ativos · ordenado por resultado`}>
-            <BreakdownBars rows={symbols} order="value" maxRows={6} />
-        </ChartCard>
-        <ChartCard title="Por sessão" icon={<Clock size={14} />} subtitle="Pela hora de abertura do trade · janelas exclusivas">
-            <BreakdownBars rows={sessions} order="natural" />
-        </ChartCard>
-        <ChartCard title="Por dia da semana" icon={<CalendarDays size={14} />} subtitle="Dia de fechamento (UTC)">
-            <BreakdownBars rows={weekdays} order="natural" />
-        </ChartCard>
-    </div>
-);
+export const OperationalBreakdown = ({ symbols, sessions, weekdays }: OperationalBreakdownProps) => {
+    const activeSymbolsCount = symbols.filter((s) => s.count > 0).length;
+    return (
+        <div className="grid grid-cols-1 items-stretch gap-3.5 md:grid-cols-3">
+            <ChartCard
+                className="h-full"
+                title="Desempenho por ativo"
+                icon={<BarChart2 size={14} />}
+                subtitle={`${activeSymbolsCount} ${activeSymbolsCount === 1 ? 'ativo operado' : 'ativos operados'} · ordenado por P&L`}
+            >
+                <BreakdownBars rows={symbols} order="value" maxRows={6} />
+            </ChartCard>
+            <ChartCard
+                className="h-full"
+                title="Sessões operacionais"
+                icon={<Clock size={14} />}
+                subtitle="Pela abertura do trade · janelas exclusivas"
+            >
+                <BreakdownBars rows={sessions} order="natural" />
+            </ChartCard>
+            <ChartCard
+                className="h-full"
+                title="Operação por dias"
+                icon={<CalendarDays size={14} />}
+                subtitle="Segunda a sexta · fechamento em UTC"
+            >
+                <BreakdownBars rows={weekdays} order="natural" />
+            </ChartCard>
+        </div>
+    );
+};
