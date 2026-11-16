@@ -1,9 +1,14 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index, ValueTransformer } from 'typeorm';
 
 export class ColumnNumericTransformer implements ValueTransformer {
-    to(data?: number | null): number | null {
-        if (data === null || data === undefined) return null;
-        return Number(data);
+    to(data?: number | null): number | null | undefined {
+        // Keep `undefined` as-is so TypeORM emits DEFAULT for omitted columns
+        // (e.g. commission/swap/fees default 0). Mapping it to null forced an
+        // explicit NULL and violated NOT NULL constraints on partial upserts.
+        if (data === undefined) return undefined;
+        if (data === null) return null;
+        const num = Number(data);
+        return Number.isNaN(num) ? null : num;
     }
     from(data?: string | number | null): number | null {
         if (data === null || data === undefined) return null;

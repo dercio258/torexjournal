@@ -109,8 +109,10 @@ export function isCorsOriginAllowed(origin: string | undefined, configService?: 
         return true;
     }
 
-    // Allow canonical torexjournal.com subdomains over HTTPS in production
-    if (isProd && /^https:\/\/([a-z0-9-]+\.)?torexjournal\.com$/i.test(normalized)) {
+    // Always allow canonical torexjournal.com (apex + subdomains) over HTTPS.
+    // Not gated on NODE_ENV: a missing NODE_ENV=production on the server must
+    // not lock the real frontend out of its own API.
+    if (/^https:\/\/([a-z0-9-]+\.)?torexjournal\.com$/i.test(normalized)) {
         return true;
     }
 
