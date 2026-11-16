@@ -177,7 +177,8 @@ export class TorexAiChatService implements OnModuleInit {
         this.lastStaleRecoveryCheckAt = now;
 
         try {
-            const cutoff = new Date(now - 2 * 60 * 1000);
+            // Só jobs realmente órfãos (bem acima do guarda de getJobStatus): nunca interromper um job ativo
+            const cutoff = new Date(now - 5 * 60 * 1000);
             const staleJobs = await this.jobRepo.find({
                 where: {
                     status: 'PROCESSING',
@@ -476,10 +477,12 @@ export class TorexAiChatService implements OnModuleInit {
             throw new NotFoundException('Processamento não encontrado');
         }
 
-        // Auto-recuperação caso tenha ultrapassado 90s sem conclusão
+        // Auto-recuperação caso tenha ultrapassado 180s sem conclusão.
+        // Análises encadeadas (router + analista + fallback) podem passar de 90s; um guarda
+        // curto demais gravava o aviso de suporte enquanto a resposta real ainda estava a ser gerada.
         if (
             job.status === 'PROCESSING' &&
-            Date.now() - new Date(job.createdAt).getTime() > 90000
+            Date.now() - new Date(job.createdAt).getTime() > 180_000
         ) {
             const fallbackMsg = await this.messageRepo.save(
                 this.messageRepo.create({
@@ -1758,6 +1761,14 @@ export class TorexAiChatService implements OnModuleInit {
                 where: { id: ctx.jobId },
             });
             if (existingJob) {
+                // Se um guarda de timeout já tinha fechado o job com o aviso de suporte,
+                // a resposta real substitui-o: remove o aviso para não duplicar a conversa.
+                const previousId = existingJob.assistantMessageId;
+                if (previousId && previousId !== result.assistantMessage.id) {
+                    await this.messageRepo
+                        .delete({ id: previousId, sessionId: ctx.session.id, intent: 'support_fallback' })
+                        .catch(() => undefined);
+                }
                 existingJob.assistantMessageId = result.assistantMessage.id;
                 existingJob.creditsUsed = result.creditsUsed;
                 existingJob.status = 'COMPLETED';

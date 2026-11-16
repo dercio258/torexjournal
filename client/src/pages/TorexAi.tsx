@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-    Activity,
     ArrowDown,
     ArrowUpRight,
     Check,
@@ -17,13 +16,10 @@ import {
     Plus,
     Search,
     SendHorizontal,
-    ShieldCheck,
     Sparkles,
-    Target,
     ThumbsDown,
     ThumbsUp,
     Trash2,
-    TrendingDown,
     WifiOff,
     X,
     Zap,
@@ -45,76 +41,6 @@ import {
 
 const TOREX_LOGO_URL =
     'https://pub-354475384fd04c1e8c075e14e17ed14d.r2.dev/produtos/originals/1790957899791_0521d2dc46a60392_touro_design_1.jpeg';
-
-interface CoachDiagnosticCard {
-    label: string;
-    prompt: string;
-    description: string;
-    tone: 'danger' | 'accent' | 'info' | 'warning';
-    Icon: React.ComponentType<{ className?: string }>;
-}
-
-const COACH_DIAGNOSTIC_CARDS_PT: CoachDiagnosticCard[] = [
-    {
-        label: 'Diagnóstico de Perdas',
-        prompt: 'Por que estou perdendo?',
-        description: 'Vazamentos de risco, ativos deficitários e horários críticos',
-        tone: 'danger',
-        Icon: TrendingDown,
-    },
-    {
-        label: 'Edge Estatístico',
-        prompt: 'Qual é o meu Edge?',
-        description: 'Expectativa matemática, melhores setups e eficiência MFE/MAE',
-        tone: 'accent',
-        Icon: Target,
-    },
-    {
-        label: 'Governança & Plano',
-        prompt: 'Estou seguindo meu plano?',
-        description: 'Auditoria de disciplina, regras do Playbook e alertas ativos',
-        tone: 'info',
-        Icon: ShieldCheck,
-    },
-    {
-        label: 'Evolução & Psicologia',
-        prompt: 'Como posso melhorar?',
-        description: 'Plano prático para controle emocional e consistência diária',
-        tone: 'warning',
-        Icon: Activity,
-    },
-];
-
-const COACH_DIAGNOSTIC_CARDS_EN: CoachDiagnosticCard[] = [
-    {
-        label: 'Loss Diagnostics',
-        prompt: 'Why am I losing money?',
-        description: 'Risk leaks, underperforming pairs, and weak sessions',
-        tone: 'danger',
-        Icon: TrendingDown,
-    },
-    {
-        label: 'Statistical Edge',
-        prompt: 'What is my trading Edge?',
-        description: 'Expectancy, top instruments, and MFE/MAE efficiency',
-        tone: 'accent',
-        Icon: Target,
-    },
-    {
-        label: 'Plan Governance',
-        prompt: 'Am I following my plan?',
-        description: 'Discipline score, Playbook coverage, and active alerts',
-        tone: 'info',
-        Icon: ShieldCheck,
-    },
-    {
-        label: 'Performance & Mindset',
-        prompt: 'How can I improve?',
-        description: 'Actionable adjustments for emotional control and consistency',
-        tone: 'warning',
-        Icon: Activity,
-    },
-];
 
 const DEFAULT_QUICK_PROMPTS_PT = [
     'Como estão minhas operações e lucros atuais?',
@@ -139,6 +65,16 @@ const PROCESSING_STAGES_EN = [
     'Analyzing telemetry...',
     'Drafting insights...',
 ];
+
+/**
+ * Limite duro do polling no cliente. Deve ficar acima do guarda de timeout do servidor
+ * (getJobStatus, 180s), para que a resposta persistida pelo servidor sempre vença.
+ */
+const POLL_GIVE_UP_MS = 240_000;
+
+/** Mensagens de aviso criadas só no cliente; são descartadas quando a resposta real chega. */
+const isClientOnlyFallbackId = (id: string) =>
+    id.startsWith('net-fb-') || id.startsWith('fb-job-');
 
 interface PendingSessionJob {
     jobId: string;
@@ -305,7 +241,12 @@ function mergeUniqueMessages(
     incoming: ClientAiMessage[]
 ): ClientAiMessage[] {
     const map = new Map<string, ClientAiMessage>();
+    const hasRealAssistant = incoming.some(
+        (m) => m.role === 'assistant' && !isClientOnlyFallbackId(String(m.id))
+    );
     for (const m of existing) {
+        // A resposta real substitui qualquer aviso provisório gerado no cliente
+        if (hasRealAssistant && isClientOnlyFallbackId(String(m.id))) continue;
         map.set(m.id, m);
     }
     for (const m of incoming) {
@@ -578,9 +519,6 @@ export const TorexAi: React.FC = () => {
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const supportFallback = isEn ? TOREX_AI_SUPPORT_FALLBACK_EN : TOREX_AI_SUPPORT_FALLBACK;
-    const coachDiagnosticCards = isEn
-        ? COACH_DIAGNOSTIC_CARDS_EN
-        : COACH_DIAGNOSTIC_CARDS_PT;
     const quickPrompts = isEn ? DEFAULT_QUICK_PROMPTS_EN : DEFAULT_QUICK_PROMPTS_PT;
     const processingStages = isEn ? PROCESSING_STAGES_EN : PROCESSING_STAGES_PT;
 
@@ -1146,10 +1084,13 @@ export const TorexAi: React.FC = () => {
                                 [targetSessionId]: true,
                             }));
                         }
-                    } catch {
+                    } catch (err: any) {
                         if (!isMountedRef.current) return;
-                        // Se exceder 25s de falhas repetidas de rede/autenticação no polling, entrega mensagem oficial no chat correto
-                        if (Date.now() - job.startedAt > 25000) {
+                        // Falhas transitórias de polling (rede, 502, reinício) NÃO encerram o processamento:
+                        // o job continua no servidor, que tem o seu próprio guarda de timeout e sempre grava
+                        // uma resposta. Só desistimos se o job não existir mais (404) ou após o limite duro.
+                        const jobGone = err?.response?.status === 404;
+                        if (jobGone || Date.now() - job.startedAt > POLL_GIVE_UP_MS) {
                             const fallbackMsg: ClientAiMessage = {
                                 id: `net-fb-${Date.now()}`,
                                 role: 'assistant',
@@ -2186,24 +2127,6 @@ export const TorexAi: React.FC = () => {
         );
     };
 
-    const diagnosticToneStyles: Record<
-        CoachDiagnosticCard['tone'],
-        { iconBox: string }
-    > = {
-        danger: {
-            iconBox: 'bg-danger/12 border-danger/25 text-danger-fg',
-        },
-        accent: {
-            iconBox: 'bg-accent/12 border-accent/25 text-accent-fg',
-        },
-        info: {
-            iconBox: 'bg-data-1/12 border-data-1/25 text-data-1',
-        },
-        warning: {
-            iconBox: 'bg-warning/15 border-warning/30 text-warning',
-        },
-    };
-
     const headlineText = humanFirstName
         ? isEn
             ? `Hello, ${humanFirstName}. What are we auditing today?`
@@ -2408,52 +2331,10 @@ export const TorexAi: React.FC = () => {
                             <h1 className="text-2xl sm:text-3xl font-bold text-fg tracking-tight text-center leading-tight">
                                 {headlineText}
                             </h1>
-                            <p className="text-xs sm:text-sm text-fg-muted text-center max-w-xl mt-2.5 mb-6 leading-relaxed">
-                                {isEn
-                                    ? 'Objective diagnostics across your closed executions, behavioral discipline, Playbook rules, and platform workflows.'
-                                    : 'Diagnósticos objetivos sobre suas operações fechadas, disciplina emocional, regras do Playbook e fluxos da plataforma.'}
-                            </p>
+                            <div className="mb-6" />
 
                             {/* Composer Principal */}
                             {renderComposer('hero')}
-
-                            {/* Grid 2x2 de Pilares de Auditoria */}
-                            <div className="mt-5 w-full grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                {coachDiagnosticCards.map((card) => {
-                                    const IconComp = card.Icon;
-                                    const tone = diagnosticToneStyles[card.tone];
-                                    return (
-                                        <button
-                                            key={card.label}
-                                            type="button"
-                                            disabled={
-                                                !isOnline || isCurrentSessionBusy
-                                            }
-                                            onClick={() =>
-                                                void handleSendPrompt(card.prompt)
-                                            }
-                                            className="group flex items-start gap-3 p-3.5 rounded-2xl bg-surface hover:bg-surface-2 border border-line hover:border-line-strong text-left transition-all disabled:opacity-50 cursor-pointer shadow-sm"
-                                        >
-                                            <div
-                                                className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${tone.iconBox}`}
-                                            >
-                                                <IconComp className="w-4 h-4" />
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span className="text-xs font-semibold text-fg group-hover:text-accent-fg transition-colors">
-                                                        {card.label}
-                                                    </span>
-                                                    <ArrowUpRight className="w-3.5 h-3.5 text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                                                </div>
-                                                <p className="mt-0.5 text-[11px] text-fg-muted leading-snug line-clamp-2">
-                                                    {card.description}
-                                                </p>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
 
                             {/* Perguntas Rápidas & Suporte */}
                             <div className="mt-5 pt-4 border-t border-line-subtle w-full">
