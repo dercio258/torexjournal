@@ -14,6 +14,8 @@ class TaskType(str, Enum):
     SYNC_ACCOUNT = "SYNC_ACCOUNT"
     FORCE_FULL_SYNC = "FORCE_FULL_SYNC"
     RESTART_TERMINAL = "RESTART_TERMINAL"
+    FETCH_MARKET_BATCHES = "FETCH_MARKET_BATCHES"
+    SYNC_CALENDAR = "SYNC_CALENDAR"
 
 
 class TaskStatus(str, Enum):
@@ -133,6 +135,7 @@ class SyncTradesPayload(BaseModel):
     accountId: int
     login: Optional[str] = None
     server: Optional[str] = None
+    serverTzOffsetSec: Optional[int] = None
     lastDealTicket: int
     trades: List[DealData]
 

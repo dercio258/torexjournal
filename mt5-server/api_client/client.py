@@ -196,3 +196,13 @@ class BackendApiClient:
         """Envia notificação de eventos críticos para o dashboard"""
         res = self._post("/events", event.model_dump(mode="json"))
         return res is not None and res.status_code in (200, 201)
+
+    def sync_candles(self, payload: Dict[str, Any]) -> bool:
+        """Envia lotes históricos de velas (OHLCV) extraídos do MT5 para o cache de Backtesting/Replay"""
+        res = self._post("/sync/candles", payload)
+        return res is not None and res.status_code in (200, 201)
+
+    def sync_calendar(self, payload: Dict[str, Any]) -> bool:
+        """Envia eventos do Calendário Econômico extraídos do MT5 para o backend"""
+        res = self._post("/sync/calendar", payload)
+        return res is not None and res.status_code in (200, 201)

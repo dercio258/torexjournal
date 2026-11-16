@@ -59,6 +59,59 @@ class SyncEngine:
         self.active_terminal_path: Optional[str] = None
         self.last_connect_error: Optional[str] = None
         self.last_error_code: Optional[int] = None
+        self._broker_tz_cache: Dict[str, Dict[str, Any]] = {}
+        self._load_broker_tz_cache()
+
+    def _get_tz_cache_file(self) -> Path:
+        try:
+            from config.settings import settings
+            return Path(settings.data_dir).resolve() / "broker_tz_offsets.json"
+        except Exception:
+            return Path("data/broker_tz_offsets.json").resolve()
+
+    def _load_broker_tz_cache(self):
+        try:
+            import json
+            fp = self._get_tz_cache_file()
+            if fp.exists():
+                raw = json.loads(fp.read_text(encoding="utf-8", errors="ignore"))
+                if isinstance(raw, dict):
+                    self._broker_tz_cache = raw
+        except Exception as e:
+            logger.debug(f"Não foi possível carregar cache de fusos horários MT5: {e}")
+
+    def _save_broker_tz_cache(self):
+        try:
+            import json
+            fp = self._get_tz_cache_file()
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            tmp = fp.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._broker_tz_cache, indent=2), encoding="utf-8")
+            tmp.replace(fp)
+        except Exception as e:
+            logger.debug(f"Não foi possível salvar cache de fusos horários MT5: {e}")
+
+    @staticmethod
+    def _is_us_dst_at_server_epoch(raw_server_ts: int) -> bool:
+        """
+        Verifica se um timestamp wall-clock do servidor MT5 cai no horário de verão dos EUA
+        (2º domingo de março às 02:00 até 1º domingo de novembro às 02:00 — padrão NY-Close GMT+2/GMT+3).
+        """
+        dt = datetime.datetime.fromtimestamp(int(raw_server_ts), tz=datetime.timezone.utc)
+        m = dt.month
+        if m < 3 or m > 11:
+            return False
+        if 3 < m < 11:
+            return True
+        if m == 3:
+            first_wd = datetime.date(dt.year, 3, 1).weekday()  # Mon=0 .. Sun=6
+            first_sun = 1 + ((6 - first_wd) % 7)
+            second_sun = first_sun + 7
+            return (dt.day > second_sun) or (dt.day == second_sun and dt.hour >= 2)
+        # m == 11
+        first_wd = datetime.date(dt.year, 11, 1).weekday()
+        first_sun = 1 + ((6 - first_wd) % 7)
+        return (dt.day < first_sun) or (dt.day == first_sun and dt.hour < 2)
 
     @staticmethod
     def _mask_password_diagnostic(password: Optional[str]) -> str:
@@ -901,6 +954,9 @@ class SyncEngine:
                 positions = mt5.positions_get()
                 if positions is None:
                     return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list, skipped=True)
+                info_srv = mt5.account_info()
+                active_srv = str(getattr(info_srv, "server", "") or "") if info_srv else ""
+                tz_prof = self._detect_broker_tz_profile(active_srv)
                 for pos in positions:
                     positions_list.append(PositionData(
                         ticket=pos.ticket,
@@ -915,7 +971,7 @@ class SyncEngine:
                         swap=pos.swap,
                         magic=pos.magic,
                         comment=pos.comment,
-                        time=datetime.datetime.fromtimestamp(pos.time, tz=datetime.timezone.utc),
+                        time=self._mt5_ts_to_utc(int(pos.time), active_srv, tz_prof),
                     ))
 
                 return SyncPositionsPayload(accountId=account_id, login=login, positions=positions_list, skipped=False)
@@ -944,6 +1000,9 @@ class SyncEngine:
 
                 orders = mt5.orders_get()
                 if orders is not None:
+                    info_srv = mt5.account_info()
+                    active_srv = str(getattr(info_srv, "server", "") or "") if info_srv else ""
+                    tz_prof = self._detect_broker_tz_profile(active_srv)
                     for ord_item in orders:
                         orders_list.append(OrderData(
                             ticket=ord_item.ticket,
@@ -955,7 +1014,7 @@ class SyncEngine:
                             priceOpen=ord_item.price_open,
                             sl=ord_item.sl,
                             tp=ord_item.tp,
-                            timeSetup=datetime.datetime.fromtimestamp(ord_item.time_setup, tz=datetime.timezone.utc),
+                            timeSetup=self._mt5_ts_to_utc(int(ord_item.time_setup), active_srv, tz_prof),
                             magic=ord_item.magic,
                             comment=ord_item.comment,
                         ))
@@ -971,24 +1030,174 @@ class SyncEngine:
                 logger.critical(err_msg)
                 raise ResourceExhaustionError(err_msg, res, operation="fetch_orders", account_id=account_id)
 
-    def _get_broker_utc_offset_seconds(self) -> int:
+    @staticmethod
+    def _is_24_7_symbol(sym_name: str) -> bool:
+        s = (sym_name or "").lower()
+        return any(
+            k in s
+            for k in (
+                "btc",
+                "eth",
+                "sol",
+                "xrp",
+                "crypto",
+                "volatility",
+                "crash",
+                "boom",
+                "step index",
+                "jump",
+                "range break",
+                "dex ",
+            )
+        )
+
+    def _detect_broker_tz_profile(self, server: Optional[str] = None) -> Dict[str, Any]:
         """
-        Estima o offset do fuso horário do servidor da corretora (em segundos) em relação ao UTC
-        arredondado para múltiplos de 30 minutos (1800s), evitando deslocamento de 2-3h nos deals MT5.
+        Detecta com precisão o fuso horário do servidor MT5 conectado (ex: GMT+0 na Deriv/Exness,
+        GMT+2 inverno / GMT+3 verão US-DST em prop firms e corretoras Forex como FTMO, GoatFunded, ICMarkets)
+        e persiste o perfil por servidor para manter exatidão mesmo durante o fim de semana.
         """
-        if not MT5_AVAILABLE:
+        srv_clean = (server or "").strip()
+        if not srv_clean and MT5_AVAILABLE:
+            try:
+                info = mt5.account_info()
+                if info:
+                    srv_clean = str(getattr(info, "server", "") or "").strip()
+            except Exception:
+                pass
+        srv_key = srv_clean.lower() or "default"
+
+        now_utc_ts = time.time()
+        utc_dt = datetime.datetime.fromtimestamp(now_utc_ts, tz=datetime.timezone.utc)
+        is_forex_weekend = (
+            (utc_dt.weekday() == 4 and utc_dt.hour >= 22)
+            or (utc_dt.weekday() == 5)
+            or (utc_dt.weekday() == 6 and utc_dt.hour < 22)
+        )
+
+        if MT5_AVAILABLE:
+            try:
+                probe_symbols: List[str] = [
+                    "BTCUSD",
+                    "ETHUSD",
+                    "Volatility 75 Index",
+                    "Volatility 100 Index",
+                    "Step Index",
+                    "EURUSD",
+                    "XAUUSD",
+                    "GBPUSD",
+                    "USDJPY",
+                    "US30",
+                ]
+                try:
+                    mw_syms = mt5.symbols_get()
+                    if mw_syms:
+                        for s_obj in mw_syms[:60]:
+                            if getattr(s_obj, "visible", False):
+                                s_name = str(getattr(s_obj, "name", "") or "")
+                                if s_name and s_name not in probe_symbols:
+                                    probe_symbols.append(s_name)
+                except Exception:
+                    pass
+
+                best_tick_ts = 0
+                best_sym = ""
+                for sym in probe_symbols:
+                    if is_forex_weekend and not self._is_24_7_symbol(sym):
+                        continue
+                    tick = mt5.symbol_info_tick(sym)
+                    t_val = int(getattr(tick, "time", 0) or 0) if tick else 0
+                    if t_val > best_tick_ts:
+                        best_tick_ts = t_val
+                        best_sym = sym
+
+                if best_tick_ts > 0:
+                    diff = float(best_tick_ts) - now_utc_ts
+                    rounded_15m = int(round(diff / 900.0) * 900)
+                    # Aceita apenas se o tick for recente (dentro de 5 min do múltiplo de fuso horário e [-12h, +14h])
+                    if -12 * 3600 <= rounded_15m <= 14 * 3600 and abs(diff - rounded_15m) <= 300:
+                        if rounded_15m == 0:
+                            mode = "UTC"
+                        elif (
+                            (rounded_15m == 10800 and self._is_us_dst_at_server_epoch(best_tick_ts))
+                            or (rounded_15m == 7200 and not self._is_us_dst_at_server_epoch(best_tick_ts))
+                        ):
+                            mode = "NY_CLOSE_DST"
+                        else:
+                            mode = "FIXED"
+
+                        prev = self._broker_tz_cache.get(srv_key)
+                        profile = {
+                            "server": srv_clean or srv_key,
+                            "offsetSec": rounded_15m,
+                            "mode": mode,
+                            "referenceSymbol": best_sym,
+                            "updatedAt": int(now_utc_ts),
+                        }
+                        self._broker_tz_cache[srv_key] = profile
+                        if not prev or prev.get("offsetSec") != rounded_15m or prev.get("mode") != mode:
+                            sign = "+" if rounded_15m >= 0 else "-"
+                            hrs = abs(rounded_15m) / 3600.0
+                            logger.info(
+                                f"[MT5-TZ] Fuso horário do servidor '{srv_clean}' detectado ao vivo via {best_sym}: "
+                                f"UTC{sign}{hrs:g} ({rounded_15m}s, modo={mode})"
+                            )
+                            self._save_broker_tz_cache()
+                        return profile
+            except Exception as e:
+                logger.debug(f"Falha ao sondar fuso horário ao vivo para {srv_clean}: {e}")
+
+        # Fallback 1: Cache persistido de sessões anteriores desse mesmo servidor
+        cached = self._broker_tz_cache.get(srv_key)
+        if isinstance(cached, dict) and "offsetSec" in cached:
+            return cached
+
+        # Fallback 2: Heurística por família de corretora (quando sincronizado no fim de semana sem símbolo 24/7)
+        if any(k in srv_key for k in ("deriv", "exness", "binance", "bybit", "okx", "kraken")):
+            return {"server": srv_clean, "offsetSec": 0, "mode": "UTC"}
+
+        if srv_clean:
+            approx_srv_ts = int(now_utc_ts) + 7200
+            is_dst = self._is_us_dst_at_server_epoch(approx_srv_ts)
+            return {
+                "server": srv_clean,
+                "offsetSec": 10800 if is_dst else 7200,
+                "mode": "NY_CLOSE_DST",
+            }
+
+        return {"server": srv_clean, "offsetSec": 0, "mode": "UTC"}
+
+    def _resolve_offset_for_mt5_ts(
+        self,
+        raw_ts: int,
+        server: Optional[str] = None,
+        tz_profile: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        prof = tz_profile or self._detect_broker_tz_profile(server)
+        mode = prof.get("mode", "UTC")
+        if mode == "UTC":
             return 0
-        try:
-            now_utc_ts = time.time()
-            for sym in ("EURUSD", "XAUUSD", "BTCUSD", "GBPUSD", "USDJPY"):
-                tick = mt5.symbol_info_tick(sym)
-                if tick and getattr(tick, "time", 0) > 0:
-                    diff = float(tick.time) - now_utc_ts
-                    if abs(diff) <= 14 * 3600:
-                        return int(round(diff / 1800.0) * 1800)
-        except Exception:
-            pass
-        return 0
+        if mode == "NY_CLOSE_DST":
+            return 10800 if self._is_us_dst_at_server_epoch(int(raw_ts)) else 7200
+        return int(prof.get("offsetSec", 0) or 0)
+
+    def _mt5_ts_to_utc(
+        self,
+        raw_ts: int,
+        server: Optional[str] = None,
+        tz_profile: Optional[Dict[str, Any]] = None,
+    ) -> datetime.datetime:
+        """
+        Converte o timestamp wall-clock retornado pelo MT5 (DEAL_TIME, POSITION_TIME, copy_rates)
+        para UTC canônico real (ISO-8601 com timezone.utc), subtraindo o offset exato do servidor da corretora.
+        """
+        offset_sec = self._resolve_offset_for_mt5_ts(int(raw_ts), server=server, tz_profile=tz_profile)
+        true_utc_ts = int(raw_ts) - offset_sec
+        return datetime.datetime.fromtimestamp(true_utc_ts, tz=datetime.timezone.utc)
+
+    def _get_broker_utc_offset_seconds(self, server: Optional[str] = None) -> int:
+        prof = self._detect_broker_tz_profile(server)
+        return int(prof.get("offsetSec", 0) or 0)
 
     def _find_entry_deal(self, position_id: int, cached_entries: Dict[int, Any]) -> Optional[Any]:
         """Localiza o deal de abertura (DEAL_ENTRY_IN) de uma posição para reconstruir preço/hora de entrada."""
@@ -1102,6 +1311,11 @@ class SyncEngine:
                     elif d.entry in (1, 2, 3) and d.position_id:
                         out_count_by_position[d.position_id] = out_count_by_position.get(d.position_id, 0) + 1
 
+                info_srv = mt5.account_info()
+                effective_server = str(getattr(info_srv, "server", "") or server or "").strip() if info_srv else (server or "")
+                tz_profile = self._detect_broker_tz_profile(effective_server)
+                current_tz_offset_sec = int(tz_profile.get("offsetSec", 0) or 0)
+
                 for d in deals:
                     if d.ticket <= last_deal_ticket:
                         continue
@@ -1113,8 +1327,8 @@ class SyncEngine:
                     entry_type = DEAL_ENTRY_MAP.get(d.entry, "DEAL_ENTRY_OUT")
                     raw_deal_type = DEAL_TYPE_MAP.get(d.type, "DEAL_TYPE_BALANCE")
 
-                    # No MT5, d.time já representa exatamente a data/hora (YYYY.MM.DD HH:MM:SS) exibida no terminal
-                    close_time = datetime.datetime.fromtimestamp(int(d.time), tz=datetime.timezone.utc)
+                    # Converte o horário wall-clock do servidor MT5 (ex: GMT+0, GMT+2, GMT+3) para UTC canônico real
+                    close_time = self._mt5_ts_to_utc(int(d.time), effective_server, tz_profile)
                     open_price = float(d.price)
                     open_time = None
                     total_commission = float(d.commission or 0.0) + float(getattr(d, "fee", 0.0) or 0.0)
@@ -1124,7 +1338,7 @@ class SyncEngine:
                         entry_deal = self._find_entry_deal(d.position_id, entry_by_position)
                         if entry_deal is not None:
                             open_price = float(entry_deal.price)
-                            open_time = datetime.datetime.fromtimestamp(int(entry_deal.time), tz=datetime.timezone.utc)
+                            open_time = self._mt5_ts_to_utc(int(entry_deal.time), effective_server, tz_profile)
                             # Soma a comissão cobrada na abertura quando não houver múltiplas saídas parciais
                             if out_count_by_position.get(d.position_id, 1) <= 1:
                                 entry_c = entry_comm_by_position.get(
@@ -1160,7 +1374,8 @@ class SyncEngine:
                 return SyncTradesPayload(
                     accountId=account_id,
                     login=login,
-                    server=server,
+                    server=effective_server or server,
+                    serverTzOffsetSec=current_tz_offset_sec,
                     lastDealTicket=max_ticket,
                     trades=trades_list
                 )
@@ -1186,4 +1401,168 @@ class SyncEngine:
                     lastDealTicket=last_deal_ticket,
                     trades=[]
                 )
+
+    def fetch_candle_batches(
+        self,
+        symbols: List[str],
+        timeframes: List[str],
+        from_ts_ms: Optional[int] = None,
+        to_ts_ms: Optional[int] = None,
+        chunk_size: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extrai lotes históricos de 500 velas (OHLCV) diretamente do terminal MetaTrader 5 conectado
+        usando mt5.copy_rates_range / mt5.copy_rates_from para alimentar Backtesting e Replay.
+        """
+        with self._ipc_lock:
+            if not MT5_AVAILABLE:
+                return []
+
+            tf_map = {
+                "1m": getattr(mt5, "TIMEFRAME_M1", 1),
+                "5m": getattr(mt5, "TIMEFRAME_M5", 5),
+                "15m": getattr(mt5, "TIMEFRAME_M15", 15),
+                "30m": getattr(mt5, "TIMEFRAME_M30", 30),
+                "1h": getattr(mt5, "TIMEFRAME_H1", 16385),
+                "1H": getattr(mt5, "TIMEFRAME_H1", 16385),
+                "4h": getattr(mt5, "TIMEFRAME_H4", 16388),
+                "4H": getattr(mt5, "TIMEFRAME_H4", 16388),
+                "1d": getattr(mt5, "TIMEFRAME_D1", 16408),
+                "D": getattr(mt5, "TIMEFRAME_D1", 16408),
+            }
+
+            info_srv = mt5.account_info()
+            active_srv = str(getattr(info_srv, "server", "") or "") if info_srv else ""
+            tz_prof = self._detect_broker_tz_profile(active_srv)
+            curr_offset_sec = int(tz_prof.get("offsetSec", 0) or 0)
+
+            now_srv_ts = time.time() + curr_offset_sec
+            to_srv_ts = (to_ts_ms / 1000.0 + curr_offset_sec) if (to_ts_ms and to_ts_ms > 0) else now_srv_ts
+            to_dt = datetime.datetime.fromtimestamp(to_srv_ts, tz=datetime.timezone.utc)
+
+            batches: List[Dict[str, Any]] = []
+            for raw_sym in (symbols or [])[:8]:
+                clean_sym = (raw_sym or "").strip()
+                if not clean_sym:
+                    continue
+                try:
+                    mt5.symbol_select(clean_sym, True)
+                except Exception:
+                    pass
+
+                for tf_str in (timeframes or ["15m"]):
+                    mt5_tf = tf_map.get(tf_str, getattr(mt5, "TIMEFRAME_M15", 15))
+                    try:
+                        rates = None
+                        if from_ts_ms and from_ts_ms > 0:
+                            from_srv_ts = from_ts_ms / 1000.0 + curr_offset_sec
+                            from_dt = datetime.datetime.fromtimestamp(from_srv_ts, tz=datetime.timezone.utc)
+                            rates = mt5.copy_rates_range(clean_sym, mt5_tf, from_dt, to_dt)
+                        if rates is None or len(rates) == 0:
+                            rates = mt5.copy_rates_from(clean_sym, mt5_tf, to_dt, int(chunk_size or 500))
+                        if rates is None or len(rates) == 0:
+                            rates = mt5.copy_rates_from_pos(clean_sym, mt5_tf, 0, int(chunk_size or 500))
+
+                        if rates is not None and len(rates) > 0:
+                            candles = []
+                            is_intraday = tf_str not in ("1d", "D", "1W", "W")
+                            for r in rates[-int(chunk_size or 500):]:
+                                raw_bar_ts = int(r["time"])
+                                bar_offset = (
+                                    self._resolve_offset_for_mt5_ts(raw_bar_ts, active_srv, tz_prof)
+                                    if is_intraday
+                                    else 0
+                                )
+                                candles.append({
+                                    "timestamp": (raw_bar_ts - bar_offset) * 1000,
+                                    "open": float(r["open"]),
+                                    "high": float(r["high"]),
+                                    "low": float(r["low"]),
+                                    "close": float(r["close"]),
+                                    "volume": float(r["tick_volume"]),
+                                })
+                            batches.append({
+                                "symbol": clean_sym,
+                                "timeframe": tf_str,
+                                "candles": candles,
+                            })
+                            logger.info(
+                                f"[OHLCV-BATCH] Lote extraído do MT5: {clean_sym} ({tf_str}) -> {len(candles)} velas."
+                            )
+                    except Exception as e:
+                        logger.warning(f"[OHLCV-BATCH] Falha ao extrair lote OHLCV ({clean_sym} {tf_str}): {e}")
+            return batches
+
+    def fetch_economic_calendar_events(self) -> List[Dict[str, Any]]:
+        """
+        Lê eventos do Calendário Econômico exportados pelos EAs MQL5 (TorexCalendarSync / Torex_journal)
+        procurando o arquivo mais recente entre MQL5/Files, FILE_COMMON e instâncias isoladas.
+        """
+        import os
+        import json
+
+        candidate_paths: List[Path] = []
+
+        if MT5_AVAILABLE:
+            with self._ipc_lock:
+                try:
+                    term_info = mt5.terminal_info()
+                    data_path = getattr(term_info, "data_path", None) if term_info else None
+                    common_path = getattr(term_info, "commondata_path", None) if term_info else None
+                    if data_path:
+                        candidate_paths.append(Path(data_path) / "MQL5" / "Files" / "torex_economic_calendar.json")
+                    if common_path:
+                        candidate_paths.append(Path(common_path) / "Files" / "torex_economic_calendar.json")
+                except Exception as e:
+                    logger.debug(f"[CALENDAR-FILE] terminal_info indisponível: {e}")
+
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            mq_root = Path(appdata) / "MetaQuotes" / "Terminal"
+            candidate_paths.append(mq_root / "Common" / "Files" / "torex_economic_calendar.json")
+            if mq_root.exists():
+                try:
+                    for sub in mq_root.iterdir():
+                        if sub.is_dir() and sub.name.lower() not in ("common", "community", "help"):
+                            candidate_paths.append(sub / "MQL5" / "Files" / "torex_economic_calendar.json")
+                except Exception:
+                    pass
+
+        try:
+            from config.settings import settings
+            inst_root = Path(settings.instances_dir).resolve()
+            if inst_root.exists():
+                for acc_dir in inst_root.glob("acc_*"):
+                    candidate_paths.append(acc_dir / "MQL5" / "Files" / "torex_economic_calendar.json")
+        except Exception:
+            pass
+
+        unique_existing: List[Path] = []
+        seen = set()
+        for p in candidate_paths:
+            try:
+                rp = str(p.resolve())
+                if rp not in seen and p.exists() and p.is_file():
+                    seen.add(rp)
+                    unique_existing.append(p)
+            except Exception:
+                continue
+
+        unique_existing.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        for cal_file in unique_existing:
+            try:
+                content = cal_file.read_text(encoding="utf-8-sig", errors="ignore").strip()
+                if not content:
+                    continue
+                raw = json.loads(content)
+                if isinstance(raw, list) and len(raw) > 0:
+                    logger.info(f"[CALENDAR-FILE] Lidas {len(raw)} notícias de {cal_file}")
+                    return raw
+            except Exception as e:
+                logger.warning(f"[CALENDAR-FILE] Falha na leitura de {cal_file}: {e}")
+
+        if not unique_existing:
+            logger.debug("[CALENDAR-FILE] Nenhum arquivo torex_economic_calendar.json encontrado ainda.")
+        return []
 

@@ -104,6 +104,9 @@ class MT5ProcessManager:
                     if not (isolated_cfg_upper / "servers.dat").exists():
                         shutil.copy2(str(pf_cfg), str(isolated_cfg_upper / "servers.dat"))
 
+            # Implanta EA headless TorexCalendarSync.ex5 em MQL5/Experts/ da instância isolada
+            self._deploy_calendar_ea(instance_dir)
+
             # Prepara startup.ini / common.ini com Login, Password e Server da conta
             if login and server:
                 self.create_startup_config(account_id, login, server, password)
@@ -115,7 +118,7 @@ class MT5ProcessManager:
                     common_lines.append(f"Password={str(password).strip()}")
                 common_lines.extend([
                     f"Server={str(server).strip()}",
-                    "NewsEnable=0",
+                    "NewsEnable=1",
                     "CertInstall=0",
                     "ProxyEnable=0",
                     "KeepPrivate=1",
@@ -134,9 +137,33 @@ class MT5ProcessManager:
             logger.warning(f"Não foi possível preparar executável isolado para conta {account_id} (usando caminho padrão): {e}")
             return self.terminal_path
 
+    def _deploy_calendar_ea(self, instance_dir: Path) -> None:
+        """Copia TorexCalendarSync.ex5 compilado para MQL5/Experts/ da instância isolada."""
+        try:
+            experts_dir = instance_dir / "MQL5" / "Experts"
+            files_dir = instance_dir / "MQL5" / "Files"
+            experts_dir.mkdir(parents=True, exist_ok=True)
+            files_dir.mkdir(parents=True, exist_ok=True)
+
+            ea_src = (Path(__file__).resolve().parent.parent / "mql5" / "TorexCalendarSync.ex5").resolve()
+            if ea_src.exists():
+                ea_dst = experts_dir / "TorexCalendarSync.ex5"
+                if (
+                    not ea_dst.exists()
+                    or ea_dst.stat().st_size != ea_src.stat().st_size
+                    or ea_dst.stat().st_mtime < ea_src.stat().st_mtime
+                ):
+                    shutil.copy2(str(ea_src), str(ea_dst))
+                    logger.info(f"[CALENDAR-EA] Implantado {ea_src.name} em {ea_dst}")
+            else:
+                logger.warning(f"[CALENDAR-EA] Arquivo compilado não encontrado em {ea_src}")
+        except Exception as e:
+            logger.warning(f"[CALENDAR-EA] Falha ao implantar TorexCalendarSync.ex5: {e}")
+
     def create_startup_config(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> Path:
         """Gera arquivo de inicialização .ini para o terminal com formatação compatível com Windows/MT5"""
         instance_dir = self.get_account_instance_dir(account_id)
+        self._deploy_calendar_ea(instance_dir)
         config_path = (instance_dir / "startup.ini").resolve()
         
         login_str = str(login).strip()
@@ -152,12 +179,19 @@ class MT5ProcessManager:
             content.append(f"Password={pass_str}")
         content.extend([
             f"Server={server_str}",
-            "NewsEnable=0",
+            "NewsEnable=1",
             "CertInstall=0",
             "ProxyEnable=0",
             "KeepPrivate=1",
-            "[Start]",
-            "Profile=Default"
+            "[Experts]",
+            "Enabled=1",
+            "AllowLiveTrading=0",
+            "AllowDllImport=0",
+            "AllowExternalExperts=0",
+            "[StartUp]",
+            "Expert=TorexCalendarSync",
+            "Symbol=EURUSD",
+            "Period=H1",
         ])
         
         # Windows INI requer quebras de linha CRLF (\r\n) e UTF-8 com BOM para o parser do MT5

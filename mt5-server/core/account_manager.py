@@ -104,6 +104,7 @@ class AccountSession(BaseModel):
     last_deal_ticket: int = 0
     last_deal_time: Optional[datetime] = None
     last_sync_time: Optional[datetime] = None
+    tz_sync_version: int = 0
     error_count: int = 0
     last_error: Optional[str] = None
 
@@ -153,6 +154,7 @@ class AccountManager:
                                 last_deal_ticket=int(item.get("last_deal_ticket", 0)),
                                 last_deal_time=last_deal_dt,
                                 last_sync_time=last_sync_dt,
+                                tz_sync_version=int(item.get("tz_sync_version", 0) or 0),
                                 status=initial_status,
                                 error_count=initial_err_cnt,
                                 last_error=item.get("last_error") if is_real_auth_fail else None,
@@ -182,6 +184,7 @@ class AccountManager:
                         "last_deal_ticket": acc.last_deal_ticket,
                         "last_deal_time": acc.last_deal_time.isoformat() if acc.last_deal_time else None,
                         "last_sync_time": acc.last_sync_time.isoformat() if acc.last_sync_time else None,
+                        "tz_sync_version": acc.tz_sync_version,
                         "status": acc.status,
                         "error_count": acc.error_count,
                         "last_error": acc.last_error,
@@ -266,6 +269,7 @@ class AccountManager:
         account_id: int,
         last_deal_ticket: int,
         last_deal_time: Optional[datetime] = None,
+        tz_sync_version: Optional[int] = None,
     ):
         with self._lock:
             acc = self.accounts.get(account_id)
@@ -274,6 +278,8 @@ class AccountManager:
                     acc.last_deal_ticket = last_deal_ticket
                 if last_deal_time and (not acc.last_deal_time or last_deal_time > acc.last_deal_time):
                     acc.last_deal_time = last_deal_time
+                if tz_sync_version is not None and tz_sync_version > acc.tz_sync_version:
+                    acc.tz_sync_version = tz_sync_version
                 acc.last_sync_time = datetime.now(timezone.utc)
                 acc.error_count = 0
                 acc.last_error = None

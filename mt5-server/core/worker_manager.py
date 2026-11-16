@@ -43,11 +43,14 @@ class WorkerManager:
         self._last_sync_ts: float = 0.0
         self._last_heartbeat_ts: float = 0.0
         self._last_flush_ts: float = 0.0
+        self._last_calendar_sync_ts: float = 0.0
         # Deduplicação local de tarefas (task_id -> timestamp de processamento)
         self._processed_tasks: dict[str, float] = {}
         # Controle de cooldown individual por conta (evita thrashing e reduz frequência de contas $0.00 ociosas)
         self._account_last_sync_ts: dict[int, float] = {}
         self._account_idle_map: dict[int, bool] = {}
+        # Contador de falhas transitórias consecutivas de IPC por conta (evita falso ACCOUNT_DISCONNECTED em blips)
+        self._consecutive_connect_failures: dict[int, int] = {}
         # Garante que na primeira sincronização após iniciar o worker seja feita reconciliação completa (last_ticket=0)
         self._initial_full_synced: set[int] = set()
 
@@ -129,6 +132,11 @@ class WorkerManager:
             self._last_flush_ts = time.time()
             self._flush_offline_batch()
 
+        # 5. CALENDÁRIO ECONÔMICO MT5 VIA CONTA DEMO (consulta novas notícias a cada 10 minutos = 600s)
+        if current_ts - self._last_calendar_sync_ts >= 600.0:
+            self._last_calendar_sync_ts = time.time()
+            self._run_periodic_calendar_sync_10m()
+
     # -------------------------------------------------------------
     # 1. EXECUÇÃO DE TAREFAS (PRIORIDADE ALTA + DEDUPLICAÇÃO)
     # -------------------------------------------------------------
@@ -203,6 +211,10 @@ class WorkerManager:
                 self._handle_force_full_sync(task)
             elif task.type == TaskType.RESTART_TERMINAL:
                 self._handle_restart_terminal(task)
+            elif task.type == TaskType.FETCH_MARKET_BATCHES:
+                self._handle_fetch_market_batches(task)
+            elif task.type == TaskType.SYNC_CALENDAR:
+                self._handle_sync_calendar(task)
             else:
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, f"Tipo de tarefa desconhecido: {task.type}")
         except ResourceExhaustionError as re:
@@ -400,6 +412,203 @@ class WorkerManager:
             err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha ao reiniciar terminal."
             self.api_client.ack_task(task.id, TaskStatus.FAILED, err_detail)
 
+    def _handle_fetch_market_batches(self, task: Task):
+        """
+        Conecta à Conta Demo compartilhada (ou conta sincronizada) no MT5, salva-a no pool local
+        e extrai lotes históricos de 500 velas (OHLCV) para alimentar o Backtesting/Replay.
+        """
+        existing_acc = self.account_manager.get_account(task.accountId)
+        password = existing_acc.password if existing_acc else None
+        normalized_server = self.sync_engine._normalize_broker_server(task.server)
+
+        if task.credentialToken:
+            cred = self.api_client.exchange_credential(task.id, task.accountId, task.credentialToken)
+            if cred and cred.password:
+                password = cred.password
+                self.account_manager.add_or_update_account(
+                    account_id=task.accountId,
+                    login=task.login,
+                    server=normalized_server,
+                    password=password,
+                )
+
+        isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+            task.accountId,
+            login=task.login,
+            server=normalized_server,
+            password=password,
+        )
+        connected = self.sync_engine.ensure_connected(
+            account_id=task.accountId,
+            login=task.login,
+            server=normalized_server,
+            password=password,
+            path=isolated_path,
+        )
+        if not connected:
+            err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha ao conectar conta Demo no MT5 para extração de velas."
+            self.api_client.ack_task(task.id, TaskStatus.FAILED, err_detail)
+            return
+
+        opts = task.options or {}
+        symbols = opts.get("symbols") or ["XAUUSD", "EURUSD", "GBPUSD"]
+        timeframes = opts.get("timeframes") or ["15m", "5m", "1h"]
+        from_ts = opts.get("fromTs")
+        to_ts = opts.get("toTs")
+        chunk_size = int(opts.get("chunkSize") or 500)
+
+        logger.info(
+            f"[MT5-DEMO-BATCHES] Conta Demo #{task.login}@{normalized_server} autenticada! "
+            f"Extraindo lotes de {chunk_size} velas para ativos={symbols} nos timeframes={timeframes}..."
+        )
+
+        batches = self.sync_engine.fetch_candle_batches(
+            symbols=symbols,
+            timeframes=timeframes,
+            from_ts_ms=from_ts,
+            to_ts_ms=to_ts,
+            chunk_size=chunk_size,
+        )
+        if batches:
+            total_bars_synced = sum(len(b.get("candles", [])) for b in batches)
+            logger.info(
+                f"[MT5-DEMO-BATCHES] Enviando {len(batches)} lotes ({total_bars_synced} velas) ao Backend para a Conta #{task.login}..."
+            )
+            self.api_client.sync_candles({
+                "accountId": task.accountId,
+                "login": task.login,
+                "server": normalized_server,
+                "batches": batches,
+            })
+
+        # Também sincroniza eventos do Calendário Econômico se disponíveis no terminal MT5
+        cal_events = self.sync_engine.fetch_economic_calendar_events()
+        if cal_events:
+            logger.info(
+                f"[MT5-DEMO-CALENDAR] Enviando {len(cal_events)} notícias do Calendário Econômico ao Backend via Conta Demo #{task.login}..."
+            )
+            self.api_client.sync_calendar({
+                "login": task.login,
+                "server": normalized_server,
+                "events": cal_events,
+            })
+
+        total_bars = sum(len(b.get("candles", [])) for b in batches)
+        self.api_client.ack_task(
+            task.id,
+            TaskStatus.SUCCESS,
+            f"Lotes de mercado extraídos via Conta MT5 {task.login}: {len(batches)} lotes ({total_bars} velas).",
+            details={"batchesCount": len(batches), "totalCandles": total_bars},
+        )
+
+    def _handle_sync_calendar(self, task: Task):
+        """
+        Autentica a Conta Demo no MT5 (se necessário) e sincroniza novas notícias do Calendário Econômico
+        nativo do MT5 para o backend (ciclo de 10 minutos).
+        """
+        existing_acc = self.account_manager.get_account(task.accountId)
+        password = existing_acc.password if existing_acc else None
+        normalized_server = self.sync_engine._normalize_broker_server(task.server)
+
+        if task.credentialToken:
+            cred = self.api_client.exchange_credential(task.id, task.accountId, task.credentialToken)
+            if cred and cred.password:
+                password = cred.password
+                self.account_manager.add_or_update_account(
+                    account_id=task.accountId,
+                    login=task.login,
+                    server=normalized_server,
+                    password=password,
+                )
+
+        logger.info(
+            f"[MT5-CALENDAR-TASK] Iniciando tarefa SYNC_CALENDAR [{task.id}] usando Conta Demo #{task.login}@{normalized_server}..."
+        )
+
+        if task.login and str(task.login).strip().isdigit():
+            isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+                task.accountId,
+                login=task.login,
+                server=normalized_server,
+                password=password,
+            )
+            connected = self.sync_engine.ensure_connected(
+                account_id=task.accountId,
+                login=task.login,
+                server=normalized_server,
+                password=password,
+                path=isolated_path,
+            )
+            logger.info(
+                f"[MT5-CALENDAR-TASK] Status da conexão MT5 para Conta Demo #{task.login}@{normalized_server}: {'CONECTADO' if connected else 'OFFLINE/LOCAL'}"
+            )
+
+        cal_events = self.sync_engine.fetch_economic_calendar_events()
+        if cal_events:
+            logger.info(
+                f"[MT5-CALENDAR-TASK] {len(cal_events)} notícias encontradas no MT5! Sincronizando com o Backend..."
+            )
+            self.api_client.sync_calendar({
+                "login": task.login,
+                "server": normalized_server,
+                "events": cal_events,
+            })
+        else:
+            logger.info(
+                f"[MT5-CALENDAR-TASK] Nenhuma nova notícia pendente no arquivo do terminal MT5 para Conta Demo #{task.login}."
+            )
+        self.api_client.ack_task(
+            task.id,
+            TaskStatus.SUCCESS,
+            f"Calendário Econômico MT5 sincronizado via Conta Demo {task.login} ({len(cal_events)} notícias verificadas).",
+            details={"eventsCount": len(cal_events), "pollIntervalMinutes": 10},
+        )
+
+    def _run_periodic_calendar_sync_10m(self):
+        """Consulta novas notícias do Calendário Econômico no MT5 a cada 10 minutos usando a conta Demo/ativa."""
+        try:
+            active_ids = self.account_manager.get_active_account_ids()
+            target_login = "DEMO_FEED"
+            target_server = "MetaQuotes-Demo"
+            if active_ids:
+                acc = self.account_manager.get_account(active_ids[0])
+                if acc:
+                    target_login = acc.login
+                    target_server = acc.server
+                    logger.info(
+                        f"[CALENDAR-10MIN] Ciclo automático de 10 minutos: consultando novas notícias no MT5 via Conta #{target_login}@{target_server}..."
+                    )
+                    isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
+                        acc.account_id,
+                        login=acc.login,
+                        server=acc.server,
+                        password=acc.password,
+                    )
+                    self.sync_engine.ensure_connected(
+                        account_id=acc.account_id,
+                        login=acc.login,
+                        server=acc.server,
+                        password=acc.password,
+                        path=isolated_path,
+                    )
+            else:
+                logger.info("[CALENDAR-10MIN] Ciclo automático de 10 minutos: verificando notícias locais do Calendário MT5...")
+
+            cal_events = self.sync_engine.fetch_economic_calendar_events()
+            if cal_events:
+                logger.success(
+                    f"[CALENDAR-10MIN] {len(cal_events)} notícias do Calendário MT5 extraídas via conta #{target_login} e enviadas ao Backend!"
+                )
+                self.api_client.sync_calendar({
+                    "login": target_login,
+                    "server": target_server,
+                    "events": cal_events,
+                })
+            else:
+                logger.info(f"[CALENDAR-10MIN] Verificação de 10min concluída (0 novas notícias no buffer local do MT5).")
+        except Exception as e:
+            logger.warning(f"[CALENDAR-10MIN] Falha no ciclo periódico de 10min do Calendário MT5: {e}")
+
     # -------------------------------------------------------------
     # 2. WATCHDOG INTEGRADO & SINCRONIZAÇÃO ROUND-ROBIN
     # -------------------------------------------------------------
@@ -472,19 +681,41 @@ class WorkerManager:
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
-                logger.warning(f"Não foi possível conectar IPC com MT5 para a conta {acc.login}@{acc.server}: {err_detail}")
+                failures = self._consecutive_connect_failures.get(account_id, 0) + 1
+                self._consecutive_connect_failures[account_id] = failures
+
+                logger.warning(
+                    f"Falha de conexão IPC/MT5 para a conta {acc.login}@{acc.server} "
+                    f"(tentativa consecutiva #{failures}, auth_err={is_auth_err}): {err_detail}"
+                )
                 self.account_manager.mark_error(account_id, err_detail, is_auth_error=is_auth_err)
-                self.api_client.send_event(WorkerEvent(
-                    workerId=settings.worker_id,
-                    accountId=account_id,
-                    login=acc.login,
-                    server=acc.server,
-                    eventType="ACCOUNT_DISCONNECTED",
-                    severity="WARNING",
-                    message=err_detail,
-                    metadata={"error": err_detail}
-                ))
+
+                if is_auth_err:
+                    self.api_client.send_event(WorkerEvent(
+                        workerId=settings.worker_id,
+                        accountId=account_id,
+                        login=acc.login,
+                        server=acc.server,
+                        eventType="ACCOUNT_LOGIN_FAILED",
+                        severity="ERROR",
+                        message=err_detail,
+                        metadata={"error": err_detail, "consecutiveFailures": failures}
+                    ))
+                elif failures >= 3:
+                    self.api_client.send_event(WorkerEvent(
+                        workerId=settings.worker_id,
+                        accountId=account_id,
+                        login=acc.login,
+                        server=acc.server,
+                        eventType="ACCOUNT_DISCONNECTED",
+                        severity="WARNING",
+                        message=err_detail,
+                        metadata={"error": err_detail, "consecutiveFailures": failures}
+                    ))
                 return None
+
+            # Resetar contador de falhas transitórias assim que a conexão IPC é confirmada
+            self._consecutive_connect_failures[account_id] = 0
 
             summary: Dict[str, Any] = {
                 "accountId": account_id,
@@ -545,8 +776,10 @@ class WorkerManager:
                 self.local_queue.enqueue("/sync/orders", orders_payload.model_dump(mode="json"))
 
             # 4. Sincronização incremental de histórico de Deals com Watermark
-            # Na primeira rodada da sessão do worker para a conta, força last_ticket=0 para recuperar qualquer deal perdido
-            effective_full = force_full or (account_id not in self._initial_full_synced)
+            # Na primeira rodada da sessão do worker para a conta (ou quando tz_sync_version < 2 para reconciliar fuso horário UTC),
+            # força last_ticket=0 para reconciliar todos os horários e valores de deals no PostgreSQL!
+            needs_tz_reconcile = getattr(acc, "tz_sync_version", 0) < 2
+            effective_full = force_full or (account_id not in self._initial_full_synced) or needs_tz_reconcile
             last_ticket = 0 if effective_full else acc.last_deal_ticket
             last_deal_time = None if effective_full else acc.last_deal_time
             deals_payload = self.sync_engine.fetch_incremental_deals(
@@ -559,10 +792,14 @@ class WorkerManager:
 
             summary["syncedTradesCount"] = len(deals_payload.trades)
             summary["lastDealTicket"] = deals_payload.lastDealTicket
+            summary["serverTzOffsetSec"] = deals_payload.serverTzOffsetSec
 
             if deals_payload.trades:
                 latest_time = max((t.time for t in deals_payload.trades if t.time), default=acc.last_deal_time)
-                logger.info(f"[SYNC] Sincronizando {len(deals_payload.trades)} novos negócios da conta {acc.login}...")
+                logger.info(
+                    f"[SYNC] Sincronizando {len(deals_payload.trades)} negócios da conta {acc.login} "
+                    f"(offset servidor MT5={deals_payload.serverTzOffsetSec}s)..."
+                )
                 deal_success = self.api_client.sync_trades(deals_payload)
                 if deal_success:
                     self._initial_full_synced.add(account_id)
@@ -570,7 +807,26 @@ class WorkerManager:
                         account_id,
                         deals_payload.lastDealTicket,
                         last_deal_time=latest_time,
+                        tz_sync_version=2,
                     )
+                    # 5. Extrai automaticamente lotes históricos de 500 velas (OHLCV) para os ativos operados nos trades sincronizados
+                    try:
+                        traded_syms = sorted(list({t.symbol for t in deals_payload.trades if t.symbol}))[:6]
+                        if traded_syms:
+                            candle_batches = self.sync_engine.fetch_candle_batches(
+                                symbols=traded_syms,
+                                timeframes=["15m", "5m", "1h"],
+                                chunk_size=500,
+                            )
+                            if candle_batches:
+                                self.api_client.sync_candles({
+                                    "accountId": account_id,
+                                    "login": acc.login,
+                                    "server": acc.server,
+                                    "batches": candle_batches,
+                                })
+                    except Exception as cb_err:
+                        logger.debug(f"Extração complementar de lotes OHLCV pós-sync: {cb_err}")
                 else:
                     err_reason = getattr(self.api_client, "last_error_reason", None)
                     if err_reason in (None, "NETWORK_ERROR"):
@@ -581,6 +837,7 @@ class WorkerManager:
                     account_id,
                     max(acc.last_deal_ticket, deals_payload.lastDealTicket),
                     last_deal_time=acc.last_deal_time,
+                    tz_sync_version=2,
                 )
 
             bal_val = float(summary.get("balance", 0.0) or 0.0)
