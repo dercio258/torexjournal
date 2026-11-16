@@ -150,3 +150,8 @@ quant-engine/datasets/
 uploads/
 quant-engine/data/parquet/
 quant-engine/data/ai_eval/embeddings_cache.json
+__pycache__/
+*.py[cod]
+*.nbi
+*.nbc
+.pytest_cache/

@@ -1,0 +1,108 @@
+{"a": "o que é scalping", "b": "explica-me o scalping", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é scalping", "b": "scalping, o que é?", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é scalping", "b": "o que significa fazer scalping no trading", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é scalping", "b": "como funciona o scalping", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é scalping", "b": "o que é swing trading", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é scalping", "b": "o scalping funciona em cripto?", "same": false, "locale": "pt", "kind": "narrower"}
+{"a": "o que é scalping", "b": "sou bom em scalping?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "what is scalping", "b": "what's scalping in trading?", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is scalping", "b": "explain scalping to me", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is scalping", "b": "what is day trading", "same": false, "locale": "en", "kind": "concept_vs_concept"}
+{"a": "what is scalping", "b": "am I a profitable scalper?", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é drawdown", "b": "o que significa drawdown máximo", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é drawdown", "b": "explica o conceito de drawdown", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é drawdown", "b": "qual é o meu drawdown", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é drawdown", "b": "qual foi o meu maior drawdown este mês", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "what is drawdown", "b": "what does maximum drawdown mean", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is drawdown", "b": "what is my drawdown", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é profit factor", "b": "o que significa fator de lucro", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é profit factor", "b": "como se calcula o profit factor", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é profit factor", "b": "qual é o meu profit factor", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é profit factor", "b": "o que é payoff", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "what is profit factor", "b": "how is profit factor calculated", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is profit factor", "b": "what is my profit factor this week", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é payoff", "b": "o que significa payoff ratio", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é payoff", "b": "qual a diferença entre payoff e win rate", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é payoff", "b": "como melhorar o meu payoff", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é win rate", "b": "o que significa taxa de acerto", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é win rate", "b": "qual é o meu win rate", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é stop loss", "b": "para que serve o stop loss", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é stop loss", "b": "o que é um stop de perda", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é stop loss", "b": "o que é trailing stop", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é stop loss", "b": "onde devo colocar o stop loss no ouro", "same": false, "locale": "pt", "kind": "narrower"}
+{"a": "o que é stop loss", "b": "o que é take profit", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "what is a stop loss", "b": "what is the purpose of a stop loss order", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is a stop loss", "b": "what is a trailing stop", "same": false, "locale": "en", "kind": "concept_vs_concept"}
+{"a": "o que é alavancagem", "b": "como funciona a alavancagem", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é alavancagem", "b": "o que é margem", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é margin call", "b": "o que significa chamada de margem", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "what is leverage", "b": "how does leverage work in forex", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is leverage", "b": "what is a margin call", "same": false, "locale": "en", "kind": "concept_vs_concept"}
+{"a": "o que é spread", "b": "o que significa o spread na corretora", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é spread", "b": "o que é slippage", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é slippage", "b": "o que significa derrapagem na execução", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é um pip", "b": "quanto vale um pip", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é um pip", "b": "o que é um lote", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é um lote", "b": "o que é lote padrão e micro lote", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "what is a pip", "b": "how much is one pip worth", "same": true, "locale": "en", "kind": "concept"}
+{"a": "o que é order block", "b": "explica o que é um bloco de ordens", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é order block", "b": "o que é fair value gap", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é fair value gap", "b": "o que é fvg", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é liquidity sweep", "b": "o que é caça de stops", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é liquidity sweep", "b": "o que é liquidez", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é bos", "b": "o que significa break of structure", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é bos", "b": "o que é choch", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "what is an order block", "b": "explain order blocks", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is a fair value gap", "b": "what is an order block", "same": false, "locale": "en", "kind": "concept_vs_concept"}
+{"a": "o que é fomo", "b": "o que significa fear of missing out no trading", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é fomo", "b": "estou a operar por fomo?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é tilt", "b": "o que significa estar em tilt", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é tilt", "b": "tive tilt esta semana?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é revenge trading", "b": "o que é operar por vingança", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é revenge trading", "b": "o que é overtrading", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "what is revenge trading", "b": "what does revenge trading mean", "same": true, "locale": "en", "kind": "concept"}
+{"a": "what is revenge trading", "b": "am I revenge trading?", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é expectativa matemática", "b": "como calcular a expectativa de um trade", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é expectativa matemática", "b": "a minha expectativa é positiva?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é risco de ruína", "b": "o que significa risk of ruin", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é risco de ruína", "b": "o que é drawdown", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é edge", "b": "o que significa vantagem estatística", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é edge", "b": "qual é o meu edge", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "what is an edge in trading", "b": "where is my edge", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é o sharpe ratio", "b": "como se calcula o índice de sharpe", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é backtesting", "b": "o que significa fazer backtest de uma estratégia", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é backtesting", "b": "como faço backtesting na plataforma", "same": false, "locale": "pt", "kind": "concept_vs_platform"}
+{"a": "o que é um diário de trading", "b": "como registo notas no diário", "same": false, "locale": "pt", "kind": "concept_vs_platform"}
+{"a": "o que é um plano de trading", "b": "o que deve ter um plano de trading", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é um plano de trading", "b": "estou a seguir o meu plano?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "como importar os meus trades", "b": "como importo operações do mt5", "same": true, "locale": "pt", "kind": "platform"}
+{"a": "como importar os meus trades", "b": "como faço upload do histórico html", "same": true, "locale": "pt", "kind": "platform"}
+{"a": "como importar os meus trades", "b": "como exportar os meus trades", "same": false, "locale": "pt", "kind": "platform_vs_platform"}
+{"a": "como importar os meus trades", "b": "como estão os meus trades", "same": false, "locale": "pt", "kind": "platform_vs_personal"}
+{"a": "how do I import my trades", "b": "how to upload my mt5 history", "same": true, "locale": "en", "kind": "platform"}
+{"a": "how do I import my trades", "b": "how are my recent trades", "same": false, "locale": "en", "kind": "platform_vs_personal"}
+{"a": "onde vejo o drawdown na plataforma", "b": "em que página está a curva de capital", "same": true, "locale": "pt", "kind": "platform"}
+{"a": "como fazer backtesting", "b": "onde crio uma sessão de backtest", "same": true, "locale": "pt", "kind": "platform"}
+{"a": "como fazer backtesting", "b": "como importar trades", "same": false, "locale": "pt", "kind": "platform_vs_platform"}
+{"a": "como ativo o 2fa", "b": "como ligar a autenticação de dois fatores", "same": true, "locale": "pt", "kind": "platform"}
+{"a": "como ativo o 2fa", "b": "como ligar o whatsapp", "same": false, "locale": "pt", "kind": "platform_vs_platform"}
+{"a": "how do I enable 2fa", "b": "how to turn on two-factor authentication", "same": true, "locale": "en", "kind": "platform"}
+{"a": "o que são as sessões de trading", "b": "a que horas abre a sessão de londres", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que são as sessões de trading", "b": "qual é a minha melhor sessão", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "what are the trading sessions", "b": "which is my best session", "same": false, "locale": "en", "kind": "concept_vs_personal"}
+{"a": "o que é mfe e mae", "b": "o que significa maximum adverse excursion", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é position sizing", "b": "como calcular o tamanho da posição", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é position sizing", "b": "estou a arriscar demasiado por trade?", "same": false, "locale": "pt", "kind": "concept_vs_personal"}
+{"a": "o que é day trading", "b": "o que significa operar intraday", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é day trading", "b": "o que é swing trading", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é swing trading", "b": "explica o swing trade", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é suporte e resistência", "b": "como identificar suporte e resistência", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é um breakout", "b": "o que é um rompimento", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é um breakout", "b": "o que é um pullback", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "o que é pullback", "b": "o que significa retração no gráfico", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é volatilidade", "b": "o que é o atr", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é volatilidade", "b": "o que é liquidez", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
+{"a": "what is volatility", "b": "what does atr measure", "same": true, "locale": "en", "kind": "concept"}
+{"a": "o que é risco retorno", "b": "o que significa relação 1 para 2", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é r múltiplo", "b": "o que significa ganhar 2r", "same": true, "locale": "pt", "kind": "concept"}
+{"a": "o que é r múltiplo", "b": "o que é risco retorno", "same": false, "locale": "pt", "kind": "concept_vs_concept"}
