@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { browser } from '../proto/browser_packet';
 import { useAuth } from './AuthContext';
-import api from '../api';
 
 interface SocketContextType {
     socket: Socket | null;
@@ -13,12 +13,35 @@ interface SocketContextType {
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 export const SocketProvider = ({ children }: { children: ReactNode }) => {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
+    const queryClient = useQueryClient();
+    const lastAccountCacheInvalidateRef = useRef(0);
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
-    const [mt5Status, setMt5Status] = useState<'connected' | 'disconnected'>('disconnected');
+    const [mt5Status, setMt5Status] = useState<'connected' | 'disconnected'>(() =>
+        user?.is_connected ? 'connected' : 'disconnected'
+    );
 
     useEffect(() => {
+        if (typeof user?.is_connected === 'boolean') {
+            setMt5Status(user.is_connected ? 'connected' : 'disconnected');
+        }
+    }, [user?.is_connected]);
+
+    useEffect(() => {
+        const notifyAccountCache = () => {
+            const now = Date.now();
+            if (now - lastAccountCacheInvalidateRef.current > 3_000) {
+                lastAccountCacheInvalidateRef.current = now;
+                void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+            }
+        };
+        const notifyHistoryCache = () => {
+            void queryClient.invalidateQueries({ queryKey: ['trades'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+            void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+        };
+
         if (!token) {
             if (socket) {
                 socket.disconnect();
@@ -69,19 +92,20 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
         });
 
         ioSocket.on('connect_error', () => {
-            // Silencia erros transitórios de reconexão (ex: 502 durante restart do PM2)
             setIsConnected(false);
         });
 
         ioSocket.on('mt5_account_update', (data: any) => {
             if (data) {
                 setMt5Status('connected');
+                notifyAccountCache();
                 window.dispatchEvent(new CustomEvent('mt5_account_update', { detail: data }));
             }
         });
 
         ioSocket.on('mt5_history_update', (data: any) => {
             if (data) {
+                notifyHistoryCache();
                 window.dispatchEvent(new CustomEvent('mt5_history_update', { detail: data }));
             }
         });
@@ -89,6 +113,7 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
         ioSocket.on('mt5_connection_status', (data: any) => {
             if (data && typeof data.isConnected === 'boolean') {
                 setMt5Status(data.isConnected ? 'connected' : 'disconnected');
+                window.dispatchEvent(new CustomEvent('mt5_connection_status', { detail: data }));
             }
         });
 
@@ -106,21 +131,29 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
                     case browser.PacketType.ACCOUNT_UPDATE:
                         if (packet.accountUpdate) {
                             setMt5Status('connected');
+                            notifyAccountCache();
                             window.dispatchEvent(
-                                new CustomEvent('mt5_account_update', { detail: packet.accountUpdate })
+                                new CustomEvent('mt5_account_update', {
+                                    detail: packet.accountUpdate,
+                                }),
                             );
                         }
                         break;
                     case browser.PacketType.HISTORY_UPDATE:
                         if (packet.historyUpdate) {
+                            notifyHistoryCache();
                             window.dispatchEvent(
-                                new CustomEvent('mt5_history_update', { detail: packet.historyUpdate })
+                                new CustomEvent('mt5_history_update', {
+                                    detail: packet.historyUpdate,
+                                }),
                             );
                         }
                         break;
                     case browser.PacketType.CONNECTION_STATUS:
                         if (packet.connectionStatus) {
-                            setMt5Status(packet.connectionStatus.isConnected ? 'connected' : 'disconnected');
+                            setMt5Status(
+                                packet.connectionStatus.isConnected ? 'connected' : 'disconnected',
+                            );
                         }
                         break;
                     default:
@@ -132,29 +165,12 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
         });
 
         setSocket(ioSocket);
-        checkInitialStatus();
 
         return () => {
             if (pingInterval) clearInterval(pingInterval);
             ioSocket.disconnect();
         };
     }, [token]);
-
-    const checkInitialStatus = async () => {
-        try {
-            const currentToken = localStorage.getItem('token');
-            if (!currentToken) return;
-
-            const res = await api.get('/account');
-            if (res.data && (res.data.isConnected || res.data.is_connected)) {
-                setMt5Status('connected');
-            } else {
-                setMt5Status('disconnected');
-            }
-        } catch {
-            // Ignore initial status error
-        }
-    };
 
     return (
         <SocketContext.Provider value={{ socket, isConnected, mt5Status }}>

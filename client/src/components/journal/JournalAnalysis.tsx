@@ -12,6 +12,7 @@ import {
 } from 'chart.js';
 import { Activity } from 'lucide-react';
 import { useChartTheme } from '../../hooks/useChartTheme';
+import { useLocale } from '../../context/LocaleContext';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
@@ -21,6 +22,8 @@ interface JournalAnalysisProps {
 
 export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
     const ct = useChartTheme();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
 
     // Stats Calculation
     const stats = useMemo(() => {
@@ -61,7 +64,9 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
 
     // Data for Bar (Day of Week Performance)
     const dayPerformance = useMemo(() => {
-        const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+        const days = isEn
+            ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+            : ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
         const pnlByDay = new Array(7).fill(0);
 
         trades.forEach(t => {
@@ -73,7 +78,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
             labels: days,
             datasets: [
                 {
-                    label: 'PnL',
+                    label: isEn ? 'Net P&L' : 'PnL',
                     data: pnlByDay,
                     backgroundColor: pnlByDay.map(v => v >= 0 ? ct.pos : ct.neg),
                     borderRadius: 4,
@@ -81,12 +86,12 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
                 }
             ]
         };
-    }, [trades, ct]);
+    }, [trades, ct, isEn]);
 
     if (!stats) {
         return (
             <div className="flex items-center justify-center h-64 text-fg-subtle">
-                <p>Nenhum dado para análise.</p>
+                <p>{isEn ? 'No data available for analysis.' : 'Nenhum dado para análise.'}</p>
             </div>
         );
     }
@@ -94,7 +99,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
     return (
         <div className="space-y-6">
             <h3 className="text-xl font-bold text-fg flex items-center gap-2">
-                <Activity className="text-indigo-400" /> Análise de Performance
+                <Activity className="text-indigo-400" /> {isEn ? 'Performance Analytics' : 'Análise de Performance'}
             </h3>
 
             {/* Quick Stats Cards */}
@@ -130,7 +135,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
 
                 {/* Win/Loss Ratio */}
                 <div className="bg-surface/40 p-6 rounded-3xl border border-line flex flex-col items-center">
-                    <h4 className="text-sm font-bold text-fg/80 mb-4 w-full">Taxa de Acerto</h4>
+                    <h4 className="text-sm font-bold text-fg/80 mb-4 w-full">{isEn ? 'Win Rate Breakdown' : 'Taxa de Acerto'}</h4>
                     <div className="w-48 h-48 relative">
                         <Doughnut
                             data={winLossData}
@@ -148,7 +153,7 @@ export const JournalAnalysis: React.FC<JournalAnalysisProps> = ({ trades }) => {
 
                 {/* Day of Week Performance */}
                 <div className="bg-surface/40 p-6 rounded-3xl border border-line">
-                    <h4 className="text-sm font-bold text-fg/80 mb-4">Performance por Dia</h4>
+                    <h4 className="text-sm font-bold text-fg/80 mb-4">{isEn ? 'Performance by Weekday' : 'Performance por Dia'}</h4>
                     <div className="h-48">
                         <Bar
                             data={dayPerformance}

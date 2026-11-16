@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ChevronDown, Search } from 'lucide-react';
 import { COUNTRIES, CountryDial, filterCountries, findCountry } from '../../constants/countries';
+import { getCurrentLocale } from '../../context/LocaleContext';
 import { cn } from '../../lib/cn';
 
 interface PhoneInputProps {
@@ -134,7 +135,7 @@ export const PhoneInput = ({
                     aria-haspopup="listbox"
                     aria-expanded={open}
                     aria-controls={open ? listId : undefined}
-                    aria-label={`País: ${country.name} (${country.dialCode}). Alterar país`}
+                    aria-label={getCurrentLocale() === 'en' ? `Country: ${country.name} (${country.dialCode}). Change country` : `País: ${country.name} (${country.dialCode}). Alterar país`}
                     className="flex min-w-[104px] shrink-0 items-center gap-2 rounded-l-control border-r border-line pl-4 pr-3 text-fg transition-colors hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
                 >
                     <Flag country={country} />
@@ -165,8 +166,8 @@ export const PhoneInput = ({
                             <input
                                 type="text"
                                 autoFocus
-                                placeholder="Buscar país ou código..."
-                                aria-label="Buscar país"
+                                placeholder={getCurrentLocale() === 'en' ? 'Search country or dial code...' : 'Buscar país ou código...'}
+                                aria-label={getCurrentLocale() === 'en' ? 'Search country' : 'Buscar país'}
                                 aria-controls={listId}
                                 aria-activedescendant={results[activeIndex] ? `${id}-opt-${results[activeIndex].iso2}` : undefined}
                                 className="ds-control w-full rounded-lg border border-line bg-canvas py-2 pl-9 pr-3 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-accent/50"
@@ -177,7 +178,7 @@ export const PhoneInput = ({
                         </div>
                     </div>
 
-                    <ul ref={listRef} id={listId} role="listbox" aria-label="Países" className="flex-1 overflow-y-auto p-1">
+                    <ul ref={listRef} id={listId} role="listbox" aria-label={getCurrentLocale() === 'en' ? 'Countries' : 'Países'} className="flex-1 overflow-y-auto p-1">
                         {results.map((c, i) => (
                             <li
                                 key={c.iso2}
@@ -197,7 +198,7 @@ export const PhoneInput = ({
                                 <span className="font-mono text-xs text-accent-fg">{c.dialCode}</span>
                             </li>
                         ))}
-                        {results.length === 0 && <li className="p-4 text-center text-xs text-fg-subtle">Nenhum país encontrado</li>}
+                        {results.length === 0 && <li className="p-4 text-center text-xs text-fg-subtle">{getCurrentLocale() === 'en' ? 'No country found' : 'Nenhum país encontrado'}</li>}
                     </ul>
                 </div>
             )}

@@ -7,20 +7,25 @@
         "dev": "vite",
         "build": "tsc && vite build",
         "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "test:unit": "node scripts/run-unit-tests.mjs"
     },
     "dependencies": {
         "@klinecharts/pro": "^0.1.1",
         "@paypal/react-paypal-js": "^8.9.2",
+        "@react-three/drei": "^9.122.0",
+        "@react-three/fiber": "^8.18.0",
         "@tanstack/react-query": "^5.90.21",
         "@tanstack/react-query-devtools": "^5.91.3",
         "@tinymce/tinymce-react": "^6.3.0",
+        "@types/three": "^0.187.0",
         "axios": "^1.6.8",
         "chart.js": "^4.5.1",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "emoji-picker-react": "^4.18.0",
         "framer-motion": "^12.36.0",
+        "gsap": "^3.15.1",
         "html2canvas": "^1.4.1",
         "klinecharts": "^9.8.12",
         "lightweight-charts": "^5.1.0",
@@ -30,7 +35,10 @@
         "react-dom": "^18.2.0",
         "react-router-dom": "^6.22.3",
         "socket.io-client": "^4.7.5",
-        "tailwind-merge": "^3.4.1"
+        "tailwind-merge": "^3.4.1",
+        "three": "^0.187.0",
+        "zod": "^4.6.7",
+        "zustand": "^5.1.0"
     },
     "devDependencies": {
         "@types/html2canvas": "^0.5.35",

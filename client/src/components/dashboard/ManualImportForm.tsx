@@ -6,13 +6,17 @@ import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 import { downloadImportTemplate, TOREX_LOGO_URL } from '../../utils/documentExporter';
+import { pullAccountHistoryInBatchesAndBuildUnifiedSession } from '../../services/historicalBatchCache';
 
 interface ManualImportFormProps {
     onBack: () => void;
 }
 
 export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { accounts, selectedAccountId, refreshAccounts, selectAccount } = useAccount();
@@ -57,7 +61,9 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
         if (!targetAccountId || targetAccountId === 'all') {
             setStatus({
                 type: 'error',
-                message: 'Selecione uma conta de trading válida de destino para associar as operações importadas.'
+                message: isEn
+                    ? 'Select a valid destination trading account to assign these imported fills.'
+                    : 'Selecione uma conta de trading válida de destino para associar as operações importadas.'
             });
             return;
         }
@@ -78,11 +84,13 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
             });
 
             const savedCount = res.data?.count ?? 0;
-            const targetName = selectedTargetAccount?.name || 'Conta';
+            const targetName = selectedTargetAccount?.name || (isEn ? 'Account' : 'Conta');
 
             setStatus({ 
                 type: 'success', 
-                message: res.data?.message || `Importamos ${savedCount} operações com sucesso na conta "${targetName}"!`,
+                message: res.data?.message || (isEn
+                    ? `Successfully imported ${savedCount} fills into "${targetName}".`
+                    : `Importamos ${savedCount} operações com sucesso na conta "${targetName}"!`),
                 count: savedCount,
                 accountName: targetName
             });
@@ -95,12 +103,18 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
             queryClient.invalidateQueries({ queryKey: ['trades'] });
             queryClient.invalidateQueries({ queryKey: ['dashboard'] });
             queryClient.invalidateQueries({ queryKey: ['technical-journal'] });
+            void pullAccountHistoryInBatchesAndBuildUnifiedSession({
+                accountId: targetAccountId,
+                accountName: targetName,
+                syncSourceLabel: isEn ? `Manual Import (${targetName})` : `Importação Manual (${targetName})`,
+                triggerLiveBrokerSync: false,
+            }).catch(() => {});
             window.dispatchEvent(new Event('trade-imported'));
 
         } catch (e: any) {
             setStatus({
                 type: 'error',
-                message: e.response?.data?.message || e.message || 'Falha ao processar e salvar o relatório.'
+                message: e.response?.data?.message || e.message || (isEn ? 'Failed to parse and save statement.' : 'Falha ao processar e salvar o relatório.')
             });
         } finally {
             setIsLoading(false);
@@ -114,7 +128,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                 className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors mb-6 text-sm cursor-pointer"
             >
                 <ArrowLeft size={16} />
-                Voltar aos brokers
+                {isEn ? 'Back to brokers' : 'Voltar aos brokers'}
             </button>
 
             <Card className="p-8 bg-surface border-line shadow-2xl">
@@ -126,11 +140,15 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                     />
                     <div>
                         <span className="text-[10px] font-extrabold uppercase tracking-widest text-accent-fg block">
-                            TOREX JOURNAL • CENTRAL DE DOCUMENTOS
+                            {isEn ? 'TOREX JOURNAL • STATEMENT CENTER' : 'TOREX JOURNAL • CENTRAL DE DOCUMENTOS'}
                         </span>
-                        <h2 className="text-xl font-bold text-fg">Importação Multi-Formato de Histórico</h2>
+                        <h2 className="text-xl font-bold text-fg">{isEn ? 'Multi-Format Statement Import' : 'Importação Multi-Formato de Histórico'}</h2>
                         <p className="text-sm text-fg-muted">
-                            Suporte completo para documentos <strong>CSV</strong>, <strong>HTML</strong> (MT4/MT5), <strong>Excel (.xls/.xlsx)</strong> e <strong>PDF</strong>.
+                            {isEn ? (
+                                <>Full parser support for <strong>CSV</strong>, <strong>HTML</strong> (MT4/MT5), <strong>Excel (.xls/.xlsx)</strong>, and <strong>PDF</strong>.</>
+                            ) : (
+                                <>Suporte completo para documentos <strong>CSV</strong>, <strong>HTML</strong> (MT4/MT5), <strong>Excel (.xls/.xlsx)</strong> e <strong>PDF</strong>.</>
+                            )}
                         </p>
                     </div>
                 </div>
@@ -140,18 +158,18 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                     <div className="bg-canvas-subtle border border-line rounded-2xl p-5 shadow-inner">
                         <div className="flex items-center justify-between mb-2.5">
                             <label className="text-xs font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2">
-                                <Wallet size={15} /> Conta de Destino dos Trades
+                                <Wallet size={15} /> {isEn ? 'Destination Trading Account' : 'Conta de Destino dos Trades'}
                             </label>
                             {activeAccounts.length > 0 && (
                                 <span className="text-[11px] font-medium text-fg-muted">
-                                    {activeAccounts.length} {activeAccounts.length === 1 ? 'conta disponível' : 'contas disponíveis'}
+                                    {activeAccounts.length} {isEn ? (activeAccounts.length === 1 ? 'account available' : 'accounts available') : (activeAccounts.length === 1 ? 'conta disponível' : 'contas disponíveis')}
                                 </span>
                             )}
                         </div>
 
                         {activeAccounts.length === 0 ? (
                             <div className="p-4 bg-canvas border border-line rounded-xl text-center">
-                                <p className="text-xs text-fg-muted">Nenhuma conta de trading disponível no momento.</p>
+                                <p className="text-xs text-fg-muted">{isEn ? 'No active trading accounts available.' : 'Nenhuma conta de trading disponível no momento.'}</p>
                             </div>
                         ) : activeAccounts.length === 1 ? (
                             <div className="flex items-center justify-between p-3 bg-surface rounded-xl border border-line">
@@ -160,7 +178,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                         {activeAccounts[0].name}
                                         {activeAccounts[0].isPrimary && (
                                             <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
-                                                Principal
+                                                {isEn ? 'Primary' : 'Principal'}
                                             </span>
                                         )}
                                     </div>
@@ -178,21 +196,23 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 >
                                     {activeAccounts.map(acc => (
                                         <option key={acc.id} value={acc.id}>
-                                            {acc.name} — {acc.broker || 'MetaTrader'} ({acc.currency || 'USD'}) {acc.isPrimary ? '★ Principal' : ''}
+                                            {acc.name} — {acc.broker || 'MetaTrader'} ({acc.currency || 'USD'}) {acc.isPrimary ? (isEn ? '★ Primary' : '★ Principal') : ''}
                                         </option>
                                     ))}
                                 </select>
                                 {selectedTargetAccount && (
                                     <div className="flex items-center justify-between text-[11px] text-fg-muted px-1">
-                                        <span>Tipo: <strong className="text-fg">{selectedTargetAccount.type}</strong></span>
-                                        <span>Saldo Atual: <strong className="text-accent-fg">{selectedTargetAccount.currency} {Number(selectedTargetAccount.balance).toFixed(2)}</strong></span>
+                                        <span>{isEn ? 'Type:' : 'Tipo:'} <strong className="text-fg">{selectedTargetAccount.type}</strong></span>
+                                        <span>{isEn ? 'Current Balance:' : 'Saldo Atual:'} <strong className="text-accent-fg">{selectedTargetAccount.currency} {Number(selectedTargetAccount.balance).toFixed(2)}</strong></span>
                                     </div>
                                 )}
                             </div>
                         )}
 
                         <p className="text-[11px] text-fg-muted mt-2.5 leading-relaxed">
-                            Todos os trades deste relatório serão estritamente associados a esta conta, atualizando suas estatísticas, win rate e gráficos no TorexJournal.
+                            {isEn
+                                ? 'All fills in this statement will be strictly mapped to this account, updating your TorexJournal metrics, win rate, and equity curve.'
+                                : 'Todos os trades deste relatório serão estritamente associados a esta conta, atualizando suas estatísticas, win rate e gráficos no TorexJournal.'}
                         </p>
                     </div>
 
@@ -211,12 +231,12 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                             </div>
                             <div>
                                 <p className="text-fg font-bold text-base">
-                                    {selectedFile ? selectedFile.name : 'Clique para selecionar o documento de operações'}
+                                    {selectedFile ? selectedFile.name : (isEn ? 'Click to upload execution statement' : 'Clique para selecionar o documento de operações')}
                                 </p>
                                 <p className="text-xs text-fg-muted mt-1.5">
                                     {selectedFile
-                                        ? `${(selectedFile.size / 1024).toFixed(1)} KB pronto para importação`
-                                        : 'Formatos suportados: CSV, HTML (MT4/MT5/Torex), Excel (.xls / .xlsx) e PDF'}
+                                        ? (isEn ? `${(selectedFile.size / 1024).toFixed(1)} KB ready to import` : `${(selectedFile.size / 1024).toFixed(1)} KB pronto para importação`)
+                                        : (isEn ? 'Supported formats: CSV, HTML (MT4/MT5/Torex), Excel (.xls / .xlsx), and PDF' : 'Formatos suportados: CSV, HTML (MT4/MT5/Torex), Excel (.xls / .xlsx) e PDF')}
                                 </p>
                                 <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3">
                                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-accent-fg border border-emerald-500/20">CSV</span>
@@ -239,10 +259,12 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 />
                                 <div>
                                     <h4 className="text-xs font-bold text-fg uppercase tracking-wider">
-                                        Modelos Oficiais com Logo TorexJournal
+                                        {isEn ? 'Official TorexJournal Statement Templates' : 'Modelos Oficiais com Logo TorexJournal'}
                                     </h4>
                                     <p className="text-[11px] text-fg-muted">
-                                        Baixe o documento estruturado no formato de sua preferência para preenchimento ou auditoria:
+                                        {isEn
+                                            ? 'Download a structured template in your preferred format for backfilling or trade audit:'
+                                            : 'Baixe o documento estruturado no formato de sua preferência para preenchimento ou auditoria:'}
                                     </p>
                                 </div>
                             </div>
@@ -261,7 +283,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 }
                                 className="flex items-center justify-center gap-1.5 px-3 py-2 bg-surface-2 hover:bg-surface-3 text-fg rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-line"
                             >
-                                <Download size={13} className="text-accent-fg" /> Modelo CSV
+                                <Download size={13} className="text-accent-fg" /> {isEn ? 'CSV Template' : 'Modelo CSV'}
                             </button>
                             <button
                                 type="button"
@@ -275,7 +297,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 }
                                 className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-emerald-500/25"
                             >
-                                <FileSpreadsheet size={13} /> Modelo Excel
+                                <FileSpreadsheet size={13} /> {isEn ? 'Excel Template' : 'Modelo Excel'}
                             </button>
                             <button
                                 type="button"
@@ -289,7 +311,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 }
                                 className="flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-indigo-500/25"
                             >
-                                <FileCode size={13} /> Modelo HTML
+                                <FileCode size={13} /> {isEn ? 'HTML Template' : 'Modelo HTML'}
                             </button>
                             <button
                                 type="button"
@@ -303,7 +325,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                 }
                                 className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-amber-500/25"
                             >
-                                <FileText size={13} /> Modelo PDF
+                                <FileText size={13} /> {isEn ? 'PDF Template' : 'Modelo PDF'}
                             </button>
                         </div>
                     </div>
@@ -328,7 +350,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                         }}
                                         className="flex items-center gap-2 px-3.5 py-2 bg-emerald-500 text-slate-950 rounded-xl font-bold text-xs hover:bg-emerald-400 transition-all shadow-md cursor-pointer"
                                     >
-                                        Ir para o Diário <ArrowRight size={14} />
+                                        {isEn ? 'Open Journal' : 'Ir para o Diário'} <ArrowRight size={14} />
                                     </button>
                                     <button 
                                         onClick={() => {
@@ -337,7 +359,7 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                                         }}
                                         className="flex items-center gap-2 px-3.5 py-2 bg-surface-2 hover:bg-surface-3 text-fg rounded-xl font-semibold text-xs transition-colors cursor-pointer border border-line"
                                     >
-                                        <BarChart2 size={14} /> Ver Operações
+                                        <BarChart2 size={14} /> {isEn ? 'View Trades' : 'Ver Operações'}
                                     </button>
                                     <button 
                                         onClick={() => {
@@ -361,7 +383,9 @@ export const ManualImportForm = ({ onBack }: ManualImportFormProps) => {
                         isLoading={isLoading}
                         icon={<Upload size={18} />}
                     >
-                        {isLoading ? 'Salvando Operações...' : 'Importar Arquivo Selecionado'}
+                        {isLoading
+                            ? (isEn ? 'Importing Fills...' : 'Salvando Operações...')
+                            : (isEn ? 'Import Selected File' : 'Importar Arquivo Selecionado')}
                     </Button>
                 </div>
             </Card>

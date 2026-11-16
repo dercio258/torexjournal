@@ -2,6 +2,9 @@ import { Github } from 'lucide-react';
 import { buttonVariants } from '../ui/Button';
 import { Divider } from '../ui/Divider';
 import { cn } from '../../lib/cn';
+import { useLocale } from '../../context/LocaleContext';
+import { captureAttributionFromWindow } from '../../lib/attribution';
+import { flushEvents, trackButtonClick } from '../../lib/tracking';
 
 const GoogleIcon = () => (
     <svg aria-hidden className="h-4 w-4" viewBox="0 0 24 24">
@@ -17,21 +20,39 @@ const PROVIDERS = [
     { id: 'github', label: 'GitHub', href: '/api/auth/github', icon: <Github size={16} aria-hidden /> },
 ] as const;
 
-/** "Ou continue com" divider + social sign-in links (full-page redirects to the API). */
-export const OAuthButtons = ({ className }: { className?: string }) => (
-    <div className={cn('space-y-6', className)}>
-        <Divider label="Ou continue com" />
-        <div className="grid grid-cols-2 gap-3.5">
-            {PROVIDERS.map((p) => (
-                <a
-                    key={p.id}
-                    href={p.href}
-                    aria-label={`Continuar com ${p.label}`}
-                    className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-11 font-semibold')}
-                >
-                    {p.icon} {p.label}
-                </a>
-            ))}
+/** Divider + social sign-in links (full-page redirects to the API). */
+export const OAuthButtons = ({ className }: { className?: string }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+
+    return (
+        <div className={cn('space-y-6', className)}>
+            <Divider label={isEn ? 'Or continue with' : 'Ou continue com'} />
+            <div className="grid grid-cols-2 gap-3.5">
+                {PROVIDERS.map((p) => (
+                    <a
+                        key={p.id}
+                        href={p.href}
+                        data-cta-tag={`oauth_${p.id}_login`}
+                        data-intent={`oauth_${p.id}`}
+                        data-track-explicit="true"
+                        onClick={() => {
+                            captureAttributionFromWindow();
+                            trackButtonClick({
+                                ctaTag: `oauth_${p.id}_login`,
+                                intent: `oauth_${p.id}`,
+                                label: p.label,
+                                targetUrl: p.href,
+                            });
+                            void flushEvents(true);
+                        }}
+                        aria-label={isEn ? `Continue with ${p.label}` : `Continuar com ${p.label}`}
+                        className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-11 font-semibold')}
+                    >
+                        {p.icon} {p.label}
+                    </a>
+                ))}
+            </div>
         </div>
-    </div>
-);
+    );
+};

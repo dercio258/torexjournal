@@ -1,4 +1,5 @@
 import React from 'react';
+import { getLandingContent, type LandingLocale } from './content';
 
 interface RealCandle {
     id: number;
@@ -32,45 +33,48 @@ const REAL_CHART_DATA: RealCandle[] = [
     { id: 17, open: 92, close: 42, high: 36, low: 100, volume: 130 },
     { id: 18, open: 42, close: 26, high: 8, low: 52, volume: 155, metric: 'upper-wick' },
     { id: 19, open: 26, close: 54, high: 22, low: 60, volume: 70 },
-    { id: 20, open: 54, close: 18, high: 10, low: 36, volume: 145, metric: 'live' }
+    { id: 20, open: 54, close: 18, high: 10, low: 36, volume: 145, metric: 'live' },
 ];
 
 export interface CandlestickHeroBackgroundProps {
     className?: string;
     opacity?: string;
+    locale?: LandingLocale;
 }
 
 export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps> = ({
-    className = "",
-    opacity = "opacity-50 sm:opacity-65"
+    className = '',
+    opacity = 'opacity-50 sm:opacity-65',
+    locale = 'pt',
 }) => {
+    const { chartLabels } = getLandingContent(locale);
     const candleWidth = 20;
     const spacing = 70;
     const startX = 45;
 
     return (
-        <div 
+        <div
             className={`absolute inset-0 pointer-events-none overflow-hidden select-none bg-canvas z-0 ${className}`}
             aria-hidden="true"
         >
             {/* Máscara suave integrada perfeitamente ao fundo preto obsidiana */}
-            <div 
+            <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: 'radial-gradient(ellipse 95% 85% at 50% 50%, transparent 40%, #08090C 95%)'
+                    background: 'radial-gradient(ellipse 95% 85% at 50% 50%, transparent 40%, #08090C 95%)',
                 }}
             />
             {/* Fade gradiente sutil no topo e base */}
-            <div 
+            <div
                 className="absolute inset-0 pointer-events-none"
                 style={{
-                    background: 'linear-gradient(180deg, #08090C 0%, transparent 12%, transparent 88%, #08090C 100%)'
+                    background: 'linear-gradient(180deg, #08090C 0%, transparent 12%, transparent 88%, #08090C 100%)',
                 }}
             />
 
-            <svg 
+            <svg
                 className={`w-full h-full ${opacity}`}
-                viewBox="0 0 1440 360" 
+                viewBox="0 0 1440 360"
                 preserveAspectRatio="xMidYMid slice"
             >
                 {/* 1. Grade de Preços Muito Escura e Integrada */}
@@ -106,20 +110,18 @@ export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps>
                     const bodyTop = Math.min(c.open, c.close);
                     const bodyHeight = Math.max(Math.abs(c.open - c.close), 8);
 
-                    // Paleta rica e viva perfeitamente calibrada
-                    const fillColor = isBullish 
-                        ? 'rgba(16, 185, 129, 0.22)' 
+                    const fillColor = isBullish
+                        ? 'rgba(16, 185, 129, 0.22)'
                         : 'rgba(244, 63, 94, 0.18)';
-                    const strokeColor = isBullish 
-                        ? 'rgba(52, 211, 153, 0.55)' 
+                    const strokeColor = isBullish
+                        ? 'rgba(52, 211, 153, 0.55)'
                         : 'rgba(251, 113, 133, 0.48)';
-                    const wickColor = isBullish 
-                        ? 'rgba(52, 211, 153, 0.75)' 
+                    const wickColor = isBullish
+                        ? 'rgba(52, 211, 153, 0.75)'
                         : 'rgba(251, 113, 133, 0.68)';
 
                     return (
                         <g key={c.id}>
-                            {/* Pavio Fino e Reto de 1px */}
                             <line
                                 x1={x}
                                 y1={c.high}
@@ -130,7 +132,6 @@ export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps>
                                 strokeLinecap="square"
                             />
 
-                            {/* Corpo Longo e Esguio (20px de largura com grande alcance vertical) */}
                             <rect
                                 x={x - candleWidth / 2}
                                 y={bodyTop}
@@ -142,7 +143,6 @@ export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps>
                                 strokeWidth="1.2"
                             />
 
-                            {/* Barra de Volume na Base */}
                             <rect
                                 x={x - (candleWidth / 2 - 2)}
                                 y={360 - c.volume * 0.36}
@@ -153,77 +153,74 @@ export const CandlestickHeroBackground: React.FC<CandlestickHeroBackgroundProps>
                                 opacity="0.30"
                             />
 
-                            {/* PONTO: SINCRONIZADO NO PAVIO SUPERIOR (Taxa de Acerto 68.5%) */}
                             {c.metric === 'upper-wick' && (
                                 <g>
                                     <circle cx={x} cy={c.high} r="2.5" fill="#34D399" opacity="0.9" />
                                     <line x1={x} y1={c.high} x2={x} y2={c.high - 8} stroke="rgba(52, 211, 153, 0.6)" strokeWidth="0.8" />
-                                    <rect 
-                                        x={x - 85} 
-                                        y={c.high - 22} 
-                                        width="170" 
-                                        height="16" 
-                                        rx="2" 
-                                        fill="#08090C" 
-                                        stroke="rgba(16, 185, 129, 0.45)" 
-                                        strokeWidth="0.8" 
+                                    <rect
+                                        x={x - 85}
+                                        y={c.high - 22}
+                                        width="170"
+                                        height="16"
+                                        rx="2"
+                                        fill="#08090C"
+                                        stroke="rgba(16, 185, 129, 0.45)"
+                                        strokeWidth="0.8"
                                     />
-                                    <text 
-                                        x={x} 
-                                        y={c.high - 11} 
-                                        textAnchor="middle" 
-                                        fill="#34D399" 
-                                        fontSize="8" 
-                                        fontFamily="monospace" 
+                                    <text
+                                        x={x}
+                                        y={c.high - 11}
+                                        textAnchor="middle"
+                                        fill="#34D399"
+                                        fontSize="8"
+                                        fontFamily="monospace"
                                         fontWeight="600"
                                         letterSpacing="0.04em"
                                     >
-                                        PAVIO SUPERIOR • WIN RATE 68.5%
+                                        {chartLabels.upperWick}
                                     </text>
                                 </g>
                             )}
 
-                            {/* PONTO: SINCRONIZADO NO PAVIO INFERIOR (Profit Factor 2.42) */}
                             {c.metric === 'lower-wick' && (
                                 <g>
                                     <circle cx={x} cy={c.low} r="2.5" fill="#34D399" opacity="0.9" />
                                     <line x1={x} y1={c.low} x2={x} y2={c.low + 8} stroke="rgba(52, 211, 153, 0.6)" strokeWidth="0.8" />
-                                    <rect 
-                                        x={x - 85} 
-                                        y={c.low + 8} 
-                                        width="170" 
-                                        height="16" 
-                                        rx="2" 
-                                        fill="#08090C" 
-                                        stroke="rgba(16, 185, 129, 0.45)" 
-                                        strokeWidth="0.8" 
+                                    <rect
+                                        x={x - 85}
+                                        y={c.low + 8}
+                                        width="170"
+                                        height="16"
+                                        rx="2"
+                                        fill="#08090C"
+                                        stroke="rgba(16, 185, 129, 0.45)"
+                                        strokeWidth="0.8"
                                     />
-                                    <text 
-                                        x={x} 
-                                        y={c.low + 19} 
-                                        textAnchor="middle" 
-                                        fill="#34D399" 
-                                        fontSize="8" 
-                                        fontFamily="monospace" 
+                                    <text
+                                        x={x}
+                                        y={c.low + 19}
+                                        textAnchor="middle"
+                                        fill="#34D399"
+                                        fontSize="8"
+                                        fontFamily="monospace"
                                         fontWeight="600"
                                         letterSpacing="0.04em"
                                     >
-                                        PAVIO INFERIOR • PROFIT FACTOR 2.42
+                                        {chartLabels.lowerWick}
                                     </text>
                                 </g>
                             )}
 
-                            {/* Cotação ao Vivo Discreta na Última Vela */}
                             {c.metric === 'live' && (
                                 <g opacity="0.85">
-                                    <line 
-                                        x1={x} 
-                                        y1={c.close} 
-                                        x2="1440" 
-                                        y2={c.close} 
-                                        stroke="rgba(16, 185, 129, 0.6)" 
-                                        strokeWidth="1" 
-                                        strokeDasharray="3 3" 
+                                    <line
+                                        x1={x}
+                                        y1={c.close}
+                                        x2="1440"
+                                        y2={c.close}
+                                        stroke="rgba(16, 185, 129, 0.6)"
+                                        strokeWidth="1"
+                                        strokeDasharray="3 3"
                                     />
                                     <rect x="1380" y={c.close - 7} width="50" height="14" rx="2" fill="#0D1F17" stroke="rgba(16, 185, 129, 0.5)" strokeWidth="0.8" />
                                     <text x="1405" y={c.close + 3} textAnchor="middle" fill="#34D399" fontSize="7.5" fontFamily="monospace" fontWeight="bold">

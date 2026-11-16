@@ -1,7 +1,21 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import api from '../api';
 import { useAuth } from './AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+    addTransactionOfflineAware,
+    archiveAccountOfflineAware,
+    createAccountOfflineAware,
+    deleteAccountOfflineAware,
+    restoreAccountOfflineAware,
+    setPrimaryAccountOfflineAware,
+    updateAccountOfflineAware,
+} from '../services/offlineMutations';
+import {
+    getCurrentUserScope,
+    listUserAccountsFromIDB,
+    upsertAccountsInIDB,
+} from '../services/offlineDb';
 
 export type AccountType = 'live' | 'demo' | 'prop_firm' | 'challenge' | 'funded' | 'custom';
 
@@ -96,85 +110,197 @@ interface AccountContextType {
     canCreateAccount: boolean;
 }
 
+const ACCOUNTS_CACHE_KEY = 'torex_accounts_cache';
+
+function readCachedAccounts(): TradingAccount[] {
+    try {
+        const raw = localStorage.getItem(ACCOUNTS_CACHE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeCachedAccounts(list: TradingAccount[]) {
+    try {
+        if (!list || list.length === 0) {
+            localStorage.removeItem(ACCOUNTS_CACHE_KEY);
+            return;
+        }
+        localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify(list));
+        const userScope = getCurrentUserScope();
+        if (userScope && userScope !== 'anon') {
+            void upsertAccountsInIDB(userScope, list);
+        }
+    } catch {
+        // ignore storage quota errors
+    }
+}
+
+function computeConsolidatedSummary(allAccounts: TradingAccount[]): ConsolidatedSummary {
+    const active = allAccounts.filter(a => !a.isArchived);
+    if (active.length === 0) {
+        return {
+            totalInitialBalance: 0,
+            totalCurrentBalance: 0,
+            totalNetPnl: 0,
+            totalTrades: 0,
+            totalWins: 0,
+            winRate: 0,
+            currencies: ['USD'],
+            hasMultipleCurrencies: false,
+            accounts: [],
+        };
+    }
+
+    const currencies = Array.from(new Set(active.map(a => a.currency || 'USD')));
+    let totalInitialBalance = 0;
+    let totalCurrentBalance = 0;
+    let totalNetPnl = 0;
+    let totalTrades = 0;
+    let totalWins = 0;
+
+    for (const acc of active) {
+        totalInitialBalance += Number(acc.initialBalance || 0);
+        totalCurrentBalance += Number(acc.balance || 0);
+        totalNetPnl += Number(acc.netPnl || 0);
+        const count = Number(acc.tradesCount || 0);
+        totalTrades += count;
+        totalWins += Math.round((Number(acc.winRate || 0) / 100) * count);
+    }
+
+    const winRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
+
+    return {
+        totalInitialBalance: Number(totalInitialBalance.toFixed(2)),
+        totalCurrentBalance: Number(totalCurrentBalance.toFixed(2)),
+        totalNetPnl: Number(totalNetPnl.toFixed(2)),
+        totalTrades,
+        totalWins,
+        winRate: Number(winRate.toFixed(1)),
+        currencies,
+        hasMultipleCurrencies: currencies.length > 1,
+        accounts: active,
+    };
+}
+
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
 export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { user } = useAuth();
+    const { token } = useAuth();
     const queryClient = useQueryClient();
 
-    const [accounts, setAccounts] = useState<TradingAccount[]>([]);
+    const [accounts, setAccounts] = useState<TradingAccount[]>(() => (localStorage.getItem('token') ? readCachedAccounts() : []));
     const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
-        return localStorage.getItem('torex_selected_account_id') || 'all';
+        const saved = localStorage.getItem('torex_selected_account_id');
+        if (saved) return saved;
+        const cached = readCachedAccounts().filter(a => !a.isArchived);
+        if (cached.length > 0) {
+            const primary = cached.find(a => a.isPrimary) || cached[0];
+            return primary.id;
+        }
+        return 'all';
     });
-    const [consolidatedSummary, setConsolidatedSummary] = useState<ConsolidatedSummary | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [isLoading, setIsLoading] = useState<boolean>(() => {
+        if (!localStorage.getItem('token')) return false;
+        return readCachedAccounts().length === 0;
+    });
 
     // Modal state
     const [isManagerOpen, setIsManagerOpen] = useState(false);
     const [activeManagerTab, setActiveManagerTab] = useState<'accounts' | 'create' | 'transactions'>('accounts');
     const [editingAccount, setEditingAccount] = useState<TradingAccount | null>(null);
 
+    const inFlightRefreshRef = useRef<Promise<void> | null>(null);
+
+    const consolidatedSummary = useMemo<ConsolidatedSummary | null>(
+        () => (token ? computeConsolidatedSummary(accounts) : null),
+        [accounts, token]
+    );
+
     const refreshAccounts = useCallback(async () => {
-        if (!user) {
+        if (!token) {
             setAccounts([]);
+            writeCachedAccounts([]);
             setIsLoading(false);
             return;
         }
 
-        try {
-            setIsLoading(true);
-            const [accRes, summaryRes] = await Promise.all([
-                api.get('/accounts?includeArchived=true'),
-                api.get('/accounts/summary/consolidated').catch(() => ({ data: null }))
-            ]);
-
-            const list: TradingAccount[] = Array.isArray(accRes.data) ? accRes.data : [];
-            setAccounts(list);
-            if (summaryRes?.data) {
-                setConsolidatedSummary(summaryRes.data);
-            }
-
-            // Validar se o selectedAccountId ainda é válido
-            const savedId = localStorage.getItem('torex_selected_account_id');
-            const activeAccounts = list.filter(a => !a.isArchived);
-
-            if (savedId === 'all') {
-                setSelectedAccountId('all');
-            } else if (savedId && activeAccounts.some(a => a.id === savedId)) {
-                setSelectedAccountId(savedId);
-            } else if (activeAccounts.length > 0) {
-                const primary = activeAccounts.find(a => a.isPrimary) || activeAccounts[0];
-                setSelectedAccountId(primary.id);
-                localStorage.setItem('torex_selected_account_id', primary.id);
-            } else {
-                setSelectedAccountId('all');
-                localStorage.setItem('torex_selected_account_id', 'all');
-            }
-
-        } catch (error) {
-            console.error('Failed to load accounts:', error);
-        } finally {
-            setIsLoading(false);
+        if (inFlightRefreshRef.current) {
+            return inFlightRefreshRef.current;
         }
-    }, [user]);
+
+        const task = (async () => {
+            try {
+                if (accounts.length === 0) {
+                    setIsLoading(true);
+                }
+                const accRes = await api.get('/accounts?includeArchived=true');
+                const list: TradingAccount[] = Array.isArray(accRes.data) ? accRes.data : [];
+                setAccounts(list);
+                writeCachedAccounts(list);
+
+                // Validate whether selectedAccountId is still valid
+                const savedId = localStorage.getItem('torex_selected_account_id');
+                const activeAccounts = list.filter(a => !a.isArchived);
+
+                if (savedId === 'all') {
+                    setSelectedAccountId('all');
+                } else if (savedId && activeAccounts.some(a => a.id === savedId)) {
+                    setSelectedAccountId(savedId);
+                } else if (activeAccounts.length > 0) {
+                    const primary = activeAccounts.find(a => a.isPrimary) || activeAccounts[0];
+                    setSelectedAccountId(primary.id);
+                    localStorage.setItem('torex_selected_account_id', primary.id);
+                } else {
+                    setSelectedAccountId('all');
+                    localStorage.setItem('torex_selected_account_id', 'all');
+                }
+            } catch (error) {
+                console.error('Failed to load accounts:', error);
+            } finally {
+                inFlightRefreshRef.current = null;
+                setIsLoading(false);
+            }
+        })();
+
+        inFlightRefreshRef.current = task;
+        return task;
+    }, [token]);
 
     useEffect(() => {
+        if (token) {
+            const scope = getCurrentUserScope();
+            void listUserAccountsFromIDB(scope).then((stored) => {
+                if (stored.length > 0) {
+                    setAccounts((prev) =>
+                        prev.length === 0 ? (stored as TradingAccount[]) : prev
+                    );
+                    setIsLoading(false);
+                }
+            });
+        }
         refreshAccounts();
-    }, [refreshAccounts]);
+    }, [token, refreshAccounts]);
 
     useEffect(() => {
         const handleAccountSyncEvent = () => {
             refreshAccounts();
         };
         window.addEventListener('trade-imported', handleAccountSyncEvent);
-        return () => window.removeEventListener('trade-imported', handleAccountSyncEvent);
+        window.addEventListener('torex:offline-sync-completed', handleAccountSyncEvent);
+        return () => {
+            window.removeEventListener('trade-imported', handleAccountSyncEvent);
+            window.removeEventListener('torex:offline-sync-completed', handleAccountSyncEvent);
+        };
     }, [refreshAccounts]);
 
     const selectAccount = (id: string) => {
         setSelectedAccountId(id);
         localStorage.setItem('torex_selected_account_id', id);
 
-        // Invalida todos os caches do dashboard, trades e journal para reatividade instantânea
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         queryClient.invalidateQueries({ queryKey: ['trades'] });
         queryClient.invalidateQueries({ queryKey: ['technical-journal'] });
@@ -192,29 +318,64 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const canCreateAccount = true;
 
     const createAccount = async (data: Partial<TradingAccount>) => {
-        const res = await api.post('/accounts', data);
+        const res = await createAccountOfflineAware(data);
         const newAccount: TradingAccount = res.data;
-        await refreshAccounts();
+        if (res.offlineQueued) {
+            setAccounts(prev => {
+                const next = [...prev, newAccount];
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
         selectAccount(newAccount.id);
         return newAccount;
     };
 
     const updateAccount = async (id: string, data: Partial<TradingAccount>) => {
-        const res = await api.put(`/accounts/${id}`, data);
+        const res = await updateAccountOfflineAware(id, data);
         const updated: TradingAccount = res.data;
-        await refreshAccounts();
+        if (res.offlineQueued) {
+            setAccounts(prev => {
+                const next = prev.map(a => (a.id === id ? { ...a, ...updated } : a));
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         return updated;
     };
 
     const setPrimaryAccount = async (id: string) => {
-        await api.post(`/accounts/${id}/primary`);
-        await refreshAccounts();
+        const res = await setPrimaryAccountOfflineAware(id);
+        if (res.offlineQueued) {
+            setAccounts(prev => {
+                const next = prev.map(a => ({ ...a, isPrimary: a.id === id }));
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
     };
 
     const archiveAccount = async (id: string) => {
-        await api.post(`/accounts/${id}/archive`);
-        await refreshAccounts();
+        const res = await archiveAccountOfflineAware(id);
+        if (res.offlineQueued) {
+            const nowIso = new Date().toISOString();
+            setAccounts(prev => {
+                const next = prev.map(a =>
+                    a.id === id ? { ...a, isArchived: true, archivedAt: nowIso } : a
+                );
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
         if (selectedAccountId === id) {
             setSelectedAccountId('all');
             localStorage.setItem('torex_selected_account_id', 'all');
@@ -222,13 +383,31 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     const restoreAccount = async (id: string) => {
-        await api.post(`/accounts/${id}/restore`);
-        await refreshAccounts();
+        const res = await restoreAccountOfflineAware(id);
+        if (res.offlineQueued) {
+            setAccounts(prev => {
+                const next = prev.map(a =>
+                    a.id === id ? { ...a, isArchived: false, archivedAt: null } : a
+                );
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
     };
 
     const deleteAccount = async (id: string, force = false) => {
-        await api.delete(`/accounts/${id}${force ? '?force=true' : ''}`);
-        await refreshAccounts();
+        const res = await deleteAccountOfflineAware(id, force);
+        if (res.offlineQueued) {
+            setAccounts(prev => {
+                const next = prev.filter(a => a.id !== id);
+                writeCachedAccounts(next);
+                return next;
+            });
+        } else {
+            await refreshAccounts();
+        }
         if (selectedAccountId === id) {
             setSelectedAccountId('all');
             localStorage.setItem('torex_selected_account_id', 'all');
@@ -249,8 +428,10 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     const addTransaction = async (accountId: string, data: { type: string; amount: number; description?: string; date?: string }) => {
-        const res = await api.post(`/accounts/${accountId}/transactions`, data);
-        await refreshAccounts();
+        const res = await addTransactionOfflineAware(accountId, data);
+        if (!res.offlineQueued) {
+            await refreshAccounts();
+        }
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         return res.data;
     };
@@ -303,7 +484,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 editingAccount,
                 setEditingAccount,
                 openCreateModal,
-                openManageModal
+                openManageModal,
             }}
         >
             {children}

@@ -2,9 +2,12 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { ShieldAlert, Rocket, ArrowRight } from 'lucide-react';
+import { useLocale } from '../../context/LocaleContext';
 
 export const PlanRequiredOverlay = () => {
     const navigate = useNavigate();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-canvas/60 backdrop-blur-sm">
@@ -14,9 +17,13 @@ export const PlanRequiredOverlay = () => {
                         <ShieldAlert className="w-8 h-8 text-indigo-400" />
                     </div>
 
-                    <h2 className="text-2xl font-bold text-fg mb-2">Plano de Acesso Necessário</h2>
+                    <h2 className="text-2xl font-bold text-fg mb-2">
+                        {isEn ? 'Workspace Plan Required' : 'Plano de Acesso Necessário'}
+                    </h2>
                     <p className="text-fg-muted mb-8">
-                        Para acessar as ferramentas de análise, diário avançado e a rede social Torex, você precisa ativar um plano de subscrição.
+                        {isEn
+                            ? 'Activate a subscription plan to unlock execution analytics, behavioral journaling, backtesting replay, and the Torex desk network.'
+                            : 'Para acessar as ferramentas de análise, diário avançado e a rede social Torex, você precisa ativar um plano de subscrição.'}
                     </p>
 
                     <div className="grid gap-3 w-full">
@@ -25,7 +32,7 @@ export const PlanRequiredOverlay = () => {
                             className="w-full py-6 text-lg group"
                             onClick={() => navigate('/pricing')}
                         >
-                            Escolher meu Plano
+                            {isEn ? 'Choose Your Plan' : 'Escolher meu Plano'}
                             <Rocket className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                         </Button>
 
@@ -34,13 +41,15 @@ export const PlanRequiredOverlay = () => {
                             className="w-full py-6 border-line-strong text-fg/80 hover:bg-surface-2"
                             onClick={() => navigate('/pricing')}
                         >
-                            Ver Planos Disponíveis
+                            {isEn ? 'View Available Plans' : 'Ver Planos Disponíveis'}
                             <ArrowRight className="w-5 h-5 ml-2" />
                         </Button>
                     </div>
 
                     <p className="mt-6 text-xs text-fg-subtle">
-                        Já possui um plano? Se o seu pagamento foi recente, pode levar alguns minutos para atualizar.
+                        {isEn
+                            ? 'Already subscribed? Recent payments may take a few moments to propagate.'
+                            : 'Já possui um plano? Se o seu pagamento foi recente, pode levar alguns minutos para atualizar.'}
                     </p>
                 </div>
             </Card>

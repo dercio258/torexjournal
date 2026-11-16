@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card } from '../components/ui/Card';
 import { Phone, CheckCircle2, AlertCircle } from 'lucide-react';
-import axios from 'axios';
+import api from '../api';
 
 export const CompleteProfile = () => {
-    const { user, token } = useAuth();
+    const { refreshProfile } = useAuth();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const navigate = useNavigate();
     const [whatsapp, setWhatsapp] = useState('');
     const [loading, setLoading] = useState(false);
@@ -21,21 +24,19 @@ export const CompleteProfile = () => {
         setError('');
 
         try {
-            const backendUrl = process.env.REACT_APP_API_URL || window.location.origin;
-            await axios.put(`${backendUrl}/api/auth/contact`, { whatsapp }, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            await api.put('/auth/contact', { whatsapp });
+            await refreshProfile().catch(() => null);
 
             setSuccess(true);
             setTimeout(() => {
-                if (user?.onboardingCompleted) {
-                    navigate('/dashboard');
-                } else {
-                    navigate('/onboarding');
-                }
-            }, 2000);
+                // OnboardingSurvey runs automatically inside MainLayout when onboardingCompleted === false
+                navigate('/dashboard', { replace: true });
+            }, 1500);
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Erro ao atualizar contacto');
+            setError(
+                err.response?.data?.message ||
+                    (isEn ? 'Unable to update contact details' : 'Erro ao atualizar contacto')
+            );
         } finally {
             setLoading(false);
         }
@@ -50,9 +51,13 @@ export const CompleteProfile = () => {
                             <Phone className="w-8 h-8 text-emerald-500" />
                         </div>
                     </div>
-                    <h2 className="text-2xl font-bold text-fg tracking-tight">Finalizar Registo</h2>
+                    <h2 className="text-2xl font-bold text-fg tracking-tight">
+                        {isEn ? 'Complete Setup' : 'Finalizar Registo'}
+                    </h2>
                     <p className="text-fg-muted text-sm">
-                        Precisamos do seu WhatsApp para enviar notificações importantes e bónus exclusivos.
+                        {isEn
+                            ? 'Add your WhatsApp number for risk alerts, drawdown warnings, and account notifications.'
+                            : 'Precisamos do seu WhatsApp para enviar notificações importantes e bónus exclusivos.'}
                     </p>
                 </div>
 
@@ -63,32 +68,34 @@ export const CompleteProfile = () => {
                             {error}
                         </div>
                     )}
-                    
+
                     {success && (
                         <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-accent-fg text-sm">
                             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                            Contacto guardado com sucesso! Redirecionando...
+                            {isEn
+                                ? 'Contact saved successfully! Redirecting...'
+                                : 'Contacto guardado com sucesso! Redirecionando...'}
                         </div>
                     )}
 
                     <div className="space-y-4">
                         <Input
-                            label="WhatsApp (com código do país)"
-                            placeholder="+258 84 123 4567"
+                            label={isEn ? 'WhatsApp (with country code)' : 'WhatsApp (com código do país)'}
+                            placeholder={isEn ? '+1 555 019 4820' : '+258 84 123 4567'}
                             value={whatsapp}
                             onChange={(e) => setWhatsapp(e.target.value)}
                             required
                         />
                     </div>
 
-                    <Button 
-                        type="submit" 
+                    <Button
+                        type="submit"
                         variant="gradient"
                         className="w-full h-11 text-base"
                         isLoading={loading}
                         disabled={success}
                     >
-                        Concluir Registo
+                        {isEn ? 'Complete Setup' : 'Concluir Registo'}
                     </Button>
                 </form>
             </Card>

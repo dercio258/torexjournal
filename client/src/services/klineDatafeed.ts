@@ -41,7 +41,7 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
         ticker: 'XAUUSD',
         name: 'Ouro / Dólar Americano (Gold Spot)',
         shortName: 'XAUUSD',
-        exchange: 'OANDA',
+        exchange: 'CFD',
         market: 'cfd',
         pricePrecision: 2,
         volumePrecision: 0,
@@ -107,7 +107,7 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
         ticker: 'NAS100',
         name: 'US Nasdaq 100 Index (US100)',
         shortName: 'NAS100',
-        exchange: 'OANDA',
+        exchange: 'INDEX',
         market: 'index',
         pricePrecision: 2,
         volumePrecision: 0,
@@ -118,7 +118,7 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
         ticker: 'US30',
         name: 'Dow Jones Industrial Average (Wall St 30)',
         shortName: 'US30',
-        exchange: 'OANDA',
+        exchange: 'INDEX',
         market: 'index',
         pricePrecision: 2,
         volumePrecision: 0,
@@ -129,7 +129,7 @@ export const DEFAULT_SYMBOLS: SymbolInfo[] = [
         ticker: 'SPX500',
         name: 'S&P 500 Index (US500)',
         shortName: 'SPX500',
-        exchange: 'OANDA',
+        exchange: 'INDEX',
         market: 'index',
         pricePrecision: 2,
         volumePrecision: 0,
@@ -145,9 +145,6 @@ const BINANCE_TICKER_MAP: Record<string, string> = {
     ETHUSDT: 'ETHUSDT',
     SOLUSD: 'SOLUSDT',
     SOLUSDT: 'SOLUSDT',
-    XAUUSD: 'PAXGUSDT',
-    EURUSD: 'EURUSDT',
-    GBPUSD: 'GBPUSDT',
 };
 
 export const binancePairOf = (ticker: string): string | undefined => BINANCE_TICKER_MAP[ticker.toUpperCase()];
@@ -202,21 +199,10 @@ export function periodToMs(period: Period): number {
     }
 }
 
-/** OANDA granularity: M1, M5, M15, M30, H1, H4, D, W, M. */
-export function periodToOandaGranularity(period: Period): string {
-    const { multiplier, timespan } = period;
-    if (timespan === 'minute') return [1, 5, 15, 30].includes(multiplier) ? `M${multiplier}` : 'M15';
-    if (timespan === 'hour') return [1, 2, 4, 6, 8, 12].includes(multiplier) ? `H${multiplier}` : 'H1';
-    if (timespan === 'day') return 'D';
-    if (timespan === 'week') return 'W';
-    if (timespan === 'month') return 'M';
-    return 'M15';
-}
-
 const MODE_LABEL: Record<DataSourceMode, string> = {
     TRADINGVIEW: 'TradingView',
     BINANCE_LIVE: 'Binance',
-    MT5_BACKEND: 'OANDA',
+    MT5_BACKEND: 'MT5 / Market Feed',
     DEMO: 'Demo (dados simulados)',
 };
 
@@ -234,15 +220,6 @@ const DEFAULT_BATCH_SIZE = 500;
 type CandleListener = (candle: KLineData, stats: FeedStats) => void;
 type BatchProgressListener = (progress: BatchLoadProgress) => void;
 
-const toKLine = (c: any): KLineData => ({
-    timestamp: Number(c.timestamp ?? (typeof c.time === 'number' ? (c.time < 1e10 ? c.time * 1000 : c.time) : new Date(c.time).getTime())),
-    open: Number(c.open),
-    high: Number(c.high),
-    low: Number(c.low),
-    close: Number(c.close),
-    volume: Number(c.volume || 0),
-});
-
 export class CustomKLineDatafeed implements Datafeed {
     private mode: DataSourceMode = 'TRADINGVIEW';
     private ws: WebSocket | null = null;
@@ -253,6 +230,7 @@ export class CustomKLineDatafeed implements Datafeed {
     // Session date range bounds for smart background batch pre-fetching
     private sessionFromTs: number | null = null;
     private sessionToTs: number | null = null;
+    private priceAnchorHint: number | null = null;
     private prefetchAbortGeneration = 0;
 
     // In-memory LRU cache for instant timeframe switching & multi-chart sync
@@ -318,6 +296,21 @@ export class CustomKLineDatafeed implements Datafeed {
             const parsedTo = new Date(`${toDate}T23:59:59`).getTime();
             if (Number.isFinite(parsedTo)) this.sessionToTs = Math.min(Date.now(), parsedTo);
         }
+    }
+
+    public setPriceAnchorHint(price: number | null) {
+        this.priceAnchorHint = typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
+    }
+
+    private resolveBackendSymbol(symbol: SymbolInfo): string {
+        const cleanTicker = (symbol.ticker || 'XAUUSD').trim().toUpperCase();
+        if (DEFAULT_SYMBOLS.some((s) => s.ticker === cleanTicker)) {
+            return cleanTicker;
+        }
+        if (symbol.exchange && !['TV', 'FX', 'CFD', 'INDEX', 'BINANCE'].includes(symbol.exchange.toUpperCase())) {
+            return `${symbol.exchange}:${cleanTicker}`;
+        }
+        return cleanTicker;
     }
 
     private updateBatchProgress(patch: Partial<BatchLoadProgress>) {
@@ -407,8 +400,14 @@ export class CustomKLineDatafeed implements Datafeed {
         preserveTimestamp: boolean = false
     ): KLineData[] {
         this.replayActive = enabled;
-        if (enabled && this.fullHistory.length > 20) {
+        if (enabled && this.fullHistory.length > 5) {
             this.stopLiveStream();
+
+            const minIdx = Math.min(10, Math.max(1, this.fullHistory.length - 2));
+            const fallbackIdx = Math.min(
+                this.fullHistory.length - 1,
+                Math.max(minIdx, Math.floor(this.fullHistory.length * startRatio))
+            );
 
             if (preserveTimestamp && this.replayCutoffTimestamp) {
                 let idx = -1;
@@ -419,13 +418,13 @@ export class CustomKLineDatafeed implements Datafeed {
                         break;
                     }
                 }
-                if (idx >= 3) {
+                if (idx >= 1) {
                     this.replayIndex = idx;
                 } else {
-                    this.replayIndex = Math.max(10, Math.floor(this.fullHistory.length * startRatio));
+                    this.replayIndex = fallbackIdx;
                 }
             } else {
-                this.replayIndex = Math.max(10, Math.floor(this.fullHistory.length * startRatio));
+                this.replayIndex = fallbackIdx;
             }
 
             const visible = this.fullHistory.slice(0, this.replayIndex + 1);
@@ -500,28 +499,52 @@ export class CustomKLineDatafeed implements Datafeed {
         });
 
         try {
+            if (this.mode === 'DEMO') {
+                const anchorPrice = this.fullHistory[0]?.open ?? this.priceAnchorHint ?? undefined;
+                const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
+                this.lastSynthetic = true;
+                this.lastSourceUsed = MODE_LABEL.DEMO;
+                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
+                this.syncMemoryCache(symbol, period, this.fullHistory);
+                const addedBars = Math.max(0, this.fullHistory.length - beforeCount);
+                const visibleCandles = this.replayActive ? this.setReplayMode(true, 0.72, true) : this.fullHistory;
+                return { addedBars, totalBars: this.fullHistory.length, visibleCandles };
+            }
+
             const batch = await fetchSingleCandleBatch({
-                symbol:
-                    symbol.exchange && symbol.exchange !== 'TV'
-                        ? `${symbol.exchange}:${symbol.ticker}`
-                        : symbol.ticker,
+                symbol: this.resolveBackendSymbol(symbol),
                 timeframe: tf,
                 chunkSize,
                 chunkIndex: this.batchProgress.loadedBatches,
                 cursorTo,
-                fromTs: this.sessionFromTs || cursorTo - chunkSize * stepMs * 2,
+                fromTs: Math.min(this.sessionFromTs || cursorTo, cursorTo) - chunkSize * stepMs * 2,
             });
 
             if (batch.candles.length > 0) {
                 this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
                 this.syncMemoryCache(symbol, period, this.fullHistory);
             } else {
-                // Fallback to deterministic historical extension anchored at earliest candle open
-                const anchorPrice = this.fullHistory[0]?.open;
-                const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
-                await saveCandleBatchToIDB(symbol.ticker, tf, generated, this.lastSourceUsed);
-                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
-                this.syncMemoryCache(symbol, period, this.fullHistory);
+                const pair = binancePairOf(symbol.ticker);
+                if (pair) {
+                    const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${cursorTo}&limit=${chunkSize}`;
+                    const resp = await fetch(url);
+                    if (resp.ok) {
+                        const raw = await resp.json();
+                        if (Array.isArray(raw) && raw.length > 0) {
+                            const mapped: KLineData[] = raw.map((k: any[]) => ({
+                                timestamp: Number(k[0]),
+                                open: parseFloat(k[1]),
+                                high: parseFloat(k[2]),
+                                low: parseFloat(k[3]),
+                                close: parseFloat(k[4]),
+                                volume: parseFloat(k[5]),
+                            }));
+                            await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
+                            this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, mapped);
+                            this.syncMemoryCache(symbol, period, this.fullHistory);
+                        }
+                    }
+                }
             }
 
             const addedBars = Math.max(0, this.fullHistory.length - beforeCount);
@@ -545,12 +568,37 @@ export class CustomKLineDatafeed implements Datafeed {
                 visibleCandles,
             };
         } catch (_) {
-            // Resilient fallback: extend history backward anchored smoothly at earliest candle open
-            const anchorPrice = this.fullHistory[0]?.open;
-            const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
-            await saveCandleBatchToIDB(symbol.ticker, tf, generated, this.lastSourceUsed);
-            this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
-            this.syncMemoryCache(symbol, period, this.fullHistory);
+            const pair = binancePairOf(symbol.ticker);
+            if (pair) {
+                try {
+                    const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${cursorTo}&limit=${chunkSize}`;
+                    const resp = await fetch(url);
+                    if (resp.ok) {
+                        const raw = await resp.json();
+                        if (Array.isArray(raw) && raw.length > 0) {
+                            const mapped: KLineData[] = raw.map((k: any[]) => ({
+                                timestamp: Number(k[0]),
+                                open: parseFloat(k[1]),
+                                high: parseFloat(k[2]),
+                                low: parseFloat(k[3]),
+                                close: parseFloat(k[4]),
+                                volume: parseFloat(k[5]),
+                            }));
+                            await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
+                            this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, mapped);
+                            this.syncMemoryCache(symbol, period, this.fullHistory);
+                        }
+                    }
+                } catch (_) {}
+            }
+            if (this.fullHistory.length === beforeCount && (this.mode === 'DEMO' || this.lastSynthetic)) {
+                const anchorPrice = this.fullHistory[0]?.open ?? this.priceAnchorHint ?? undefined;
+                const generated = this.generateDemoCandles(symbol.ticker, period, chunkSize, cursorTo, anchorPrice);
+                this.lastSynthetic = true;
+                this.lastSourceUsed = MODE_LABEL.DEMO;
+                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, generated);
+                this.syncMemoryCache(symbol, period, this.fullHistory);
+            }
 
             const addedBars = Math.max(0, this.fullHistory.length - beforeCount);
             const nextLoadedBatches = this.batchProgress.loadedBatches + 1;
@@ -559,7 +607,7 @@ export class CustomKLineDatafeed implements Datafeed {
                 totalBatches: Math.max(nextLoadedBatches, this.batchProgress.totalBatches),
                 totalBars: this.fullHistory.length,
                 isPrefetching: false,
-                statusText: `Lote ${nextLoadedBatches} • ${this.fullHistory.length} velas (Cache)`,
+                statusText: `Lote ${nextLoadedBatches} • ${this.fullHistory.length} velas`,
             });
 
             const visibleCandles = this.replayActive
@@ -588,42 +636,69 @@ export class CustomKLineDatafeed implements Datafeed {
         const earliest = this.fullHistory[0]?.timestamp ?? Infinity;
         const latest = this.fullHistory[this.fullHistory.length - 1]?.timestamp ?? 0;
 
-        if (targetTimestamp < earliest + stepMs * 15 || targetTimestamp > latest) {
+        if (targetTimestamp < earliest + stepMs * 15 || targetTimestamp > latest - stepMs * 2) {
             this.updateBatchProgress({
                 isPrefetching: true,
                 statusText: 'Carregando lote da data selecionada...',
             });
 
-            const windowEnd = Math.min(Date.now(), targetTimestamp + stepMs * 250);
-            const windowStart = targetTimestamp - stepMs * 250;
+            const windowEnd = Math.min(Date.now(), targetTimestamp + stepMs * 160);
+            const windowStart = targetTimestamp - stepMs * 340;
 
             try {
-                const batch = await fetchSingleCandleBatch({
-                    symbol:
-                        symbol.exchange && symbol.exchange !== 'TV'
-                            ? `${symbol.exchange}:${symbol.ticker}`
-                            : symbol.ticker,
-                    timeframe: tf,
-                    chunkSize: DEFAULT_BATCH_SIZE,
-                    cursorTo: windowEnd,
-                    fromTs: windowStart,
-                });
+                if (this.mode !== 'DEMO') {
+                    const batch = await fetchSingleCandleBatch({
+                        symbol: this.resolveBackendSymbol(symbol),
+                        timeframe: tf,
+                        chunkSize: DEFAULT_BATCH_SIZE,
+                        cursorTo: windowEnd,
+                        fromTs: windowStart,
+                    });
 
-                if (batch.candles.length > 0) {
-                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
-                    this.syncMemoryCache(symbol, period, this.fullHistory);
+                    if (batch.candles.length > 0) {
+                        this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
+                        this.syncMemoryCache(symbol, period, this.fullHistory);
+                    }
                 }
             } catch (_) {
-                // Check IndexedDB or generate anchored window around targetTimestamp
                 const idb = await getMergedCandlesFromIDB(symbol.ticker, tf);
                 if (idb.candles.length > 0) {
                     this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, idb.candles);
                 }
+                const pair = binancePairOf(symbol.ticker);
                 if (
-                    this.fullHistory.length === 0 ||
-                    targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity)
+                    this.mode !== 'DEMO' &&
+                    pair &&
+                    (this.fullHistory.length === 0 ||
+                        targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity) ||
+                        targetTimestamp > (this.fullHistory[this.fullHistory.length - 1]?.timestamp ?? 0))
                 ) {
-                    const anchor = this.fullHistory[0]?.open;
+                    try {
+                        const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${windowEnd}&limit=${DEFAULT_BATCH_SIZE}`;
+                        const resp = await fetch(url);
+                        if (resp.ok) {
+                            const raw = await resp.json();
+                            if (Array.isArray(raw) && raw.length > 0) {
+                                const mapped: KLineData[] = raw.map((k: any[]) => ({
+                                    timestamp: Number(k[0]),
+                                    open: parseFloat(k[1]),
+                                    high: parseFloat(k[2]),
+                                    low: parseFloat(k[3]),
+                                    close: parseFloat(k[4]),
+                                    volume: parseFloat(k[5]),
+                                }));
+                                await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
+                                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, mapped);
+                            }
+                        }
+                    } catch (_) {}
+                }
+                if (
+                    (this.mode === 'DEMO' || this.fullHistory.length === 0) &&
+                    (this.fullHistory.length === 0 ||
+                        targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity))
+                ) {
+                    const anchor = this.fullHistory[0]?.open ?? this.priceAnchorHint ?? undefined;
                     const fallbackChunk = this.generateDemoCandles(
                         symbol.ticker,
                         period,
@@ -631,7 +706,8 @@ export class CustomKLineDatafeed implements Datafeed {
                         windowEnd,
                         anchor
                     );
-                    await saveCandleBatchToIDB(symbol.ticker, tf, fallbackChunk, this.lastSourceUsed);
+                    this.lastSynthetic = true;
+                    this.lastSourceUsed = MODE_LABEL.DEMO;
                     this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, fallbackChunk);
                 }
                 this.syncMemoryCache(symbol, period, this.fullHistory);
@@ -731,31 +807,87 @@ export class CustomKLineDatafeed implements Datafeed {
         estimatedTotalChunks: number;
     }> {
         const tf = periodToTimeframe(period);
+        const stepMs = periodToMs(period);
         const batchSize = DEFAULT_BATCH_SIZE;
-        const from = this.sessionFromTs || to - batchSize * periodToMs(period) * 3;
+        const from = Math.min(this.sessionFromTs || to, to) - batchSize * stepMs * 2;
+        const backendSymbol = this.resolveBackendSymbol(symbol);
 
-        // 1. Check IndexedDB dual-layer cache first for instant load when switching symbols/sessions
+        // Explicit DEMO mode: fetch deterministic Polars/Parquet OHLCV first, fallback to cursor-invariant generator
+        if (this.mode === 'DEMO') {
+            try {
+                const res = await fetch(
+                    `/api/quant/ohlcv?symbol=${encodeURIComponent(symbol.ticker)}&timeframe=${encodeURIComponent(tf)}&to=${to}&limit=${batchSize}`,
+                    { signal: AbortSignal.timeout(2500) }
+                );
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data?.candles) && data.candles.length > 0) {
+                        const bars: KLineData[] = data.candles.map((c: any) => ({
+                            timestamp: Number(c.timestamp),
+                            open: Number(c.open),
+                            high: Number(c.high),
+                            low: Number(c.low),
+                            close: Number(c.close),
+                            volume: Number(c.volume || 0),
+                        }));
+                        return {
+                            candles: bars,
+                            source: `${MODE_LABEL.DEMO} · Polars`,
+                            synthetic: true,
+                            fromCache: false,
+                            nextCursorTo: bars[0]?.timestamp ? bars[0].timestamp - stepMs : null,
+                            hasMore: true,
+                            estimatedTotalChunks: 2,
+                        };
+                    }
+                }
+            } catch (_) {
+                // Offline fallback below
+            }
+            const generated = this.generateDemoCandles(
+                symbol.ticker,
+                period,
+                batchSize,
+                to,
+                this.priceAnchorHint ?? undefined
+            );
+            return {
+                candles: generated,
+                source: MODE_LABEL.DEMO,
+                synthetic: true,
+                fromCache: false,
+                nextCursorTo: generated[0]?.timestamp ? generated[0].timestamp - stepMs : null,
+                hasMore: true,
+                estimatedTotalChunks: 2,
+            };
+        }
+
+        // 1. Check IndexedDB dual-layer cache AND verify that it covers the requested `to` window
         const idbCached = await getMergedCandlesFromIDB(symbol.ticker, tf);
-        if (idbCached.candles.length >= 120) {
+        const idbCoversTargetWindow =
+            idbCached.candles.length >= 60 &&
+            idbCached.earliestTs !== null &&
+            idbCached.latestTs !== null &&
+            idbCached.earliestTs <= to - stepMs * 10 &&
+            idbCached.latestTs >= to - stepMs * 96;
+
+        if (idbCoversTargetWindow) {
             return {
                 candles: idbCached.candles,
                 source: `${idbCached.source} · IDB`,
                 synthetic: false,
                 fromCache: true,
-                nextCursorTo: idbCached.earliestTs ? idbCached.earliestTs - periodToMs(period) : null,
+                nextCursorTo: idbCached.earliestTs ? idbCached.earliestTs - stepMs : null,
                 hasMore: true,
                 estimatedTotalChunks: Math.max(1, idbCached.batchCount),
             };
         }
 
-        // 2. TradingView Batch Endpoint (`/tradingview/candles/batch`)
-        if (this.mode === 'TRADINGVIEW') {
+        // 2. Unified Backend Batch Endpoint (`/tradingview/candles/batch`: MT5 cache -> TradingView WS -> public HTTP fallback)
+        if (this.mode === 'TRADINGVIEW' || this.mode === 'MT5_BACKEND') {
             try {
                 const batchRes = await fetchSingleCandleBatch({
-                    symbol:
-                        symbol.exchange && symbol.exchange !== 'TV'
-                            ? `${symbol.exchange}:${symbol.ticker}`
-                            : symbol.ticker,
+                    symbol: backendSymbol,
                     timeframe: tf,
                     chunkSize: batchSize,
                     chunkIndex: 0,
@@ -764,9 +896,10 @@ export class CustomKLineDatafeed implements Datafeed {
                     toTs: to,
                 });
                 if (batchRes.candles.length > 0) {
+                    const merged = mergeAndDeduplicateCandles(idbCached.candles, batchRes.candles);
                     return {
-                        candles: batchRes.candles,
-                        source: MODE_LABEL.TRADINGVIEW,
+                        candles: merged,
+                        source: this.mode === 'MT5_BACKEND' ? MODE_LABEL.MT5_BACKEND : MODE_LABEL.TRADINGVIEW,
                         synthetic: false,
                         fromCache: batchRes.fromCache,
                         nextCursorTo: batchRes.nextCursorTo,
@@ -775,71 +908,13 @@ export class CustomKLineDatafeed implements Datafeed {
                     };
                 }
             } catch (_) {
-                // Fallback to standard `/tradingview/candles`
-                try {
-                    const res = await api.get('/tradingview/candles', {
-                        params: {
-                            symbol:
-                                symbol.exchange && symbol.exchange !== 'TV'
-                                    ? `${symbol.exchange}:${symbol.ticker}`
-                                    : symbol.ticker,
-                            timeframe: tf,
-                            range: batchSize,
-                            to,
-                        },
-                    });
-                    const raw = Array.isArray(res.data) ? res.data : res.data?.candles;
-                    if (Array.isArray(raw) && raw.length > 0) {
-                        const mapped = raw.map(toKLine);
-                        await saveCandleBatchToIDB(symbol.ticker, tf, mapped, MODE_LABEL.TRADINGVIEW);
-                        return {
-                            candles: mapped,
-                            source: MODE_LABEL.TRADINGVIEW,
-                            synthetic: false,
-                            fromCache: false,
-                            nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
-                            hasMore: true,
-                            estimatedTotalChunks: 2,
-                        };
-                    }
-                } catch (_) {
-                    // Fallback below
-                }
-            }
-        }
-
-        // 3. MT5 / OANDA Backend
-        if (this.mode === 'MT5_BACKEND') {
-            try {
-                const res = await api.get('/market-data/candles', {
-                    params: {
-                        symbol: symbol.ticker,
-                        from: new Date(to - batchSize * periodToMs(period)).toISOString(),
-                        to: new Date(to).toISOString(),
-                        granularity: periodToOandaGranularity(period),
-                    },
-                });
-                if (Array.isArray(res.data) && res.data.length > 0) {
-                    const mapped = res.data.map(toKLine);
-                    await saveCandleBatchToIDB(symbol.ticker, tf, mapped, MODE_LABEL.MT5_BACKEND);
-                    return {
-                        candles: mapped,
-                        source: MODE_LABEL.MT5_BACKEND,
-                        synthetic: false,
-                        fromCache: false,
-                        nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
-                        hasMore: true,
-                        estimatedTotalChunks: 2,
-                    };
-                }
-            } catch (_) {
                 // Fallback below
             }
         }
 
-        // 4. Binance Public Klines (500-bar batch)
+        // 4. Binance Public Klines (500-bar real market batch anchored at `to`)
         const pair = binancePairOf(symbol.ticker);
-        if (this.mode !== 'DEMO' && pair) {
+        if (pair) {
             try {
                 const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${to}&limit=${batchSize}`;
                 const response = await fetch(url);
@@ -856,30 +931,75 @@ export class CustomKLineDatafeed implements Datafeed {
                             turnover: parseFloat(k[7]),
                         }));
                         await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
+                        const merged = mergeAndDeduplicateCandles(idbCached.candles, mapped);
                         return {
-                            candles: mapped,
+                            candles: merged,
                             source: `${MODE_LABEL.BINANCE_LIVE} (${pair})`,
                             synthetic: false,
                             fromCache: false,
-                            nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - periodToMs(period) : null,
+                            nextCursorTo: mapped[0]?.timestamp ? mapped[0].timestamp - stepMs : null,
                             hasMore: true,
                             estimatedTotalChunks: 2,
                         };
                     }
                 }
             } catch (_) {
-                // Fallback to deterministic generator below
+                // Fallback below
             }
         }
 
-        const generated = this.generateDemoCandles(symbol.ticker, period, batchSize, to);
-        await saveCandleBatchToIDB(symbol.ticker, tf, generated, MODE_LABEL.TRADINGVIEW);
+        // 5. If IndexedDB had partial real market candles, prefer real cached data over synthetic
+        if (idbCached.candles.length > 0) {
+            return {
+                candles: idbCached.candles,
+                source: `${idbCached.source} · IDB`,
+                synthetic: false,
+                fromCache: true,
+                nextCursorTo: idbCached.earliestTs ? idbCached.earliestTs - stepMs : null,
+                hasMore: false,
+                estimatedTotalChunks: Math.max(1, idbCached.batchCount),
+            };
+        }
+
+        // 5.5 Quant-Engine Real Parquet Data Lake fallback (only serves verified real market Parquet)
+        try {
+            const qRes = await fetch(
+                `/api/quant/ohlcv?symbol=${encodeURIComponent(this.resolveBackendSymbol(symbol))}&timeframe=${encodeURIComponent(tf)}&to=${to}&limit=${batchSize}&source=real`,
+                { signal: AbortSignal.timeout(6000) }
+            );
+            if (qRes.ok) {
+                const qData = await qRes.json();
+                if (qData?.isRealMarket && Array.isArray(qData.candles) && qData.candles.length > 0) {
+                    const bars = qData.candles as KLineData[];
+                    return {
+                        candles: bars,
+                        source: qData.source || 'Real Parquet Lake',
+                        synthetic: false,
+                        fromCache: true,
+                        nextCursorTo: qData.nextCursorTo ?? (bars[0]?.timestamp ? bars[0].timestamp - stepMs : null),
+                        hasMore: true,
+                        estimatedTotalChunks: 2,
+                    };
+                }
+            }
+        } catch {
+            // fall through cleanly to emergency offline fallback
+        }
+
+        // 6. Offline emergency fallback ONLY in memory (NEVER saved to IDB, ALWAYS flagged synthetic: true)
+        const generated = this.generateDemoCandles(
+            symbol.ticker,
+            period,
+            batchSize,
+            to,
+            this.priceAnchorHint ?? undefined
+        );
         return {
             candles: generated,
-            source: MODE_LABEL.TRADINGVIEW,
-            synthetic: false,
+            source: 'Demo (offline — sem conexão ao feed)',
+            synthetic: true,
             fromCache: false,
-            nextCursorTo: generated[0]?.timestamp ? generated[0].timestamp - periodToMs(period) : null,
+            nextCursorTo: generated[0]?.timestamp ? generated[0].timestamp - stepMs : null,
             hasMore: true,
             estimatedTotalChunks: 2,
         };
@@ -902,9 +1022,9 @@ export class CustomKLineDatafeed implements Datafeed {
         const targetFromTs =
             this.sessionFromTs || Date.now() - stepMs * DEFAULT_BATCH_SIZE * 2;
 
-        // If we already cover `targetFromTs` or no cursor is needed, mark complete
+        // If DEMO/synthetic or we already cover `targetFromTs` or no cursor is needed, mark complete
         const currentEarliest = this.fullHistory[0]?.timestamp ?? Infinity;
-        if (!initialCursorTo || currentEarliest <= targetFromTs) {
+        if (this.mode === 'DEMO' || this.lastSynthetic || !initialCursorTo || currentEarliest <= targetFromTs) {
             this.updateBatchProgress({
                 symbol: symbol.ticker,
                 timeframe: tf,
@@ -938,15 +1058,12 @@ export class CustomKLineDatafeed implements Datafeed {
 
                 try {
                     const batch = await fetchSingleCandleBatch({
-                        symbol:
-                            symbol.exchange && symbol.exchange !== 'TV'
-                                ? `${symbol.exchange}:${symbol.ticker}`
-                                : symbol.ticker,
+                        symbol: this.resolveBackendSymbol(symbol),
                         timeframe: tf,
                         chunkSize: DEFAULT_BATCH_SIZE,
                         chunkIndex: idx,
                         cursorTo: cursor,
-                        fromTs: targetFromTs,
+                        fromTs: targetFromTs - stepMs * DEFAULT_BATCH_SIZE,
                     });
 
                     if (generation !== this.prefetchAbortGeneration) break;
@@ -1144,7 +1261,8 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * Deterministic generated series anchored at `anchorEndPrice` when extending batches backward.
+     * Cursor-invariant deterministic candles anchored to UTC 2026-01-01 so shared timestamps
+     * never mutate when the user pans, changes `to`, or reloads the session.
      */
     private generateDemoCandles(
         ticker: string,
@@ -1158,23 +1276,37 @@ export class CustomKLineDatafeed implements Datafeed {
         const stepMs = periodToMs(period);
         const alignedEnd = Math.floor(toTs / stepMs) * stepMs;
         const vol = cfg.volatility * Math.sqrt(stepMs / (15 * 60 * 1000));
+        const epochAnchor = Date.UTC(2026, 0, 1, 0, 0, 0);
+        const basePrice = anchorEndPrice && Number.isFinite(anchorEndPrice) ? anchorEndPrice : cfg.price;
 
-        let seed = clean.split('').reduce((a, b) => a + b.charCodeAt(0), 0) + Math.floor(alignedEnd / 60000);
-        const rand = () => {
-            seed = (seed * 1664525 + 1013904223) % 4294967296;
-            return seed / 4294967296;
+        let symHash = 2166136261;
+        for (let k = 0; k < clean.length; k++) {
+            symHash ^= clean.charCodeAt(k);
+            symHash = Math.imul(symHash, 16777619);
+        }
+        const hashUnit = (barIdx: number, salt: number): number => {
+            let h = (symHash ^ Math.imul(barIdx, 374761393) ^ Math.imul(salt, 668265263)) >>> 0;
+            h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+            return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+        };
+        const closeAtIndex = (barIdx: number): number => {
+            const macro =
+                Math.sin(barIdx / 47.0 + (symHash % 7)) * vol * 3.8 +
+                Math.cos(barIdx / 16.0) * vol * 1.9 +
+                Math.sin(barIdx / 5.5) * vol * 0.85;
+            const micro = (hashUnit(barIdx, 1) - 0.5) * vol * 1.1;
+            return Math.max(basePrice * 0.25, basePrice + macro + micro);
         };
 
         const bars: KLineData[] = [];
-        let price = anchorEndPrice && Number.isFinite(anchorEndPrice) ? anchorEndPrice : cfg.price;
         for (let i = count; i >= 0; i--) {
             const ts = alignedEnd - i * stepMs;
-            const swing = Math.sin(i / 18) * vol * 0.3;
-            const open = price;
-            const close = Math.max(cfg.price * 0.25, open + (rand() - 0.495) * vol + swing * 0.15);
-            const high = Math.max(open, close) + rand() * vol * 0.7;
-            const low = Math.min(open, close) - rand() * vol * 0.7;
-            const volume = Math.round(120 + rand() * 1200);
+            const barIdx = Math.round((ts - epochAnchor) / stepMs);
+            const open = closeAtIndex(barIdx - 1);
+            const close = closeAtIndex(barIdx);
+            const high = Math.max(open, close) + hashUnit(barIdx, 2) * vol * 0.7;
+            const low = Math.max(basePrice * 0.1, Math.min(open, close) - hashUnit(barIdx, 3) * vol * 0.7);
+            const volume = Math.round(120 + hashUnit(barIdx, 4) * 1200);
             bars.push({
                 timestamp: ts,
                 open: Number(open.toFixed(cfg.decimals)),
@@ -1183,7 +1315,6 @@ export class CustomKLineDatafeed implements Datafeed {
                 close: Number(close.toFixed(cfg.decimals)),
                 volume,
             });
-            price = close;
         }
         return bars;
     }

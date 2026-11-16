@@ -1,5 +1,5 @@
-
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Bell,
     Check,
@@ -13,241 +13,309 @@ import {
     ArrowRight,
     MessageCircle,
     Copy,
-    Settings
+    Settings,
 } from 'lucide-react';
 import api from '../api';
+import {
+    deleteNotificationOfflineAware,
+    markAllNotificationsReadOfflineAware,
+    markNotificationReadOfflineAware,
+    resolveAlertOfflineAware,
+} from '../services/offlineMutations';
+import { useLocale } from '../context/LocaleContext';
 import { Modal } from '../components/ui/Modal';
+import { Skeleton } from '../components/ui/Skeleton';
 
-// Dados carregados dinamicamente via API
-
-// --- Componentes UI Reutilizáveis ---
-
-const NotificationButton = ({ children, variant = 'primary', className = '', icon: Icon, ...props }: any) => {
-    const baseStyles = "relative px-4 py-2 rounded-xl font-bold transition-all duration-300 flex items-center justify-center disabled:opacity-70 disabled:cursor-not-allowed active:scale-[0.98] text-sm";
-
-    const variants: any = {
-        primary: "bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-900/20 border border-transparent",
-        secondary: "bg-surface-2 text-fg/80 hover:text-fg hover:bg-surface-3 border border-line-strong",
-        ghost: "bg-transparent text-fg-muted hover:text-fg hover:bg-surface-2/50",
-        danger: "bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20"
-    };
-
+const Badge = ({ count, active = false }: { count?: number; active?: boolean }) => {
+    if (!count || count <= 0) return null;
     return (
-        <button className={`${baseStyles} ${variants[variant]} ${className}`} {...props}>
-            {Icon && <Icon size={16} className="mr-2" />}
-            {children}
-        </button>
-    );
-};
-
-const Badge = ({ count, variant = 'default' }: any) => {
-    if (count === 0) return null;
-    const colors: any = {
-        default: "bg-surface-3 text-fg/80",
-        emerald: "bg-emerald-500 text-white",
-        red: "bg-red-500 text-white"
-    };
-    return (
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${colors[variant]}`}>
+        <span
+            className={`px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums leading-none ${
+                active ? 'bg-accent/15 text-accent-fg' : 'bg-surface-3 text-fg-muted'
+            }`}
+        >
             {count}
         </span>
     );
 };
 
-const TraderHealthScore = ({ score, details }: { score: number; details: any }) => {
+const TraderHealthScore = ({
+    score,
+    details,
+    onOpenReports,
+}: {
+    score: number;
+    details: any;
+    onOpenReports: () => void;
+}) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+
     const getScoreColor = (s: number) => {
         if (s >= 80) return 'text-accent-fg';
-        if (s >= 50) return 'text-amber-400';
-        return 'text-red-400';
+        if (s >= 50) return 'text-warning';
+        return 'text-danger-fg';
     };
 
     const getScoreLabel = (s: number) => {
-        if (s >= 80) return 'Excelente Disciplina';
-        if (s >= 50) return 'Atenção Necessária';
-        return 'Risco Operacional Alto';
+        if (s >= 80) return isEn ? 'Peak Discipline' : 'Excelente Disciplina';
+        if (s >= 50) return isEn ? 'Attention Required' : 'Atenção Necessária';
+        return isEn ? 'High Operational Risk' : 'Risco Operacional Alto';
     };
 
+    const radius = 26;
+    const circumference = 2 * Math.PI * radius;
+
     return (
-        <div className="bg-surface/60 backdrop-blur-xl border border-line rounded-3xl p-6 mb-8 flex flex-col md:flex-row items-center gap-8 shadow-2xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-[80px] -z-10 group-hover:bg-emerald-500/10 transition-colors duration-700" />
+        <div className="bg-surface border border-line rounded-xl p-4 sm:p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
+                {/* Compact Circular Progress */}
+                <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 64 64">
+                        <circle
+                            cx="32"
+                            cy="32"
+                            r={radius}
+                            fill="transparent"
+                            stroke="currentColor"
+                            strokeWidth="5"
+                            className="text-surface-3"
+                        />
+                        <circle
+                            cx="32"
+                            cy="32"
+                            r={radius}
+                            fill="transparent"
+                            stroke="currentColor"
+                            strokeWidth="5"
+                            strokeDasharray={circumference}
+                            strokeDashoffset={circumference - (circumference * score) / 100}
+                            strokeLinecap="round"
+                            className={`transition-all duration-700 ease-out ${getScoreColor(score)}`}
+                        />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className={`text-base font-bold font-mono tabular-nums ${getScoreColor(score)}`}>
+                            {score}
+                        </span>
+                    </div>
+                </div>
 
-            {/* Circular Progress */}
-            <div className="relative w-32 h-32 flex items-center justify-center">
-                <svg className="w-full h-full -rotate-90">
-                    <circle
-                        cx="64"
-                        cy="64"
-                        r="58"
-                        fill="transparent"
-                        stroke="currentColor"
-                        strokeWidth="8"
-                        className="text-slate-800"
-                    />
-                    <circle
-                        cx="64"
-                        cy="64"
-                        r="58"
-                        fill="transparent"
-                        stroke="currentColor"
-                        strokeWidth="8"
-                        strokeDasharray={364.4}
-                        strokeDashoffset={364.4 - (364.4 * score) / 100}
-                        strokeLinecap="round"
-                        className={`transition-all duration-1000 ease-out ${getScoreColor(score)}`}
-                    />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-3xl font-black ${getScoreColor(score)}`}>{score}</span>
-                    <span className="text-[10px] text-fg-subtle font-bold uppercase tracking-tighter">Health</span>
+                <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        <h3 className="text-sm sm:text-base font-bold text-fg">
+                            {isEn ? 'Trader Health:' : 'Saúde do Trader:'}{' '}
+                            <span className={getScoreColor(score)}>{getScoreLabel(score)}</span>
+                        </h3>
+                    </div>
+                    <p className="text-xs text-fg-muted">
+                        {isEn
+                            ? 'Score derived from trailing 7-day execution discipline.'
+                            : 'Score calculado pela disciplina operacional dos últimos 7 dias.'}
+                    </p>
+                    <div className="flex flex-wrap justify-center sm:justify-start gap-2 pt-0.5">
+                        <div className="bg-canvas-subtle px-2.5 py-1 rounded-lg border border-line-subtle inline-flex items-center gap-1.5 text-[11px]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-danger" />
+                            <span className="text-fg-muted">{isEn ? 'Critical:' : 'Críticos:'}</span>
+                            <span className="text-fg font-bold tabular-nums">
+                                {details?.penalties?.critical || 0}
+                            </span>
+                        </div>
+                        <div className="bg-canvas-subtle px-2.5 py-1 rounded-lg border border-line-subtle inline-flex items-center gap-1.5 text-[11px]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                            <span className="text-fg-muted">{isEn ? 'Warnings:' : 'Avisos:'}</span>
+                            <span className="text-fg font-bold tabular-nums">
+                                {details?.penalties?.warning || 0}
+                            </span>
+                        </div>
+                        <div className="bg-canvas-subtle px-2.5 py-1 rounded-lg border border-line-subtle inline-flex items-center gap-1.5 text-[11px]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-data-1" />
+                            <span className="text-fg-muted">{isEn ? 'Window:' : 'Janela:'}</span>
+                            <span className="text-fg font-bold">7d</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div className="flex-1 text-center md:text-left">
-                <h3 className="text-xl font-bold text-fg mb-1 flex items-center justify-center md:justify-start gap-2">
-                    Saúde do Trader: <span className={getScoreColor(score)}>{getScoreLabel(score)}</span>
-                </h3>
-                <p className="text-fg-muted text-sm mb-4">
-                    Seu score é baseado na disciplina dos últimos 7 dias. Evite alertas críticos para manter uma alta pontuação.
-                </p>
-                <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                        <span className="text-xs text-fg-muted font-medium">Críticos: <span className="text-fg font-bold">{details?.penalties?.critical || 0}</span></span>
-                    </div>
-                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        <span className="text-xs text-fg-muted font-medium">Avisos: <span className="text-fg font-bold">{details?.penalties?.warning || 0}</span></span>
-                    </div>
-                    <div className="bg-canvas/50 px-3 py-1.5 rounded-xl border border-line flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        <span className="text-xs text-fg-muted font-medium">Periodo: <span className="text-fg font-bold">7d</span></span>
-                    </div>
-                </div>
-            </div>
-
-            <button onClick={() => window.location.href = '/performance'} className="px-5 py-2.5 bg-surface-2 hover:bg-slate-750 text-fg text-xs font-bold rounded-xl transition-all border border-line-strong hover:border-slate-600">
-                Ver Relatório
+            <button
+                type="button"
+                onClick={onOpenReports}
+                className="h-8 px-3.5 bg-canvas-subtle hover:bg-surface-2 text-fg text-xs font-semibold rounded-lg transition-colors border border-line shrink-0"
+            >
+                {isEn ? 'View Reports' : 'Ver Relatórios'}
             </button>
         </div>
     );
 };
 
-// --- Componente de Item da Lista ---
-
 const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const isAlert = 'severity' in item;
+    const isMuted = Boolean(item.read || item.resolved);
 
     const getIcon = (type: string, severity?: string) => {
-        if (severity === 'CRITICAL') return <Search className="text-red-500 animate-pulse" size={20} />;
+        if (severity === 'CRITICAL') return <AlertTriangle className="text-danger-fg" size={16} />;
 
-        switch (type.toLowerCase()) {
-            case 'trade_success': return <TrendingUp className="text-accent-fg" size={20} />;
+        switch ((type || '').toLowerCase()) {
+            case 'trade_success':
+                return <TrendingUp className="text-accent-fg" size={16} />;
             case 'risk':
-            case 'risk_alert': return <AlertTriangle className="text-red-400" size={20} />;
-            case 'psychology':
-            case 'mental_insight': return <BrainCircuit className="text-purple-400" size={20} />;
-            case 'performance': return <TrendingUp className="text-blue-400" size={20} />;
-            case 'discipline': return <CheckCircle2 className="text-amber-400" size={20} />;
-            case 'system': return <Info className="text-blue-400" size={20} />;
-            case 'journal':
-            case 'trade_neutral': return <Clock className="text-fg-muted" size={20} />;
-            default: return <Bell className="text-fg-muted" size={20} />;
-        }
-    };
-
-    const getSeverityStyles = (severity: string) => {
-        switch (severity) {
-            case 'CRITICAL': return 'border-red-500/50 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]';
-            case 'WARNING': return 'border-amber-500/40 bg-amber-500/5';
-            case 'INFO': return 'border-blue-500/30 bg-blue-500/5';
-            default: return 'border-line bg-surface-2/20';
-        }
-    };
-
-    const getStatusColor = (type: string, isRead: boolean) => {
-        if (isRead) return 'border-transparent opacity-60';
-        switch (type.toLowerCase()) {
-            case 'trade_success': return 'border-emerald-500/30 bg-emerald-500/5';
             case 'risk_alert':
-            case 'risk': return 'border-red-500/30 bg-red-500/5';
-            default: return 'border-line bg-surface/40';
+                return <AlertTriangle className="text-danger-fg" size={16} />;
+            case 'psychology':
+            case 'mental_insight':
+                return <BrainCircuit className="text-data-2" size={16} />;
+            case 'performance':
+                return <TrendingUp className="text-data-1" size={16} />;
+            case 'discipline':
+                return <CheckCircle2 className="text-warning" size={16} />;
+            case 'system':
+                return <Info className="text-data-1" size={16} />;
+            case 'journal':
+            case 'trade_neutral':
+                return <Clock className="text-fg-muted" size={16} />;
+            default:
+                return <Bell className="text-fg-muted" size={16} />;
         }
     };
+
+    const getCardStyles = () => {
+        if (isMuted) {
+            return 'border-line-subtle bg-canvas-subtle opacity-75';
+        }
+        if (isAlert) {
+            switch (item.severity) {
+                case 'CRITICAL':
+                    return 'border-danger/35 bg-danger/5';
+                case 'WARNING':
+                    return 'border-warning/35 bg-warning/5';
+                default:
+                    return 'border-line bg-surface';
+            }
+        }
+        return 'border-line bg-canvas-subtle hover:border-line-strong';
+    };
+
+    const timestamp = item.createdAt || item.time;
 
     return (
-        <div className={`group relative p-5 rounded-2xl border transition-all duration-500 hover:scale-[1.01] ${isAlert ? getSeverityStyles(item.severity) : getStatusColor(item.type, item.read)}`}>
-            <div className="flex gap-4">
-                {/* Ícone Container */}
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 bg-canvas border border-line group-hover:border-line-strong transition-colors ${!item.read ? 'shadow-xl' : ''}`}>
+        <div className={`relative p-3.5 sm:p-4 rounded-xl border transition-colors ${getCardStyles()}`}>
+            <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-surface border border-line">
                     {getIcon(item.type, item.severity)}
                 </div>
 
-                {/* Conteúdo */}
-                <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start mb-1">
-                        <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                             {isAlert && (
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md tracking-wider ${item.severity === 'CRITICAL' ? 'bg-red-500 text-white' :
-                                    item.severity === 'WARNING' ? 'bg-amber-500 text-white' : 'bg-blue-500 text-white'
-                                    }`}>
+                                <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider border ${
+                                        item.severity === 'CRITICAL'
+                                            ? 'bg-danger/15 text-danger-fg border-danger/30'
+                                            : item.severity === 'WARNING'
+                                              ? 'bg-warning/15 text-warning border-warning/30'
+                                              : 'bg-data-1/15 text-data-1 border-data-1/30'
+                                    }`}
+                                >
                                     {item.severity}
                                 </span>
                             )}
-                            <h4 className={`text-base font-bold truncate pr-4 ${item.read || item.resolved ? 'text-fg-muted' : 'text-fg'}`}>
+                            <h4
+                                className={`text-xs sm:text-sm font-bold truncate ${
+                                    isMuted ? 'text-fg-muted' : 'text-fg'
+                                }`}
+                            >
                                 {item.title}
                             </h4>
+                            {!isMuted && (
+                                <span
+                                    className={`w-2 h-2 rounded-full shrink-0 ${
+                                        item.severity === 'CRITICAL' ? 'bg-danger' : 'bg-accent'
+                                    }`}
+                                />
+                            )}
                         </div>
-                        <span className="text-xs text-fg-subtle whitespace-nowrap flex items-center gap-1 font-medium bg-canvas/50 px-2 py-1 rounded-lg">
-                            <Clock size={12} /> {new Date(item.createdAt || item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {new Date(item.createdAt || item.time).toLocaleDateString()}
-                        </span>
+
+                        {timestamp && (
+                            <span className="text-[11px] text-fg-subtle whitespace-nowrap inline-flex items-center gap-1 tabular-nums">
+                                <Clock size={11} />
+                                {new Date(timestamp).toLocaleTimeString(isEn ? 'en-US' : [], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                })}{' '}
+                                · {new Date(timestamp).toLocaleDateString(isEn ? 'en-US' : 'pt-BR')}
+                            </span>
+                        )}
                     </div>
 
-                    <p className={`text-sm leading-relaxed mb-4 ${item.read || item.resolved ? 'text-fg-subtle' : 'text-fg/80'}`}>
+                    <p
+                        className={`text-xs leading-relaxed ${
+                            isMuted ? 'text-fg-subtle' : 'text-fg-muted'
+                        }`}
+                    >
                         {isAlert ? item.description : item.message}
                     </p>
 
-                    {/* Meta Data (if Alert) */}
-                    {isAlert && item.metadata && (
-                        <div className="flex gap-4 mb-4">
+                    {isAlert && item.metadata && Object.keys(item.metadata).length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
                             {Object.entries(item.metadata).map(([key, value]: [string, any]) => (
-                                <div key={key} className="bg-canvas/80 px-3 py-1.5 rounded-xl border border-line">
-                                    <span className="text-[10px] text-fg-subtle uppercase block font-bold mb-0.5">{key.replace('_', ' ')}</span>
-                                    <span className="text-xs font-mono text-accent-fg font-bold">{typeof value === 'number' ? value.toFixed(2) : value}</span>
+                                <div
+                                    key={key}
+                                    className="bg-surface px-2.5 py-1 rounded-lg border border-line-subtle"
+                                >
+                                    <span className="text-[9px] text-fg-subtle uppercase block font-semibold">
+                                        {key.replace('_', ' ')}
+                                    </span>
+                                    <span className="text-xs font-mono tabular-nums text-accent-fg font-bold">
+                                        {typeof value === 'number' ? value.toFixed(2) : value}
+                                    </span>
                                 </div>
                             ))}
                         </div>
                     )}
 
-                    {/* Ações Rápidas */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 pt-1">
                         {isAlert && !item.resolved ? (
                             <button
+                                type="button"
                                 onClick={() => onResolve(item.id)}
-                                className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-xl transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center gap-2"
+                                className="h-7 px-3 rounded-lg text-[11px] font-semibold text-accent-on bg-accent hover:opacity-95 transition-opacity inline-flex items-center gap-1.5"
                             >
-                                <Check size={14} /> Resolver Alerta
+                                <Check size={12} />
+                                <span>{isEn ? 'Resolve Alert' : 'Resolver Alerta'}</span>
                             </button>
-                        ) : !isAlert && !item.read && (
-                            <button onClick={() => onRead(item.id)} className="text-xs font-bold text-accent-fg hover:text-emerald-300 flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-xl transition-colors border border-emerald-500/20">
-                                <Check size={14} /> Marcar como lida
-                            </button>
+                        ) : (
+                            !isAlert &&
+                            !item.read && (
+                                <button
+                                    type="button"
+                                    onClick={() => onRead(item.id)}
+                                    className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-accent-fg bg-accent/10 hover:bg-accent/20 border border-accent/25 transition-colors inline-flex items-center gap-1.5"
+                                >
+                                    <Check size={12} />
+                                    <span>{isEn ? 'Mark as read' : 'Marcar como lida'}</span>
+                                </button>
+                            )
                         )}
-                        <button onClick={() => onDelete(item.id, isAlert)} className="text-xs font-bold text-fg-subtle hover:text-red-400 flex items-center gap-2 hover:bg-red-500/5 px-3 py-1.5 rounded-xl transition-colors">
-                            {isAlert ? 'Descartar' : 'Excluir'}
+                        <button
+                            type="button"
+                            onClick={() => onDelete(item.id, isAlert)}
+                            className="h-7 px-2.5 rounded-lg text-[11px] font-semibold text-fg-subtle hover:text-danger-fg hover:bg-danger/10 transition-colors"
+                        >
+                            {isAlert ? (isEn ? 'Dismiss' : 'Descartar') : (isEn ? 'Delete' : 'Excluir')}
                         </button>
                     </div>
                 </div>
-
-                {/* Status Indicator */}
-                {!item.read && !item.resolved && (
-                    <div className={`absolute top-5 right-5 w-2.5 h-2.5 rounded-full ${item.severity === 'CRITICAL' ? 'bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.8)]' : 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]'}`}></div>
-                )}
             </div>
         </div>
     );
 };
 
 const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [step, setStep] = useState<'initial' | 'otp' | 'connected'>('initial');
     const [otp, setOtp] = useState('');
     const [botUsername, setBotUsername] = useState('');
@@ -256,7 +324,7 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
         trade_success: true,
         risk_alert: true,
         mental_insight: true,
-        system: true
+        system: true,
     });
 
     useEffect(() => {
@@ -268,11 +336,7 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
     const checkStatus = async () => {
         try {
             const { data } = await api.get('/notifications/telegram/status');
-            if (data.connected) {
-                setStep('connected');
-            } else {
-                setStep('initial');
-            }
+            setStep(data.connected ? 'connected' : 'initial');
         } catch (error) {
             console.error('Failed to check Telegram status', error);
         }
@@ -307,54 +371,59 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
 
     const handleCopyOtp = () => {
         navigator.clipboard.writeText(otp);
-        // Could show toast here
     };
 
     const handlePreferenceChange = (key: string) => {
-        setPreferences(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
-        // Debounce save or save on close?
-        // For simplicity, we can save immediately or have a save button.
-        // Let's implicit save for now or separate API call needed if backend supports it.
-        // Backend updateSettings supports notificationPreferences.
-        api.post('/notifications/settings', { notificationPreferences: { ...preferences, [key]: !preferences[key as keyof typeof preferences] } });
+        setPreferences((prev) => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
+        api.post('/notifications/settings', {
+            notificationPreferences: {
+                ...preferences,
+                [key]: !preferences[key as keyof typeof preferences],
+            },
+        });
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Configurações de Notificação">
-            <div className="space-y-6">
-
-                {/* Telegram Section */}
-                <div className="bg-canvas/50 p-4 rounded-xl border border-line">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-blue-500/10 rounded-lg">
-                            <MessageCircle className="text-blue-400" size={20} />
+        <Modal isOpen={isOpen} onClose={onClose} title={isEn ? 'Notification Settings' : 'Configurações de Notificação'}>
+            <div className="space-y-4">
+                <div className="bg-canvas-subtle p-4 rounded-xl border border-line space-y-3">
+                    <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-data-1/10 border border-data-1/25 rounded-lg">
+                            <MessageCircle className="text-data-1" size={16} />
                         </div>
                         <div>
-                            <h4 className="font-bold text-fg">Telegram Bot</h4>
-                            <p className="text-xs text-fg-muted">Receba alertas em tempo real no seu Telegram.</p>
+                            <h4 className="text-xs sm:text-sm font-bold text-fg">Telegram Bot</h4>
+                            <p className="text-[11px] text-fg-muted">
+                                {isEn ? 'Receive real-time execution & risk alerts on Telegram.' : 'Receba alertas em tempo real no seu Telegram.'}
+                            </p>
                         </div>
                     </div>
 
                     {step === 'initial' && (
                         <button
+                            type="button"
                             onClick={handleConnect}
                             disabled={loading}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                            className="w-full h-9 bg-accent hover:opacity-95 text-accent-on text-xs font-semibold rounded-lg transition-opacity flex items-center justify-center"
                         >
-                            {loading ? 'Carregando...' : 'Conectar Telegram'}
+                            {loading ? (isEn ? 'Loading...' : 'Carregando...') : (isEn ? 'Connect Telegram' : 'Conectar Telegram')}
                         </button>
                     )}
 
                     {step === 'otp' && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                            <div className="text-center">
-                                <p className="text-sm text-fg-muted mb-2">Envie este código para o nosso bot:</p>
+                        <div className="space-y-3">
+                            <div className="text-center space-y-1.5">
+                                <p className="text-xs text-fg-muted">{isEn ? 'Send this code to the bot:' : 'Envie este código para o bot:'}</p>
                                 <div className="flex items-center justify-center gap-2">
-                                    <code className="text-2xl font-mono font-bold text-accent-fg bg-surface px-4 py-2 rounded-lg border border-line-strong tracking-widest">
+                                    <code className="text-xl font-mono font-bold text-accent-fg bg-surface px-4 py-1.5 rounded-lg border border-line tracking-widest">
                                         {otp}
                                     </code>
-                                    <button onClick={handleCopyOtp} className="p-2 hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg transition-colors">
-                                        <Copy size={18} />
+                                    <button
+                                        type="button"
+                                        onClick={handleCopyOtp}
+                                        className="p-2 hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg border border-line-subtle transition-colors"
+                                    >
+                                        <Copy size={15} />
                                     </button>
                                 </div>
                             </div>
@@ -364,131 +433,146 @@ const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
                                     href={`https://t.me/${botUsername}?start=${otp}`}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="inline-block text-blue-400 hover:text-blue-300 text-sm hover:underline"
+                                    className="inline-block text-accent-fg hover:underline text-xs font-medium"
                                 >
-                                    Abrir @{botUsername || 'Bot'}
+                                    {isEn ? 'Open' : 'Abrir'} @{botUsername || 'Bot'}
                                 </a>
                             </div>
 
                             <button
+                                type="button"
                                 onClick={checkStatus}
-                                className="w-full py-2 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-lg transition-colors text-sm"
+                                className="w-full h-9 bg-surface-2 hover:bg-surface-3 border border-line text-fg font-semibold rounded-lg transition-colors text-xs"
                             >
-                                Já enviei o código
+                                {isEn ? "I've sent the code" : 'Já enviei o código'}
                             </button>
                         </div>
                     )}
 
                     {step === 'connected' && (
-                        <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-lg">
-                            <span className="text-accent-fg text-sm font-bold flex items-center gap-2">
-                                <CheckCircle2 size={16} /> Conectado
+                        <div className="flex items-center justify-between bg-accent/10 border border-accent/25 p-3 rounded-lg">
+                            <span className="text-accent-fg text-xs font-bold flex items-center gap-1.5">
+                                <CheckCircle2 size={14} /> {isEn ? 'Connected' : 'Conectado'}
                             </span>
                             <button
+                                type="button"
                                 onClick={handleDisconnect}
                                 disabled={loading}
-                                className="text-xs text-red-400 hover:text-red-300 hover:underline"
+                                className="text-xs text-danger-fg hover:underline font-medium"
                             >
-                                Desconectar
+                                {isEn ? 'Disconnect' : 'Desconectar'}
                             </button>
                         </div>
                     )}
                 </div>
 
-                {/* Preferences Section */}
                 <div>
-                    <h4 className="font-bold text-fg mb-3">Preferências</h4>
-                    <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-fg-subtle mb-2">
+                        {isEn ? 'Preferences' : 'Preferências'}
+                    </h4>
+                    <div className="space-y-1.5">
                         {[
-                            { id: 'trade_success', label: 'Trades e Profit' },
-                            { id: 'risk_alert', label: 'Alertas de Risco' },
-                            { id: 'mental_insight', label: 'Insights Mentais' },
-                            { id: 'system', label: 'Sistema' }
-                        ].map(pref => (
-                            <label key={pref.id} className="flex items-center justify-between p-3 bg-surface rounded-lg cursor-pointer hover:bg-surface-2/50 transition-colors">
-                                <span className="text-sm text-fg/80">{pref.label}</span>
+                            { id: 'trade_success', label: isEn ? 'Trades & Profit' : 'Trades e Profit' },
+                            { id: 'risk_alert', label: isEn ? 'Risk Alerts' : 'Alertas de Risco' },
+                            { id: 'mental_insight', label: isEn ? 'Psychology Insights' : 'Insights Mentais' },
+                            { id: 'system', label: isEn ? 'System' : 'Sistema' },
+                        ].map((pref) => (
+                            <label
+                                key={pref.id}
+                                className="flex items-center justify-between px-3 py-2.5 bg-canvas-subtle border border-line-subtle rounded-lg cursor-pointer hover:bg-surface-2 transition-colors"
+                            >
+                                <span className="text-xs sm:text-sm text-fg">{pref.label}</span>
                                 <input
                                     type="checkbox"
                                     checked={preferences[pref.id as keyof typeof preferences]}
                                     onChange={() => handlePreferenceChange(pref.id)}
-                                    className="w-5 h-5 rounded border-line-strong bg-surface-2 text-emerald-500 focus:ring-emerald-500/50"
+                                    className="w-4 h-4 rounded border-line bg-surface text-accent focus:ring-accent/40"
                                 />
                             </label>
                         ))}
                     </div>
                 </div>
-
             </div>
         </Modal>
     );
 };
 
-// --- Componente Principal ---
-
 export const Notifications = () => {
+    const navigate = useNavigate();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [notifications, setNotifications] = useState<any[]>([]);
     const [alerts, setAlerts] = useState<any[]>([]);
-    const [scoreData, setScoreData] = useState<{ score: number; details: any }>({ score: 100, details: {} });
-    const [filter, setFilter] = useState('all'); // all, unread, alerts
+    const [scoreData, setScoreData] = useState<{ score: number; details: any }>({
+        score: 100,
+        details: {},
+    });
+    const [filter, setFilter] = useState('all');
+    const [searchQuery, setSearchQuery] = useState('');
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetchData();
     }, []);
 
     const fetchData = async () => {
+        setLoading(true);
         try {
             const [notifRes, alertRes, scoreRes] = await Promise.all([
                 api.get('/notifications'),
                 api.get('/alerts'),
-                api.get('/alerts/score')
+                api.get('/alerts/score'),
             ]);
 
-            setNotifications(notifRes.data.map((n: any) => ({
-                id: n.id,
-                type: n.type?.toLowerCase() || 'system',
-                title: n.title,
-                message: n.message,
-                read: n.isRead,
-                createdAt: n.createdAt
-            })));
+            setNotifications(
+                notifRes.data.map((n: any) => ({
+                    id: n.id,
+                    type: n.type?.toLowerCase() || 'system',
+                    title: n.title,
+                    message: n.message,
+                    read: n.isRead,
+                    createdAt: n.createdAt,
+                }))
+            );
 
             setAlerts(alertRes.data);
             setScoreData(scoreRes.data);
         } catch (error) {
             console.error('Failed to fetch data', error);
+        } finally {
+            setLoading(false);
         }
-    }
+    };
 
-    const unreadCount = notifications.filter(n => !n.read).length;
-    const pendingAlertsCount = alerts.filter(a => !a.resolved).length;
+    const unreadCount = notifications.filter((n) => !n.read).length;
+    const pendingAlertsCount = alerts.filter((a) => !a.resolved).length;
 
     const markAllAsRead = async () => {
-        const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        const hasUnread = notifications.some((n) => !n.read);
+        if (!hasUnread) return;
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
 
-        for (const id of unreadIds) {
-            try {
-                await api.patch(`/notifications/${id}/read`);
-            } catch (error) {
-                console.error('Failed to mark as read', id);
-            }
+        try {
+            await markAllNotificationsReadOfflineAware();
+        } catch (error) {
+            console.error('Failed to mark all notifications as read', error);
         }
     };
 
     const markAsRead = async (id: number | string) => {
-        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
         try {
-            await api.patch(`/notifications/${id}/read`);
+            await markNotificationReadOfflineAware(id);
         } catch (error) {
             console.error('Failed to mark as read', id);
         }
     };
 
     const resolveAlert = async (id: string) => {
-        setAlerts(prev => prev.map(a => a.id === id ? { ...a, resolved: true } : a));
+        setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, resolved: true } : a)));
         try {
-            await api.patch(`/alerts/${id}/resolve`);
+            await resolveAlertOfflineAware(id);
         } catch (error) {
             console.error('Failed to resolve alert', id);
         }
@@ -496,13 +580,12 @@ export const Notifications = () => {
 
     const deleteItem = async (id: number | string, isAlert: boolean) => {
         if (isAlert) {
-            setAlerts(prev => prev.filter(a => a.id !== id));
-            // Backend might need a delete endpoint for alerts if requested, for now we just resolve
+            setAlerts((prev) => prev.filter((a) => a.id !== id));
             await resolveAlert(id as string);
         } else {
-            setNotifications(prev => prev.filter(n => n.id !== id));
+            setNotifications((prev) => prev.filter((n) => n.id !== id));
             try {
-                await api.delete(`/notifications/${id}`);
+                await deleteNotificationOfflineAware(id);
             } catch (error) {
                 console.error('Failed to delete notification', id);
             }
@@ -510,134 +593,180 @@ export const Notifications = () => {
     };
 
     const combinedItems = [
-        ...notifications.map(n => ({ ...n, isAlert: false })),
-        ...alerts.map(a => ({ ...a, isAlert: true }))
+        ...notifications.map((n) => ({ ...n, isAlert: false })),
+        ...alerts.map((a) => ({ ...a, isAlert: true })),
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    const filteredItems = combinedItems.filter(item => {
-        if (filter === 'unread') return !item.read && !item.resolved;
-        if (filter === 'alerts') return item.isAlert && !item.resolved;
+    const filteredItems = combinedItems.filter((item) => {
+        if (filter === 'unread' && (item.read || item.resolved)) return false;
+        if (filter === 'alerts' && (!item.isAlert || item.resolved)) return false;
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            const text = `${item.title || ''} ${item.message || ''} ${item.description || ''}`.toLowerCase();
+            if (!text.includes(q)) return false;
+        }
         return true;
     });
 
     return (
-        <div className="min-h-screen bg-canvas text-fg font-sans relative overflow-hidden flex justify-center p-4 md:p-8">
+        <div className="w-full space-y-3 pb-10">
+            <TelegramSettingsModal
+                isOpen={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
+            />
 
-            {/* Background Ambience */}
-            <div className="fixed inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-0 right-0 w-[800px] h-[600px] bg-emerald-500/5 rounded-full blur-[120px] -z-10" />
-                <div className="absolute inset-0 opacity-[0.02]" style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
-            </div>
+            {/* Health Score Widget */}
+            {scoreData && (
+                <TraderHealthScore
+                    score={scoreData.score}
+                    details={scoreData.details}
+                    onOpenReports={() => navigate('/reports')}
+                />
+            )}
 
-            <div className="w-full max-w-4xl relative z-10">
-
-                {/* Header da Página */}
-                <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="p-2 bg-surface border border-line rounded-lg">
-                                <Bell className="text-accent-fg" size={24} />
-                            </div>
-                            <h1 className="text-2xl md:text-3xl font-bold text-fg">Notificações</h1>
-                        </div>
-                        <p className="text-fg-muted text-sm">Gerencie seus alertas de trade e insights do sistema.</p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        <NotificationButton variant="secondary" onClick={markAllAsRead} disabled={unreadCount === 0} icon={CheckCircle2}>
-                            Marcar lidas
-                        </NotificationButton>
-                        <div className="h-8 w-px bg-surface-2 hidden md:block"></div>
-                        <NotificationButton
-                            variant="ghost"
-                            className="hidden md:flex"
-                            onClick={() => setIsSettingsOpen(true)}
-                        >
-                            <Settings size={18} className="mr-2" /> Configurações
-                        </NotificationButton>
-                    </div>
-                </header>
-
-                <TelegramSettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-
-                {/* Health Score Widget */}
-                {scoreData && <TraderHealthScore score={scoreData.score} details={scoreData.details} />}
-
-                {/* Container Principal */}
-                <div className="bg-surface/40 backdrop-blur-xl border border-line rounded-3xl overflow-hidden shadow-2xl min-h-[600px] flex flex-col">
-
-                    {/* Barra de Filtros */}
-                    <div className="border-b border-line p-4 md:p-6 flex flex-col md:flex-row gap-4 justify-between items-center bg-surface/50">
-                        <div className="flex p-1 bg-canvas rounded-xl w-full md:w-auto overflow-x-auto">
-                            {[
-                                { id: 'all', label: 'Todas' },
-                                { id: 'unread', label: 'Não lidas', count: unreadCount + pendingAlertsCount },
-                                { id: 'alerts', label: 'Professional Alerts', count: pendingAlertsCount }
-                            ].map(tab => (
+            {/* Main Container */}
+            <div className="bg-surface border border-line rounded-xl overflow-hidden flex flex-col">
+                {/* Filter & Actions Toolbar */}
+                <div className="border-b border-line p-3 sm:px-4 flex flex-col lg:flex-row gap-2.5 justify-between lg:items-center">
+                    <div className="flex items-center gap-1 bg-canvas-subtle border border-line-subtle p-1 rounded-lg overflow-x-auto no-scrollbar">
+                        {[
+                            { id: 'all', label: isEn ? 'All' : 'Todas' },
+                            {
+                                id: 'unread',
+                                label: isEn ? 'Unread' : 'Não lidas',
+                                count: unreadCount + pendingAlertsCount,
+                            },
+                            {
+                                id: 'alerts',
+                                label: isEn ? 'Risk Alerts' : 'Alertas de Risco',
+                                count: pendingAlertsCount,
+                            },
+                        ].map((tab) => {
+                            const active = filter === tab.id;
+                            return (
                                 <button
                                     key={tab.id}
+                                    type="button"
                                     onClick={() => setFilter(tab.id)}
-                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center gap-2 ${filter === tab.id
-                                        ? 'bg-surface-2 text-fg shadow-md'
-                                        : 'text-fg-subtle hover:text-fg/80'
-                                        }`}
+                                    className={`px-2.5 h-7 rounded-md text-xs font-semibold transition-colors whitespace-nowrap inline-flex items-center gap-1.5 border ${
+                                        active
+                                            ? 'bg-surface-2 border-line text-fg'
+                                            : 'border-transparent text-fg-muted hover:text-fg'
+                                    }`}
                                 >
-                                    {tab.label}
-                                    {(tab.count || 0) > 0 && <Badge count={tab.count} variant={filter === tab.id ? 'emerald' : 'default'} />}
+                                    <span>{tab.label}</span>
+                                    <Badge count={tab.count} active={active} />
                                 </button>
-                            ))}
-                        </div>
+                            );
+                        })}
+                    </div>
 
-                        <div className="relative w-full md:w-64 group">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle group-focus-within:text-accent-fg transition-colors" size={16} />
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 sm:w-56">
+                            <Search
+                                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle"
+                                size={14}
+                            />
                             <input
                                 type="text"
-                                placeholder="Buscar alertas..."
-                                className="w-full bg-canvas border border-line rounded-xl py-2 pl-10 pr-4 text-sm text-fg placeholder:text-slate-600 focus:ring-0 focus:border-emerald-500/50 transition-all outline-none"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder={isEn ? 'Search alerts...' : 'Buscar alertas...'}
+                                className="w-full h-8 bg-canvas-subtle border border-line rounded-lg pl-8 pr-3 text-xs text-fg placeholder:text-fg-subtle focus:border-accent/50 outline-none"
                             />
                         </div>
-                    </div>
 
-                    {/* Lista de Notificações */}
-                    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-                        {filteredItems.length > 0 ? (
-                            filteredItems.map(item => (
-                                <NotificationItem
-                                    key={item.id}
-                                    item={item}
-                                    onRead={markAsRead}
-                                    onDelete={deleteItem}
-                                    onResolve={resolveAlert}
-                                />
-                            ))
-                        ) : (
-                            <div className="h-full flex flex-col items-center justify-center text-center py-20 opacity-50">
-                                <div className="w-20 h-20 bg-surface-2/50 rounded-full flex items-center justify-center mb-6">
-                                    <Bell className="text-slate-600" size={32} />
+                        <button
+                            type="button"
+                            onClick={markAllAsRead}
+                            disabled={unreadCount === 0}
+                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg disabled:opacity-45 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <CheckCircle2 size={13} className="text-accent-fg" />
+                            <span>{isEn ? 'Mark all read' : 'Marcar lidas'}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setIsSettingsOpen(true)}
+                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg transition-colors"
+                        >
+                            <Settings size={13} className="text-fg-muted" />
+                            <span>Telegram</span>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Notification List */}
+                <div className="p-3 sm:p-4 space-y-2.5 min-h-[360px]">
+                    {loading ? (
+                        Array.from({ length: 5 }).map((_, idx) => (
+                            <div
+                                key={idx}
+                                className="flex items-start justify-between gap-3 p-3.5 rounded-xl border border-line-subtle bg-canvas-subtle/50"
+                            >
+                                <div className="flex items-start gap-3 flex-1">
+                                    <Skeleton className="w-8 h-8 rounded-lg shrink-0" />
+                                    <div className="space-y-2 flex-1">
+                                        <Skeleton className="h-3.5 w-44" />
+                                        <Skeleton className="h-3 w-full max-w-md" />
+                                        <Skeleton className="h-2.5 w-24" />
+                                    </div>
                                 </div>
-                                <h3 className="text-xl font-bold text-fg/80 mb-2">Tudo limpo por aqui!</h3>
-                                <p className="text-fg-subtle max-w-xs">Você resolveu todos os alertas desta categoria.</p>
-                                {filter !== 'all' && (
-                                    <button onClick={() => setFilter('all')} className="mt-6 text-accent-fg hover:text-emerald-300 text-sm font-bold flex items-center gap-2">
-                                        Ver todos os alertas <ArrowRight size={14} />
-                                    </button>
-                                )}
+                                <Skeleton className="h-6 w-16 rounded-md shrink-0" />
                             </div>
-                        )}
-                    </div>
-
-                    {/* Footer da Lista */}
-                    <div className="bg-canvas/50 border-t border-line p-4 flex justify-between items-center text-[10px] text-fg-subtle uppercase tracking-widest font-bold">
-                        <span>Sincronizado há pouco • Torex Engine v2.0</span>
-                        <div className="flex gap-6">
-                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div> Trades</span>
-                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-red-500"></div> Risco</span>
-                            <span className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Comportamento</span>
+                        ))
+                    ) : filteredItems.length > 0 ? (
+                        filteredItems.map((item) => (
+                            <NotificationItem
+                                key={item.id}
+                                item={item}
+                                onRead={markAsRead}
+                                onDelete={deleteItem}
+                                onResolve={resolveAlert}
+                            />
+                        ))
+                    ) : (
+                        <div className="flex flex-col items-center justify-center text-center py-14">
+                            <div className="w-12 h-12 bg-canvas-subtle border border-line-subtle rounded-xl flex items-center justify-center mb-3">
+                                <Bell className="text-fg-subtle" size={20} />
+                            </div>
+                            <h3 className="text-sm font-bold text-fg mb-1">{isEn ? 'All caught up' : 'Tudo limpo por aqui'}</h3>
+                            <p className="text-xs text-fg-muted max-w-xs">
+                                {isEn
+                                    ? 'No pending alerts or notifications in this view.'
+                                    : 'Nenhum alerta pendente ou notificação encontrada nesta visualização.'}
+                            </p>
+                            {filter !== 'all' && (
+                                <button
+                                    type="button"
+                                    onClick={() => setFilter('all')}
+                                    className="mt-3 text-accent-fg hover:underline text-xs font-semibold inline-flex items-center gap-1"
+                                >
+                                    <span>{isEn ? 'View all notifications' : 'Ver todos os registros'}</span>
+                                    <ArrowRight size={13} />
+                                </button>
+                            )}
                         </div>
-                    </div>
+                    )}
+                </div>
 
+                {/* Footer */}
+                <div className="bg-canvas-subtle border-t border-line-subtle px-4 py-2.5 flex flex-wrap justify-between items-center gap-2 text-[10px] text-fg-subtle uppercase tracking-wider font-semibold">
+                    <span>{isEn ? 'Synced • Torex Engine' : 'Sincronizado • Torex Engine'}</span>
+                    <div className="flex items-center gap-4">
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-accent" /> Trades
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-danger" /> {isEn ? 'Risk' : 'Risco'}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-data-2" /> {isEn ? 'Behavior' : 'Comportamento'}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
     );
-}
+};

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useChartTheme } from '../../hooks/useChartTheme';
+import { useLocale } from '../../context/LocaleContext';
 import { formatMoney, formatMoneyCompact, niceDomain, pickLabelIndices, useElementWidth } from '../charts/chartUtils';
 import { ChartEmpty } from '../charts/ChartCard';
 
@@ -28,6 +29,8 @@ export const ComparisonChart = ({
     labelB: string;
     caption?: string;
 }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const ct = useChartTheme();
     const [ref, width] = useElementWidth<HTMLDivElement>();
     const [hover, setHover] = useState<number | null>(null);
@@ -59,7 +62,11 @@ export const ComparisonChart = ({
             </div>
             <div ref={ref} className="relative w-full" style={{ height: H }}>
                 {!geo ? (
-                    <ChartEmpty message="Dados insuficientes para a curva" hint="São precisos pelo menos 2 trades." className="h-full" />
+                    <ChartEmpty
+                        message={isEn ? 'Insufficient data for comparison curve' : 'Dados insuficientes para a curva'}
+                        hint={isEn ? 'At least 2 executions are required.' : 'São precisos pelo menos 2 trades.'}
+                        className="h-full"
+                    />
                 ) : (
                     <svg
                         width={width}

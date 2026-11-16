@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Monitor, Upload, Search, Lock, Building2, ChevronRight } from 'lucide-react';
 import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../ui/BrokerLogo';
+import { useLocale } from '../../context/LocaleContext';
 
 export interface Broker {
     id: string;
@@ -18,6 +19,8 @@ interface BrokerSelectorProps {
 }
 
 export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [search, setSearch] = useState('');
     const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'Deriv' | 'Forex / ECN' | 'Prop Firm' | 'MetaQuotes'>('ALL');
 
@@ -27,28 +30,28 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             name: 'Deriv Autosync',
             type: 'AUTO_SYNC',
             icon: <img src="https://deriv.com/static/deriv-logo-c97b819f.svg" className="w-10 h-10" alt="Deriv" />,
-            description: 'Sincronização automática da sua conta Deriv'
+            description: isEn ? 'Automatic sync for your Deriv account' : 'Sincronização automática da sua conta Deriv'
         },
         {
             id: 'mt5',
-            name: 'Conectar MetaTrader 5',
+            name: isEn ? 'Connect MetaTrader 5' : 'Conectar MetaTrader 5',
             type: 'AUTO_SYNC',
             icon: <Monitor className="w-10 h-10 text-emerald-500" />,
-            description: 'Sincronizar qualquer corretora automaticamente'
+            description: isEn ? 'Auto-sync any MT5 broker in the cloud' : 'Sincronizar qualquer corretora automaticamente'
         },
         {
             id: 'mt4',
-            name: 'Conectar MetaTrader 4',
+            name: isEn ? 'Connect MetaTrader 4' : 'Conectar MetaTrader 4',
             type: 'AUTO_SYNC',
             icon: <Monitor className="w-10 h-10 text-cyan-500" />,
-            description: 'Sincronização automática para contas MT4'
+            description: isEn ? 'Automatic sync for MT4 accounts' : 'Sincronização automática para contas MT4'
         },
         {
             id: 'manual_csv',
-            name: 'Importar Relatório (CSV / Excel / HTML / PDF)',
+            name: isEn ? 'Import Statement (CSV / Excel / HTML / PDF)' : 'Importar Relatório (CSV / Excel / HTML / PDF)',
             type: 'MANUAL',
             icon: <Upload className="w-10 h-10 text-fg-muted" />,
-            description: 'Importar histórico de operações por arquivo'
+            description: isEn ? 'Upload trade history files manually' : 'Importar histórico de operações por arquivo'
         }
     ];
 
@@ -60,7 +63,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                 b.name.toLowerCase().includes(q) ||
                 b.description.toLowerCase().includes(q)
         );
-    }, [search]);
+    }, [search, isEn]);
 
     const filteredCatalogBrokers = useMemo(() => {
         const q = search.trim().toLowerCase();
@@ -86,7 +89,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             name: `${group.broker} (MT5)`,
             type: 'AUTO_SYNC',
             icon: <BrokerLogo broker={group} size="lg" />,
-            description: `Servidor: ${defaultSrv}`,
+            description: `${isEn ? 'Server' : 'Servidor'}: ${defaultSrv}`,
             defaultServer: defaultSrv,
             brokerCatalogId: group.id,
         });
@@ -99,7 +102,11 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-muted" size={20} />
                 <input
                     type="text"
-                    placeholder="Pesquisar corretora ou servidor MT5 (Ex: Deriv, Exness, XM, FTMO, IC Markets, Deriv-Demo...)"
+                    placeholder={
+                        isEn
+                            ? 'Search broker or MT5 server (e.g., Deriv, Exness, XM, FTMO, IC Markets, Deriv-Demo...)'
+                            : 'Pesquisar corretora ou servidor MT5 (Ex: Deriv, Exness, XM, FTMO, IC Markets, Deriv-Demo...)'
+                    }
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="w-full bg-canvas border border-line rounded-xl py-3.5 pl-11 pr-4 text-fg focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-fg-subtle"
@@ -110,7 +117,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             {filteredMainMethods.length > 0 && (
                 <div className="space-y-3">
                     <h2 className="text-xs font-bold uppercase tracking-wider text-fg-muted">
-                        Modos Principais de Conexão
+                        {isEn ? 'Primary Connection Methods' : 'Modos Principais de Conexão'}
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {filteredMainMethods.map((broker) => {
@@ -142,7 +149,11 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                                         : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
                                                 }`}
                                             >
-                                                {broker.type === 'AUTO_SYNC' ? 'AUTO SYNC' : 'MULTI-FORMATO'}
+                                                {broker.type === 'AUTO_SYNC'
+                                                    ? 'AUTO SYNC'
+                                                    : isEn
+                                                    ? 'MULTI-FORMAT'
+                                                    : 'MULTI-FORMATO'}
                                             </span>
                                         </div>
                                         <p className="text-xs text-fg-muted mt-1 line-clamp-1">
@@ -162,10 +173,14 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                     <div>
                         <h2 className="text-sm font-bold text-fg flex items-center gap-2">
                             <Building2 size={16} className="text-accent-fg" />
-                            Diretório de Corretoras &amp; Servidores MT5 ({filteredCatalogBrokers.length})
+                            {isEn
+                                ? `Broker & MT5 Server Directory (${filteredCatalogBrokers.length})`
+                                : `Diretório de Corretoras & Servidores MT5 (${filteredCatalogBrokers.length})`}
                         </h2>
                         <p className="text-xs text-fg-muted">
-                            Clique na sua corretora ou diretamente em um servidor pronto para conectar na Nuvem MT5.
+                            {isEn
+                                ? 'Select your broker or click directly on a server to connect via MT5 Cloud.'
+                                : 'Clique na sua corretora ou diretamente em um servidor pronto para conectar na Nuvem MT5.'}
                         </p>
                     </div>
 
@@ -181,7 +196,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                         : 'bg-surface border-line text-fg-muted hover:text-fg'
                                 }`}
                             >
-                                {cat === 'ALL' ? 'Todas' : cat}
+                                {cat === 'ALL' ? (isEn ? 'All' : 'Todas') : cat}
                             </button>
                         ))}
                     </div>
@@ -205,7 +220,12 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                                 {group.broker}
                                             </h3>
                                             <span className="text-[10px] text-fg-muted">
-                                                {group.category} • {group.servers.length} servidor(es)
+                                                {group.category} • {group.servers.length}{' '}
+                                                {isEn
+                                                    ? group.servers.length === 1
+                                                        ? 'server'
+                                                        : 'servers'
+                                                    : 'servidor(es)'}
                                             </span>
                                         </div>
                                     </div>
@@ -240,7 +260,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
                                             onClick={() => handleSelectCatalogBroker(group)}
                                             className="px-2 py-1 rounded-md bg-fg/[0.03] hover:bg-fg/[0.08] text-[10px] text-fg-muted hover:text-fg transition-colors"
                                         >
-                                            +{group.servers.length - 4} mais...
+                                            +{group.servers.length - 4} {isEn ? 'more...' : 'mais...'}
                                         </button>
                                     )}
                                 </div>
@@ -253,23 +273,27 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             {filteredMainMethods.length === 0 && filteredCatalogBrokers.length === 0 && (
                 <div className="text-center py-12 bg-surface border border-line rounded-2xl p-6 space-y-3">
                     <p className="text-fg-muted">
-                        Nenhuma corretora pré-listada encontrada para &ldquo;{search}&rdquo;.
+                        {isEn
+                            ? <>No listed broker found for &ldquo;{search}&rdquo;.</>
+                            : <>Nenhuma corretora pré-listada encontrada para &ldquo;{search}&rdquo;.</>}
                     </p>
                     <button
                         type="button"
                         onClick={() =>
                             onSelect({
                                 id: 'mt5_broker_direct',
-                                name: 'MetaTrader 5 (Personalizado)',
+                                name: isEn ? 'MetaTrader 5 (Custom)' : 'MetaTrader 5 (Personalizado)',
                                 type: 'AUTO_SYNC',
                                 icon: <Monitor className="w-10 h-10 text-emerald-500" />,
-                                description: 'Servidor personalizado',
+                                description: isEn ? 'Custom broker server' : 'Servidor personalizado',
                                 defaultServer: search.trim(),
                             })
                         }
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold hover:bg-emerald-500/25 transition-all"
                     >
-                        Conectar MT5 usando servidor &ldquo;{search.trim()}&rdquo; →
+                        {isEn
+                            ? <>Connect MT5 using server &ldquo;{search.trim()}&rdquo; →</>
+                            : <>Conectar MT5 usando servidor &ldquo;{search.trim()}&rdquo; →</>}
                     </button>
                 </div>
             )}

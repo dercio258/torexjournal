@@ -1,6 +1,7 @@
 import { cn } from '../../lib/cn';
 import { ChartEmpty } from './ChartCard';
 import { formatMoney } from './chartUtils';
+import { useLocale } from '../../context/LocaleContext';
 
 export interface BreakdownRow {
     key: string;
@@ -15,12 +16,12 @@ interface BreakdownBarsProps {
     rows: BreakdownRow[];
     /** `value` = rank by P&L (nominal categories); `natural` = keep given order (sessions, weekdays). */
     order?: 'value' | 'natural';
-    /** Rows beyond this fold into "Outros". */
+    /** Rows beyond this fold into "Outros" / "Other". */
     maxRows?: number;
     emptyMessage?: string;
 }
 
-const foldTail = (rows: BreakdownRow[], max: number): BreakdownRow[] => {
+const foldTail = (rows: BreakdownRow[], max: number, isEn: boolean): BreakdownRow[] => {
     if (rows.length <= max) return rows;
     const head = rows.slice(0, max - 1);
     const tail = rows.slice(max - 1);
@@ -30,7 +31,7 @@ const foldTail = (rows: BreakdownRow[], max: number): BreakdownRow[] => {
         ...head,
         {
             key: '__other',
-            label: `Outros (${tail.length})`,
+            label: isEn ? `Other (${tail.length})` : `Outros (${tail.length})`,
             pnl: Math.round(tail.reduce((a, r) => a + r.pnl, 0) * 100) / 100,
             count,
             winRate: count ? Math.round((wins / count) * 100) : undefined,
@@ -42,12 +43,15 @@ const foldTail = (rows: BreakdownRow[], max: number): BreakdownRow[] => {
  * Diverging horizontal bars around a zero line. Bar = P&L magnitude; side +
  * color + sign = polarity; trades and win rate printed as text on every row.
  */
-export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage = 'Sem trades no período' }: BreakdownBarsProps) => {
+export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage }: BreakdownBarsProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+    const resolvedEmptyMessage = emptyMessage ?? (isEn ? 'No trades in period' : 'Sem trades no período');
     const active = rows.filter((r) => r.count > 0 || r.pnl !== 0);
-    if (active.length === 0) return <ChartEmpty message={emptyMessage} className="min-h-[190px]" />;
+    if (active.length === 0) return <ChartEmpty message={resolvedEmptyMessage} className="min-h-[190px]" />;
 
     const sorted = order === 'value' ? [...rows].filter((r) => r.count > 0).sort((a, b) => b.pnl - a.pnl) : rows;
-    const shown = order === 'value' ? foldTail(sorted, maxRows) : sorted;
+    const shown = order === 'value' ? foldTail(sorted, maxRows, isEn) : sorted;
 
     const hasNeg = shown.some((r) => r.pnl < 0);
     const hasPos = shown.some((r) => r.pnl > 0);
@@ -69,7 +73,7 @@ export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage
                         <li
                             key={r.key}
                             className="group rounded-lg px-1.5 py-1 transition-colors hover:bg-surface-2/60"
-                            title={`${r.label}: ${formatMoney(r.pnl)} · ${r.count} trades${r.winRate !== undefined ? ` · ${r.winRate}% de acerto` : ''}`}
+                            title={`${r.label}: ${formatMoney(r.pnl)} · ${r.count} trades${r.winRate !== undefined ? ` · ${r.winRate}% ${isEn ? 'win rate' : 'de acerto'}` : ''}`}
                         >
                             <div className="flex items-baseline justify-between gap-2">
                                 <span className={cn('truncate text-xs font-semibold', empty ? 'text-fg-subtle' : 'text-fg')}>
@@ -106,8 +110,8 @@ export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage
                             </div>
 
                             <p className="mt-1 text-[11px] text-fg-subtle tabular-nums">
-                                {empty ? 'Sem operações' : `${r.count} ${r.count === 1 ? 'trade' : 'trades'}`}
-                                {!empty && r.winRate !== undefined && ` · ${r.winRate}% de acerto`}
+                                {empty ? (isEn ? 'No trades' : 'Sem operações') : `${r.count} ${r.count === 1 ? 'trade' : 'trades'}`}
+                                {!empty && r.winRate !== undefined && ` · ${r.winRate}% ${isEn ? 'win rate' : 'de acerto'}`}
                             </p>
                         </li>
                     );
@@ -116,7 +120,7 @@ export const BreakdownBars = ({ rows, order = 'value', maxRows = 6, emptyMessage
 
             {bestRow && (
                 <div className="pt-2.5 border-t border-line flex items-center justify-between text-[11px] tabular-nums">
-                    <span className="text-fg-subtle">Destaque do período</span>
+                    <span className="text-fg-subtle">{isEn ? 'Top performer' : 'Destaque do período'}</span>
                     <span className="font-semibold text-fg truncate max-w-[65%]">
                         {bestRow.label.split(' · ')[0]}{' '}
                         <span className={bestRow.pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}>

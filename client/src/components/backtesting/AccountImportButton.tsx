@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Download, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { useAccount } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 import { pullAccountHistoryInBatchesAndBuildUnifiedSession, UnifiedSyncBatchProgress } from '../../services/historicalBatchCache';
 
 /**
@@ -11,6 +12,8 @@ import { pullAccountHistoryInBatchesAndBuildUnifiedSession, UnifiedSyncBatchProg
  */
 export const AccountImportButton = ({ onDone }: { onDone?: () => void }) => {
     const navigate = useNavigate();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const { selectedAccountId, selectedAccount } = useAccount();
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<UnifiedSyncBatchProgress | null>(null);
@@ -24,7 +27,7 @@ export const AccountImportButton = ({ onDone }: { onDone?: () => void }) => {
             const isDeriv = broker.includes('deriv');
             const result = await pullAccountHistoryInBatchesAndBuildUnifiedSession({
                 accountId: selectedAccountId !== 'all' ? selectedAccountId : undefined,
-                accountName: selectedAccount?.name || 'Conta principal',
+                accountName: selectedAccount?.name || (isEn ? 'Primary Account' : 'Conta principal'),
                 syncSourceLabel: isDeriv ? 'Deriv Sync' : 'MT5 Sync',
                 isDeriv,
                 triggerLiveBrokerSync: true,
@@ -33,7 +36,12 @@ export const AccountImportButton = ({ onDone }: { onDone?: () => void }) => {
             onDone?.();
             navigate(`/backtesting/replay/${result.session.id}`);
         } catch (e: any) {
-            setError(e?.message || 'Não foi possível importar os trades da conta.');
+            setError(
+                e?.message ||
+                    (isEn
+                        ? 'Unable to import executions from the selected account.'
+                        : 'Não foi possível importar os trades da conta.')
+            );
         } finally {
             setBusy(false);
             setProgress(null);
@@ -48,9 +56,13 @@ export const AccountImportButton = ({ onDone }: { onDone?: () => void }) => {
                 isLoading={busy}
                 icon={<Download size={14} />}
                 onClick={run}
-                title="Cria uma sessão com os trades fechados da conta selecionada e pré-carrega as velas à volta deles"
+                title={
+                    isEn
+                        ? 'Create a replay session using closed trades from the selected account and pre-cache surrounding bars'
+                        : 'Cria uma sessão com os trades fechados da conta selecionada e pré-carrega as velas à volta deles'
+                }
             >
-                Importar trades da conta
+                {isEn ? 'Import Account Trades' : 'Importar trades da conta'}
             </Button>
             {progress && (
                 <div role="status" className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-[11px] text-fg-muted">
@@ -58,7 +70,9 @@ export const AccountImportButton = ({ onDone }: { onDone?: () => void }) => {
                         <RefreshCw size={12} className="animate-spin" aria-hidden /> {progress.message}
                     </p>
                     <p className="mt-0.5 tabular-nums">
-                        Trades: {progress.loadedTradeBatches}/{progress.totalTradeBatches} lotes · Velas: {progress.loadedCandleBatches}/{progress.totalCandleBatches} lotes ({progress.totalCandlesCached.toLocaleString('pt-BR')})
+                        {isEn
+                            ? `Trades: ${progress.loadedTradeBatches}/${progress.totalTradeBatches} batches · Bars: ${progress.loadedCandleBatches}/${progress.totalCandleBatches} batches (${progress.totalCandlesCached.toLocaleString('en-US')})`
+                            : `Trades: ${progress.loadedTradeBatches}/${progress.totalTradeBatches} lotes · Velas: ${progress.loadedCandleBatches}/${progress.totalCandleBatches} lotes (${progress.totalCandlesCached.toLocaleString('pt-BR')})`}
                     </p>
                 </div>
             )}

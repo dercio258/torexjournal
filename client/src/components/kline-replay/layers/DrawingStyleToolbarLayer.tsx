@@ -22,6 +22,7 @@ import {
     Send,
 } from 'lucide-react';
 import { DrawnObjectItem } from './RightSidePanelLayer';
+import { useLocale } from '../../../context/LocaleContext';
 
 export type DrawingLineStyle = 'solid' | 'dashed' | 'dotted';
 
@@ -80,40 +81,47 @@ const COLOR_PALETTE_ROWS: string[][] = [
     ['#7f1d1d', '#7c2d12', '#713f12', '#064e3b', '#164e63', '#0c4a6e', '#1e3a8a', '#4c1d95', '#701a75', '#831843'],
 ];
 
-const STYLE_TEMPLATES: Array<{ name: string; badge: string; patch: Partial<DrawingStyleState> }> = [
+const STYLE_TEMPLATES: Array<{ name: string; nameEn: string; badge: string; patch: Partial<DrawingStyleState> }> = [
     {
         name: 'Azul Institucional (Padrão)',
+        nameEn: 'Institutional Blue (Default)',
         badge: '#2962ff',
         patch: { lineColor: '#2962ff', lineOpacity: 100, lineSize: 2, lineStyle: 'solid', fillColor: '#2962ff', fillOpacity: 16 },
     },
     {
         name: 'Liquidez / Ouro Institucional',
+        nameEn: 'Liquidity / Institutional Gold',
         badge: '#eab308',
         patch: { lineColor: '#eab308', lineOpacity: 100, lineSize: 2, lineStyle: 'dashed', fillColor: '#eab308', fillOpacity: 18 },
     },
     {
         name: 'Demanda / Suporte Esmeralda',
+        nameEn: 'Demand / Emerald Support',
         badge: '#10b981',
         patch: { lineColor: '#10b981', lineOpacity: 100, lineSize: 2, lineStyle: 'solid', fillColor: '#10b981', fillOpacity: 20 },
     },
     {
         name: 'Oferta / Resistência Rubi',
+        nameEn: 'Supply / Ruby Resistance',
         badge: '#ef4444',
         patch: { lineColor: '#ef4444', lineOpacity: 100, lineSize: 2, lineStyle: 'solid', fillColor: '#ef4444', fillOpacity: 20 },
     },
     {
         name: 'FVG / Imbalance Violeta',
+        nameEn: 'FVG / Violet Imbalance',
         badge: '#8b5cf6',
         patch: { lineColor: '#8b5cf6', lineOpacity: 95, lineSize: 1, lineStyle: 'dotted', fillColor: '#8b5cf6', fillOpacity: 22 },
     },
     {
         name: 'Nível Discreto / Cinza',
+        nameEn: 'Subtle Level / Slate',
         badge: '#64748b',
         patch: { lineColor: '#64748b', lineOpacity: 85, lineSize: 1, lineStyle: 'dashed', fillColor: '#64748b', fillOpacity: 12 },
     },
 ];
 
 const QUICK_SMC_TAGS = ['BOS', 'CHoCH', 'FVG', 'OB', '$$$ Liquidez', 'EQH', 'EQL', 'Zona Chave', 'Alvo TP'];
+const QUICK_SMC_TAGS_EN = ['BOS', 'CHoCH', 'FVG', 'OB', '$$$ Liquidity', 'EQH', 'EQL', 'Key Zone', 'TP Target'];
 const QUICK_EMOJIS = ['🎯', '🚀', '🔥', '💎', '💰', '🐋', '⚡', '👀', '✅', '❌', '⚠️', '🛑'];
 const LINE_SIZES = [1, 2, 3, 4, 5, 6];
 const FONT_SIZES = [10, 11, 12, 14, 16, 20, 24, 28, 36];
@@ -125,7 +133,8 @@ const ColorPalettePopover: React.FC<{
     onChangeColor: (hex: string) => void;
     onChangeOpacity: (opacity: number) => void;
     title?: string;
-}> = ({ color, opacity, onChangeColor, onChangeOpacity, title }) => {
+    isEn?: boolean;
+}> = ({ color, opacity, onChangeColor, onChangeOpacity, title, isEn = false }) => {
     const colorInputRef = useRef<HTMLInputElement | null>(null);
 
     return (
@@ -170,7 +179,7 @@ const ColorPalettePopover: React.FC<{
                         type="button"
                         onClick={() => colorInputRef.current?.click()}
                         className="w-7 h-7 rounded-md border border-line hover:bg-surface-2 flex items-center justify-center cursor-pointer text-fg-muted hover:text-fg"
-                        title="Escolher cor personalizada"
+                        title={isEn ? 'Choose custom color' : 'Escolher cor personalizada'}
                     >
                         <Plus size={14} />
                     </button>
@@ -248,6 +257,8 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
     onResetStyle,
     onSendPositionToOrderTicket,
 }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [openPopover, setOpenPopover] = useState<'none' | 'templates' | 'lineColor' | 'fillColor' | 'text' | 'size' | 'style' | 'more'>('none');
     const [settingsModalOpen, setSettingsModalOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState<'style' | 'coords' | 'visibility'>('style');
@@ -328,7 +339,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         };
                     }}
                     className="px-1 py-1.5 cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg"
-                    title="Arrastar barra de estilo"
+                    title={isEn ? 'Drag style toolbar' : 'Arrastar barra de estilo'}
                 >
                     <GripVertical size={14} />
                 </div>
@@ -341,14 +352,14 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
                             openPopover === 'templates' ? 'bg-accent/15 text-accent-fg' : 'hover:bg-surface-2 text-fg-muted hover:text-fg'
                         }`}
-                        title="Templates de Estilo Rápido"
+                        title={isEn ? 'Quick Style Templates' : 'Templates de Estilo Rápido'}
                     >
                         <LayoutGrid size={15} />
                     </button>
                     {openPopover === 'templates' && (
                         <div className="absolute top-full left-0 mt-2 w-60 p-1.5 rounded-xl border border-line bg-surface shadow-2xl z-50">
                             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-fg-muted">
-                                Templates de Estilo
+                                {isEn ? 'Style Templates' : 'Templates de Estilo'}
                             </div>
                             {STYLE_TEMPLATES.map((tpl) => (
                                 <button
@@ -361,7 +372,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                     className="w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-2.5 hover:bg-surface-2 cursor-pointer text-left"
                                 >
                                     <span className="w-3.5 h-3.5 rounded-full shrink-0 border border-white/20" style={{ backgroundColor: tpl.badge }} />
-                                    <span className="truncate font-medium">{tpl.name}</span>
+                                    <span className="truncate font-medium">{isEn ? tpl.nameEn : tpl.name}</span>
                                 </button>
                             ))}
                         </div>
@@ -376,7 +387,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`px-2 py-1 rounded-lg cursor-pointer flex flex-col items-center justify-center transition-colors ${
                             openPopover === 'lineColor' ? 'bg-surface-2' : 'hover:bg-surface-2'
                         }`}
-                        title="Cor da Linha / Borda e Opacidade"
+                        title={isEn ? 'Line / Border Color & Opacity' : 'Cor da Linha / Borda e Opacidade'}
                     >
                         <Pencil size={14} className="text-fg" />
                         <span
@@ -387,11 +398,12 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                     {openPopover === 'lineColor' && (
                         <div className="absolute top-full left-0 mt-2 z-50">
                             <ColorPalettePopover
-                                title="Cor da Linha & Opacidade"
+                                title={isEn ? 'Line Color & Opacity' : 'Cor da Linha & Opacidade'}
                                 color={styleState.lineColor}
                                 opacity={styleState.lineOpacity}
                                 onChangeColor={(hex) => onUpdateStyle({ lineColor: hex })}
                                 onChangeOpacity={(op) => onUpdateStyle({ lineOpacity: op })}
+                                isEn={isEn}
                             />
                         </div>
                     )}
@@ -405,7 +417,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`px-2 py-1 rounded-lg cursor-pointer flex flex-col items-center justify-center transition-colors ${
                             openPopover === 'fillColor' ? 'bg-surface-2' : 'hover:bg-surface-2'
                         }`}
-                        title="Cor de Preenchimento / Fundo e Opacidade"
+                        title={isEn ? 'Fill / Background Color & Opacity' : 'Cor de Preenchimento / Fundo e Opacidade'}
                     >
                         <PaintBucket size={14} className="text-fg" />
                         <span
@@ -416,11 +428,12 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                     {openPopover === 'fillColor' && (
                         <div className="absolute top-full left-0 mt-2 z-50">
                             <ColorPalettePopover
-                                title="Cor de Preenchimento & Opacidade"
+                                title={isEn ? 'Fill Color & Opacity' : 'Cor de Preenchimento & Opacidade'}
                                 color={styleState.fillColor}
                                 opacity={styleState.fillOpacity}
                                 onChangeColor={(hex) => onUpdateStyle({ fillColor: hex })}
                                 onChangeOpacity={(op) => onUpdateStyle({ fillOpacity: op })}
+                                isEn={isEn}
                             />
                         </div>
                     )}
@@ -434,7 +447,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`px-2 py-1 rounded-lg cursor-pointer flex flex-col items-center justify-center transition-colors ${
                             openPopover === 'text' ? 'bg-surface-2' : 'hover:bg-surface-2'
                         }`}
-                        title="Texto, Tamanho da Fonte e Cor do Texto"
+                        title={isEn ? 'Text, Font Size & Text Color' : 'Texto, Tamanho da Fonte e Cor do Texto'}
                     >
                         <Type size={14} className="text-fg" />
                         <span
@@ -446,17 +459,17 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         <div className="absolute top-full left-0 mt-2 w-[264px] p-3 rounded-xl border border-line bg-surface shadow-2xl z-50 space-y-3">
                             <div>
                                 <label className="block text-[10px] font-bold uppercase tracking-wider text-fg-muted mb-1">
-                                    {isEmojiTool ? 'Emoji / Marcador' : 'Texto / Rótulo no Gráfico'}
+                                    {isEmojiTool ? (isEn ? 'Emoji / Marker' : 'Emoji / Marcador') : (isEn ? 'Chart Text / Label' : 'Texto / Rótulo no Gráfico')}
                                 </label>
                                 <input
                                     type="text"
                                     value={styleState.extendData}
                                     onChange={(e) => onUpdateStyle({ extendData: e.target.value })}
-                                    placeholder={isEmojiTool ? '🎯' : 'Digite o texto (ex: BOS, OB H4...)'}
+                                    placeholder={isEmojiTool ? '🎯' : (isEn ? 'Enter text (e.g. BOS, OB H4...)' : 'Digite o texto (ex: BOS, OB H4...)')}
                                     className="w-full px-2.5 py-1.5 rounded-lg border border-line bg-surface-2 text-xs text-fg focus:outline-none focus:border-[#2962ff]"
                                 />
                                 <div className="flex flex-wrap gap-1 mt-1.5">
-                                    {(isEmojiTool ? QUICK_EMOJIS : QUICK_SMC_TAGS).map((tag) => (
+                                    {(isEmojiTool ? QUICK_EMOJIS : (isEn ? QUICK_SMC_TAGS_EN : QUICK_SMC_TAGS)).map((tag) => (
                                         <button
                                             key={tag}
                                             type="button"
@@ -471,7 +484,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
 
                             <div>
                                 <label className="block text-[10px] font-bold uppercase tracking-wider text-fg-muted mb-1">
-                                    Tamanho ({styleState.textSize}px)
+                                    {isEn ? `Size (${styleState.textSize}px)` : `Tamanho (${styleState.textSize}px)`}
                                 </label>
                                 <div className="flex flex-wrap gap-1">
                                     {FONT_SIZES.map((sz) => (
@@ -493,7 +506,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
 
                             <div>
                                 <div className="text-[10px] font-bold uppercase tracking-wider text-fg-muted mb-1">
-                                    Cor do Texto
+                                    {isEn ? 'Text Color' : 'Cor do Texto'}
                                 </div>
                                 <div className="grid grid-cols-10 gap-1">
                                     {COLOR_PALETTE_ROWS[0].concat(COLOR_PALETTE_ROWS[1]).map((hex) => (
@@ -525,7 +538,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`px-2 py-1.5 rounded-lg cursor-pointer flex items-center gap-1.5 text-xs font-semibold transition-colors ${
                             openPopover === 'size' ? 'bg-surface-2 text-[#2962ff]' : 'hover:bg-surface-2 text-fg'
                         }`}
-                        title="Espessura da Linha"
+                        title={isEn ? 'Line Thickness' : 'Espessura da Linha'}
                     >
                         <span
                             className="w-4 rounded-full bg-current inline-block"
@@ -565,7 +578,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`px-2 py-1.5 rounded-lg cursor-pointer flex items-center justify-center transition-colors ${
                             openPopover === 'style' ? 'bg-surface-2 text-[#2962ff]' : 'hover:bg-surface-2 text-fg'
                         }`}
-                        title="Estilo da Linha (Sólida, Tracejada, Pontilhada)"
+                        title={isEn ? 'Line Style (Solid, Dashed, Dotted)' : 'Estilo da Linha (Sólida, Tracejada, Pontilhada)'}
                     >
                         <svg viewBox="0 0 22 10" className="w-5 h-3 stroke-current fill-none" strokeWidth="2">
                             {styleState.lineStyle === 'solid' && <line x1="1" y1="5" x2="21" y2="5" />}
@@ -576,9 +589,9 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                     {openPopover === 'style' && (
                         <div className="absolute top-full left-0 mt-2 w-40 p-1.5 rounded-xl border border-line bg-surface shadow-2xl z-50 space-y-0.5">
                             {([
-                                { id: 'solid', label: 'Linha Sólida', dash: undefined },
-                                { id: 'dashed', label: 'Tracejada', dash: '5 3' },
-                                { id: 'dotted', label: 'Pontilhada', dash: '2 2.5' },
+                                { id: 'solid', label: isEn ? 'Solid Line' : 'Linha Sólida', dash: undefined },
+                                { id: 'dashed', label: isEn ? 'Dashed' : 'Tracejada', dash: '5 3' },
+                                { id: 'dotted', label: isEn ? 'Dotted' : 'Pontilhada', dash: '2 2.5' },
                             ] as const).map((st) => (
                                 <button
                                     key={st.id}
@@ -613,7 +626,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         setSettingsModalOpen(true);
                     }}
                     className="p-1.5 rounded-lg hover:bg-surface-2 text-fg-muted hover:text-fg cursor-pointer transition-colors"
-                    title="Configurações Avançadas da Ferramenta (Estilo, Coordenadas e Visibilidade)"
+                    title={isEn ? 'Advanced Tool Settings (Style, Coordinates & Visibility)' : 'Configurações Avançadas da Ferramenta (Estilo, Coordenadas e Visibilidade)'}
                 >
                     <Settings size={15} />
                 </button>
@@ -627,7 +640,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                             ? 'bg-amber-500/15 text-amber-500 font-bold'
                             : 'hover:bg-surface-2 text-fg-muted hover:text-fg'
                     }`}
-                    title={isLocked ? 'Desbloquear Objeto' : 'Bloquear Objeto'}
+                    title={isLocked ? (isEn ? 'Unlock Object' : 'Desbloquear Objeto') : (isEn ? 'Lock Object' : 'Bloquear Objeto')}
                 >
                     {isLocked ? <Lock size={15} /> : <Unlock size={15} />}
                 </button>
@@ -637,7 +650,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                     type="button"
                     onClick={() => onDelete(selectedItem.id)}
                     className="p-1.5 rounded-lg hover:bg-neg/15 text-fg-muted hover:text-neg cursor-pointer transition-colors"
-                    title="Remover Objeto (Delete / Backspace)"
+                    title={isEn ? 'Delete Object (Delete / Backspace)' : 'Remover Objeto (Delete / Backspace)'}
                 >
                     <Trash2 size={15} />
                 </button>
@@ -650,7 +663,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                         className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
                             openPopover === 'more' ? 'bg-surface-2 text-fg' : 'hover:bg-surface-2 text-fg-muted hover:text-fg'
                         }`}
-                        title="Mais Ações"
+                        title={isEn ? 'More Actions' : 'Mais Ações'}
                     >
                         <MoreHorizontal size={15} />
                     </button>
@@ -665,7 +678,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 className="w-full px-2.5 py-1.5 rounded-lg flex items-center gap-2 hover:bg-surface-2 cursor-pointer text-left"
                             >
                                 <Copy size={13} />
-                                <span>Duplicar / Clonar</span>
+                                <span>{isEn ? 'Duplicate / Clone' : 'Duplicar / Clonar'}</span>
                             </button>
                             <button
                                 type="button"
@@ -676,7 +689,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 className="w-full px-2.5 py-1.5 rounded-lg flex items-center gap-2 hover:bg-surface-2 cursor-pointer text-left"
                             >
                                 <Crosshair size={13} />
-                                <span>Centralizar no Gráfico</span>
+                                <span>{isEn ? 'Center on Chart' : 'Centralizar no Gráfico'}</span>
                             </button>
                             <button
                                 type="button"
@@ -687,7 +700,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 className="w-full px-2.5 py-1.5 rounded-lg flex items-center gap-2 hover:bg-surface-2 cursor-pointer text-left"
                             >
                                 {isVisible ? <EyeOff size={13} /> : <Eye size={13} />}
-                                <span>{isVisible ? 'Ocultar no Gráfico' : 'Mostrar no Gráfico'}</span>
+                                <span>{isVisible ? (isEn ? 'Hide on Chart' : 'Ocultar no Gráfico') : (isEn ? 'Show on Chart' : 'Mostrar no Gráfico')}</span>
                             </button>
                             <button
                                 type="button"
@@ -698,7 +711,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 className="w-full px-2.5 py-1.5 rounded-lg flex items-center gap-2 hover:bg-surface-2 cursor-pointer text-left text-fg-muted"
                             >
                                 <RotateCcw size={13} />
-                                <span>Restaurar Padrão</span>
+                                <span>{isEn ? 'Reset to Default' : 'Restaurar Padrão'}</span>
                             </button>
                         </div>
                     )}
@@ -718,10 +731,10 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 />
                                 <div>
                                     <h3 className="text-sm font-bold leading-tight">
-                                        Configurações: {selectedItem.label}
+                                        {isEn ? `Settings: ${selectedItem.label}` : `Configurações: ${selectedItem.label}`}
                                     </h3>
                                     <p className="text-[11px] text-fg-muted">
-                                        Personalize estilo, coordenadas exatas de preço e visibilidade
+                                        {isEn ? 'Customize style, exact price coordinates, and visibility' : 'Personalize estilo, coordenadas exatas de preço e visibilidade'}
                                     </p>
                                 </div>
                             </div>
@@ -746,7 +759,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 }`}
                             >
                                 <Sliders size={13} />
-                                <span>Estilo & Texto</span>
+                                <span>{isEn ? 'Style & Text' : 'Estilo & Texto'}</span>
                             </button>
                             <button
                                 type="button"
@@ -758,7 +771,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 }`}
                             >
                                 <MapPin size={13} />
-                                <span>Coordenadas ({points.length})</span>
+                                <span>{isEn ? `Coordinates (${points.length})` : `Coordenadas (${points.length})`}</span>
                             </button>
                             <button
                                 type="button"
@@ -770,7 +783,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 }`}
                             >
                                 <Eye size={13} />
-                                <span>Visibilidade</span>
+                                <span>{isEn ? 'Visibility' : 'Visibilidade'}</span>
                             </button>
                         </div>
 
@@ -782,7 +795,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
                                             <label className="block text-[11px] font-semibold text-fg-muted mb-1">
-                                                Nome na Camada (Object Tree)
+                                                {isEn ? 'Layer Name (Object Tree)' : 'Nome na Camada (Object Tree)'}
                                             </label>
                                             <input
                                                 type="text"
@@ -793,13 +806,13 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                         </div>
                                         <div>
                                             <label className="block text-[11px] font-semibold text-fg-muted mb-1">
-                                                Texto / Tag no Gráfico
+                                                {isEn ? 'Chart Text / Tag' : 'Texto / Tag no Gráfico'}
                                             </label>
                                             <input
                                                 type="text"
                                                 value={styleState.extendData}
                                                 onChange={(e) => onUpdateStyle({ extendData: e.target.value })}
-                                                placeholder="Ex: BOS, OB H4, Liquidez..."
+                                                placeholder={isEn ? 'e.g. BOS, OB H4, Liquidity...' : 'Ex: BOS, OB H4, Liquidez...'}
                                                 className="w-full px-3 py-1.5 rounded-lg border border-line bg-surface-2 text-fg focus:outline-none focus:border-[#2962ff]"
                                             />
                                         </div>
@@ -808,7 +821,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                     {/* Line Color, Thickness & Style */}
                                     <div className="p-3.5 rounded-xl border border-line bg-surface-2/40 space-y-3">
                                         <div className="flex items-center justify-between">
-                                            <span className="font-bold text-fg">Linha / Contorno</span>
+                                            <span className="font-bold text-fg">{isEn ? 'Line / Stroke' : 'Linha / Contorno'}</span>
                                             <div className="flex items-center gap-2">
                                                 <input
                                                     type="color"
@@ -840,7 +853,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                         <div className="grid grid-cols-2 gap-3 pt-1">
                                             <div>
                                                 <label className="block text-[11px] text-fg-muted mb-1">
-                                                    Espessura ({styleState.lineSize}px)
+                                                    {isEn ? `Thickness (${styleState.lineSize}px)` : `Espessura (${styleState.lineSize}px)`}
                                                 </label>
                                                 <div className="flex gap-1">
                                                     {LINE_SIZES.map((sz) => (
@@ -862,13 +875,13 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
 
                                             <div>
                                                 <label className="block text-[11px] text-fg-muted mb-1">
-                                                    Estilo do Traço
+                                                    {isEn ? 'Line Style' : 'Estilo do Traço'}
                                                 </label>
                                                 <div className="grid grid-cols-3 gap-1">
                                                     {([
-                                                        { id: 'solid', label: 'Sólido' },
-                                                        { id: 'dashed', label: 'Tracejado' },
-                                                        { id: 'dotted', label: 'Pontilhado' },
+                                                        { id: 'solid', label: isEn ? 'Solid' : 'Sólido' },
+                                                        { id: 'dashed', label: isEn ? 'Dashed' : 'Tracejado' },
+                                                        { id: 'dotted', label: isEn ? 'Dotted' : 'Pontilhado' },
                                                     ] as const).map((st) => (
                                                         <button
                                                             key={st.id}
@@ -891,7 +904,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                     {/* Fill Color & Opacity */}
                                     <div className="p-3.5 rounded-xl border border-line bg-surface-2/40 space-y-2.5">
                                         <div className="flex items-center justify-between">
-                                            <span className="font-bold text-fg">Preenchimento & Opacidade</span>
+                                            <span className="font-bold text-fg">{isEn ? 'Fill & Opacity' : 'Preenchimento & Opacidade'}</span>
                                             <div className="flex items-center gap-2">
                                                 <input
                                                     type="color"
@@ -915,7 +928,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                     {/* Text & Font Size */}
                                     <div className="p-3.5 rounded-xl border border-line bg-surface-2/40 space-y-2.5">
                                         <div className="flex items-center justify-between">
-                                            <span className="font-bold text-fg">Tamanho da Fonte / Ícone ({styleState.textSize}px)</span>
+                                            <span className="font-bold text-fg">{isEn ? `Font / Icon Size (${styleState.textSize}px)` : `Tamanho da Fonte / Ícone (${styleState.textSize}px)`}</span>
                                             <input
                                                 type="color"
                                                 value={styleState.textColor.startsWith('#') && styleState.textColor.length === 7 ? styleState.textColor : '#ffffff'}
@@ -946,23 +959,27 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                             {settingsTab === 'coords' && (
                                 <div className="space-y-3">
                                     <p className="text-[11px] text-fg-muted">
-                                        Ajuste os níveis exatos de preço e posição das âncoras da ferramenta no gráfico:
+                                        {isEn
+                                            ? 'Fine-tune exact price levels and anchor bar indices on the chart:'
+                                            : 'Ajuste os níveis exatos de preço e posição das âncoras da ferramenta no gráfico:'}
                                     </p>
 
                                     {points.length === 0 ? (
                                         <div className="p-4 rounded-xl border border-line text-center text-fg-muted">
-                                            Clique no gráfico para posicionar os pontos desta ferramenta.
+                                            {isEn
+                                                ? 'Click on the chart to place anchor points for this tool.'
+                                                : 'Clique no gráfico para posicionar os pontos desta ferramenta.'}
                                         </div>
                                     ) : (
                                         points.map((pt, idx) => {
                                             const pointTitle =
                                                 isPositionTool && idx === 0
-                                                    ? 'Ponto 1 · Preço de Entrada (Entry)'
+                                                    ? (isEn ? 'Point 1 · Entry Price' : 'Ponto 1 · Preço de Entrada (Entry)')
                                                     : isPositionTool && idx === 1
-                                                        ? 'Ponto 2 · Alvo (Take Profit)'
+                                                        ? (isEn ? 'Point 2 · Take Profit (TP)' : 'Ponto 2 · Alvo (Take Profit)')
                                                         : isPositionTool && idx === 2
-                                                            ? 'Ponto 3 · Stop Loss (SL)'
-                                                            : `Ponto #${idx + 1}`;
+                                                            ? (isEn ? 'Point 3 · Stop Loss (SL)' : 'Ponto 3 · Stop Loss (SL)')
+                                                            : (isEn ? `Point #${idx + 1}` : `Ponto #${idx + 1}`);
                                             return (
                                                 <div
                                                     key={idx}
@@ -971,13 +988,13 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                                     <div>
                                                         <div className="font-bold text-fg">{pointTitle}</div>
                                                         <div className="text-[10px] text-fg-muted">
-                                                            Barra #{pt.dataIndex ?? '—'}
+                                                            {isEn ? `Bar #${pt.dataIndex ?? '—'}` : `Barra #${pt.dataIndex ?? '—'}`}
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <div className="flex flex-col">
                                                             <span className="text-[9px] uppercase text-fg-muted font-bold">
-                                                                Preço
+                                                                {isEn ? 'Price' : 'Preço'}
                                                             </span>
                                                             <input
                                                                 type="number"
@@ -994,7 +1011,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                                         </div>
                                                         <div className="flex flex-col">
                                                             <span className="text-[9px] uppercase text-fg-muted font-bold">
-                                                                Vela (Índice)
+                                                                {isEn ? 'Bar (Index)' : 'Vela (Índice)'}
                                                             </span>
                                                             <input
                                                                 type="number"
@@ -1039,7 +1056,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                                 className="w-full py-2.5 px-4 rounded-xl bg-[#2962ff] hover:bg-[#1d4ed8] text-white font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md"
                                             >
                                                 <Send size={14} />
-                                                <span>Enviar Níveis (Entrada / TP / SL) para a Boleta de Trade</span>
+                                                <span>{isEn ? 'Send Levels (Entry / TP / SL) to Order Ticket' : 'Enviar Níveis (Entrada / TP / SL) para a Boleta de Trade'}</span>
                                             </button>
                                         </div>
                                     )}
@@ -1050,9 +1067,9 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 <div className="space-y-3">
                                     <div className="p-3.5 rounded-xl border border-line bg-surface-2/40 flex items-center justify-between">
                                         <div>
-                                            <div className="font-bold">Visível no Gráfico</div>
+                                            <div className="font-bold">{isEn ? 'Visible on Chart' : 'Visível no Gráfico'}</div>
                                             <div className="text-[11px] text-fg-muted">
-                                                Exibir ou ocultar esta camada mantendo suas coordenadas salvas
+                                                {isEn ? 'Show or hide this layer while keeping its saved coordinates' : 'Exibir ou ocultar esta camada mantendo suas coordenadas salvas'}
                                             </div>
                                         </div>
                                         <button
@@ -1065,15 +1082,15 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                             }`}
                                         >
                                             {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
-                                            <span>{isVisible ? 'Visível' : 'Oculto'}</span>
+                                            <span>{isVisible ? (isEn ? 'Visible' : 'Visível') : (isEn ? 'Hidden' : 'Oculto')}</span>
                                         </button>
                                     </div>
 
                                     <div className="p-3.5 rounded-xl border border-line bg-surface-2/40 flex items-center justify-between">
                                         <div>
-                                            <div className="font-bold">Bloquear Posição (Lock)</div>
+                                            <div className="font-bold">{isEn ? 'Lock Position' : 'Bloquear Posição (Lock)'}</div>
                                             <div className="text-[11px] text-fg-muted">
-                                                Impede que o objeto seja movido acidentalmente durante o replay
+                                                {isEn ? 'Prevents accidental movement during replay' : 'Impede que o objeto seja movido acidentalmente durante o replay'}
                                             </div>
                                         </div>
                                         <button
@@ -1086,7 +1103,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                             }`}
                                         >
                                             {isLocked ? <Lock size={14} /> : <Unlock size={14} />}
-                                            <span>{isLocked ? 'Bloqueado' : 'Desbloqueado'}</span>
+                                            <span>{isLocked ? (isEn ? 'Locked' : 'Bloqueado') : (isEn ? 'Unlocked' : 'Desbloqueado')}</span>
                                         </button>
                                     </div>
 
@@ -1100,7 +1117,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                             className="py-2 px-3 rounded-xl border border-line hover:bg-surface-2 font-semibold flex items-center justify-center gap-2 cursor-pointer"
                                         >
                                             <Copy size={14} />
-                                            <span>Duplicar Camada</span>
+                                            <span>{isEn ? 'Duplicate Layer' : 'Duplicar Camada'}</span>
                                         </button>
                                         <button
                                             type="button"
@@ -1108,7 +1125,7 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                             className="py-2 px-3 rounded-xl border border-line hover:bg-surface-2 font-semibold flex items-center justify-center gap-2 cursor-pointer text-fg-muted hover:text-fg"
                                         >
                                             <RotateCcw size={14} />
-                                            <span>Restaurar Padrão</span>
+                                            <span>{isEn ? 'Reset to Default' : 'Restaurar Padrão'}</span>
                                         </button>
                                     </div>
                                 </div>
@@ -1126,14 +1143,14 @@ export const DrawingStyleToolbarLayer: React.FC<DrawingStyleToolbarLayerProps> =
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold text-neg hover:bg-neg/10 flex items-center gap-1.5 cursor-pointer"
                             >
                                 <Trash2 size={14} />
-                                <span>Excluir Objeto</span>
+                                <span>{isEn ? 'Delete Object' : 'Excluir Objeto'}</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setSettingsModalOpen(false)}
                                 className="px-5 py-1.5 rounded-lg bg-[#2962ff] hover:bg-[#1d4ed8] text-white text-xs font-bold cursor-pointer shadow-sm"
                             >
-                                Concluído
+                                {isEn ? 'Done' : 'Concluído'}
                             </button>
                         </div>
                     </div>

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAccount } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 import { 
     ChevronDown, 
     Check, 
@@ -13,6 +14,8 @@ import {
 } from 'lucide-react';
 
 export const AccountSelector: React.FC = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const { 
         accounts, 
         selectedAccountId, 
@@ -81,7 +84,7 @@ export const AccountSelector: React.FC = () => {
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-surface hover:bg-surface-2 border border-line hover:border-line-strong transition-all duration-200 shadow-md group focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                title="Alternar Conta de Trading"
+                title={isEn ? 'Switch Trading Account' : 'Alternar Conta de Trading'}
             >
                 <div className="flex items-center gap-2.5">
                     {isConsolidated ? (
@@ -98,8 +101,8 @@ export const AccountSelector: React.FC = () => {
                         <div className="flex items-center gap-1.5">
                             <span className="text-xs font-bold text-fg max-w-[130px] sm:max-w-[160px] truncate leading-tight">
                                 {isConsolidated 
-                                    ? 'Todas as contas' 
-                                    : `${selectedAccount?.name || 'Conta'}${selectedAccount?.mt5Id ? ` (#${selectedAccount.mt5Id})` : ''}`}
+                                    ? (isEn ? 'All Accounts' : 'Todas as contas')
+                                    : `${selectedAccount?.name || (isEn ? 'Account' : 'Conta')}${selectedAccount?.mt5Id ? ` (#${selectedAccount.mt5Id})` : ''}`}
                             </span>
                             {!isConsolidated && selectedAccount && (
                                 <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded border ${getTypeBadge(selectedAccount.type).classes}`}>
@@ -109,7 +112,7 @@ export const AccountSelector: React.FC = () => {
                         </div>
                         <span className="text-[11px] font-mono leading-tight mt-0.5">
                             {isConsolidated ? (
-                                <span className="text-indigo-400 font-semibold">{activeAccounts.length} contas</span>
+                                <span className="text-indigo-400 font-semibold">{activeAccounts.length} {isEn ? (activeAccounts.length === 1 ? 'account' : 'accounts') : 'contas'}</span>
                             ) : (
                                 <span className={`font-bold ${(selectedAccount?.netPnl || 0) >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                                     {(selectedAccount?.netPnl || 0) >= 0 ? '+' : ''}
@@ -132,7 +135,7 @@ export const AccountSelector: React.FC = () => {
                     <div className="p-3 border-b border-line flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs font-bold text-fg-muted uppercase tracking-wider">
                             <Briefcase size={13} />
-                            <span>Contas de Trading</span>
+                            <span>{isEn ? 'Trading Accounts' : 'Contas de Trading'}</span>
                         </div>
                         <span className="text-[10px] bg-surface-2 text-fg-muted px-2 py-0.5 rounded-full font-mono border border-line">
                             {activeAccounts.length}
@@ -180,7 +183,7 @@ export const AccountSelector: React.FC = () => {
                                                  </span>
                                                  {account.isPrimary && (
                                                      <span className="text-[9px] bg-surface-2 text-fg-muted px-1 rounded border border-line">
-                                                         Principal
+                                                         {isEn ? 'Primary' : 'Principal'}
                                                      </span>
                                                  )}
                                              </div>
@@ -203,7 +206,7 @@ export const AccountSelector: React.FC = () => {
 
                          {activeAccounts.length === 0 && (
                              <div className="text-center py-4 text-xs text-fg-subtle">
-                                 Nenhuma conta cadastrada
+                                 {isEn ? 'No accounts registered' : 'Nenhuma conta cadastrada'}
                              </div>
                          )}
                      </div>
@@ -231,10 +234,10 @@ export const AccountSelector: React.FC = () => {
                                  </div>
                                  <div className="flex flex-col">
                                      <span className="text-xs font-semibold leading-tight">
-                                         Todas as contas
+                                         {isEn ? 'All Accounts' : 'Todas as contas'}
                                      </span>
                                      <span className="text-[10px] text-fg-subtle leading-tight mt-0.5">
-                                         Visão Consolidada Geral
+                                         {isEn ? 'Consolidated Desk View' : 'Visão Consolidada Geral'}
                                      </span>
                                  </div>
                              </div>
@@ -255,7 +258,7 @@ export const AccountSelector: React.FC = () => {
                                  <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-accent-fg">
                                      <Plus size={15} />
                                  </div>
-                                 <span>Adicionar conta</span>
+                                 <span>{isEn ? 'Add account' : 'Adicionar conta'}</span>
                              </button>
                          )}
                          <button
@@ -268,7 +271,7 @@ export const AccountSelector: React.FC = () => {
                              <div className="w-8 h-8 rounded-lg bg-surface-2 border border-line flex items-center justify-center text-fg-muted">
                                  <Settings2 size={15} />
                              </div>
-                             <span>Gerenciar contas</span>
+                             <span>{isEn ? 'Manage accounts' : 'Gerenciar contas'}</span>
                          </button>
                      </div>
                 </div>

@@ -1,8 +1,15 @@
 import React from 'react';
+import { useLocale } from '../../context/LocaleContext';
 
 export const WhatsAppSupportWidget: React.FC = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const phoneNumber = "258858923752";
-    const message = encodeURIComponent("Olá, preciso de suporte no Torex Journal.");
+    const message = encodeURIComponent(
+        isEn
+            ? "Hi, I need support with my Torex Journal workspace."
+            : "Olá, preciso de suporte no Torex Journal."
+    );
     const whatsappUrl = `https://wa.me/${phoneNumber}?text=${message}`;
 
     return (
@@ -10,7 +17,7 @@ export const WhatsAppSupportWidget: React.FC = () => {
             {/* Tooltip on Hover */}
             <div className="absolute right-16 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none translate-x-2 group-hover:translate-x-0 hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-canvas/95 border border-line-strong text-fg shadow-2xl backdrop-blur-md whitespace-nowrap">
                 <div className="flex flex-col text-left">
-                    <span className="text-xs font-bold text-fg">Suporte WhatsApp</span>
+                    <span className="text-xs font-bold text-fg">{isEn ? 'WhatsApp Desk Support' : 'Suporte WhatsApp'}</span>
                     <span className="text-[11px] font-mono text-accent-fg font-semibold">+258 85 892 3752</span>
                 </div>
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1" />
@@ -21,7 +28,7 @@ export const WhatsAppSupportWidget: React.FC = () => {
                 href={whatsappUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Contacto de WhatsApp Suporte"
+                aria-label={isEn ? 'WhatsApp Support Contact' : 'Contacto de WhatsApp Suporte'}
                 className="group relative flex items-center justify-center w-14 h-14 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-full shadow-lg shadow-emerald-900/40 hover:shadow-emerald-500/40 transition-all duration-300 hover:scale-110 active:scale-95"
             >
                 {/* Subtle Pulse Animation */}

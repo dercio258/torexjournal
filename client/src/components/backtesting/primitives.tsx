@@ -2,42 +2,56 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { getCurrentLocale } from '../../context/LocaleContext';
 
 /* ------------------------------------------------------------------ format */
 
-export const fmtMoney = (v: number, opts: { sign?: boolean; decimals?: number } = {}) => {
-    const d = opts.decimals ?? 2;
-    const abs = Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
-    const sign = v < 0 ? '−' : opts.sign && v > 0 ? '+' : '';
-    return `${sign}$${abs}`;
+const CURRENCY_PREFIX: Record<string, string> = {
+    USD: '$',
+    EUR: '€',
+    GBP: '£',
+    MZN: 'MT ',
 };
 
-export const fmtNum = (v: number, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+export const fmtMoney = (v: number, opts: { sign?: boolean; decimals?: number; currency?: string } = {}) => {
+    const d = opts.decimals ?? 2;
+    const abs = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const sign = v < 0 ? '−' : opts.sign && v > 0 ? '+' : '';
+    const prefix = CURRENCY_PREFIX[opts.currency || 'USD'] ?? '$';
+    return `${sign}${prefix}${abs}`;
+};
 
-/** YYYY-MM-DD → dd/mm/aaaa without timezone drift. */
+export const fmtNum = (v: number, d = 2) =>
+    v.toLocaleString(getCurrentLocale() === 'en' ? 'en-US' : 'pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+/** YYYY-MM-DD → dd/mm/yyyy (or MM/DD/YYYY in EN) without timezone drift. */
 export const fmtIsoDate = (iso?: string) => {
     if (!iso) return '—';
     const [y, m, d] = iso.slice(0, 10).split('-');
-    return y && m && d ? `${d}/${m}/${y}` : iso;
+    if (!(y && m && d)) return iso;
+    return getCurrentLocale() === 'en' ? `${m}/${d}/${y}` : `${d}/${m}/${y}`;
 };
 
 export const fmtDateTime = (ts?: number | string | null) => {
     if (ts === undefined || ts === null || ts === '') return '—';
     const d = new Date(ts);
+    const isEn = getCurrentLocale() === 'en';
     return Number.isNaN(d.getTime())
         ? '—'
-        : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+        : d.toLocaleString(isEn ? 'en-US' : 'pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
 export const fmtRelative = (iso?: string) => {
     if (!iso) return '—';
+    const isEn = getCurrentLocale() === 'en';
     const diff = Date.now() - new Date(iso).getTime();
     const min = Math.round(diff / 60000);
-    if (min < 1) return 'agora';
-    if (min < 60) return `há ${min} min`;
+    if (min < 1) return isEn ? 'just now' : 'agora';
+    if (min < 60) return isEn ? `${min}m ago` : `há ${min} min`;
     const h = Math.round(min / 60);
-    if (h < 24) return `há ${h} h`;
+    if (h < 24) return isEn ? `${h}h ago` : `há ${h} h`;
     const days = Math.round(h / 24);
+    if (isEn) return days === 1 ? 'yesterday' : `${days}d ago`;
     return days === 1 ? 'ontem' : `há ${days} dias`;
 };
 
@@ -178,7 +192,9 @@ export const SubTabs = <T extends string>({
 );
 
 /** Delete with an inline second click instead of a browser confirm(). */
-export const ConfirmDeleteButton = ({ onConfirm, label = 'Excluir' }: { onConfirm: () => void; label?: string }) => {
+export const ConfirmDeleteButton = ({ onConfirm, label }: { onConfirm: () => void; label?: string }) => {
+    const isEn = getCurrentLocale() === 'en';
+    const resolvedLabel = label || (isEn ? 'Delete' : 'Excluir');
     const [armed, setArmed] = useState(false);
     return armed ? (
         <span className="inline-flex items-center gap-1">
@@ -190,7 +206,7 @@ export const ConfirmDeleteButton = ({ onConfirm, label = 'Excluir' }: { onConfir
                 }}
                 className="rounded-lg bg-data-neg px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-data-neg/90"
             >
-                Confirmar
+                {isEn ? 'Confirm' : 'Confirmar'}
             </button>
             <button
                 type="button"
@@ -200,14 +216,14 @@ export const ConfirmDeleteButton = ({ onConfirm, label = 'Excluir' }: { onConfir
                 }}
                 className="rounded-lg px-2 py-1.5 text-xs font-semibold text-fg-muted hover:bg-surface-2 hover:text-fg"
             >
-                Cancelar
+                {isEn ? 'Cancel' : 'Cancelar'}
             </button>
         </span>
     ) : (
         <button
             type="button"
-            title={label}
-            aria-label={label}
+            title={resolvedLabel}
+            aria-label={resolvedLabel}
             onClick={(e) => {
                 e.stopPropagation();
                 setArmed(true);
@@ -265,7 +281,12 @@ export const KpiCard = ({
 }) => (
     <div className={cn('min-w-0 rounded-xl border border-line bg-surface p-4', className)}>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">{label}</p>
-        <p className={cn('mt-1.5 truncate text-xl font-bold tabular-nums', tone || 'text-fg')}>{value}</p>
+        <p
+            title={typeof value === 'string' || typeof value === 'number' ? String(value) : undefined}
+            className={cn('mt-1.5 truncate text-lg xl:text-xl font-bold tabular-nums', tone || 'text-fg')}
+        >
+            {value}
+        </p>
         {hint && <p className="mt-1 truncate text-[11px] text-fg-muted">{hint}</p>}
     </div>
 );
@@ -307,7 +328,7 @@ export const Badge = ({ children, tone = 'neutral', className }: { children: Rea
 );
 
 export const Breadcrumbs = ({ items }: { items: { label: string; to?: string }[] }) => (
-    <nav aria-label="Navegação estrutural" className="flex flex-wrap items-center gap-1 text-xs text-fg-muted">
+    <nav aria-label={getCurrentLocale() === 'en' ? 'Breadcrumb navigation' : 'Navegação estrutural'} className="flex flex-wrap items-center gap-1 text-xs text-fg-muted">
         {items.map((it, i) => (
             <React.Fragment key={i}>
                 {i > 0 && <span aria-hidden className="text-fg-subtle">/</span>}

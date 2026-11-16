@@ -29,7 +29,9 @@ import {
 } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 import { MT5_BROKERS_CATALOG } from '../../constants/mt5ServersCatalog';
+import { pullAccountHistoryInBatchesAndBuildUnifiedSession } from '../../services/historicalBatchCache';
 
 interface AutoSyncFormProps {
     brokerName: string;
@@ -38,6 +40,8 @@ interface AutoSyncFormProps {
 }
 
 export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFormProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const { accounts, selectedAccountId, refreshAccounts, selectAccount } = useAccount();
     const validSelectedAccountId = selectedAccountId && selectedAccountId !== 'all' ? selectedAccountId : undefined;
     const [login, setLogin] = useState('');
@@ -182,7 +186,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 if (task.status === 'IN_PROGRESS' || task.status === 'RECEIVED') {
                     setStatus({
                         type: 'info',
-                        message: task.message || `Conectando à conta ${targetLogin}...`
+                        message: task.message || (isEn ? `Connecting to account ${targetLogin}...` : `Conectando à conta ${targetLogin}...`)
                     });
                 } else if (task.status === 'SUCCESS') {
                     clearInterval(pollTimerRef.current);
@@ -192,12 +196,20 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     setIsSyncing(false);
                     setStatus({
                         type: 'success',
-                        message: task.message || 'Conta MT5 conectada e sincronizada com sucesso!'
+                        message: task.message || (isEn ? 'MT5 account connected and synced successfully!' : 'Conta MT5 conectada e sincronizada com sucesso!')
                     });
                     await fetchCloudStatus(targetLogin);
                     if (refreshAccounts) await refreshAccounts();
                     if (res.data?.account?.id && selectAccount) {
                         selectAccount(res.data.account.id);
+                    }
+                    void pullAccountHistoryInBatchesAndBuildUnifiedSession({
+                        accountId: res.data?.account?.id || validSelectedAccountId,
+                        accountName: res.data?.account?.name || `MT5 #${targetLogin}`,
+                        syncSourceLabel: `MT5 Cloud Sync (#${targetLogin})`,
+                        triggerLiveBrokerSync: false,
+                    }).catch(() => {});
+                    if (false) {
                     }
                     window.dispatchEvent(new Event('trade-imported'));
                 } else if (task.status === 'FAILED') {
@@ -208,7 +220,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     setIsSyncing(false);
                     setStatus({
                         type: 'error',
-                        message: task.errorMessage || task.message || 'Falha ao autenticar no servidor MT5. Verifique login, senha e nome do servidor.'
+                        message: task.errorMessage || task.message || (isEn
+                            ? 'Failed to authenticate on MT5 server. Check login, password, and server name.'
+                            : 'Falha ao autenticar no servidor MT5. Verifique login, senha e nome do servidor.')
                     });
                     await fetchCloudStatus(targetLogin);
                     window.dispatchEvent(new Event('trade-imported'));
@@ -226,7 +240,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         setRequestFeedback(null);
         setStatus({
             type: 'info',
-            message: 'Iniciando conexão com a sua conta...'
+            message: isEn ? 'Initiating connection to your trading account...' : 'Iniciando conexão com a sua conta...'
         });
 
         try {
@@ -240,8 +254,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                 setServer(res.data.server);
             }
 
-            const confirmationMsg =
-                'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
+            const confirmationMsg = isEn
+                ? 'Connection request queued! Syncing your trading account...'
+                : 'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
             setRequestFeedback(confirmationMsg);
             setStatus({
                 type: 'info',
@@ -269,7 +284,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             setIsLoading(false);
             setStatus({
                 type: 'error',
-                message: e.response?.data?.message || e.message || 'Falha ao enviar solicitação de conexão.'
+                message: e.response?.data?.message || e.message || (isEn ? 'Failed to submit connection request.' : 'Falha ao enviar solicitação de conexão.')
             });
         }
     };
@@ -279,12 +294,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         if (!targetLogin) return;
 
         setIsSyncing(true);
-        const syncMsg = 'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
+        const syncMsg = isEn
+            ? 'Sync request queued! Pulling fills and positions...'
+            : 'Solicitação de conexão enviada com sucesso! Sincronizando sua conta...';
         setRequestFeedback(syncMsg);
         setStatus({
             type: 'info',
             message: forceFull
-                ? 'Atualizando todo o histórico de operações da sua conta...'
+                ? (isEn ? 'Re-importing full historical execution blotter...' : 'Atualizando todo o histórico de operações da sua conta...')
                 : syncMsg
         });
 
@@ -305,7 +322,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             setIsSyncing(false);
             setStatus({
                 type: 'error',
-                message: e.response?.data?.message || 'Erro ao solicitar sincronização.'
+                message: e.response?.data?.message || (isEn ? 'Failed to trigger sync.' : 'Erro ao solicitar sincronização.')
             });
         }
     };
@@ -322,14 +339,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             setRequestFeedback(null);
             setStatus({
                 type: 'info',
-                message: `Conta ${targetLogin} desconectada.`
+                message: isEn ? `Account ${targetLogin} disconnected.` : `Conta ${targetLogin} desconectada.`
             });
             await fetchCloudStatus(targetLogin);
             if (refreshAccounts) await refreshAccounts();
         } catch (e: any) {
             setStatus({
                 type: 'error',
-                message: e.response?.data?.message || 'Erro ao desconectar conta.'
+                message: e.response?.data?.message || (isEn ? 'Failed to disconnect account.' : 'Erro ao desconectar conta.')
             });
         }
     };
@@ -389,24 +406,26 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
         const state = acc?.connectionState || (isAccConnected ? 'CONNECTED' : 'DISCONNECTED');
         if (activeTaskId || state === 'CONNECTING' || state === 'SYNCING') {
             return {
-                label: state === 'SYNCING' ? 'SINCRONIZANDO' : 'CONECTANDO...',
+                label: state === 'SYNCING'
+                    ? (isEn ? 'SYNCING' : 'SINCRONIZANDO')
+                    : (isEn ? 'CONNECTING...' : 'CONECTANDO...'),
                 className: 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 animate-pulse'
             };
         }
         if (state === 'CONNECTED' || isAccConnected) {
             return {
-                label: 'CONECTADO',
+                label: isEn ? 'CONNECTED' : 'CONECTADO',
                 className: 'bg-emerald-500/15 text-accent-fg border border-emerald-500/30'
             };
         }
         if (state === 'AUTH_FAILED') {
             return {
-                label: 'SENHA OU SERVIDOR INVÁLIDO',
+                label: isEn ? 'INVALID PASSWORD OR SERVER' : 'SENHA OU SERVIDOR INVÁLIDO',
                 className: 'bg-rose-500/15 text-danger-fg border border-rose-500/30'
             };
         }
         return {
-            label: 'DESCONECTADO',
+            label: isEn ? 'DISCONNECTED' : 'DESCONECTADO',
             className: 'bg-slate-500/15 text-fg-muted border border-slate-500/30'
         };
     };
@@ -429,7 +448,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     className="flex items-center gap-2 text-fg-muted hover:text-fg transition-colors text-sm"
                 >
                     <ArrowLeft size={16} />
-                    Voltar às opções
+                    {isEn ? 'Back to options' : 'Voltar às opções'}
                 </button>
 
                 {/* Status da Sincronização */}
@@ -441,8 +460,8 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     {worker?.isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
                     <span>
                         {worker?.isOnline
-                            ? 'Sincronização Automática Online'
-                            : 'Conectando ao serviço...'}
+                            ? (isEn ? 'Auto-Sync Bridge Online' : 'Sincronização Automática Online')
+                            : (isEn ? 'Connecting to sync service...' : 'Conectando ao serviço...')}
                     </span>
                 </div>
             </div>
@@ -453,10 +472,10 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-bold uppercase tracking-wider text-fg-muted">
-                                Contas Trader MT5 ({syncedMt5Accounts.length})
+                                {isEn ? `MT5 Trader Accounts (${syncedMt5Accounts.length})` : `Contas Trader MT5 (${syncedMt5Accounts.length})`}
                             </span>
                             <span className="text-[11px] text-accent-fg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
-                                Sem limite de contas
+                                {isEn ? 'Unlimited accounts' : 'Sem limite de contas'}
                             </span>
                         </div>
                         <button
@@ -466,12 +485,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 setPassword('');
                                 setStatus({
                                     type: 'info',
-                                    message: 'Preencha o login, senha e servidor abaixo para sincronizar uma nova conta MT5 (uma nova Conta Trader será criada automaticamente).'
+                                    message: isEn
+                                        ? 'Enter your MT5 login, password, and server below to link another account (a new trading account will be provisioned automatically).'
+                                        : 'Preencha o login, senha e servidor abaixo para sincronizar uma nova conta MT5 (uma nova Conta Trader será criada automaticamente).'
                                 });
                             }}
                             className="text-xs font-bold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 px-3 py-1.5 rounded-xl transition-all"
                         >
-                            + Sincronizar Outra Conta MT5
+                            {isEn ? '+ Link Another MT5 Account' : '+ Sincronizar Outra Conta MT5'}
                         </button>
                     </div>
 
@@ -527,40 +548,47 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         <Cloud size={24} />
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-fg">Conectar {brokerName}</h2>
+                        <h2 className="text-xl font-bold text-fg">{isEn ? `Connect ${brokerName}` : `Conectar ${brokerName}`}</h2>
                         <p className="text-sm text-fg-muted">
-                            Insira os dados da sua conta para importar suas operações automaticamente.
+                            {isEn
+                                ? 'Enter your trading account credentials to auto-sync your executions.'
+                                : 'Insira os dados da sua conta para importar suas operações automaticamente.'}
                         </p>
                     </div>
                 </div>
 
                 <div className="space-y-6">
                     <Input
-                        label="Número da Conta (Login MT5)"
-                        placeholder="Ex: 202658742"
+                        label={isEn ? 'Account Number (MT5 Login)' : 'Número da Conta (Login MT5)'}
+                        placeholder={isEn ? 'e.g. 202658742' : 'Ex: 202658742'}
                         value={login}
                         onChange={(e) => setLogin(e.target.value)}
                         className="bg-canvas border-line"
                     />
 
                     <Input
-                        label="Senha da Conta / Investidor"
+                        label={isEn ? 'Account / Investor Password' : 'Senha da Conta / Investidor'}
                         type="password"
-                        placeholder="Digite a senha da conta MT5"
+                        placeholder={isEn ? 'Enter your MT5 account password' : 'Digite a senha da conta MT5'}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="bg-canvas border-line"
                     />
                     <p className="text-xs text-fg-subtle -mt-4 flex items-center gap-1.5">
                         <ShieldCheck size={14} className="text-accent-fg" />
-                        Seus dados são protegidos com segurança e usados exclusivamente para sincronizar seus trades.
+                        {isEn
+                            ? 'Your credentials are encrypted and used strictly to sync your trades.'
+                            : 'Seus dados são protegidos com segurança e usados exclusivamente para sincronizar seus trades.'}
                     </p>
 
                     {/* Campo Híbrido: Servidor da Corretora (Campo Livre + Dropdown com Busca de Corretoras) */}
                     <div className="space-y-2.5" ref={serverDropdownRef}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="block text-sm font-medium text-fg/80">
-                                Servidor da Corretora <span className="text-xs font-normal text-fg-muted">(Selecione na lista ou digite livremente)</span>
+                                {isEn ? 'Broker Server' : 'Servidor da Corretora'}{' '}
+                                <span className="text-xs font-normal text-fg-muted">
+                                    {isEn ? '(Pick from directory or type manually)' : '(Selecione na lista ou digite livremente)'}
+                                </span>
                             </label>
                             {matchedBrokerForCurrentServer ? (
                                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-accent-fg border border-emerald-500/25">
@@ -570,7 +598,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             ) : server.trim() ? (
                                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/25">
                                     <Server size={12} />
-                                    Servidor Personalizado
+                                    {isEn ? 'Custom Server' : 'Servidor Personalizado'}
                                 </span>
                             ) : null}
                         </div>
@@ -587,7 +615,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     </div>
                                     <input
                                         type="text"
-                                        placeholder="Digite o servidor ou escolha no modal (Ex: Deriv-Demo, Exness-MT5Real...)"
+                                        placeholder={isEn
+                                            ? 'Type server name or select from directory (e.g. Deriv-Demo, Exness-MT5Real...)'
+                                            : 'Digite o servidor ou escolha no modal (Ex: Deriv-Demo, Exness-MT5Real...)'}
                                         value={server}
                                         onChange={(e) => {
                                             setServer(e.target.value);
@@ -601,7 +631,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 setServer('');
                                                 setBrokerSearchQuery('');
                                             }}
-                                            title="Limpar servidor"
+                                            title={isEn ? 'Clear server' : 'Limpar servidor'}
                                             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg p-1 rounded-lg transition-colors"
                                         >
                                             <X size={14} />
@@ -622,7 +652,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     }`}
                                 >
                                     <Building2 size={15} className="text-accent-fg" />
-                                    <span>Corretoras &amp; Servidores ({MT5_BROKERS_CATALOG.length})</span>
+                                    <span>{isEn ? `Brokers & Servers (${MT5_BROKERS_CATALOG.length})` : `Corretoras & Servidores (${MT5_BROKERS_CATALOG.length})`}</span>
                                     <ChevronDown size={15} className={`transition-transform duration-200 ${isServerDropdownOpen ? 'rotate-180 text-accent-fg' : ''}`} />
                                 </button>
                             </div>
@@ -645,10 +675,12 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 </div>
                                                 <div className="min-w-0">
                                                     <h3 className="text-sm sm:text-base font-bold text-fg truncate">
-                                                        Selecionar Corretora &amp; Servidor MT5
+                                                        {isEn ? 'Select Broker & MT5 Server' : 'Selecionar Corretora & Servidor MT5'}
                                                     </h3>
                                                     <p className="text-[11px] sm:text-xs text-fg-muted truncate">
-                                                        Escolha um servidor oficial abaixo ou pesquise pelo nome da sua corretora
+                                                        {isEn
+                                                            ? 'Choose an official server below or search by broker name'
+                                                            : 'Escolha um servidor oficial abaixo ou pesquise pelo nome da sua corretora'}
                                                     </p>
                                                 </div>
                                             </div>
@@ -656,7 +688,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 type="button"
                                                 onClick={() => setIsServerDropdownOpen(false)}
                                                 className="p-2 rounded-xl bg-fg/[0.05] hover:bg-fg/[0.1] text-fg/80 hover:text-fg border border-line transition-colors shrink-0"
-                                                title="Fechar modal"
+                                                title={isEn ? 'Close modal' : 'Fechar modal'}
                                             >
                                                 <X size={18} />
                                             </button>
@@ -671,7 +703,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     <input
                                                         type="text"
                                                         autoFocus
-                                                        placeholder="Buscar corretora, mesa proprietária ou servidor (ex: GoatFunded-Server2, FundingPips, FTMO, Deriv, Exness)..."
+                                                        placeholder={isEn
+                                                            ? 'Search broker, prop firm, or server (e.g. FTMO, FundingPips, Deriv, Exness)...'
+                                                            : 'Buscar corretora, mesa proprietária ou servidor (ex: GoatFunded-Server2, FundingPips, FTMO, Deriv, Exness)...'}
                                                         value={brokerSearchQuery}
                                                         onChange={(e) => setBrokerSearchQuery(e.target.value)}
                                                         className="w-full bg-canvas border border-line-strong focus:border-emerald-500/60 rounded-xl py-2.5 pl-9 pr-8 text-xs sm:text-sm text-fg placeholder:text-fg-subtle focus:outline-none"
@@ -693,17 +727,17 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     onChange={(e) => setSelectedBrokerFilter(e.target.value)}
                                                     className="bg-canvas border border-line-strong focus:border-emerald-500/60 rounded-xl py-2.5 px-3 text-xs sm:text-sm text-fg focus:outline-none sm:w-64"
                                                 >
-                                                    <option value="ALL">Todas as Corretoras ({MT5_BROKERS_CATALOG.length})</option>
-                                                    <optgroup label="Categorias">
-                                                        <option value="Deriv">Somente Deriv</option>
-                                                        <option value="Forex / ECN">Corretoras Forex / ECN</option>
-                                                        <option value="Prop Firm">Prop Firms (Mesas Proprietárias)</option>
-                                                        <option value="MetaQuotes">MetaQuotes Oficial</option>
+                                                    <option value="ALL">{isEn ? `All Brokers (${MT5_BROKERS_CATALOG.length})` : `Todas as Corretoras (${MT5_BROKERS_CATALOG.length})`}</option>
+                                                    <optgroup label={isEn ? 'Categories' : 'Categorias'}>
+                                                        <option value="Deriv">{isEn ? 'Deriv Only' : 'Somente Deriv'}</option>
+                                                        <option value="Forex / ECN">{isEn ? 'Forex / ECN Brokers' : 'Corretoras Forex / ECN'}</option>
+                                                        <option value="Prop Firm">{isEn ? 'Prop Firms' : 'Prop Firms (Mesas Proprietárias)'}</option>
+                                                        <option value="MetaQuotes">{isEn ? 'MetaQuotes Official' : 'MetaQuotes Oficial'}</option>
                                                     </optgroup>
-                                                    <optgroup label="Lista Completa de Corretoras">
+                                                    <optgroup label={isEn ? 'Full Broker Directory' : 'Lista Completa de Corretoras'}>
                                                         {MT5_BROKERS_CATALOG.map((b) => (
                                                             <option key={b.id} value={b.id}>
-                                                                {b.broker} ({b.servers.length} servidores)
+                                                                {b.broker} ({b.servers.length} {isEn ? 'servers' : 'servidores'})
                                                             </option>
                                                         ))}
                                                     </optgroup>
@@ -714,7 +748,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                             <div className="flex flex-wrap items-center justify-between gap-2">
                                                 <div className="flex flex-wrap items-center gap-1.5">
                                                     {[
-                                                        { id: 'ALL', label: 'Todas' },
+                                                        { id: 'ALL', label: isEn ? 'All' : 'Todas' },
                                                         { id: 'Deriv', label: 'Deriv' },
                                                         { id: 'Forex / ECN', label: 'Forex / ECN' },
                                                         { id: 'Prop Firm', label: 'Prop Firms' },
@@ -761,7 +795,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                         {(brokerSearchQuery.trim() || server.trim()) && (
                                             <div className="px-4 py-2.5 bg-indigo-500/10 border-b border-indigo-500/20 flex items-center justify-between gap-2 shrink-0">
                                                 <span className="text-xs text-indigo-200 truncate">
-                                                    Campo livre: <strong>{(brokerSearchQuery.trim() || server.trim())}</strong>
+                                                    {isEn ? 'Custom entry:' : 'Campo livre:'} <strong>{(brokerSearchQuery.trim() || server.trim())}</strong>
                                                 </span>
                                                 <button
                                                     type="button"
@@ -772,7 +806,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     }}
                                                     className="px-3 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 text-[11px] font-semibold shrink-0 transition-colors"
                                                 >
-                                                    Usar este nome exato
+                                                    {isEn ? 'Use exact string' : 'Usar este nome exato'}
                                                 </button>
                                             </div>
                                         )}
@@ -782,10 +816,14 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                             {filteredBrokerGroups.length === 0 ? (
                                                 <div className="p-8 text-center space-y-2">
                                                     <p className="text-sm text-fg/80 font-medium">
-                                                        Nenhum servidor pré-cadastrado encontrado para &ldquo;{brokerSearchQuery}&rdquo;.
+                                                        {isEn
+                                                            ? <>No pre-indexed servers matching &ldquo;{brokerSearchQuery}&rdquo;.</>
+                                                            : <>Nenhum servidor pré-cadastrado encontrado para &ldquo;{brokerSearchQuery}&rdquo;.</>}
                                                     </p>
                                                     <p className="text-xs text-fg-subtle">
-                                                        Você pode usar o nome digitado acima ou digitar qualquer servidor manualmente.
+                                                        {isEn
+                                                            ? 'You can use the custom entry above or type any server name manually.'
+                                                            : 'Você pode usar o nome digitado acima ou digitar qualquer servidor manualmente.'}
                                                     </p>
                                                     {brokerSearchQuery.trim() && (
                                                         <button
@@ -797,7 +835,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                             className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
                                                         >
                                                             <Check size={14} />
-                                                            Usar &ldquo;{brokerSearchQuery.trim()}&rdquo; como servidor
+                                                            {isEn
+                                                                ? <>Use &ldquo;{brokerSearchQuery.trim()}&rdquo; as server</>
+                                                                : <>Usar &ldquo;{brokerSearchQuery.trim()}&rdquo; como servidor</>}
                                                         </button>
                                                     )}
                                                 </div>
@@ -822,7 +862,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                                 </div>
                                                             </div>
                                                             <span className="text-[10px] sm:text-xs font-medium text-fg-muted bg-fg/[0.03] px-2.5 py-1 rounded-lg border border-line">
-                                                                {group.servers.length} servidor(es)
+                                                                {isEn ? `${group.servers.length} server(s)` : `${group.servers.length} servidor(es)`}
                                                             </span>
                                                         </div>
 
@@ -892,7 +932,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     {requestFeedback}
                                 </p>
                                 <p className="text-xs text-emerald-200/80">
-                                    Sincronização automática ativa {lastUpdatedAt ? `(atualizado às ${lastUpdatedAt})` : ''}
+                                    {isEn
+                                        ? `Auto-sync active ${lastUpdatedAt ? `(updated at ${lastUpdatedAt})` : ''}`
+                                        : `Sincronização automática ativa ${lastUpdatedAt ? `(atualizado às ${lastUpdatedAt})` : ''}`}
                                 </p>
                             </div>
                         </div>
@@ -927,28 +969,30 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                     {(requestFeedback || activeTask || acc?.mt5Id) && (
                         <div className="p-4 rounded-xl bg-canvas border border-line space-y-3">
                             <div className="flex items-center justify-between text-xs text-fg-muted">
-                                <span className="font-semibold text-fg">Progresso da Conexão</span>
-                                <span>{worker?.isOnline ? 'Serviço Online' : 'Conectando...'}</span>
+                                <span className="font-semibold text-fg">{isEn ? 'Connection Pipeline' : 'Progresso da Conexão'}</span>
+                                <span>{worker?.isOnline ? (isEn ? 'Bridge Online' : 'Serviço Online') : (isEn ? 'Connecting...' : 'Conectando...')}</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
                                 <div className={`p-2.5 rounded-lg border ${step1Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-surface border-line text-fg-subtle'}`}>
-                                    <span className="font-bold block">1. Solicitação</span>
-                                    <span>{step1Done ? 'Recebida' : 'Aguardando envio'}</span>
+                                    <span className="font-bold block">{isEn ? '1. Request' : '1. Solicitação'}</span>
+                                    <span>{step1Done ? (isEn ? 'Queued' : 'Recebida') : (isEn ? 'Pending' : 'Aguardando envio')}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step2Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step1Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-surface border-line text-fg-subtle'}`}>
-                                    <span className="font-bold block">2. Processamento</span>
-                                    <span>{step2Done ? 'Em andamento' : 'Iniciando...'}</span>
+                                    <span className="font-bold block">{isEn ? '2. Processing' : '2. Processamento'}</span>
+                                    <span>{step2Done ? (isEn ? 'Active' : 'Em andamento') : (isEn ? 'Initializing...' : 'Iniciando...')}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step3Failed ? 'bg-rose-500/15 border-rose-500/30 text-rose-300' : step3Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step2Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-surface border-line text-fg-subtle'}`}>
-                                    <span className="font-bold block">3. Conta MT5</span>
-                                    <span>{step3Failed ? 'Dados incorretos' : step3Done ? 'Conta conectada' : 'Verificando...'}</span>
+                                    <span className="font-bold block">{isEn ? '3. MT5 Account' : '3. Conta MT5'}</span>
+                                    <span>{step3Failed ? (isEn ? 'Auth failed' : 'Dados incorretos') : step3Done ? (isEn ? 'Authenticated' : 'Conta conectada') : (isEn ? 'Verifying...' : 'Verificando...')}</span>
                                 </div>
                                 <div className={`p-2.5 rounded-lg border ${step4Done ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : step3Done ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 animate-pulse' : 'bg-surface border-line text-fg-subtle'}`}>
-                                    <span className="font-bold block">4. Operações</span>
+                                    <span className="font-bold block">{isEn ? '4. Executions' : '4. Operações'}</span>
                                     <span>
                                         {step4Done
-                                            ? `${totalOperationsCount} sincronizada(s) (${openPositionsCount} abertas, ${totalTradesCount} fechadas)`
-                                            : 'Importando...'}
+                                            ? (isEn
+                                                ? `${totalOperationsCount} synced (${openPositionsCount} open, ${totalTradesCount} closed)`
+                                                : `${totalOperationsCount} sincronizada(s) (${openPositionsCount} abertas, ${totalTradesCount} fechadas)`)
+                                            : (isEn ? 'Importing...' : 'Importando...')}
                                     </span>
                                 </div>
                             </div>
@@ -963,7 +1007,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         disabled={!login || !password || !server || isLoading || !!activeTaskId}
                         icon={<Power size={18} />}
                     >
-                        {activeTaskId ? 'Conectando e Importando Operações...' : 'Conectar e Sincronizar Agora'}
+                        {activeTaskId
+                            ? (isEn ? 'Connecting & Importing Executions...' : 'Conectando e Importando Operações...')
+                            : (isEn ? 'Connect & Sync Now' : 'Conectar e Sincronizar Agora')}
                     </Button>
                 </div>
             </Card>
@@ -983,7 +1029,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                             <div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <h3 className="font-bold text-fg">
-                                        Conta #{acc.mt5Id}
+                                        {isEn ? `Account #${acc.mt5Id}` : `Conta #${acc.mt5Id}`}
                                     </h3>
                                     <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${connectionBadge.className}`}>
                                         {connectionBadge.label}
@@ -1016,7 +1062,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 isLoading={isSyncing}
                                 icon={<RefreshCw size={14} />}
                             >
-                                Atualizar Agora
+                                {isEn ? 'Sync Now' : 'Atualizar Agora'}
                             </Button>
                             {isAccConnected && (
                                 <Button
@@ -1025,7 +1071,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                     onClick={handleDisconnect}
                                     icon={<LogOut size={14} />}
                                 >
-                                    Desconectar
+                                    {isEn ? 'Disconnect' : 'Desconectar'}
                                 </Button>
                             )}
                         </div>
@@ -1033,39 +1079,39 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
                         <div className="p-3 rounded-xl bg-canvas border border-line">
-                            <span className="text-xs text-fg-muted block">Saldo</span>
+                            <span className="text-xs text-fg-muted block">{isEn ? 'Balance' : 'Saldo'}</span>
                             <span className="font-bold text-fg text-base">
                                 {acc.currency || 'USD'} {Number(acc.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-canvas border border-line">
-                            <span className="text-xs text-fg-muted block">Patrimônio (Equity)</span>
+                            <span className="text-xs text-fg-muted block">{isEn ? 'Equity' : 'Patrimônio (Equity)'}</span>
                             <span className="font-bold text-accent-fg text-base">
                                 {acc.currency || 'USD'} {Number(acc.equity || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-canvas border border-line">
-                            <span className="text-xs text-fg-muted block">Trades Fechados</span>
+                            <span className="text-xs text-fg-muted block">{isEn ? 'Closed Trades' : 'Trades Fechados'}</span>
                             <span className="font-bold text-indigo-400 text-base">
-                                {totalTradesCount} {totalTradesCount === 1 ? 'operação' : 'operações'}
+                                {totalTradesCount} {isEn ? (totalTradesCount === 1 ? 'trade' : 'trades') : (totalTradesCount === 1 ? 'operação' : 'operações')}
                             </span>
                         </div>
                         <div className="p-3 rounded-xl bg-canvas border border-line">
-                            <span className="text-xs text-fg-muted block">Posições em Aberto</span>
+                            <span className="text-xs text-fg-muted block">{isEn ? 'Open Positions' : 'Posições em Aberto'}</span>
                             <span className="font-bold text-fg text-base">
-                                {openPositionsCount} {openPositionsCount === 1 ? 'ativa' : 'ativas'}
+                                {openPositionsCount} {isEn ? 'active' : (openPositionsCount === 1 ? 'ativa' : 'ativas')}
                             </span>
                         </div>
                     </div>
 
                     {acc.lastSyncAt && (
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-fg-subtle">
-                            <span>Última atualização: {new Date(acc.lastSyncAt).toLocaleString()}</span>
+                            <span>{isEn ? 'Last synced:' : 'Última atualização:'} {new Date(acc.lastSyncAt).toLocaleString(isEn ? 'en-US' : 'pt-BR')}</span>
                             <button
                                 onClick={() => handleForceSync(true)}
                                 className="text-indigo-400 hover:underline"
                             >
-                                Reimportar histórico completo
+                                {isEn ? 'Re-import full history' : 'Reimportar histórico completo'}
                             </button>
                         </div>
                     )}
@@ -1079,23 +1125,25 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         <div className="flex flex-wrap items-center gap-2.5">
                             <FileCheck size={18} className="text-accent-fg" />
                             <h3 className="text-base font-bold text-fg">
-                                Operações Sincronizadas ({totalOperationsCount})
+                                {isEn ? `Synced Executions (${totalOperationsCount})` : `Operações Sincronizadas (${totalOperationsCount})`}
                             </h3>
                             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-accent-fg border border-emerald-500/30">
-                                {openPositionsCount} em aberto
+                                {isEn ? `${openPositionsCount} open` : `${openPositionsCount} em aberto`}
                             </span>
                             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-                                {totalTradesCount} fechada(s)
+                                {isEn ? `${totalTradesCount} closed` : `${totalTradesCount} fechada(s)`}
                             </span>
                         </div>
                         <span className="text-xs text-fg-muted">
-                            Conta #{acc.mt5Id}
+                            {isEn ? `Account #${acc.mt5Id}` : `Conta #${acc.mt5Id}`}
                         </span>
                     </div>
 
                     {allSyncedOperations.length === 0 ? (
                         <div className="p-6 text-center rounded-xl bg-canvas border border-line text-fg-muted text-sm">
-                            Nenhuma operação encontrada nesta conta até o momento. Assim que novas posições ou trades forem sincronizados, eles aparecerão aqui automaticamente.
+                            {isEn
+                                ? 'No executions found on this account yet. As new fills or positions sync, they will appear here automatically.'
+                                : 'Nenhuma operação encontrada nesta conta até o momento. Assim que novas posições ou trades forem sincronizados, eles aparecerão aqui automaticamente.'}
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -1103,13 +1151,13 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                 <thead>
                                     <tr className="border-b border-line text-fg-muted uppercase">
                                         <th className="py-2.5 px-3">Ticket</th>
-                                        <th className="py-2.5 px-3">Ativo</th>
-                                        <th className="py-2.5 px-3">Tipo</th>
+                                        <th className="py-2.5 px-3">{isEn ? 'Symbol' : 'Ativo'}</th>
+                                        <th className="py-2.5 px-3">{isEn ? 'Side' : 'Tipo'}</th>
                                         <th className="py-2.5 px-3">Status</th>
-                                        <th className="py-2.5 px-3">Volume</th>
-                                        <th className="py-2.5 px-3">Preço (Ent. → Atual/Saída)</th>
-                                        <th className="py-2.5 px-3">Data</th>
-                                        <th className="py-2.5 px-3 text-right">Resultado</th>
+                                        <th className="py-2.5 px-3">{isEn ? 'Size (Lots)' : 'Volume'}</th>
+                                        <th className="py-2.5 px-3">{isEn ? 'Price (Entry → Mark/Exit)' : 'Preço (Ent. → Atual/Saída)'}</th>
+                                        <th className="py-2.5 px-3">{isEn ? 'Timestamp' : 'Data'}</th>
+                                        <th className="py-2.5 px-3 text-right">{isEn ? 'P&L' : 'Resultado'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-line">
@@ -1144,11 +1192,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     {isOpen ? (
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
                                                             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                                                            ABERTA
+                                                            {isEn ? 'OPEN' : 'ABERTA'}
                                                         </span>
                                                     ) : (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-surface-2 text-fg/80 border border-line">
-                                                            FECHADA
+                                                            {isEn ? 'CLOSED' : 'FECHADA'}
                                                         </span>
                                                     )}
                                                 </td>
@@ -1160,9 +1208,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 </td>
                                                 <td className="py-2.5 px-3 text-fg-muted">
                                                     {trade.closeTime
-                                                        ? new Date(trade.closeTime).toLocaleString('pt-BR', { timeZone: 'UTC' })
+                                                        ? new Date(trade.closeTime).toLocaleString(isEn ? 'en-US' : 'pt-BR', { timeZone: 'UTC' })
                                                         : trade.openTime
-                                                            ? new Date(trade.openTime).toLocaleString('pt-BR', { timeZone: 'UTC' })
+                                                            ? new Date(trade.openTime).toLocaleString(isEn ? 'en-US' : 'pt-BR', { timeZone: 'UTC' })
                                                             : '-'}
                                                 </td>
                                                 <td className={`py-2.5 px-3 text-right font-bold ${
@@ -1171,7 +1219,7 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                     <div>{isWin ? '+' : ''}{grossPnl.toFixed(2)} {acc.currency || 'USD'}</div>
                                                     {Math.abs(netPnl - grossPnl) > 0.005 && (
                                                         <div className="text-[10px] font-normal text-fg-muted">
-                                                            Líq: {netPnl >= 0 ? '+' : ''}{netPnl.toFixed(2)}
+                                                            {isEn ? 'Net:' : 'Líq:'} {netPnl >= 0 ? '+' : ''}{netPnl.toFixed(2)}
                                                         </div>
                                                     )}
                                                 </td>
@@ -1192,11 +1240,11 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                         <div className="flex items-center gap-2.5">
                             <Clock size={18} className="text-indigo-400" />
                             <h3 className="text-base font-bold text-fg">
-                                Histórico de Sincronização
+                                {isEn ? 'Sync Activity Log' : 'Histórico de Sincronização'}
                             </h3>
                         </div>
                         <span className="text-xs text-fg-muted">
-                            Atividades recentes
+                            {isEn ? 'Recent events' : 'Atividades recentes'}
                         </span>
                     </div>
 
@@ -1213,13 +1261,15 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 ? 'bg-rose-500/15 text-danger-fg border border-rose-500/30'
                                                 : 'bg-emerald-500/15 text-accent-fg border border-emerald-500/30'
                                         }`}>
-                                            {ev.severity === 'ERROR' ? 'Atenção' : 'Conectado'}
+                                            {ev.severity === 'ERROR'
+                                                ? (isEn ? 'Warning' : 'Atenção')
+                                                : (isEn ? 'Connected' : 'Conectado')}
                                         </span>
                                     </div>
                                     <p className="text-fg/80 mt-1">{ev.message}</p>
                                 </div>
                                 <span className="text-fg-subtle shrink-0 text-[11px]">
-                                    {new Date(ev.timestamp).toLocaleTimeString()}
+                                    {new Date(ev.timestamp).toLocaleTimeString(isEn ? 'en-US' : 'pt-BR')}
                                 </span>
                             </div>
                         ))}
@@ -1236,20 +1286,22 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
                                                 ? 'bg-emerald-500/15 text-accent-fg border border-emerald-500/30'
                                                 : 'bg-rose-500/15 text-danger-fg border border-rose-500/30'
                                         }`}>
-                                            {log.status === 'SUCCESS' ? 'Sincronizado' : 'Falha'}
+                                            {log.status === 'SUCCESS'
+                                                ? (isEn ? 'Synced' : 'Sincronizado')
+                                                : (isEn ? 'Failed' : 'Falha')}
                                         </span>
                                         {log.tradesCount > 0 && (
                                             <span className="text-fg-muted font-medium">
-                                                {log.tradesCount} {log.tradesCount === 1 ? 'nova operação' : 'novas operações'}
+                                                {log.tradesCount} {isEn ? (log.tradesCount === 1 ? 'new fill' : 'new fills') : (log.tradesCount === 1 ? 'nova operação' : 'novas operações')}
                                             </span>
                                         )}
                                     </div>
                                     <p className="text-fg/80 mt-1">
-                                        {log.details || log.errorDetails || log.fileName || 'Sincronização automática concluída'}
+                                        {log.details || log.errorDetails || log.fileName || (isEn ? 'Auto-sync completed' : 'Sincronização automática concluída')}
                                     </p>
                                 </div>
                                 <span className="text-fg-subtle shrink-0 text-[11px]">
-                                    {new Date(log.createdAt).toLocaleString()}
+                                    {new Date(log.createdAt).toLocaleString(isEn ? 'en-US' : 'pt-BR')}
                                 </span>
                             </div>
                         ))}

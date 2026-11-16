@@ -1,25 +1,42 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/cn';
+import { buildTaggedUrl } from '../../lib/attribution';
 
-/** In-page anchors (`#id`) render as <a>; app routes as router <Link>. */
+/** In-page anchors (`#id`) render as <a>; app routes as router <Link> with UTM tagging. */
 export const SmartLink = ({
     href,
     className,
     children,
     onClick,
+    ctaTag,
+    intent,
 }: {
     href: string;
     className?: string;
     children: React.ReactNode;
     onClick?: () => void;
+    ctaTag?: string;
+    intent?: string;
 }) =>
     href.startsWith('#') ? (
-        <a href={href} className={className} onClick={onClick}>
+        <a
+            href={href}
+            className={className}
+            onClick={onClick}
+            data-cta-tag={ctaTag}
+            data-intent={intent}
+        >
             {children}
         </a>
     ) : (
-        <Link to={href} className={className} onClick={onClick}>
+        <Link
+            to={ctaTag ? buildTaggedUrl(href, { ctaTag, intent }) : href}
+            className={className}
+            onClick={onClick}
+            data-cta-tag={ctaTag}
+            data-intent={intent}
+        >
             {children}
         </Link>
     );

@@ -5,8 +5,11 @@ import { Input } from '../ui/Input';
 import { Cloud, Monitor, CheckCircle, Download, Power, AlertTriangle, FileText, Upload, Copy, Wifi } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 
 export const ConnectionManager = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [method, setMethod] = useState<'LOCAL' | 'CLOUD' | 'FILE'>('LOCAL');
     const { selectedAccountId, refreshAccounts } = useAccount();
 
@@ -109,7 +112,7 @@ export const ConnectionManager = () => {
                     ...(selectedAccountId && selectedAccountId !== 'all' ? { 'x-account-id': selectedAccountId } : {})
                 }
             });
-            setStatusData({ message: 'Relatório importado com sucesso! Histórico atualizado.' });
+            setStatusData({ message: isEn ? 'Statement imported successfully. Trade history updated.' : 'Relatório importado com sucesso! Histórico atualizado.' });
             setSelectedFile(null);
             await refreshAccounts();
             window.dispatchEvent(new Event('trade-imported'));

@@ -1,22 +1,21 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
+import { useAccount } from '../../context/AccountContext';
 import {
     BacktestReplaySession,
     BacktestStrategy,
     createBacktestSession,
-    createBacktestStrategy,
-    deleteBacktestSession,
-    deleteBacktestStrategy,
-    loadBacktestSessions,
-    loadBacktestStrategies,
-    updateBacktestSession,
-    updateBacktestStrategy,
 } from '../../services/backtestWorkspaceStore';
+import { LocalDbStorageStats } from '../../services/historicalBatchCache';
+import { useBacktestWorkspaceStore } from '../../store/useBacktestWorkspaceStore';
+import { subscribeBacktestCrossTabEvents } from '../../store/useReplaySessionStore';
 
 type CreateSessionInput = Parameters<typeof createBacktestSession>[0];
 
 interface WorkspaceValue {
     strategies: BacktestStrategy[];
     sessions: BacktestReplaySession[];
+    isCloudSyncing: boolean;
+    localDbStats: LocalDbStorageStats;
     refresh: () => void;
     strategyById: (id?: string | null) => BacktestStrategy | undefined;
     sessionById: (id?: string | null) => BacktestReplaySession | undefined;
@@ -31,66 +30,93 @@ interface WorkspaceValue {
 const Ctx = createContext<WorkspaceValue | null>(null);
 
 /**
- * Single in-memory view of the backtesting workspace (strategies + replay
- * sessions) shared by the hub header and every sub-page. The replay terminal
- * writes to the same store, so we re-read when the tab regains focus.
+ * Unified Zustand-backed provider of the Backtesting Workspace (strategies + replay
+ * sessions + Local IndexedDB telemetry + Redis/PostgreSQL sync + Cross-Tab BroadcastChannel).
  */
 export const BacktestWorkspaceProvider = ({ children }: { children: React.ReactNode }) => {
-    const [strategies, setStrategies] = useState<BacktestStrategy[]>(() => loadBacktestStrategies());
-    const [sessions, setSessions] = useState<BacktestReplaySession[]>(() => loadBacktestSessions());
-
-    const refresh = useCallback(() => {
-        setStrategies(loadBacktestStrategies());
-        setSessions(loadBacktestSessions());
-    }, []);
+    const { selectedAccountId } = useAccount();
+    const strategies = useBacktestWorkspaceStore((s) => s.strategies);
+    const sessions = useBacktestWorkspaceStore((s) => s.sessions);
+    const isCloudSyncing = useBacktestWorkspaceStore((s) => s.isCloudSyncing);
+    const localDbStats = useBacktestWorkspaceStore((s) => s.localDbStats);
+    const refreshFromLocal = useBacktestWorkspaceStore((s) => s.refreshFromLocal);
+    const refreshLocalDbStats = useBacktestWorkspaceStore((s) => s.refreshLocalDbStats);
+    const syncWithBackendRedis = useBacktestWorkspaceStore((s) => s.syncWithBackendRedis);
+    const createStrategyAction = useBacktestWorkspaceStore((s) => s.createStrategy);
+    const updateStrategyAction = useBacktestWorkspaceStore((s) => s.updateStrategy);
+    const deleteStrategyAction = useBacktestWorkspaceStore((s) => s.deleteStrategy);
+    const createSessionAction = useBacktestWorkspaceStore((s) => s.createSession);
+    const updateSessionAction = useBacktestWorkspaceStore((s) => s.updateSession);
+    const deleteSessionAction = useBacktestWorkspaceStore((s) => s.deleteSession);
 
     useEffect(() => {
-        const onVisible = () => document.visibilityState === 'visible' && refresh();
-        window.addEventListener('focus', refresh);
-        document.addEventListener('visibilitychange', onVisible);
-        window.addEventListener('storage', refresh);
-        return () => {
-            window.removeEventListener('focus', refresh);
-            document.removeEventListener('visibilitychange', onVisible);
-            window.removeEventListener('storage', refresh);
+        void syncWithBackendRedis(true);
+        void refreshLocalDbStats();
+    }, [selectedAccountId, syncWithBackendRedis, refreshLocalDbStats]);
+
+    useEffect(() => {
+        const onFocus = () => {
+            refreshFromLocal();
+            void syncWithBackendRedis(false);
         };
-    }, [refresh]);
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') {
+                refreshFromLocal();
+                void syncWithBackendRedis(false);
+            }
+        };
+        const unsubscribeCrossTab = subscribeBacktestCrossTabEvents(() => {
+            refreshFromLocal();
+            void refreshLocalDbStats();
+        });
+
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('storage', refreshFromLocal);
+        window.addEventListener('torex:backtest-workspace-updated', refreshFromLocal);
+
+        return () => {
+            unsubscribeCrossTab();
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('storage', refreshFromLocal);
+            window.removeEventListener('torex:backtest-workspace-updated', refreshFromLocal);
+        };
+    }, [refreshFromLocal, refreshLocalDbStats, syncWithBackendRedis]);
+
+    const accountParam =
+        selectedAccountId && selectedAccountId !== 'all' ? selectedAccountId : undefined;
 
     const value = useMemo<WorkspaceValue>(
         () => ({
             strategies,
             sessions,
-            refresh,
+            isCloudSyncing,
+            localDbStats,
+            refresh: refreshFromLocal,
             strategyById: (id) => strategies.find((s) => s.id === id),
             sessionById: (id) => sessions.find((s) => s.id === id),
-            createStrategy: (input) => {
-                const created = createBacktestStrategy(input);
-                setStrategies(loadBacktestStrategies());
-                return created;
-            },
-            updateStrategy: (id, patch) => {
-                setStrategies(updateBacktestStrategy(id, patch));
-                // Sessions display the strategy name: keep it in sync.
-                if (patch.name) {
-                    loadBacktestSessions()
-                        .filter((s) => s.strategyId === id)
-                        .forEach((s) => updateBacktestSession(s.id, { strategyName: patch.name }));
-                    setSessions(loadBacktestSessions());
-                }
-            },
-            deleteStrategy: (id) => setStrategies(deleteBacktestStrategy(id)),
-            createSession: (input) => {
-                const created = createBacktestSession(input);
-                setSessions(loadBacktestSessions());
-                return created;
-            },
-            updateSession: (id, patch) => {
-                updateBacktestSession(id, patch);
-                setSessions(loadBacktestSessions());
-            },
-            deleteSession: (id) => setSessions(deleteBacktestSession(id)),
+            createStrategy: (input) => createStrategyAction(input),
+            updateStrategy: (id, patch) => updateStrategyAction(id, patch, accountParam),
+            deleteStrategy: (id) => deleteStrategyAction(id),
+            createSession: (input) => createSessionAction(input),
+            updateSession: (id, patch) => updateSessionAction(id, patch, accountParam),
+            deleteSession: (id) => deleteSessionAction(id),
         }),
-        [strategies, sessions, refresh]
+        [
+            strategies,
+            sessions,
+            isCloudSyncing,
+            localDbStats,
+            refreshFromLocal,
+            createStrategyAction,
+            updateStrategyAction,
+            deleteStrategyAction,
+            createSessionAction,
+            updateSessionAction,
+            deleteSessionAction,
+            accountParam,
+        ]
     );
 
     return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { useLocale } from '../../context/LocaleContext';
 
 interface ManualTradeModalProps {
     onClose: () => void;
@@ -9,6 +10,8 @@ interface ManualTradeModalProps {
 }
 
 export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onSave }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [formData, setFormData] = useState({
         symbol: '',
         type: 'BUY',
@@ -34,7 +37,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
         e.preventDefault();
         // Basic Validation
         if (!formData.symbol || !formData.openTime || !formData.closeTime) {
-            alert('Preencha os campos obrigatórios');
+            alert(isEn ? 'Please fill in the required fields' : 'Preencha os campos obrigatórios');
             return;
         }
         await onSave(formData);
@@ -50,12 +53,12 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                     <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-bold text-fg mb-6">Adicionar Trade Manual</h2>
+                <h2 className="text-xl font-bold text-fg mb-6">{isEn ? 'Log Manual Execution' : 'Adicionar Trade Manual'}</h2>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Ativo</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Symbol' : 'Ativo'}</label>
                             <input
                                 name="symbol"
                                 value={formData.symbol}
@@ -65,7 +68,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                             />
                         </div>
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Tipo</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Side' : 'Tipo'}</label>
                             <select
                                 name="type"
                                 value={formData.type}
@@ -80,7 +83,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Volume</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Size / Lots' : 'Volume'}</label>
                             <input
                                 type="number" step="0.01"
                                 name="volume"
@@ -90,7 +93,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                             />
                         </div>
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Lucro ($)</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Net P&L ($)' : 'Lucro ($)'}</label>
                             <input
                                 type="number" step="0.01"
                                 name="profit"
@@ -103,7 +106,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Preço Entrada</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Entry Price' : 'Preço Entrada'}</label>
                             <input
                                 type="number" step="0.00001"
                                 name="openPrice"
@@ -113,7 +116,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                             />
                         </div>
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Preço Saída</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Exit Price' : 'Preço Saída'}</label>
                             <input
                                 type="number" step="0.00001"
                                 name="closePrice"
@@ -126,7 +129,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Abertura</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Entry Time' : 'Abertura'}</label>
                             <input
                                 type="datetime-local"
                                 name="openTime"
@@ -136,7 +139,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                             />
                         </div>
                         <div>
-                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Fechamento</label>
+                            <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Exit Time' : 'Fechamento'}</label>
                             <input
                                 type="datetime-local"
                                 name="closeTime"
@@ -148,20 +151,20 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
                     </div>
 
                     <div className="border-t border-line pt-4 mt-2">
-                        <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">Humor & Setup</label>
+                        <label className="text-xs text-fg-subtle uppercase font-bold block mb-1">{isEn ? 'Mindset & Setup' : 'Humor & Setup'}</label>
                         <div className="grid grid-cols-2 gap-4">
                             <input
                                 name="mood"
                                 value={formData.mood}
                                 onChange={handleChange}
-                                placeholder="Humor ex: Calmo"
+                                placeholder={isEn ? 'Mindset e.g. Composed' : 'Humor ex: Calmo'}
                                 className="w-full bg-surface border border-line-strong rounded p-2 text-fg"
                             />
                             <input
                                 name="setup"
                                 value={formData.setup}
                                 onChange={handleChange}
-                                placeholder="Setup ex: Pullback"
+                                placeholder={isEn ? 'Setup e.g. Pullback' : 'Setup ex: Pullback'}
                                 className="w-full bg-surface border border-line-strong rounded p-2 text-fg"
                             />
                         </div>
@@ -169,7 +172,7 @@ export const ManualTradeModal: React.FC<ManualTradeModalProps> = ({ onClose, onS
 
                     <div className="flex justify-end pt-4">
                         <Button type="submit" className="w-full sm:w-auto" icon={<Save size={16} />}>
-                            Salvar Trade
+                            {isEn ? 'Save Execution' : 'Salvar Trade'}
                         </Button>
                     </div>
                 </form>

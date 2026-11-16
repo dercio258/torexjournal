@@ -2,7 +2,14 @@ import { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Edit, Check, Gift, Sparkles, Power, Users, Clock, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Edit, Check, Gift, Sparkles, Power, Users, Clock, ShieldCheck, CreditCard, Plus } from 'lucide-react';
+import {
+    AdminBadge,
+    AdminBanner,
+    AdminLoadingState,
+    AdminPageHeader,
+    AdminStatCard,
+} from './components/AdminPrimitives';
 import api from '../../api';
 
 export const AdminPlans = () => {
@@ -17,7 +24,7 @@ export const AdminPlans = () => {
         totalTrialsGranted: number;
     } | null>(null);
     const [isTogglingTrial, setIsTogglingTrial] = useState(false);
-    const [trialMessage, setTrialMessage] = useState<string | null>(null);
+    const [banner, setBanner] = useState<{ tone: 'success' | 'warning' | 'danger' | 'info'; message: string } | null>(null);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,7 +34,8 @@ export const AdminPlans = () => {
         features: '', // comma separated string for input
         monthlyPrice: '',
         annualDiscountPercent: '20',
-        trialDays: '0'
+        trialDays: '0',
+        aiDailyCredits: '100'
     });
     const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -60,7 +68,7 @@ export const AdminPlans = () => {
     const handleToggleTrial = async () => {
         if (!trialCampaign) return;
         setIsTogglingTrial(true);
-        setTrialMessage(null);
+        setBanner(null);
         try {
             const nextState = !trialCampaign.active;
             const { data } = await api.post('/admin/trial-campaign/toggle', {
@@ -68,16 +76,16 @@ export const AdminPlans = () => {
                 days: 30
             });
             setTrialCampaign(data);
-            setTrialMessage(
-                nextState
-                    ? 'Campanha de Trial ATIVADA com sucesso! Todos os novos traders sem plano ativo receberão 30 dias de Plano Premium grátis ao acessar o painel.'
-                    : 'Campanha de Trial PAUSADA. Novos trials não serão concedidos automaticamente.'
-            );
-            setTimeout(() => setTrialMessage(null), 7000);
+            setBanner({
+                tone: nextState ? 'success' : 'info',
+                message: nextState
+                    ? 'Campanha de Trial ATIVADA com sucesso! Novos traders recebem 30 dias de Plano Premium grátis ao acessar o painel.'
+                    : 'Campanha de Trial PAUSADA. Novos trials não serão concedidos automaticamente.',
+            });
             fetchPlans();
         } catch (error) {
             console.error('Error toggling trial:', error);
-            alert('Falha ao alternar status do período de teste.');
+            setBanner({ tone: 'danger', message: 'Falha ao alternar status do período de teste.' });
         } finally {
             setIsTogglingTrial(false);
         }
@@ -86,6 +94,7 @@ export const AdminPlans = () => {
     const handleCreateOrUpdatePlan = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsCreating(true);
+        setBanner(null);
         try {
             const planData = {
                 tier: newPlan.tier.toUpperCase(),
@@ -95,30 +104,36 @@ export const AdminPlans = () => {
                 annualDiscountPercent: parseInt(newPlan.annualDiscountPercent),
                 trialEnabled: parseInt(newPlan.trialDays) > 0,
                 trialDays: parseInt(newPlan.trialDays),
+                aiDailyCredits: parseInt(newPlan.aiDailyCredits) || 100,
                 isActive: true
             };
 
             if (editingPlanId) {
                 await api.patch(`/admin/plans/${editingPlanId}`, planData);
-                alert('Plano atualizado com sucesso!');
+                setBanner({ tone: 'success', message: `Plano ${planData.tier} atualizado com sucesso.` });
             } else {
                 await api.post('/admin/plans', planData);
-                alert('Plano criado com sucesso!');
+                setBanner({ tone: 'success', message: `Plano ${planData.tier} criado com sucesso.` });
             }
 
             setIsModalOpen(false);
             setEditingPlanId(null);
-            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0' });
+            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
             fetchPlans();
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            alert(`Erro ao ${editingPlanId ? 'atualizar' : 'criar'} plano.`);
+            setBanner({
+                tone: 'danger',
+                message: error.response?.data?.message || `Erro ao ${editingPlanId ? 'atualizar' : 'criar'} plano.`,
+            });
         } finally {
             setIsCreating(false);
         }
     };
 
     const openEditModal = (plan: any) => {
+        const defaultCredits =
+            plan.tier === 'PREMIUM' ? 20000 : plan.tier === 'PRO' ? 2000 : 100;
         setEditingPlanId(plan.id);
         setNewPlan({
             tier: plan.tier,
@@ -126,72 +141,117 @@ export const AdminPlans = () => {
             features: plan.features?.join(', ') || '',
             monthlyPrice: plan.monthlyPrice.toString(),
             annualDiscountPercent: plan.annualDiscountPercent.toString(),
-            trialDays: plan.trialDays.toString()
+            trialDays: plan.trialDays.toString(),
+            aiDailyCredits: (plan.aiDailyCredits ?? defaultCredits).toString()
         });
         setIsModalOpen(true);
     };
 
-    if (isLoading) return <div className="text-fg">Carregando...</div>;
+    if (isLoading) return <AdminLoadingState label="Carregando catálogo de planos e campanha de trial..." />;
+
+    const activePlansCount = plans.filter((p) => p.isActive !== false).length;
 
     return (
-        <div>
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-fg">Planos de Assinatura</h1>
-            </div>
+        <div className="space-y-6 animate-in fade-in duration-300">
+            <AdminPageHeader
+                badge="Clientes & Receita"
+                title="Planos & Campanha de Trial"
+                subtitle="Configure tiers de assinatura, limites diários de IA, descontos anuais e onboarding gratuito."
+                icon={<CreditCard className="h-5 w-5" />}
+                actions={
+                    <Button
+                        variant="brand"
+                        size="sm"
+                        onClick={() => {
+                            setEditingPlanId(null);
+                            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
+                            setIsModalOpen(true);
+                        }}
+                        icon={<Plus className="h-3.5 w-3.5" />}
+                    >
+                        Novo Plano
+                    </Button>
+                }
+            />
 
-            {/* Notificação Toast de Alteração de Estado do Trial */}
-            {trialMessage && (
-                <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-accent-fg flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <CheckCircle2 size={20} className="shrink-0 text-accent-fg" />
-                    <span className="text-sm font-medium">{trialMessage}</span>
-                </div>
+            {banner && (
+                <AdminBanner
+                    tone={banner.tone}
+                    message={banner.message}
+                    onDismiss={() => setBanner(null)}
+                />
             )}
 
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <AdminStatCard
+                    label="Planos Ativos"
+                    value={`${activePlansCount} / ${plans.length}`}
+                    hint="Visíveis para checkout"
+                    icon={<CreditCard className="h-4 w-4" />}
+                    tone="info"
+                />
+                <AdminStatCard
+                    label="Campanha Trial"
+                    value={trialCampaign?.active ? 'Ativa' : 'Pausada'}
+                    hint={`${trialCampaign?.trialDays || 30} dias Premium`}
+                    icon={<Gift className="h-4 w-4" />}
+                    tone={trialCampaign?.active ? 'accent' : 'default'}
+                />
+                <AdminStatCard
+                    label="Trials Concedidos"
+                    value={trialCampaign?.totalTrialsGranted ?? 0}
+                    hint="Total de onboarding"
+                    icon={<Users className="h-4 w-4" />}
+                    tone="warning"
+                />
+                <AdminStatCard
+                    label="Plano do Trial"
+                    value={trialCampaign?.tier || 'PREMIUM'}
+                    hint="Tier automático"
+                    icon={<ShieldCheck className="h-4 w-4" />}
+                />
+            </div>
+
             {/* CARD INSTITUCIONAL: CAMPANHA DE PERÍODO DE TESTE (TRIAL 30 DIAS) */}
-            <div className="mb-8 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-line rounded-3xl p-6 sm:p-7 relative overflow-hidden shadow-xl">
-                <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+            <div className="bg-surface border border-line rounded-2xl p-6 sm:p-7 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-80 h-80 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
 
                 <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
                     <div className="space-y-3 max-w-2xl">
-                        <div className="flex items-center gap-2.5">
-                            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                                <Gift size={20} />
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
+                                <Gift size={18} />
                             </div>
-                            <span className="text-xs font-black uppercase tracking-widest text-fg-muted">
+                            <span className="text-xs font-bold uppercase tracking-widest text-fg-muted">
                                 Campanha Global de Onboarding
                             </span>
-                            <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
-                                trialCampaign?.active 
-                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-accent-fg' 
-                                    : 'bg-surface-2 border-line-strong text-fg-muted'
-                            }`}>
-                                <span className={`w-2 h-2 rounded-full ${trialCampaign?.active ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                            <AdminBadge tone={trialCampaign?.active ? 'success' : 'neutral'} dot>
                                 {trialCampaign?.active ? 'Campanha Ativa' : 'Pausada'}
-                            </span>
+                            </AdminBadge>
                         </div>
 
-                        <h2 className="text-xl sm:text-2xl font-black text-fg tracking-tight">
+                        <h2 className="text-xl sm:text-2xl font-bold text-fg tracking-tight">
                             Período de Teste Gratuito (Trial de 30 Dias Premium)
                         </h2>
 
                         <p className="text-xs sm:text-sm text-fg-muted leading-relaxed">
-                            Quando ativada, qualquer novo trader que acessar o sistema sem um plano ativo recebe 
-                            automaticamente <strong className="text-fg font-bold">30 dias de Plano Premium grátis</strong> de forma instantânea, com disparo de e-mail formal de boas-vindas. Usuários que já usufruíram do teste uma vez são bloqueados de receber novamente e direcionados à página de preços.
+                            Quando ativada, qualquer novo trader que acessar o sistema sem um plano ativo recebe
+                            automaticamente <strong className="text-fg font-semibold">30 dias de Plano Premium grátis</strong> de forma instantânea, com disparo de e-mail formal de boas-vindas. Usuários que já usufruíram do teste uma vez são bloqueados de receber novamente.
                         </p>
 
-                        <div className="flex flex-wrap items-center gap-3 sm:gap-4 pt-1 text-xs text-fg/80">
-                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
+                        <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-fg-muted">
+                            <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
                                 <ShieldCheck size={14} className="text-accent-fg" />
                                 <span>Plano Concedido: <strong className="text-fg">PREMIUM (PRO)</strong></span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
-                                <Clock size={14} className="text-amber-400" />
+                            <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
+                                <Clock size={14} className="text-amber-500" />
                                 <span>Duração: <strong className="text-fg">{trialCampaign?.trialDays || 30} Dias</strong></span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 bg-canvas/60 px-3 py-1.5 rounded-xl border border-line">
-                                <Users size={14} className="text-indigo-400" />
+                            <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
+                                <Users size={14} className="text-sky-500" />
                                 <span>Total Beneficiados: <strong className="text-accent-fg font-bold">{trialCampaign?.totalTrialsGranted ?? 0} traders</strong></span>
                             </div>
                         </div>
@@ -199,30 +259,17 @@ export const AdminPlans = () => {
 
                     <div className="flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center lg:items-end gap-3 w-full lg:w-auto shrink-0">
                         <Button
-                            variant={trialCampaign?.active ? "secondary" : "primary"}
+                            variant={trialCampaign?.active ? 'danger' : 'brand'}
+                            size="lg"
                             onClick={handleToggleTrial}
                             isLoading={isTogglingTrial}
-                            className={`py-3.5 px-6 rounded-xl font-bold text-xs sm:text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
-                                trialCampaign?.active 
-                                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-500/10' 
-                                    : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black shadow-emerald-500/20'
-                            }`}
+                            icon={trialCampaign?.active ? <Power size={16} /> : <Sparkles size={16} />}
                         >
-                            {trialCampaign?.active ? (
-                                <>
-                                    <Power size={16} />
-                                    Pausar Período de Teste
-                                </>
-                            ) : (
-                                <>
-                                    <Sparkles size={16} />
-                                    Ativar Período de Teste (30 Dias)
-                                </>
-                            )}
+                            {trialCampaign?.active ? 'Pausar Período de Teste' : 'Ativar Período de Teste (30 Dias)'}
                         </Button>
                         <span className="text-[11px] text-fg-subtle text-center lg:text-right">
-                            {trialCampaign?.active 
-                                ? 'Novos usuários recebem 30 dias automaticamente' 
+                            {trialCampaign?.active
+                                ? 'Novos usuários recebem 30 dias automaticamente'
                                 : 'Novos trials suspensos até nova ativação'}
                         </span>
                     </div>
@@ -275,6 +322,19 @@ export const AdminPlans = () => {
                                 <span className="text-fg-muted">Dias de Teste</span>
                                 <span className="text-fg font-medium">{plan.trialDays} dias</span>
                             </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-fg-muted">Créditos IA / Dia</span>
+                                <span className="text-accent-fg font-bold">
+                                    {(
+                                        plan.aiDailyCredits ??
+                                        (plan.tier === 'PREMIUM'
+                                            ? 20000
+                                            : plan.tier === 'PRO'
+                                              ? 2000
+                                              : 100)
+                                    ).toLocaleString('pt-BR')}
+                                </span>
+                            </div>
                         </div>
 
                         <Button 
@@ -294,7 +354,7 @@ export const AdminPlans = () => {
                 onClose={() => {
                     setIsModalOpen(false);
                     setEditingPlanId(null);
-                    setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0' });
+                    setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
                 }}
                 title={editingPlanId ? "Editar Plano" : "Novo Plano de Assinatura"}
             >
@@ -361,6 +421,21 @@ export const AdminPlans = () => {
                                 placeholder="0"
                             />
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">
+                            Créditos Diários de IA (reseta a cada dia)
+                        </label>
+                        <input
+                            type="number"
+                            min={0}
+                            value={newPlan.aiDailyCredits}
+                            onChange={(e) => setNewPlan({ ...newPlan, aiDailyCredits: e.target.value })}
+                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                            placeholder="Ex: 100 (BASIC), 2000 (PRO), 20000 (PREMIUM)"
+                            required
+                        />
                     </div>
 
                     <Button

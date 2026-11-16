@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Sparkles, CheckCircle2, ArrowRight, X, ShieldCheck, Zap, BarChart3, Brain, Users } from 'lucide-react';
+import { useLocale } from '../../context/LocaleContext';
 
 interface TrialCelebrationModalProps {
     isOpen: boolean;
@@ -13,6 +14,8 @@ export const TrialCelebrationModal: React.FC<TrialCelebrationModalProps> = ({
     onClose,
     days = 30,
 }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     if (!isOpen) return null;
 
     const handleAcknowledge = () => {
@@ -37,7 +40,7 @@ export const TrialCelebrationModal: React.FC<TrialCelebrationModalProps> = ({
                 <button
                     onClick={handleAcknowledge}
                     className="absolute top-4 right-4 p-2 rounded-xl text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
-                    title="Fechar"
+                    title={isEn ? 'Close' : 'Fechar'}
                 >
                     <X size={18} />
                 </button>
@@ -50,54 +53,82 @@ export const TrialCelebrationModal: React.FC<TrialCelebrationModalProps> = ({
                     <div>
                         <div className="flex items-center gap-1.5">
                             <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-500/15 text-accent-fg border border-emerald-500/30">
-                                Presente Torex Journal
+                                {isEn ? 'Torex Journal Grant' : 'Presente Torex Journal'}
                             </span>
                             <span className="text-[10px] font-bold text-fg-muted flex items-center gap-1">
                                 <ShieldCheck size={12} className="text-accent-fg" /> VIP
                             </span>
                         </div>
                         <h2 className="text-xl sm:text-2xl font-black text-fg tracking-tight mt-0.5">
-                            {days} Dias de Plano Premium Liberados!
+                            {isEn ? `${days}-Day Premium Access Unlocked!` : `${days} Dias de Plano Premium Liberados!`}
                         </h2>
                     </div>
                 </div>
 
                 <p className="text-xs sm:text-sm text-fg-muted leading-relaxed mb-5">
-                    Você ganhou <strong className="text-accent-fg font-bold">{days} dias de acesso gratuito e irrestrito</strong> ao plano institucional mais completo do mercado para turbinar seus resultados.
+                    {isEn ? (
+                        <>You have been granted <strong className="text-accent-fg font-bold">{days} days of unrestricted complimentary access</strong> to the full institutional trading workspace.</>
+                    ) : (
+                        <>Você ganhou <strong className="text-accent-fg font-bold">{days} dias de acesso gratuito e irrestrito</strong> ao plano institucional mais completo do mercado para turbinar seus resultados.</>
+                    )}
                 </p>
 
                 {/* Recursos Desbloqueados */}
                 <div className="bg-canvas-subtle border border-line rounded-2xl p-4 mb-6 space-y-3">
                     <span className="text-[11px] font-bold text-fg-muted uppercase tracking-wider block mb-1">
-                        Ferramentas Ativas no seu Painel:
+                        {isEn ? 'Unlocked Workspace Suite:' : 'Ferramentas Ativas no seu Painel:'}
                     </span>
 
                     <div className="grid gap-2.5 sm:grid-cols-2 text-xs">
                         <div className="flex items-start gap-2 text-fg">
                             <Zap size={15} className="text-accent-fg shrink-0 mt-0.5" />
-                            <span><strong>Auto-Sync MT5 / Deriv:</strong> importação instantânea de trades</span>
+                            <span>
+                                {isEn ? (
+                                    <><strong>MT5 / Deriv Auto-Sync:</strong> automated live ledger import</>
+                                ) : (
+                                    <><strong>Auto-Sync MT5 / Deriv:</strong> importação instantânea de trades</>
+                                )}
+                            </span>
                         </div>
 
                         <div className="flex items-start gap-2 text-fg">
                             <BarChart3 size={15} className="text-accent-fg shrink-0 mt-0.5" />
-                            <span><strong>Diário Quantitativo:</strong> métricas de consistência e PnL</span>
+                            <span>
+                                {isEn ? (
+                                    <><strong>Quantitative Telemetry:</strong> consistency, expectancy &amp; P&amp;L analytics</>
+                                ) : (
+                                    <><strong>Diário Quantitativo:</strong> métricas de consistência e PnL</>
+                                )}
+                            </span>
                         </div>
 
                         <div className="flex items-start gap-2 text-fg">
                             <Brain size={15} className="text-accent-fg shrink-0 mt-0.5" />
-                            <span><strong>Gestão Emocional:</strong> psicologia e controle comportamental</span>
+                            <span>
+                                {isEn ? (
+                                    <><strong>Mindset &amp; Guardrails:</strong> behavioral scoring and tilt detection</>
+                                ) : (
+                                    <><strong>Gestão Emocional:</strong> psicologia e controle comportamental</>
+                                )}
+                            </span>
                         </div>
 
                         <div className="flex items-start gap-2 text-fg">
                             <Users size={15} className="text-accent-fg shrink-0 mt-0.5" />
-                            <span><strong>Network Torex:</strong> posts, ideias e conexão entre traders</span>
+                            <span>
+                                {isEn ? (
+                                    <><strong>Torex Desk Network:</strong> verified trade ideas and peer desk feed</>
+                                ) : (
+                                    <><strong>Network Torex:</strong> posts, ideias e conexão entre traders</>
+                                )}
+                            </span>
                         </div>
                     </div>
 
                     <div className="pt-2 border-t border-line flex items-center justify-between text-[11px] text-fg-muted">
-                        <span>Cobrança automática:</span>
+                        <span>{isEn ? 'Recurring billing:' : 'Cobrança automática:'}</span>
                         <span className="text-accent-fg font-bold flex items-center gap-1">
-                            <CheckCircle2 size={13} /> Nenhuma (Totalmente Gratuito)
+                            <CheckCircle2 size={13} /> {isEn ? 'None (100% Complimentary)' : 'Nenhuma (Totalmente Gratuito)'}
                         </span>
                     </div>
                 </div>
@@ -107,7 +138,7 @@ export const TrialCelebrationModal: React.FC<TrialCelebrationModalProps> = ({
                     onClick={handleAcknowledge}
                     className="w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black py-3.5 px-6 rounded-xl transition-all shadow-xl shadow-emerald-500/20 active:scale-98 text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                    Começar a Usar Meu Plano Premium
+                    {isEn ? 'Enter Premium Workspace' : 'Começar a Usar Meu Plano Premium'}
                     <ArrowRight size={16} />
                 </button>
             </div>

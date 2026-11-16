@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Send, MessageSquare, X } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 import api from '../../api';
 
 interface Message {
@@ -16,6 +17,8 @@ interface Message {
 
 export const ChatWidget = () => {
     const { token, user } = useAuth();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
@@ -100,8 +103,8 @@ export const ChatWidget = () => {
             const lowerTitle = notif.title?.toLowerCase() || '';
             const lowerMsg = notif.message?.toLowerCase() || '';
             const isSensitive = 
-                lowerTitle.includes('senha') || lowerTitle.includes('token') || lowerTitle.includes('2fa') || lowerTitle.includes('código') || lowerTitle.includes('recupera') ||
-                lowerMsg.includes('senha') || lowerMsg.includes('token') || lowerMsg.includes('2fa') || lowerMsg.includes('código') || lowerMsg.includes('recupera');
+                lowerTitle.includes('senha') || lowerTitle.includes('password') || lowerTitle.includes('token') || lowerTitle.includes('2fa') || lowerTitle.includes('código') || lowerTitle.includes('code') || lowerTitle.includes('recupera') || lowerTitle.includes('recover') ||
+                lowerMsg.includes('senha') || lowerMsg.includes('password') || lowerMsg.includes('token') || lowerMsg.includes('2fa') || lowerMsg.includes('código') || lowerMsg.includes('code') || lowerMsg.includes('recupera') || lowerMsg.includes('recover');
 
             if (isSensitive) {
                 console.warn('[PWA Notification] Blocked native display of sensitive content:', notif.title);
@@ -153,7 +156,7 @@ export const ChatWidget = () => {
                     <div className="p-4 bg-canvas border-b border-line flex justify-between items-center">
                         <h3 className="font-bold text-fg flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Comunidade Pro
+                            {isEn ? 'Pro Community' : 'Comunidade Pro'}
                         </h3>
                         <button
                             onClick={() => setIsOpen(false)}
@@ -196,7 +199,7 @@ export const ChatWidget = () => {
                             value={newMessage}
                             onChange={e => setNewMessage(e.target.value)}
                             onKeyDown={handleKeyPress}
-                            placeholder="Digite sua mensagem..."
+                            placeholder={isEn ? 'Type your message...' : 'Digite sua mensagem...'}
                             className="flex-1 bg-surface-2 border-none rounded-xl px-4 py-2 text-sm text-fg focus:ring-1 focus:ring-indigo-500 outline-none"
                         />
                         <button

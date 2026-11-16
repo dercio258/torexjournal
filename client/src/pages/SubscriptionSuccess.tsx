@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { CheckCircle, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { useLocale } from '../context/LocaleContext';
+import { trackConversion } from '../lib/tracking';
 
 export const SubscriptionSuccess = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const location = useLocation();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
 
     useEffect(() => {
@@ -14,6 +18,12 @@ export const SubscriptionSuccess = () => {
         // Show success if query param exists OR if navigated with location state
         if (subscriptionId || location.state?.method || location.state?.success) {
             setStatus('success');
+            trackConversion('purchase', {
+                metadata: {
+                    subscriptionId: subscriptionId || undefined,
+                    method: location.state?.method || 'card',
+                },
+            });
         } else {
             setStatus('error');
         }
@@ -25,8 +35,14 @@ export const SubscriptionSuccess = () => {
                 {status === 'loading' && (
                     <>
                         <Loader2 className="w-16 h-16 text-indigo-500 animate-spin mx-auto mb-6" />
-                        <h2 className="text-2xl font-bold text-fg mb-2">Processando...</h2>
-                        <p className="text-fg-muted">Aguarde enquanto confirmamos sua assinatura.</p>
+                        <h2 className="text-2xl font-bold text-fg mb-2">
+                            {isEn ? 'Confirming...' : 'Processando...'}
+                        </h2>
+                        <p className="text-fg-muted">
+                            {isEn
+                                ? 'Please wait while we verify your subscription.'
+                                : 'Aguarde enquanto confirmamos sua assinatura.'}
+                        </p>
                     </>
                 )}
 
@@ -35,12 +51,16 @@ export const SubscriptionSuccess = () => {
                         <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                             <CheckCircle className="w-10 h-10 text-emerald-500" />
                         </div>
-                        <h2 className="text-2xl font-bold text-fg mb-2">Assinatura Confirmada!</h2>
+                        <h2 className="text-2xl font-bold text-fg mb-2">
+                            {isEn ? 'Subscription Active!' : 'Assinatura Confirmada!'}
+                        </h2>
                         <p className="text-fg-muted mb-8">
-                            Sua assinatura foi criada com sucesso. Seu acesso será liberado em instantes.
+                            {isEn
+                                ? 'Your plan is now live. Full workspace access is unlocked.'
+                                : 'Sua assinatura foi criada com sucesso. Seu acesso será liberado em instantes.'}
                         </p>
                         <Button variant="primary" onClick={() => navigate('/dashboard')} className="w-full">
-                            Ir para Dashboard
+                            {isEn ? 'Go to Dashboard' : 'Ir para Dashboard'}
                         </Button>
                     </>
                 )}
@@ -50,12 +70,16 @@ export const SubscriptionSuccess = () => {
                         <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
                             <CheckCircle className="w-10 h-10 text-rose-500" />
                         </div>
-                        <h2 className="text-2xl font-bold text-fg mb-2">Algo deu errado</h2>
+                        <h2 className="text-2xl font-bold text-fg mb-2">
+                            {isEn ? 'Verification Failed' : 'Algo deu errado'}
+                        </h2>
                         <p className="text-fg-muted mb-8">
-                            Não foi possível confirmar os detalhes da assinatura.
+                            {isEn
+                                ? 'We could not verify your subscription details.'
+                                : 'Não foi possível confirmar os detalhes da assinatura.'}
                         </p>
                         <Button variant="secondary" onClick={() => navigate('/pricing')} className="w-full">
-                            Voltar
+                            {isEn ? 'Back to Plans' : 'Voltar'}
                         </Button>
                     </>
                 )}

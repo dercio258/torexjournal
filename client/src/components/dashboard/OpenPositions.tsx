@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '../ui/Card';
 import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../../api';
+import { useLocale } from '../../context/LocaleContext';
 
 interface Position {
     ticket: number;
@@ -17,6 +18,8 @@ interface Position {
 }
 
 export const OpenPositions = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [positions, setPositions] = useState<Position[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -57,12 +60,12 @@ export const OpenPositions = () => {
             <Card className="p-6">
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-blue-400" /> Posições Abertas
+                        <Activity className="w-4 h-4 text-blue-400" /> {isEn ? 'Open Positions' : 'Posições Abertas'}
                     </h2>
                 </div>
                 <div className="text-center py-8 text-fg-subtle">
                     <Activity className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                    <p>Nenhuma posição aberta no momento</p>
+                    <p>{isEn ? 'No open positions right now' : 'Nenhuma posição aberta no momento'}</p>
                 </div>
             </Card>
         );
@@ -72,10 +75,12 @@ export const OpenPositions = () => {
         <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-blue-400" /> Posições Abertas
+                    <Activity className="w-4 h-4 text-blue-400" /> {isEn ? 'Open Positions' : 'Posições Abertas'}
                 </h2>
                 <span className="text-xs font-mono text-fg/80 bg-surface-2 border border-line px-2 py-0.5 rounded-lg">
-                    {positions.length} Ativa{positions.length !== 1 ? 's' : ''}
+                    {isEn
+                        ? `${positions.length} Open`
+                        : `${positions.length} Ativa${positions.length !== 1 ? 's' : ''}`}
                 </span>
             </div>
 
@@ -83,12 +88,12 @@ export const OpenPositions = () => {
                 <table className="w-full text-sm text-left">
                     <thead>
                         <tr className="border-b border-line">
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Símbolo</th>
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Tipo</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Volume</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Entrada</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Atual</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Lucro</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Symbol' : 'Símbolo'}</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Side' : 'Tipo'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Size (Lots)' : 'Volume'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Entry' : 'Entrada'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Mark' : 'Atual'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Floating P&L' : 'Lucro'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-line">

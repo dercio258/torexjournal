@@ -1,19 +1,22 @@
 import React, { useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { PREVIEW_TABS } from './content';
+import { getLandingContent, type LandingLocale } from './content';
 import { Section, SectionHeading } from './primitives';
 
 /** Product module switcher implemented as an accessible tablist (arrow keys, Home/End). */
-export const PlatformShowcase = () => {
-    const [activeId, setActiveId] = useState(PREVIEW_TABS[0].id);
+export const PlatformShowcase = ({ locale = 'pt' }: { locale?: LandingLocale }) => {
+    const { showcase } = getLandingContent(locale);
+    const tabs = showcase.tabs;
+    const [activeId, setActiveId] = useState(tabs[0].id);
     const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-    const activeIndex = Math.max(0, PREVIEW_TABS.findIndex((t) => t.id === activeId));
-    const current = PREVIEW_TABS[activeIndex];
+    const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === activeId));
+    const current = tabs[activeIndex];
+    const headingId = `${showcase.sectionId}-title`;
 
     const focusTab = (index: number) => {
-        const i = (index + PREVIEW_TABS.length) % PREVIEW_TABS.length;
-        setActiveId(PREVIEW_TABS[i].id);
+        const i = (index + tabs.length) % tabs.length;
+        setActiveId(tabs[i].id);
         tabRefs.current[i]?.focus();
     };
 
@@ -22,7 +25,7 @@ export const PlatformShowcase = () => {
             ArrowRight: activeIndex + 1,
             ArrowLeft: activeIndex - 1,
             Home: 0,
-            End: PREVIEW_TABS.length - 1,
+            End: tabs.length - 1,
         };
         if (e.key in keys) {
             e.preventDefault();
@@ -31,21 +34,21 @@ export const PlatformShowcase = () => {
     };
 
     return (
-        <Section id="plataforma" aria-labelledby="plataforma-title">
+        <Section id={showcase.sectionId} aria-labelledby={headingId}>
             <SectionHeading
-                id="plataforma-title"
-                eyebrow="Plataforma interativa"
-                title="Visualize cada dimensão do seu operacional"
-                description="Alterne entre os módulos analíticos do Torex Journal para gerenciar suas operações com precisão."
+                id={headingId}
+                eyebrow={showcase.eyebrow}
+                title={showcase.title}
+                description={showcase.description}
             />
 
             <div
                 role="tablist"
-                aria-label="Módulos da plataforma"
+                aria-label={showcase.tablistAriaLabel}
                 onKeyDown={onKeyDown}
                 className="relative z-10 mx-auto mb-10 mt-8 flex max-w-6xl flex-wrap items-center justify-center gap-2.5 sm:gap-3"
             >
-                {PREVIEW_TABS.map((tab, i) => {
+                {tabs.map((tab, i) => {
                     const Icon = tab.icon;
                     const selected = tab.id === activeId;
                     return (
@@ -58,6 +61,8 @@ export const PlatformShowcase = () => {
                             aria-selected={selected}
                             aria-controls="plataforma-panel"
                             tabIndex={selected ? 0 : -1}
+                            data-cta-tag={`lp_pt_tab_${tab.id}`}
+                            data-intent={`interest_${tab.id}`}
                             onClick={() => setActiveId(tab.id)}
                             className={cn(
                                 'flex items-center gap-2 rounded-full border px-4 py-2.5 text-xs font-bold transition-all sm:px-5 sm:text-sm',
@@ -112,7 +117,6 @@ export const PlatformShowcase = () => {
                     </p>
                 </div>
             </div>
-
         </Section>
     );
 };

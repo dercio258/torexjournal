@@ -51,6 +51,7 @@ html.dark,
     --ds-data-pos: 14 165 160;
     --ds-data-neg: 220 38 38;
     --ds-data-1: 57 135 229;
+    --ds-data-radar: 139 92 246;
 
     color-scheme: dark;
 }
@@ -77,6 +78,7 @@ html.light {
     --ds-shadow-alpha: 0.10;
 
     --ds-data-1: 42 120 214;
+    --ds-data-radar: 99 102 241;
 
     color-scheme: light;
 }
@@ -272,4 +274,51 @@ html.light {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgb(var(--ds-fg-subtle));
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Smooth theme-aware skeleton shimmer (GPU-composited) */
+@keyframes torexSkeletonShimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+.skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background-color: rgb(var(--ds-surface-2));
+}
+
+.skeleton-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgb(var(--ds-line) / 0.05) 45%,
+        rgb(var(--ds-line) / 0.10) 50%,
+        rgb(var(--ds-line) / 0.05) 55%,
+        transparent 100%
+    );
+    animation: torexSkeletonShimmer 1.65s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-shimmer::after {
+        animation: none;
+    }
 }

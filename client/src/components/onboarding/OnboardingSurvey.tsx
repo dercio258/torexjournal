@@ -15,93 +15,94 @@ import {
 } from 'lucide-react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 
 interface OnboardingSurveyProps {
   onComplete: () => void;
 }
 
-const steps = [
+const getSteps = (isEn: boolean) => [
   {
     id: 'experience',
-    title: 'Sua Experiência',
-    question: 'Quanto tempo você opera no mercado financeiro?',
+    title: isEn ? 'Market Experience' : 'Sua Experiência',
+    question: isEn ? 'How long have you been actively trading financial markets?' : 'Quanto tempo você opera no mercado financeiro?',
     icon: TrendingUp,
     options: [
-      { label: 'Iniciante (< 1 ano)', value: 'beginner' },
-      { label: 'Intermediário (1-3 anos)', value: 'intermediate' },
-      { label: 'Avançado (3-5 anos)', value: 'advanced' },
-      { label: 'Profissional (5+ anos)', value: 'pro' },
+      { label: isEn ? 'Developing (< 1 year)' : 'Iniciante (< 1 ano)', value: 'beginner' },
+      { label: isEn ? 'Intermediate (1-3 years)' : 'Intermediário (1-3 anos)', value: 'intermediate' },
+      { label: isEn ? 'Experienced (3-5 years)' : 'Avançado (3-5 anos)', value: 'advanced' },
+      { label: isEn ? 'Institutional / Desk (5+ years)' : 'Profissional (5+ anos)', value: 'pro' },
     ]
   },
   {
     id: 'entity',
-    title: 'Seu Perfil',
-    question: 'Você opera como indivíduo ou em nome de uma empresa?',
+    title: isEn ? 'Trading Profile' : 'Seu Perfil',
+    question: isEn ? 'Do you trade individual capital or under a prop firm / entity?' : 'Você opera como indivíduo ou em nome de uma empresa?',
     icon: Users,
     options: [
-      { label: 'Individual (Varejo)', value: 'individual' },
-      { label: 'Empresa / Institucional', value: 'company' },
+      { label: isEn ? 'Retail / Personal Capital' : 'Individual (Varejo)', value: 'individual' },
+      { label: isEn ? 'Prop Firm / Institutional Desk' : 'Empresa / Institucional', value: 'company' },
     ]
   },
   {
     id: 'volume',
-    title: 'Volume Operacional',
-    question: 'Qual o seu volume médio de movimentação diária?',
+    title: isEn ? 'Daily Turnover' : 'Volume Operacional',
+    question: isEn ? 'What is your average daily notional trading volume?' : 'Qual o seu volume médio de movimentação diária?',
     icon: DollarSign,
     options: [
-      { label: '0 - 100$', value: 'low' },
-      { label: '100$ - 1.000$', value: 'medium' },
-      { label: '1.000$ - 10.000$', value: 'high' },
-      { label: 'Acima de 10.000$', value: 'whale' },
+      { label: '$0 - $100', value: 'low' },
+      { label: '$100 - $1,000', value: 'medium' },
+      { label: '$1,000 - $10,000', value: 'high' },
+      { label: isEn ? '$10,000+' : 'Acima de 10.000$', value: 'whale' },
     ]
   },
   {
     id: 'goal',
-    title: 'Seu Objetivo',
-    question: 'Qual o seu objetivo principal ao usar o Torex Journal?',
+    title: isEn ? 'Primary Objective' : 'Seu Objetivo',
+    question: isEn ? 'What is your main goal inside Torex Journal?' : 'Qual o seu objetivo principal ao usar o Torex Journal?',
     icon: Target,
     options: [
-      { label: 'Viver de Trading', value: 'full_time' },
-      { label: 'Renda Extra', value: 'side_income' },
-      { label: 'Gestão de Capital', value: 'management' },
-      { label: 'Aprendizado e Disciplina', value: 'learning' },
+      { label: isEn ? 'Full-Time Trading Career' : 'Viver de Trading', value: 'full_time' },
+      { label: isEn ? 'Consistent Side Income' : 'Renda Extra', value: 'side_income' },
+      { label: isEn ? 'Capital & Prop Firm Risk Control' : 'Gestão de Capital', value: 'management' },
+      { label: isEn ? 'Edge Refinement & Discipline' : 'Aprendizado e Disciplina', value: 'learning' },
     ]
   },
   {
     id: 'market',
-    title: 'Mercado Principal',
-    question: 'Em qual mercado você foca a maior parte das suas operações?',
+    title: isEn ? 'Primary Asset Class' : 'Mercado Principal',
+    question: isEn ? 'Which asset class represents most of your executions?' : 'Em qual mercado você foca a maior parte das suas operações?',
     icon: Globe,
     options: [
-      { label: 'Forex', value: 'forex' },
-      { label: 'Criptoativos', value: 'crypto' },
-      { label: 'Índices / Ações', value: 'indices' },
-      { label: 'Sintéticos / Deriv', value: 'synthetic' },
+      { label: isEn ? 'FX / Spot Currencies' : 'Forex', value: 'forex' },
+      { label: isEn ? 'Crypto Perpetuals & Spot' : 'Criptoativos', value: 'crypto' },
+      { label: isEn ? 'Indices & Equities' : 'Índices / Ações', value: 'indices' },
+      { label: isEn ? 'Synthetics / Deriv' : 'Sintéticos / Deriv', value: 'synthetic' },
     ]
   },
   {
     id: 'discipline',
-    title: 'Autoavalição',
-    question: 'Como você avalia seu nível atual de disciplina e controle emocional?',
+    title: isEn ? 'Execution Discipline' : 'Autoavalição',
+    question: isEn ? 'How would you rate your adherence to your risk plan?' : 'Como você avalia seu nível atual de disciplina e controle emocional?',
     icon: ShieldCheck,
     options: [
-      { label: 'Sigo meu plano à risca', value: 'disciplined' },
-      { label: 'Ocasionalmente saio do plano', value: 'improving' },
-      { label: 'Tenho dificuldade em seguir regras', value: 'struggling' },
-      { label: 'Ainda não tenho um plano definido', value: 'no_plan' },
+      { label: isEn ? 'Strictly follow my playbook & stops' : 'Sigo meu plano à risca', value: 'disciplined' },
+      { label: isEn ? 'Occasional rule drift or overtrading' : 'Ocasionalmente saio do plano', value: 'improving' },
+      { label: isEn ? 'Struggle with tilt & revenge trading' : 'Tenho dificuldade em seguir regras', value: 'struggling' },
+      { label: isEn ? 'Still formalizing my trading plan' : 'Ainda não tenho um plano definido', value: 'no_plan' },
     ]
   },
   {
     id: 'referral',
-    title: 'Como nos encontrou?',
-    question: 'Como você ficou sabendo do Torex Journal?',
+    title: isEn ? 'Discovery Channel' : 'Como nos encontrou?',
+    question: isEn ? 'How did you hear about Torex Journal?' : 'Como você ficou sabendo do Torex Journal?',
     icon: Search,
     options: [
-      { label: 'Instagram / Redes Sociais', value: 'social' },
+      { label: isEn ? 'Instagram / Social Media' : 'Instagram / Redes Sociais', value: 'social' },
       { label: 'YouTube', value: 'youtube' },
-      { label: 'Recomendação de Amigo', value: 'friend' },
-      { label: 'Pesquisa no Google', value: 'search' },
-      { label: 'Outro', value: 'other' },
+      { label: isEn ? 'Trader Referral' : 'Recomendação de Amigo', value: 'friend' },
+      { label: isEn ? 'Google Search' : 'Pesquisa no Google', value: 'search' },
+      { label: isEn ? 'Other' : 'Outro', value: 'other' },
     ]
   }
 ];
@@ -111,6 +112,9 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { updateUser } = useAuth();
+  const { locale } = useLocale();
+  const isEn = locale === 'en';
+  const steps = getSteps(isEn);
 
   const handleOptionSelect = (value: string) => {
     const stepId = steps[currentStep].id;
@@ -132,7 +136,7 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
       onComplete();
     } catch (error) {
       console.error('Failed to complete onboarding', error);
-      alert('Houve um erro ao salvar suas respostas. Por favor, tente novamente.');
+      alert(isEn ? 'Failed to save onboarding responses. Please try again.' : 'Houve um erro ao salvar suas respostas. Por favor, tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -166,7 +170,7 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
               </div>
               <div>
                 <span className="text-xs font-bold text-indigo-500 uppercase tracking-widest">
-                  Passo {currentStep + 1} de {steps.length}
+                  {isEn ? `Step ${currentStep + 1} of ${steps.length}` : `Passo ${currentStep + 1} de ${steps.length}`}
                 </span>
                 <h2 className="text-fg font-bold">{activeStep.title}</h2>
               </div>
@@ -175,7 +179,7 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
               <button 
                 onClick={() => setCurrentStep(prev => prev - 1)}
                 className="p-2 text-fg-subtle hover:text-fg transition-colors"
-                title="Voltar"
+                title={isEn ? 'Back' : 'Voltar'}
               >
                 <ChevronLeft size={20} />
               </button>
@@ -243,7 +247,9 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
                 disabled={isSubmitting}
                 className="flex items-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-xl shadow-indigo-600/20 transition-all disabled:opacity-50"
               >
-                {isSubmitting ? 'Salvando...' : 'Finalizar'}
+                {isSubmitting
+                  ? (isEn ? 'Saving...' : 'Salvando...')
+                  : (isEn ? 'Complete Setup' : 'Finalizar')}
                 <Sparkles size={18} />
               </motion.button>
             )}
@@ -252,9 +258,9 @@ export const OnboardingSurvey: React.FC<OnboardingSurveyProps> = ({ onComplete }
               <button 
                 onClick={() => setCurrentStep(prev => prev + 1)}
                 className="flex items-center gap-2 text-indigo-400 font-bold hover:text-indigo-300 transition-colors"
-                title="Próximo"
+                title={isEn ? 'Next' : 'Próximo'}
               >
-                Próximo
+                {isEn ? 'Next' : 'Próximo'}
                 <ChevronRight size={20} />
               </button>
             )}

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Lock, Mail, ShieldCheck, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import api from '../api';
 import { AuthLayout } from '../layouts/AuthLayout';
 import { AuthCard } from '../components/auth/AuthCard';
@@ -15,6 +16,14 @@ import { Button } from '../components/ui/Button';
 import { Alert } from '../components/ui/Alert';
 import { useCountdown } from '../hooks/useCountdown';
 import { EMAIL_RE, MIN_PASSWORD_LENGTH, getApiMessage, getRegisterErrorMessage } from '../lib/authErrors';
+import {
+    getAttributionPayload,
+    getLightweightClientMetadata,
+    getOrCreateVisitorId,
+    mergeSessionUtmsIntoSearch,
+    sanitizeReturnTo,
+} from '../lib/attribution';
+import { identifyUserOnTracker, trackConversion } from '../lib/tracking';
 
 const OTP_RESEND_COOLDOWN_S = 60;
 
@@ -25,10 +34,14 @@ const backendMessage = (err: unknown) => getApiMessage(err, '');
 
 export const Register = () => {
     const { login } = useAuth();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const safeReturnTo = sanitizeReturnTo(searchParams.get('returnTo'));
 
     const [form, setForm] = useState({ name: '', email: '', otp: '', contact: '', password: '' });
-    const [dialCode, setDialCode] = useState('+55');
+    const [dialCode, setDialCode] = useState(isEn ? '+1' : '+55');
     const [terms, setTerms] = useState(false);
     const [otpSent, setOtpSent] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -37,6 +50,9 @@ export const Register = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSendingOtp, setIsSendingOtp] = useState(false);
     const otpCooldown = useCountdown();
+
+    const loginBaseSearch = safeReturnTo ? `?returnTo=${encodeURIComponent(safeReturnTo)}` : '';
+    const loginSearch = mergeSessionUtmsIntoSearch(loginBaseSearch);
 
     const update = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = field === 'otp' ? e.target.value.replace(/\D/g, '') : e.target.value;
@@ -48,7 +64,12 @@ export const Register = () => {
         setError(null);
         setNotice(null);
         if (!EMAIL_RE.test(form.email.trim())) {
-            setFieldErrors((fe) => ({ ...fe, email: 'Informe um e-mail válido para receber o código.' }));
+            setFieldErrors((fe) => ({
+                ...fe,
+                email: isEn
+                    ? 'Enter a valid email to receive your code.'
+                    : 'Informe um e-mail válido para receber o código.',
+            }));
             return;
         }
         setIsSendingOtp(true);
@@ -57,12 +78,21 @@ export const Register = () => {
             if (res.data.success) {
                 setOtpSent(true);
                 otpCooldown.start(OTP_RESEND_COOLDOWN_S);
-                setNotice(`Enviamos um código de verificação para ${form.email.trim()}.`);
+                setNotice(
+                    isEn
+                        ? `Verification code sent to ${form.email.trim()}.`
+                        : `Enviamos um código de verificação para ${form.email.trim()}.`
+                );
             } else {
-                setError(getRegisterErrorMessage(res.data.error || 'Erro ao enviar OTP'));
+                setError(
+                    getRegisterErrorMessage(
+                        res.data.error || (isEn ? 'Failed to send verification code' : 'Erro ao enviar OTP'),
+                        locale
+                    )
+                );
             }
         } catch (err) {
-            setError(getRegisterErrorMessage(backendMessage(err)));
+            setError(getRegisterErrorMessage(backendMessage(err), locale));
         } finally {
             setIsSendingOtp(false);
         }
@@ -70,12 +100,25 @@ export const Register = () => {
 
     const validate = (): FieldErrors => {
         const errors: FieldErrors = {};
-        if (!form.name.trim()) errors.name = 'Informe seu nome.';
-        if (!EMAIL_RE.test(form.email.trim())) errors.email = 'Informe um e-mail válido.';
-        if (!otpSent) errors.otp = 'Solicite o código de verificação no botão ao lado.';
-        else if (!form.otp) errors.otp = 'Digite o código enviado ao seu e-mail.';
-        if (form.password.length < MIN_PASSWORD_LENGTH) errors.password = `A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
-        if (!terms) errors.terms = 'Você deve aceitar os Termos de Uso para continuar.';
+        if (!form.name.trim()) errors.name = isEn ? 'Enter your full name.' : 'Informe seu nome.';
+        if (!EMAIL_RE.test(form.email.trim()))
+            errors.email = isEn ? 'Enter a valid email address.' : 'Informe um e-mail válido.';
+        if (!otpSent)
+            errors.otp = isEn
+                ? 'Request your verification code first.'
+                : 'Solicite o código de verificação no botão ao lado.';
+        else if (!form.otp)
+            errors.otp = isEn
+                ? 'Enter the code sent to your email.'
+                : 'Digite o código enviado ao seu e-mail.';
+        if (form.password.length < MIN_PASSWORD_LENGTH)
+            errors.password = isEn
+                ? `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+                : `A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
+        if (!terms)
+            errors.terms = isEn
+                ? 'Accept the Terms of Service to continue.'
+                : 'Você deve aceitar os Termos de Uso para continuar.';
         return errors;
     };
 
@@ -88,22 +131,35 @@ export const Register = () => {
 
         setIsSubmitting(true);
         try {
+            const clientMeta = getLightweightClientMetadata();
+            const attributionData = getAttributionPayload();
+
             const res = await api.post('/auth/register', {
                 ...form,
                 name: form.name.trim(),
                 email: form.email.trim(),
                 contact: `${dialCode} ${form.contact.trim()}`,
+                preferredLocale: locale,
+                timezone: clientMeta.timezone,
+                visitorId: getOrCreateVisitorId(),
+                attributionData,
             });
             if (res.data.success) {
-                if (res.data.token) login(res.data.token);
-                navigate('/dashboard');
+                if (res.data.token) {
+                    login(res.data.token);
+                    void identifyUserOnTracker();
+                }
+                trackConversion('signup', {
+                    metadata: { method: 'email_otp', locale },
+                });
+                navigate(safeReturnTo || '/dashboard', { replace: true });
                 // Full reload so every context (account, socket) boots with the new session.
                 window.location.reload();
             } else {
-                setError(getRegisterErrorMessage(res.data.error || res.data.message));
+                setError(getRegisterErrorMessage(res.data.error || res.data.message, locale));
             }
         } catch (err) {
-            setError(getRegisterErrorMessage(backendMessage(err)));
+            setError(getRegisterErrorMessage(backendMessage(err), locale));
         } finally {
             setIsSubmitting(false);
         }
@@ -115,40 +171,72 @@ export const Register = () => {
             aside={
                 <AuthAside
                     title={
-                        <>
-                            Comece sua jornada rumo à <span className="text-accent-fg">profissionalização.</span>
-                        </>
+                        isEn ? (
+                            <>
+                                Build institutional discipline <span className="text-accent-fg">from day one.</span>
+                            </>
+                        ) : (
+                            <>
+                                Comece sua jornada rumo à <span className="text-accent-fg">profissionalização.</span>
+                            </>
+                        )
                     }
-                    description="Crie sua conta em menos de um minuto e conecte sua corretora."
-                    highlights={[
-                        'Sincronização automática com MT4/MT5',
-                        'Análise detalhada de performance quantitativa',
-                        'Diário emocional e psicológico integrado',
-                        'Gestão de risco automatizada',
-                    ]}
+                    description={
+                        isEn
+                            ? 'Launch your workspace in under 60 seconds and sync your live broker or prop account.'
+                            : 'Crie sua conta em menos de um minuto e conecte sua corretora.'
+                    }
+                    highlights={
+                        isEn
+                            ? [
+                                  'Automated MT5, Deriv & Prop Firm execution sync',
+                                  'Quantitative Edge Score, Profit Factor & MFE/MAE',
+                                  'Integrated Trade Debrief & Pre-Market Checklist',
+                                  'Autonomous Daily Drawdown & Tilt guardrails',
+                              ]
+                            : [
+                                  'Sincronização automática com MT4/MT5',
+                                  'Análise detalhada de performance quantitativa',
+                                  'Diário emocional e psicológico integrado',
+                                  'Gestão de risco automatizada',
+                              ]
+                    }
                 />
             }
         >
             <AuthCard
-                title="Crie sua conta"
+                title={isEn ? 'Create your workspace' : 'Crie sua conta'}
                 showLegalNote={false}
-                description="Teste gratuitamente por 14 dias. Sem compromisso."
+                description={
+                    isEn
+                        ? '7-day full workspace access. No credit card required.'
+                        : 'Teste gratuitamente por 14 dias. Sem compromisso.'
+                }
                 footer={
-                    <>
-                        Já tem uma conta?{' '}
-                        <Link to="/login" className="font-bold text-accent-fg transition-colors hover:text-accent-hover">
-                            Fazer login
-                        </Link>
-                    </>
+                    isEn ? (
+                        <>
+                            Already have an account?{' '}
+                            <Link to={`/login${loginSearch}`} className="font-bold text-accent-fg transition-colors hover:text-accent-hover">
+                                Sign in
+                            </Link>
+                        </>
+                    ) : (
+                        <>
+                            Já tem uma conta?{' '}
+                            <Link to={`/login${loginSearch}`} className="font-bold text-accent-fg transition-colors hover:text-accent-hover">
+                                Fazer login
+                            </Link>
+                        </>
+                    )
                 }
             >
                 <form onSubmit={handleSubmit} noValidate className="space-y-4">
                     <Input
                         variant="field"
                         name="name"
-                        label="Nome completo"
+                        label={isEn ? 'Full name' : 'Nome completo'}
                         autoComplete="name"
-                        placeholder="João Silva"
+                        placeholder={isEn ? 'Alex Morgan' : 'João Silva'}
                         icon={<User size={18} />}
                         value={form.name}
                         onChange={update('name')}
@@ -160,9 +248,9 @@ export const Register = () => {
                         variant="field"
                         name="email"
                         type="email"
-                        label="E-mail"
+                        label={isEn ? 'Email' : 'E-mail'}
                         autoComplete="email"
-                        placeholder="exemplo@torex.com"
+                        placeholder={isEn ? 'trader@torexjournal.com' : 'exemplo@torex.com'}
                         icon={<Mail size={18} />}
                         value={form.email}
                         onChange={update('email')}
@@ -173,10 +261,16 @@ export const Register = () => {
                         <Input
                             variant="field"
                             name="otp"
-                            label="Código de verificação"
+                            label={isEn ? 'Verification code' : 'Código de verificação'}
                             inputMode="numeric"
                             autoComplete="one-time-code"
-                            placeholder={otpSent ? '123456' : 'Clique em enviar'}
+                            placeholder={
+                                otpSent
+                                    ? '123456'
+                                    : isEn
+                                      ? 'Click Send'
+                                      : 'Clique em enviar'
+                            }
                             maxLength={6}
                             icon={<ShieldCheck size={18} />}
                             value={form.otp}
@@ -196,7 +290,15 @@ export const Register = () => {
                             isLoading={isSendingOtp}
                             disabled={otpCooldown.active || !form.email}
                         >
-                            {otpCooldown.active ? `${otpCooldown.remaining}s` : otpSent ? 'Reenviar' : 'Enviar código'}
+                            {otpCooldown.active
+                                ? `${otpCooldown.remaining}s`
+                                : otpSent
+                                  ? isEn
+                                    ? 'Resend'
+                                    : 'Reenviar'
+                                  : isEn
+                                    ? 'Send code'
+                                    : 'Enviar código'}
                         </Button>
                     </div>
 
@@ -204,24 +306,28 @@ export const Register = () => {
 
                     <PhoneInput
                         name="contact"
-                        label="WhatsApp / Celular"
+                        label={isEn ? 'WhatsApp / Mobile' : 'WhatsApp / Celular'}
                         value={form.contact}
                         onChange={(contact) => setForm((f) => ({ ...f, contact }))}
                         onCountryChange={(c) => setDialCode(c.dialCode)}
-                        defaultCountry="BR"
+                        defaultCountry={isEn ? 'US' : 'BR'}
                         error={fieldErrors.contact}
                     />
 
                     <PasswordInput
                         name="password"
-                        label="Senha"
+                        label={isEn ? 'Password' : 'Senha'}
                         autoComplete="new-password"
                         placeholder="••••••••"
                         icon={<Lock size={18} />}
                         value={form.password}
                         onChange={update('password')}
                         error={fieldErrors.password}
-                        hint={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+                        hint={
+                            isEn
+                                ? `Minimum ${MIN_PASSWORD_LENGTH} characters`
+                                : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`
+                        }
                     />
 
                     <Checkbox
@@ -233,17 +339,31 @@ export const Register = () => {
                         }}
                         error={fieldErrors.terms}
                         label={
-                            <>
-                                Aceito os{' '}
-                                <Link to="/terms" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
-                                    Termos de Uso
-                                </Link>{' '}
-                                e a{' '}
-                                <Link to="/privacy" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
-                                    Política de Privacidade
-                                </Link>
-                                .
-                            </>
+                            isEn ? (
+                                <>
+                                    I agree to the{' '}
+                                    <Link to="/terms" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
+                                        Terms of Service
+                                    </Link>{' '}
+                                    and{' '}
+                                    <Link to="/privacy" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
+                                        Privacy Policy
+                                    </Link>
+                                    .
+                                </>
+                            ) : (
+                                <>
+                                    Aceito os{' '}
+                                    <Link to="/terms" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
+                                        Termos de Uso
+                                    </Link>{' '}
+                                    e a{' '}
+                                    <Link to="/privacy" target="_blank" rel="noopener" className="font-semibold text-accent-fg hover:underline">
+                                        Política de Privacidade
+                                    </Link>
+                                    .
+                                </>
+                            )
                         }
                     />
 
@@ -257,7 +377,7 @@ export const Register = () => {
                         isLoading={isSubmitting}
                         iconRight={<ArrowRight size={18} aria-hidden />}
                     >
-                        Criar conta gratuita
+                        {isEn ? 'Create Free Workspace' : 'Criar conta gratuita'}
                     </Button>
                 </form>
 

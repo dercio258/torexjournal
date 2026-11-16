@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Loader2 } from 'lucide-react';
+import { StandalonePageSkeleton } from '../components/ui/Skeleton';
+import { sanitizeReturnTo } from '../lib/attribution';
+import { identifyUserOnTracker, trackConversion } from '../lib/tracking';
+import api from '../api';
 
 export const AuthCallback = () => {
     const { login } = useAuth();
@@ -9,29 +12,60 @@ export const AuthCallback = () => {
     const [searchParams] = useSearchParams();
 
     useEffect(() => {
-        const token = searchParams.get('token');
-        const onboardingCompleted = searchParams.get('onboardingCompleted') === 'true';
+        const code = searchParams.get('code');
+        const legacyToken = searchParams.get('token');
         const requiresContact = searchParams.get('requiresContact') === 'true';
+        const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
 
-        if (token) {
+        // Immediately strip sensitive query parameters from browser history/URL bar
+        if (window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        const completeSignIn = async (token: string, needsContact: boolean) => {
             login(token);
-            
-            if (requiresContact) {
-                navigate('/complete-profile');
-            } else if (!onboardingCompleted) {
-                navigate('/onboarding');
+            await identifyUserOnTracker();
+            trackConversion('login', { metadata: { method: 'oauth' } });
+            if (needsContact) {
+                navigate('/complete-profile', { replace: true });
             } else {
-                navigate('/dashboard');
+                // OnboardingSurvey runs automatically inside MainLayout when onboardingCompleted === false
+                navigate(returnTo || '/dashboard', { replace: true });
             }
+        };
+
+        if (code) {
+            let cancelled = false;
+            api.post('/auth/oauth/exchange', { code })
+                .then((res) => {
+                    if (cancelled) return;
+                    const data = res.data;
+                    if (data?.twoFactorRequired && data?.twoFactorToken) {
+                        navigate(`/2fa?twoFactorToken=${encodeURIComponent(data.twoFactorToken)}`, { replace: true });
+                        return;
+                    }
+                    if (data?.token) {
+                        completeSignIn(data.token, Boolean(data.requiresContact));
+                        return;
+                    }
+                    navigate('/login', { replace: true });
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        navigate('/login', { replace: true });
+                    }
+                });
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (legacyToken) {
+            completeSignIn(legacyToken, requiresContact);
         } else {
-            navigate('/login');
+            navigate('/login', { replace: true });
         }
     }, [login, navigate, searchParams]);
 
-    return (
-        <div className="min-h-screen bg-canvas flex flex-col items-center justify-center space-y-4">
-            <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
-            <p className="text-fg-muted font-medium">Autenticando...</p>
-        </div>
-    );
+    return <StandalonePageSkeleton />;
 };

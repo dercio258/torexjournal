@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Sparkles, KeyRound, RefreshCw, Smartphone, ShieldAlert, Clock } from 'lucide-react';
 import api from '../../api';
+import { useLocale } from '../../context/LocaleContext';
 
 interface PlanModalProps {
     type: 'NO_ACTIVE_PLAN' | 'UPGRADE_REQUIRED' | 'RENEWAL_CONFIRMATION' | 'PLAN_EXPIRED' | 'NEAR_EXPIRATION_WARNING';
@@ -9,20 +10,23 @@ interface PlanModalProps {
     featureName?: string;
     savedPaymentMethod?: 'mpesa' | 'emola' | 'card';
     savedPhoneNumber?: string;
-    planTier?: 'BASIC' | 'PRO';
+    planTier?: 'BASIC' | 'PRO' | 'PREMIUM';
     daysLeft?: number;
 }
 
 export const PlanModal = ({
     type,
     onClose,
-    featureName = 'Funcionalidade Avançada',
+    featureName,
     savedPaymentMethod,
     savedPhoneNumber,
     planTier = 'BASIC',
     daysLeft
 }: PlanModalProps) => {
     const navigate = useNavigate();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+    const resolvedFeatureName = featureName || (isEn ? 'Institutional Feature' : 'Funcionalidade Avançada');
     const [isRenewing, setIsRenewing] = useState(false);
     const [showPinPrompt, setShowPinPrompt] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -41,7 +45,12 @@ export const PlanModal = ({
             setShowPinPrompt(true);
         } catch (error: any) {
             console.error("Renewal error", error);
-            setErrorMessage(error.response?.data?.message || "Erro ao iniciar a renovação. Verifique se possui saldo e tente novamente.");
+            setErrorMessage(
+                error.response?.data?.message ||
+                (isEn
+                    ? "Unable to initiate renewal. Check your balance and try again."
+                    : "Erro ao iniciar a renovação. Verifique se possui saldo e tente novamente.")
+            );
             setIsRenewing(false);
         }
     };
@@ -72,16 +81,23 @@ export const PlanModal = ({
         try {
             const pricingRes = await api.get('/payment/pricing-config');
             const pricingConfig = pricingRes.data;
+            const isPremium = planTier === 'PREMIUM';
             const isPro = planTier === 'PRO';
+            const targetTier = isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'BASIC';
+            const monthlyPrice = isPremium
+                ? Number(pricingConfig.premiumPrice)
+                : isPro
+                  ? Number(pricingConfig.proPrice ?? pricingConfig.premiumPrice)
+                  : Number(pricingConfig.basicoPrice);
             
             // Map plan details matching backend structure
             const plan = {
-                id: isPro ? '2' : '1',
-                tier: isPro ? 'PRO' : 'BASIC',
-                monthlyPrice: isPro ? Number(pricingConfig.premiumPrice) : Number(pricingConfig.basicoPrice),
+                id: isPremium ? '3' : isPro ? '2' : '1',
+                tier: targetTier,
+                monthlyPrice,
                 annualDiscountPercent: 20,
-                trialEnabled: isPro,
-                trialDays: isPro ? 7 : 0
+                trialEnabled: isPro || isPremium,
+                trialDays: isPro || isPremium ? 7 : 0
             };
 
             navigate('/checkout', {
@@ -123,16 +139,20 @@ export const PlanModal = ({
                             <KeyRound size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-fg tracking-tight">ATIVAÇÃO DE CONTA</h3>
+                            <h3 className="text-2xl font-black text-fg tracking-tight">{isEn ? 'WORKSPACE ACTIVATION' : 'ATIVAÇÃO DE CONTA'}</h3>
                             <p className="text-fg-muted text-sm leading-relaxed">
-                                Seja bem-vindo ao <strong>TOREX JOURNAL</strong>! Para visualizar o painel operacional, gerenciar seus trades e desbloquear as ferramentas, você precisa ativar um plano.
+                                {isEn ? (
+                                    <>Welcome to <strong>TOREX JOURNAL</strong>! Activate a workspace plan to unlock the execution dashboard, trade analytics, and institutional replay tools.</>
+                                ) : (
+                                    <>Seja bem-vindo ao <strong>TOREX JOURNAL</strong>! Para visualizar o painel operacional, gerenciar seus trades e desbloquear as ferramentas, você precisa ativar um plano.</>
+                                )}
                             </p>
                         </div>
                         <button
                             onClick={handleRedirectToPricing}
                             className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-amber-500/10 uppercase tracking-wider text-sm"
                         >
-                            Ver Planos de Assinatura
+                            {isEn ? 'View Workspace Plans' : 'Ver Planos de Assinatura'}
                         </button>
                     </div>
                 )}
@@ -144,17 +164,21 @@ export const PlanModal = ({
                             <Sparkles size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">Upgrade Premium</h3>
-                            <p className="text-indigo-400 text-xs font-bold uppercase tracking-widest">{featureName}</p>
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">{isEn ? 'Premium Upgrade' : 'Upgrade Premium'}</h3>
+                            <p className="text-indigo-400 text-xs font-bold uppercase tracking-widest">{resolvedFeatureName}</p>
                             <p className="text-fg-muted text-sm leading-relaxed">
-                                Esta funcionalidade requer o plano <strong>Premium (PRO)</strong>. Faça o upgrade agora para ter auto-sync, backtesting ilimitado, análises com IA e muito mais.
+                                {isEn ? (
+                                    <>This capability requires the <strong>Pro or Premium</strong> tier. Upgrade now to unlock broker auto-sync, unlimited backtesting, Torex AI review, and more.</>
+                                ) : (
+                                    <>Esta funcionalidade requer o plano <strong>Premium (PRO)</strong>. Faça o upgrade agora para ter auto-sync, backtesting ilimitado, análises com IA e muito mais.</>
+                                )}
                             </p>
                         </div>
                         <button
                             onClick={handleRedirectToPricing}
                             className="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-black rounded-xl transition-all shadow-lg shadow-indigo-500/20 uppercase tracking-wider text-sm"
                         >
-                            Upgrade para Premium
+                            {isEn ? 'Upgrade Plan' : 'Upgrade para Premium'}
                         </button>
                     </div>
                 )}
@@ -168,9 +192,13 @@ export const PlanModal = ({
                                     <RefreshCw size={32} />
                                 </div>
                                 <div className="space-y-2">
-                                    <h4 className="text-xl font-bold text-fg uppercase tracking-tight">Confirmar no Telemóvel</h4>
+                                    <h4 className="text-xl font-bold text-fg uppercase tracking-tight">{isEn ? 'Confirm on Phone' : 'Confirmar no Telemóvel'}</h4>
                                     <p className="text-fg-muted text-sm leading-relaxed">
-                                        Enviamos um pedido de pagamento de Mpesa/e-Mola para o número <strong>{savedPhoneNumber}</strong>. Digite seu PIN no celular para concluir a renovação.
+                                        {isEn ? (
+                                            <>We sent an M-Pesa / e-Mola payment prompt to <strong>{savedPhoneNumber}</strong>. Enter your PIN on your handset to complete renewal.</>
+                                        ) : (
+                                            <>Enviamos um pedido de pagamento de Mpesa/e-Mola para o número <strong>{savedPhoneNumber}</strong>. Digite seu PIN no celular para concluir a renovação.</>
+                                        )}
                                     </p>
                                 </div>
                             </div>
@@ -180,20 +208,20 @@ export const PlanModal = ({
                                     <Smartphone size={32} />
                                 </div>
                                 <div className="space-y-2">
-                                    <h3 className="text-2xl font-black text-fg tracking-tight">RENOVAÇÃO RÁPIDA</h3>
+                                    <h3 className="text-2xl font-black text-fg tracking-tight">{isEn ? 'EXPRESS RENEWAL' : 'RENOVAÇÃO RÁPIDA'}</h3>
                                     <p className="text-fg-muted text-sm leading-relaxed">
-                                        Deseja renovar sua assinatura do plano usando seus dados salvos?
+                                        {isEn ? 'Renew your subscription using your saved payment details?' : 'Deseja renovar sua assinatura do plano usando seus dados salvos?'}
                                     </p>
                                 </div>
 
                                 {savedPhoneNumber && savedPaymentMethod && (
                                     <div className="bg-canvas-subtle border border-line rounded-2xl p-4 flex items-center justify-between text-left">
                                         <div>
-                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">Método Salvo</p>
+                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">{isEn ? 'Saved Method' : 'Método Salvo'}</p>
                                             <p className="text-fg font-bold capitalize">{savedPaymentMethod}</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">Número</p>
+                                            <p className="text-[10px] text-fg-subtle font-bold uppercase tracking-wider">{isEn ? 'Number' : 'Número'}</p>
                                             <p className="text-fg font-mono font-bold">{savedPhoneNumber}</p>
                                         </div>
                                     </div>
@@ -215,10 +243,10 @@ export const PlanModal = ({
                                             {isRenewing ? (
                                                 <>
                                                     <RefreshCw className="w-4 h-4 animate-spin" />
-                                                    Processando...
+                                                    {isEn ? 'Processing...' : 'Processando...'}
                                                 </>
                                             ) : (
-                                                'Confirmar e Pagar'
+                                                isEn ? 'Confirm & Pay' : 'Confirmar e Pagar'
                                             )}
                                         </button>
                                     )}
@@ -228,7 +256,7 @@ export const PlanModal = ({
                                         disabled={isRenewing}
                                         className="w-full py-3 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-xl transition-colors border border-line text-xs uppercase"
                                     >
-                                        Alterar Método / Ir para Checkout
+                                        {isEn ? 'Change Method / Go to Checkout' : 'Alterar Método / Ir para Checkout'}
                                     </button>
                                 </div>
                             </>
@@ -243,16 +271,18 @@ export const PlanModal = ({
                             <ShieldAlert size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">ASSINATURA EXPIRADA</h3>
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">{isEn ? 'SUBSCRIPTION EXPIRED' : 'ASSINATURA EXPIRADA'}</h3>
                             <p className="text-fg-muted text-sm leading-relaxed">
-                                Sua assinatura expirou. Para continuar acompanhando seu desempenho, registrar novos trades e utilizar nossas ferramentas de análise, por favor reative sua assinatura.
+                                {isEn
+                                    ? 'Your workspace subscription has expired. Renew your plan to restore live auto-sync, execution logging, and analytics tools.'
+                                    : 'Sua assinatura expirou. Para continuar acompanhando seu desempenho, registrar novos trades e utilizar nossas ferramentas de análise, por favor reative sua assinatura.'}
                             </p>
                         </div>
                         <button
                             onClick={handleRedirectToPricing}
                             className="w-full py-4 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 text-white font-black rounded-xl transition-all shadow-lg shadow-rose-500/10 uppercase tracking-wider text-sm"
                         >
-                            Renovar Assinatura
+                            {isEn ? 'Renew Subscription' : 'Renovar Assinatura'}
                         </button>
                     </div>
                 )}
@@ -264,9 +294,13 @@ export const PlanModal = ({
                             <Clock size={32} />
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">Assinatura Próxima do Fim</h3>
+                            <h3 className="text-2xl font-black text-fg tracking-tight uppercase">{isEn ? 'Plan Expiring Soon' : 'Assinatura Próxima do Fim'}</h3>
                             <p className="text-fg-muted text-sm leading-relaxed">
-                                Atenção: sua assinatura do Torex Journal expira em <strong className="text-amber-400">{daysLeft}</strong> dias. Renove agora para garantir acesso ininterrupto.
+                                {isEn ? (
+                                    <>Heads up: your Torex Journal subscription expires in <strong className="text-amber-400">{daysLeft}</strong> days. Renew now for uninterrupted desk access.</>
+                                ) : (
+                                    <>Atenção: sua assinatura do Torex Journal expira em <strong className="text-amber-400">{daysLeft}</strong> dias. Renove agora para garantir acesso ininterrupto.</>
+                                )}
                             </p>
                         </div>
                         <div className="space-y-3 pt-2">
@@ -277,13 +311,13 @@ export const PlanModal = ({
                                 }}
                                 className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-amber-500/10 uppercase tracking-wider text-sm font-bold"
                             >
-                                Renovar Agora
+                                {isEn ? 'Renew Now' : 'Renovar Agora'}
                             </button>
                             <button
                                 onClick={onClose}
                                 className="w-full py-3 bg-surface-2 hover:bg-surface-3 text-fg font-bold rounded-xl transition-colors border border-line text-xs uppercase"
                             >
-                                Continuar para a Dashboard
+                                {isEn ? 'Continue to Dashboard' : 'Continuar para a Dashboard'}
                             </button>
                         </div>
                     </div>

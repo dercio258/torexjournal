@@ -17,16 +17,16 @@ export const ChartCard = ({
     children: React.ReactNode;
     className?: string;
 }) => (
-    <section className={cn('flex min-w-0 flex-col rounded-xl border border-line bg-surface p-4 sm:p-5', className)}>
-        <header className="mb-3 flex flex-wrap items-start justify-between gap-2">
+    <section className={cn('flex min-w-0 flex-col rounded-xl border border-line bg-surface p-3.5 sm:p-4', className)}>
+        <header className="mb-2.5 flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-fg">
+                <h3 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-fg-muted">
                     {icon && <span aria-hidden className="text-fg-subtle">{icon}</span>}
                     {title}
                 </h3>
-                {subtitle && <p className="mt-0.5 text-[11px] text-fg-subtle">{subtitle}</p>}
+                {subtitle && <p className="mt-0.5 text-[10.5px] text-fg-subtle">{subtitle}</p>}
             </div>
-            {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+            {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
         </header>
         {children}
     </section>

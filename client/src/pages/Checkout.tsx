@@ -3,6 +3,7 @@ import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { ShieldCheck, CreditCard, ChevronLeft, Smartphone, Loader2 } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
+import { useLocale } from '../context/LocaleContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
     PlanSummary, 
@@ -11,18 +12,14 @@ import {
     CardPaymentView, 
     PollingOverlay 
 } from '../components/subscription/CheckoutFlow';
+import { trackButtonClick } from '../lib/tracking';
 
 export const Checkout = () => {
-    const { token } = useAuth();
-    const [user, setUser] = useState<any>(null);
+    const { user } = useAuth();
+    const { locale, localizeBrowserPath } = useLocale();
+    const isEn = locale === 'en';
     const location = useLocation();
     const navigate = useNavigate();
-
-    useEffect(() => {
-        if (token) {
-            api.get('/auth/profile').then(res => setUser(res.data)).catch(console.error);
-        }
-    }, [token]);
 
     const { plan, billingCycle, pricingConfig } = location.state || {};
     const exchangeRate = pricingConfig?.exchangeRate ? Number(pricingConfig.exchangeRate) : 65;
@@ -55,6 +52,12 @@ export const Checkout = () => {
         if (!phoneNumber || phoneNumber.length !== 9) return;
         setProcessing(true);
         setShowPinPrompt(false);
+        trackButtonClick({
+            ctaTag: `checkout_submit_${paymentMethod}`,
+            intent: `pay_${String(plan.tier || '').toLowerCase()}`,
+            label: `Pay ${paymentMethod}`,
+            metadata: { tier: plan.tier, billingCycle, amountUSD: getBillTotalUSD() },
+        });
         try {
             await api.post('/subscription/subscribe/mobile', {
                 tier: plan.tier,
@@ -67,7 +70,11 @@ export const Checkout = () => {
             setShowModal(true);
         } catch (error) {
             console.error(error);
-            alert("Erro ao iniciar pagamento. Verifique o número e tente novamente.");
+            alert(
+                isEn
+                    ? 'Failed to initiate payment. Please check the number and try again.'
+                    : 'Erro ao iniciar pagamento. Verifique o número e tente novamente.'
+            );
         } finally {
             setProcessing(false);
         }
@@ -76,12 +83,18 @@ export const Checkout = () => {
     const handleRedirectSubmit = async () => {
         setProcessing(true);
         setShowModal(true);
+        trackButtonClick({
+            ctaTag: `checkout_submit_${paymentMethod}`,
+            intent: `pay_${String(plan.tier || '').toLowerCase()}`,
+            label: `Pay ${paymentMethod}`,
+            metadata: { tier: plan.tier, billingCycle, amountUSD: getBillTotalUSD() },
+        });
         try {
             const res = await api.post('/subscription/subscribe/card', {
                 tier: plan.tier,
                 cycle: billingCycle,
-                returnUrl: `${window.location.origin}/subscription/success`,
-                cancelUrl: `${window.location.origin}/checkout`,
+                returnUrl: `${window.location.origin}${localizeBrowserPath('/subscription/success')}`,
+                cancelUrl: `${window.location.origin}${localizeBrowserPath('/checkout')}`,
                 phoneNumber: phoneNumber, // Set via CountryPhoneInput callback
                 paymentMethod: paymentMethod === 'payfast' ? 'payfast' : 'card'
             });
@@ -96,7 +109,11 @@ export const Checkout = () => {
         } catch (error) {
             console.error(error);
             setShowModal(false);
-            alert(`Erro ao iniciar pagamento com ${paymentMethod === 'payfast' ? 'PayFast' : 'cartão'}.`);
+            alert(
+                isEn
+                    ? `Failed to initiate ${paymentMethod === 'payfast' ? 'PayFast' : 'card'} payment.`
+                    : `Erro ao iniciar pagamento com ${paymentMethod === 'payfast' ? 'PayFast' : 'cartão'}.`
+            );
         } finally {
             setProcessing(false);
         }
@@ -139,7 +156,7 @@ export const Checkout = () => {
                     <div className="w-8 h-8 rounded-full bg-surface border border-line flex items-center justify-center group-hover:bg-surface-2 transition-colors shadow-sm">
                         <ChevronLeft size={16} />
                     </div>
-                    <span className="text-sm font-bold uppercase tracking-widest text-[10px]">Voltar aos Planos</span>
+                    <span className="text-sm font-bold uppercase tracking-widest text-[10px]">{isEn ? 'Back to Plans' : 'Voltar aos Planos'}</span>
                 </motion.button>
 
                 <div className="grid lg:grid-cols-12 gap-12 lg:gap-20 items-start">
@@ -150,6 +167,7 @@ export const Checkout = () => {
                             billingCycle={billingCycle} 
                             total={getBillTotalUSD()} 
                             exchangeRate={exchangeRate}
+                            isEn={isEn}
                         />
                     </div>
 
@@ -164,7 +182,7 @@ export const Checkout = () => {
                             <div className="relative z-10">
                                 <header className="mb-10">
                                     <h2 className="text-3xl font-black text-fg mb-3 tracking-tight uppercase">Checkout</h2>
-                                    <p className="text-fg-muted text-sm">Escolha seu método de pagamento preferido para ativar sua licença Torex.</p>
+                                    <p className="text-fg-muted text-sm">{isEn ? 'Select your preferred payment method to activate your Torex workspace license.' : 'Escolha seu método de pagamento preferido para ativar sua licença Torex.'}</p>
                                 </header>
 
                                 {/* Method Selector */}
@@ -185,7 +203,7 @@ export const Checkout = () => {
                                     />
                                     <PaymentMethodBadge 
                                         id="card" 
-                                        label="Cartão" 
+                                        label={isEn ? 'Card' : 'Cartão'} 
                                         icon={CreditCard}
                                         active={paymentMethod === 'card'}
                                         onClick={() => { setPaymentMethod('card'); setShowPinPrompt(false); }}
@@ -203,7 +221,7 @@ export const Checkout = () => {
                                 <div className="min-h-[260px]">
                                     <AnimatePresence mode="wait">
                                         {showPinPrompt ? (
-                                            <PollingOverlay key="polling" method={paymentMethod} total={getBillTotalUSD()} exchangeRate={exchangeRate} />
+                                            <PollingOverlay key="polling" method={paymentMethod} total={getBillTotalUSD()} exchangeRate={exchangeRate} isEn={isEn} />
                                         ) : (
                                             <motion.div
                                                 key={paymentMethod}
@@ -215,6 +233,7 @@ export const Checkout = () => {
                                                 {(paymentMethod === 'mpesa' || paymentMethod === 'emola') && (
                                                     <MobileMoneyForm 
                                                         method={paymentMethod}
+                                                        isEn={isEn}
                                                         phoneNumber={phoneNumber}
                                                         setPhoneNumber={setPhoneNumber}
                                                         savePreference={savePreference}
@@ -228,6 +247,7 @@ export const Checkout = () => {
                                                     <CardPaymentView 
                                                         onSubmit={handleRedirectSubmit}
                                                         processing={processing}
+                                                        isEn={isEn}
                                                         onPhoneChange={setPhoneNumber}
                                                         method={paymentMethod}
                                                     />
@@ -240,10 +260,10 @@ export const Checkout = () => {
                                 <footer className="mt-10 pt-8 border-t border-slate-200 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-6 opacity-70 dark:opacity-50">
                                     <div className="flex items-center gap-2">
                                         <ShieldCheck className="text-indigo-600 dark:text-indigo-400" size={16} />
-                                        <span className="text-[9px] font-bold uppercase tracking-widest text-fg-muted ">Processamento Criptografado</span>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest text-fg-muted ">{isEn ? 'Encrypted Checkout' : 'Processamento Criptografado'}</span>
                                     </div>
                                     <div className="flex items-center gap-2 grayscale hover:grayscale-0 transition-all cursor-default">
-                                        <span className="text-[9px] font-bold text-fg-subtle">Parceiro Oficial:</span>
+                                        <span className="text-[9px] font-bold text-fg-subtle">{isEn ? 'Official Gateway:' : 'Parceiro Oficial:'}</span>
                                         <span className="text-[10px] font-black text-slate-800 dark:text-slate-300">Debito.co.mz</span>
                                     </div>
                                 </footer>
@@ -286,16 +306,16 @@ export const Checkout = () => {
 
                                 <div className="space-y-2">
                                     <h3 className="text-lg font-black text-fg uppercase tracking-tight">
-                                        {['mpesa', 'emola'].includes(paymentMethod) ? 'Aguardando Confirmação' : 'Redirecionando'}
+                                        {['mpesa', 'emola'].includes(paymentMethod) ? (isEn ? 'Awaiting Confirmation' : 'Aguardando Confirmação') : (isEn ? 'Redirecting' : 'Redirecionando')}
                                     </h3>
                                     <p className="text-fg-muted text-xs leading-relaxed">
                                         {['mpesa', 'emola'].includes(paymentMethod) ? (
                                             <>
-                                                Enviamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> (~ MT {(getBillTotalUSD() * exchangeRate).toFixed(0)} MZN) para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.
+                                                {isEn ? <>We sent a payment prompt of <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> (~ MT {(getBillTotalUSD() * exchangeRate).toFixed(0)} MZN) to your phone. Please enter your <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> to authorize.</> : <>Enviamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> (~ MT {(getBillTotalUSD() * exchangeRate).toFixed(0)} MZN) para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.</>}
                                             </>
                                         ) : (
                                             <>
-                                                Estamos a preparar a sua ligação segura. Você será redirecionado para a página de pagamento seguro para concluir a transação de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span>.
+                                                {isEn ? <>Preparing your encrypted session. You will be redirected to our secure payment page to complete your <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span> transaction.</> : <>Estamos a preparar a sua ligação segura. Você será redirecionado para a página de pagamento seguro para concluir a transação de <span className="text-fg font-bold font-mono">$ {getBillTotalUSD().toFixed(2)} USD</span>.</>}
                                             </>
                                         )}
                                     </p>
@@ -304,14 +324,14 @@ export const Checkout = () => {
                                 {['mpesa', 'emola'].includes(paymentMethod) && (
                                     <div className="bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-900 rounded-2xl p-4 text-[10px] text-slate-600 dark:text-slate-500 text-left space-y-2 shadow-sm">
                                         <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider">
-                                            <span>Estado</span>
+                                            <span>{isEn ? 'Status' : 'Estado'}</span>
                                             <span className="flex items-center gap-1">
                                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                Pendente
+                                                {isEn ? 'Pending' : 'Pendente'}
                                             </span>
                                         </div>
                                         <p className="text-[9px] text-fg-subtle leading-normal">
-                                            Após digitar o PIN no seu telemóvel, aguarde a confirmação automática nesta tela. Não feche a página.
+                                            {isEn ? 'After entering your PIN on your phone, wait for automatic confirmation on this screen. Do not close this tab.' : 'Após digitar o PIN no seu telemóvel, aguarde a confirmação automática nesta tela. Não feche a página.'}
                                         </p>
                                     </div>
                                 )}
@@ -325,7 +345,7 @@ export const Checkout = () => {
                                         }}
                                         className="text-[10px] text-fg-subtle hover:text-slate-800 dark:text-slate-600 dark:hover:text-slate-400 transition-colors uppercase font-bold tracking-widest pt-2 block mx-auto"
                                     >
-                                        Cancelar
+                                        {isEn ? 'Cancel' : 'Cancelar'}
                                     </button>
                                 )}
                             </div>

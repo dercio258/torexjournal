@@ -1,6 +1,34 @@
-import { Heart, MessageCircle, Share2, MoreHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+    Heart,
+    MessageCircle,
+    MessageSquare,
+    Send,
+    Share2,
+    Trash2,
+    TrendingDown,
+    TrendingUp,
+    Check,
+} from 'lucide-react';
+import api from '../../api';
+import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
+import { ChatPartnerTarget } from './ChatTab';
 
 const ASSETS_URL = import.meta.env.VITE_API_URL || window.location.origin;
+
+interface PostComment {
+    id: number | string;
+    content: string;
+    createdAt?: string;
+    user: {
+        id?: string;
+        username: string;
+        name?: string;
+        avatarUrl?: string | null;
+    };
+}
+
 interface Post {
     id: number;
     content: string;
@@ -11,7 +39,8 @@ interface Post {
     user: {
         id: string;
         username: string;
-        avatarUrl?: string;
+        name?: string;
+        avatarUrl?: string | null;
     };
     type?: string;
     tradeData?: {
@@ -22,131 +51,314 @@ interface Post {
         isWin?: boolean;
     };
     imageUrl?: string;
+    comments?: PostComment[];
 }
 
 interface PostCardProps {
     post: Post;
     onLike: (postId: number) => void;
+    onCommentAdded?: (postId: number, comment: PostComment) => void;
+    onDeletePost?: (postId: number) => void;
+    onMessageUser?: (partner: ChatPartnerTarget) => void;
     isRestricted?: boolean;
 }
 
-export const PostCard = ({ post, onLike, isRestricted = false }: PostCardProps) => {
+export const PostCard: React.FC<PostCardProps> = ({
+    post,
+    onLike,
+    onCommentAdded,
+    onDeletePost,
+    onMessageUser,
+    isRestricted = false,
+}) => {
+    const { user } = useAuth();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+    const [showComments, setShowComments] = useState(false);
+    const [commentText, setCommentText] = useState('');
+    const [submittingComment, setSubmittingComment] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const isOwner = user?.id === post.user?.id;
+    const commentsList = Array.isArray(post.comments) ? post.comments : [];
+
+    const resolveMediaUrl = (rawUrl?: string) => {
+        if (!rawUrl) return '';
+        if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+        return `${ASSETS_URL}${rawUrl}`;
+    };
+
+    const handleAddComment = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!commentText.trim() || submittingComment) return;
+
+        setSubmittingComment(true);
+        try {
+            const res = await api.post(`/network/post/${post.id}/comment`, {
+                content: commentText.trim(),
+            });
+            if (res.data) {
+                onCommentAdded?.(post.id, res.data);
+            }
+            setCommentText('');
+        } catch {
+            // ignore
+        } finally {
+            setSubmittingComment(false);
+        }
+    };
+
+    const handleShare = async () => {
+        try {
+            await navigator.clipboard.writeText(`${window.location.origin}/network`);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1800);
+        } catch {
+            // ignore
+        }
+    };
+
     return (
-        <div className="bg-white dark:bg-slate-900/40 backdrop-blur-xl border border-line rounded-3xl p-6 shadow-sm dark:shadow-lg hover:border-line-strong transition-all group">
-            <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center text-fg-muted font-bold border-2 border-slate-200 dark:border-slate-700 group-hover:border-indigo-500/50 transition-colors">
+        <div className="bg-surface border border-line rounded-xl p-4 transition-colors">
+            <div className="flex justify-between items-start gap-2 mb-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-surface-2 flex items-center justify-center text-fg font-bold text-xs border border-line-strong shrink-0 overflow-hidden">
                         {post.user?.avatarUrl ? (
-                            <img src={post.user.avatarUrl} alt={post.user.username} className="w-full h-full rounded-full object-cover" />
+                            <img
+                                src={post.user.avatarUrl}
+                                alt={post.user.username}
+                                className="w-full h-full rounded-full object-cover"
+                            />
                         ) : (
-                            post.user?.username?.[0]?.toUpperCase() || '?'
+                            post.user?.username?.[0]?.toUpperCase() || 'T'
                         )}
                     </div>
-                    <div>
-                        <h3 className="font-bold text-fg text-base leading-tight flex items-center gap-2">
-                            {post.user?.username || 'Usuário Desconhecido'}
-                            <span className="px-1.5 py-0.5 rounded bg-surface-2 text-[10px] text-fg-muted font-normal">Trader</span>
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-fg text-xs leading-tight flex items-center gap-1.5 truncate">
+                            <span className="truncate">
+                                @{post.user?.username || 'trader'}
+                            </span>
+                            <span className="px-1.5 py-0.2 rounded bg-surface-2 text-[10px] text-fg-subtle font-medium border border-line-subtle shrink-0">
+                                Trader
+                            </span>
                         </h3>
-                        <span className="text-xs text-fg-subtle dark:text-slate-400">{new Date(post.createdAt).toLocaleDateString()} às {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[11px] text-fg-subtle tabular-nums">
+                            {new Date(post.createdAt).toLocaleDateString(isEn ? 'en-US' : 'pt-BR')} ·{' '}
+                            {new Date(post.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                            })}
+                        </span>
                     </div>
                 </div>
-                <button className="text-fg-muted hover:text-slate-700 dark:hover:text-white p-2 hover:bg-surface-2 rounded-full transition-colors"><MoreHorizontal size={20} /></button>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                    {!isOwner &&
+                        onMessageUser &&
+                        post.user?.id &&
+                        post.user.id !== 'deleted' && (
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    onMessageUser({
+                                        id: post.user.id,
+                                        username: post.user.username,
+                                        name: post.user.name,
+                                        avatarUrl: post.user.avatarUrl,
+                                    })
+                                }
+                                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg bg-surface-2 hover:bg-surface-3 border border-line text-[11px] font-semibold text-fg-muted hover:text-fg transition-colors cursor-pointer"
+                                title={isEn ? 'Start direct chat' : 'Iniciar conversa direta'}
+                            >
+                                <MessageSquare size={12} className="text-accent-fg" />
+                                <span>{isEn ? 'Message' : 'Conversar'}</span>
+                            </button>
+                        )}
+
+                    {isOwner && onDeletePost && (
+                        <button
+                            type="button"
+                            onClick={() => onDeletePost(post.id)}
+                            className="p-1.5 rounded-lg text-fg-subtle hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
+                            title={isEn ? 'Delete post' : 'Remover publicação'}
+                        >
+                            <Trash2 size={14} />
+                        </button>
+                    )}
+                </div>
             </div>
 
-            <div className="text-fg-muted text-sm mb-4 whitespace-pre-wrap leading-relaxed pl-[3.75rem]">
-                {post.content}
-            </div>
+            {post.content && (
+                <div className="text-fg text-xs mb-3 whitespace-pre-wrap leading-relaxed pl-[2.875rem] break-words">
+                    {post.content}
+                </div>
+            )}
 
-            {/* Generic Image Post */}
+            {/* Imagem Genérica */}
             {post.type === 'image' && post.imageUrl && !post.tradeData?.imageUrl && (
-                <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50 group/image">
+                <div className="mb-3 pl-[2.875rem]">
+                    <div className="relative rounded-xl overflow-hidden border border-line bg-canvas-subtle">
                         <img
-                            src={`${ASSETS_URL}${post.imageUrl}`}
+                            src={resolveMediaUrl(post.imageUrl)}
                             alt="Post Media"
-                            className="w-full h-auto max-h-[500px] object-contain cursor-pointer transition-transform duration-500 group-hover/image:scale-[1.02]"
+                            className="w-full h-auto max-h-[420px] object-contain cursor-pointer"
                             loading="lazy"
-                            onClick={() => window.open(`${ASSETS_URL}${post.imageUrl}`, '_blank')}
+                            onClick={() =>
+                                window.open(resolveMediaUrl(post.imageUrl), '_blank')
+                            }
                         />
                     </div>
                 </div>
             )}
 
-            {/* Generic Video Post */}
+            {/* Vídeo no Feed */}
             {post.type === 'video' && post.imageUrl && (
-                <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50">
+                <div className="mb-3 pl-[2.875rem]">
+                    <div className="relative rounded-xl overflow-hidden border border-line bg-canvas-subtle">
                         <video
-                            src={`${ASSETS_URL}${post.imageUrl}`}
+                            src={resolveMediaUrl(post.imageUrl)}
                             controls
-                            className="w-full h-auto max-h-[500px] object-contain"
+                            className="w-full h-auto max-h-[420px] object-contain"
                         />
                     </div>
                 </div>
             )}
 
-            {/* Trade Analysis/Share Post (Legacy or specialized) */}
+            {/* Partilha de Trade */}
             {post.type === 'image' && post.tradeData?.imageUrl && (
-                <div className="mb-4 pl-[3.75rem]">
-                    <div className="relative rounded-2xl overflow-hidden border border-line-strong bg-canvas/50 group/image">
+                <div className="mb-3 pl-[2.875rem]">
+                    <div className="relative rounded-xl overflow-hidden border border-line bg-canvas-subtle">
                         <img
-                            src={`${ASSETS_URL}${post.tradeData?.imageUrl}`}
+                            src={resolveMediaUrl(post.tradeData.imageUrl)}
                             alt="Trade Review"
-                            className="w-full h-auto max-h-[500px] object-contain cursor-pointer transition-transform duration-500 group-hover/image:scale-[1.02]"
+                            className="w-full h-auto max-h-[420px] object-contain cursor-pointer"
                             loading="lazy"
-                            onClick={() => window.open(`${ASSETS_URL}${post.tradeData?.imageUrl}`, '_blank')}
+                            onClick={() =>
+                                window.open(
+                                    resolveMediaUrl(post.tradeData?.imageUrl),
+                                    '_blank'
+                                )
+                            }
                         />
                         {post.tradeData?.symbol && (
-                            <div className="absolute top-3 left-3 bg-surface/80 backdrop-blur border border-line-strong px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
-                                <span className="text-fg font-bold text-sm tracking-wide">{post.tradeData?.symbol}</span>
-                                {post.tradeData?.ticket && (
-                                    <span className="text-fg-muted text-xs">#{post.tradeData?.ticket}</span>
+                            <div className="absolute top-2.5 left-2.5 bg-surface/90 backdrop-blur border border-line px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                                <span className="text-fg font-bold text-xs">
+                                    {post.tradeData.symbol}
+                                </span>
+                                {post.tradeData.ticket && (
+                                    <span className="text-fg-muted text-[11px] font-mono">
+                                        #{post.tradeData.ticket}
+                                    </span>
                                 )}
                             </div>
                         )}
-                        {post.tradeData?.profit !== undefined && post.tradeData?.isWin !== undefined && (
-                            <div className={`absolute bottom-3 right-3 backdrop-blur px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-lg border text-sm font-bold ${post.tradeData?.isWin
-                                ? 'bg-emerald-500/20 text-accent-fg border-emerald-500/30'
-                                : 'bg-rose-500/20 text-danger-fg border-rose-500/30'
-                                }`}>
-                                {post.tradeData?.isWin ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                                {post.tradeData?.isWin ? '+' : ''}{Number(post.tradeData?.profit).toFixed(2)}
-                            </div>
-                        )}
+                        {post.tradeData?.profit !== undefined &&
+                            post.tradeData?.isWin !== undefined && (
+                                <div
+                                    className={`absolute bottom-2.5 right-2.5 backdrop-blur px-2.5 py-1 rounded-lg flex items-center gap-1.5 border text-xs font-bold font-mono tabular-nums ${
+                                        post.tradeData.isWin
+                                            ? 'bg-accent/15 text-accent-fg border-accent/30'
+                                            : 'bg-danger/15 text-danger-fg border-danger/30'
+                                    }`}
+                                >
+                                    {post.tradeData.isWin ? (
+                                        <TrendingUp size={13} />
+                                    ) : (
+                                        <TrendingDown size={13} />
+                                    )}
+                                    {post.tradeData.isWin ? '+' : ''}$
+                                    {Number(post.tradeData.profit).toFixed(2)}
+                                </div>
+                            )}
                     </div>
                 </div>
             )}
 
-            {/* Interactions */}
-            <div className="flex items-center gap-6 pt-4 border-t border-slate-200 dark:border-slate-800/50 ml-[3.75rem]">
+            {/* Barra de Interações */}
+            <div className="flex items-center gap-5 pt-2.5 border-t border-line-subtle ml-[2.875rem]">
                 <button
+                    type="button"
                     onClick={() => !isRestricted && onLike(post.id)}
                     disabled={isRestricted}
-                    className={`flex items-center gap-2 text-sm font-bold transition-all ${post.isLiked ? 'text-rose-500' : 'text-fg-subtle hover:text-rose-500'
-                        } ${isRestricted
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:bg-rose-500/10 px-2 py-1 -ml-2 rounded-lg'
-                        }`}
+                    className={`flex items-center gap-1.5 text-xs font-semibold transition-colors tabular-nums ${
+                        post.isLiked
+                            ? 'text-danger-fg'
+                            : 'text-fg-subtle hover:text-danger-fg'
+                    } ${isRestricted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
-                    <Heart size={18} fill={post.isLiked ? "currentColor" : "none"} className={post.isLiked ? "animate-bounce" : ""} />
-                    {post.likesCount || 0}
+                    <Heart size={14} fill={post.isLiked ? 'currentColor' : 'none'} />
+                    <span>{post.likesCount || 0}</span>
                 </button>
+
                 <button
-                    disabled={isRestricted}
-                    className={`flex items-center gap-2 text-sm font-bold text-fg-subtle hover:text-indigo-600 dark:hover:text-indigo-400 transition-all ${isRestricted
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:bg-indigo-500/10 px-2 py-1 rounded-lg'
-                        }`}
+                    type="button"
+                    onClick={() => setShowComments((prev) => !prev)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle hover:text-fg transition-colors tabular-nums cursor-pointer"
                 >
-                    <MessageCircle size={18} />
-                    {post.commentsCount || 0}
+                    <MessageCircle size={14} />
+                    <span>{post.commentsCount || commentsList.length || 0}</span>
                 </button>
+
                 <button
-                    className="flex items-center gap-2 text-sm font-bold text-fg-subtle hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 px-2 py-1 rounded-lg transition-all ml-auto"
+                    type="button"
+                    onClick={() => void handleShare()}
+                    className="flex items-center gap-1 text-xs font-semibold text-fg-subtle hover:text-accent-fg transition-colors ml-auto cursor-pointer"
+                    title={isEn ? 'Copy link' : 'Copiar link'}
                 >
-                    <Share2 size={18} />
+                    {copied ? (
+                        <Check size={14} className="text-accent-fg" />
+                    ) : (
+                        <Share2 size={14} />
+                    )}
                 </button>
             </div>
+
+            {/* Comentários Expansíveis da Publicação */}
+            {showComments && (
+                <div className="mt-3 pt-3 border-t border-line-subtle ml-[2.875rem] space-y-2.5">
+                    {commentsList.length > 0 && (
+                        <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                            {commentsList.map((c) => (
+                                <div
+                                    key={c.id}
+                                    className="p-2.5 rounded-lg bg-canvas-subtle border border-line-subtle text-xs"
+                                >
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className="font-bold text-accent-fg font-mono text-[11px]">
+                                            @{c.user?.username || 'trader'}
+                                        </span>
+                                    </div>
+                                    <p className="text-fg-muted whitespace-pre-wrap break-words leading-relaxed">
+                                        {c.content}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {!isRestricted && (
+                        <form
+                            onSubmit={handleAddComment}
+                            className="flex items-center gap-2"
+                        >
+                            <input
+                                type="text"
+                                value={commentText}
+                                onChange={(e) => setCommentText(e.target.value)}
+                                placeholder={isEn ? 'Write a comment...' : 'Escreva um comentário...'}
+                                className="flex-1 h-8 rounded-lg bg-canvas-subtle border border-line px-3 text-xs text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent/60"
+                            />
+                            <button
+                                type="submit"
+                                disabled={!commentText.trim() || submittingComment}
+                                className="h-8 px-3 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-45 text-accent-on text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                                <Send size={12} />
+                            </button>
+                        </form>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

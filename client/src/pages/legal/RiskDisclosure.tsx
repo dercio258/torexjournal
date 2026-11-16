@@ -1,27 +1,75 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { useLocale } from '../../context/LocaleContext';
 
 export const RiskDisclosure = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+
     return (
         <div className="min-h-screen bg-canvas text-fg/80 py-20 px-6 font-sans">
             <div className="max-w-3xl mx-auto bg-surface/40 p-8 md:p-12 rounded-3xl border border-line shadow-2xl">
                 <Link to="/legal" className="inline-flex items-center text-emerald-500 hover:text-accent-fg mb-8 transition-colors text-sm font-medium">
                     <ArrowLeft className="w-4 h-4 mr-2" />
-                    Voltar para Central Legal
+                    {isEn ? 'Back to Legal Center' : 'Voltar para Central Legal'}
                 </Link>
 
                 <div className="flex items-center gap-4 mb-6">
                     <div className="p-3 bg-red-500/10 rounded-xl text-red-500">
                         <AlertTriangle size={32} />
                     </div>
-                    <h1 className="text-3xl md:text-4xl font-bold text-fg">Aviso de Risco</h1>
+                    <h1 className="text-3xl md:text-4xl font-bold text-fg">
+                        {isEn ? 'Risk Disclosure' : 'Aviso de Risco'}
+                    </h1>
                 </div>
 
                 <div className="p-4 mb-10 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 font-medium">
-                    IMPORTANTE: LEIA COM ATENÇÃO ANTES DE UTILIZAR A PLATAFORMA.
+                    {isEn
+                        ? 'IMPORTANT: READ CAREFULLY BEFORE USING THE PLATFORM.'
+                        : 'IMPORTANTE: LEIA COM ATENÇÃO ANTES DE UTILIZAR A PLATAFORMA.'}
                 </div>
 
-                <div className="space-y-8 text-base leading-relaxed">
+                {isEn ? (
+                    <div className="space-y-8 text-base leading-relaxed">
+                        <section>
+                            <h2 className="text-xl font-bold text-fg mb-3">4.1 High Risk of Financial Loss</h2>
+                            <p>Trading leveraged financial instruments — including FX, indices, commodities, futures, and digital assets — carries substantial risk and may not be suitable for all participants. Leverage can amplify both gains and drawdowns.</p>
+                        </section>
+
+                        <section>
+                            <h2 className="text-xl font-bold text-fg mb-3">4.2 Risk Capital Only</h2>
+                            <p>You may sustain partial or total loss of initial capital. Never trade with funds you cannot afford to lose.</p>
+                        </section>
+
+                        <section>
+                            <h2 className="text-xl font-bold text-fg mb-3">4.3 Hypothetical & Historical Performance</h2>
+                            <p>Market replay sessions, backtesting statistics, and historical analytics rendered in <strong>Torex Journal</strong> are strictly informational and do not guarantee future execution outcomes or live liquidity fills.</p>
+                        </section>
+
+                        <section>
+                            <h2 className="text-xl font-bold text-fg mb-3">4.4 No Performance Guarantees</h2>
+                            <p>Torex Journal is a post-trade and simulation decision-support workspace. Using the software does not guarantee profitability or eliminate market risk.</p>
+                        </section>
+
+                        <hr className="border-line my-10" />
+
+                        <div className="flex items-center gap-3 mb-6">
+                            <h1 className="text-2xl md:text-3xl font-bold text-fg">Professional Disclaimer</h1>
+                        </div>
+
+                        <section>
+                            <h2 className="text-xl font-bold text-fg mb-3">5.1 Scope of Service</h2>
+                            <p className="mb-2">Torex Journal explicitly clarifies that it:</p>
+                            <ul className="list-disc pl-5 space-y-2">
+                                <li><strong>Is NOT a Broker:</strong> We do not intermediate market orders or custody client capital.</li>
+                                <li><strong>Is NOT Investment Advice:</strong> We issue zero buy/sell signals or portfolio recommendations; all telemetry is algorithmically derived from your own execution ledger.</li>
+                                <li><strong>Does NOT Manage Funds:</strong> We are not asset managers and never execute live trades in your brokerage account.</li>
+                                <li><strong>Does NOT Route Live Orders:</strong> Torex Journal operates purely as an analytical cloud workspace for journaling and market replay.</li>
+                            </ul>
+                        </section>
+                    </div>
+                ) : (
+                    <div className="space-y-8 text-base leading-relaxed">
                     <section>
                         <h2 className="text-xl font-bold text-fg mb-3">4.1 O Trading Envolve Risco Significativo</h2>
                         <p>A negociação de instrumentos financeiros, incluindo Forex, ações, commodities e criptoativos, possui um alto nível de risco e pode não ser adequada para todos os investidores. O uso de alavancagem pode aumentar tanto os lucros quanto as perdas.</p>
@@ -64,6 +112,7 @@ export const RiskDisclosure = () => {
                         <p>A plataforma deve ser utilizada estritamente como uma ferramenta educacional para aprimorar as habilidades de gestão de risco e psicologia do trader. Toda e qualquer ação tomada no mercado financeiro é de responsabilidade exclusiva e soberana do Usuário.</p>
                     </section>
                 </div>
+                )}
             </div>
         </div>
     );

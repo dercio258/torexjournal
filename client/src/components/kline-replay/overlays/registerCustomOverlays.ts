@@ -1468,4 +1468,315 @@ export function ensureCustomOverlays() {
     } catch (_) {
         // Ignore if already registered
     }
+
+    // 7. Replay Trade Execution Marker + Path Overlay (Entry & Exit Arrows + Dashed Trade Path)
+    try {
+        registerOverlay({
+            name: 'replayTradeExecution',
+            totalStep: 3,
+            needDefaultPointFigure: false,
+            needDefaultXAxisFigure: false,
+            needDefaultYAxisFigure: false,
+            createPointFigures: ({ overlay, coordinates, precision }) => {
+                if (!coordinates || coordinates.length < 1) return [];
+                const meta = (overlay?.extendData || {}) as {
+                    side?: 'BUY' | 'SELL';
+                    status?: string;
+                    entryPrice?: number;
+                    exitPrice?: number;
+                    exitReason?: string;
+                    pnl?: number;
+                    rMultiple?: number;
+                    decimals?: number;
+                };
+
+                const isBuy = (meta.side || 'BUY') === 'BUY';
+                const status = meta.status || 'OPEN';
+                const isClosed = status === 'WIN' || status === 'LOSS';
+                const pnl = Number(meta.pnl ?? 0);
+                const rMult = typeof meta.rMultiple === 'number' && Number.isFinite(meta.rMultiple) ? meta.rMultiple : null;
+                const dec = meta.decimals ?? precision?.price ?? 2;
+
+                const entryVal = Number(meta.entryPrice ?? overlay.points?.[0]?.value ?? 0);
+                const exitVal = Number(meta.exitPrice ?? overlay.points?.[1]?.value ?? entryVal);
+
+                const p1 = coordinates[0];
+                const p2 = coordinates.length >= 2 ? coordinates[1] : null;
+                const entryColor = isBuy ? '#2563eb' : '#e11d48';
+                const resultColor = pnl >= 0 ? '#10b981' : '#ef4444';
+
+                const figures: any[] = [];
+
+                // 1) Dashed execution path between Entry and Exit (or current live bar while OPEN)
+                if (p2 && (Math.abs(p2.x - p1.x) > 0.5 || Math.abs(p2.y - p1.y) > 0.5)) {
+                    figures.push({
+                        type: 'line',
+                        ignoreEvent: true,
+                        attrs: {
+                            coordinates: [
+                                { x: p1.x, y: p1.y },
+                                { x: p2.x, y: p2.y },
+                            ],
+                        },
+                        styles: {
+                            style: LineType.Dashed,
+                            color: resultColor,
+                            size: isClosed ? 1.8 : 1.35,
+                            dashedValue: [5, 4],
+                        },
+                    });
+                }
+
+                // 2) Exact Entry price anchor dot + directional arrow + badge
+                figures.push(
+                    {
+                        type: 'circle',
+                        ignoreEvent: true,
+                        attrs: { x: p1.x, y: p1.y, r: 4.5 },
+                        styles: {
+                            style: 'stroke_fill',
+                            color: entryColor,
+                            borderColor: '#ffffff',
+                            borderSize: 1.5,
+                        },
+                    },
+                    {
+                        type: 'polygon',
+                        ignoreEvent: true,
+                        attrs: {
+                            coordinates: isBuy
+                                ? [
+                                      { x: p1.x, y: p1.y + 6 },
+                                      { x: p1.x - 5.5, y: p1.y + 14 },
+                                      { x: p1.x + 5.5, y: p1.y + 14 },
+                                  ]
+                                : [
+                                      { x: p1.x, y: p1.y - 6 },
+                                      { x: p1.x - 5.5, y: p1.y - 14 },
+                                      { x: p1.x + 5.5, y: p1.y - 14 },
+                                  ],
+                        },
+                        styles: {
+                            style: 'fill',
+                            color: entryColor,
+                        },
+                    },
+                    {
+                        type: 'text',
+                        ignoreEvent: true,
+                        attrs: {
+                            x: p1.x,
+                            y: isBuy ? p1.y + 24 : p1.y - 24,
+                            text: `ENTRY ${isBuy ? 'BUY' : 'SELL'} @ ${entryVal.toFixed(dec)}`,
+                            align: 'center',
+                            baseline: 'middle',
+                        },
+                        styles: {
+                            color: '#ffffff',
+                            backgroundColor: entryColor,
+                            size: 10,
+                            weight: 'bold',
+                            paddingLeft: 6,
+                            paddingRight: 6,
+                            paddingTop: 3,
+                            paddingBottom: 3,
+                            borderRadius: 4,
+                        },
+                    }
+                );
+
+                // 3) Exact Exit price anchor dot + directional arrow + PnL/R badge when trade is closed
+                if (isClosed && p2) {
+                    const reasonTag = meta.exitReason ? ` ${meta.exitReason}` : '';
+                    const pnlSign = pnl >= 0 ? '+' : '-';
+                    const pnlText = `${pnlSign}$${Math.abs(pnl).toFixed(2)}`;
+                    const rText =
+                        rMult !== null && Math.abs(rMult) > 0
+                            ? ` (${rMult >= 0 ? '+' : ''}${rMult.toFixed(2)}R)`
+                            : '';
+
+                    figures.push(
+                        {
+                            type: 'circle',
+                            ignoreEvent: true,
+                            attrs: { x: p2.x, y: p2.y, r: 4.5 },
+                            styles: {
+                                style: 'stroke_fill',
+                                color: resultColor,
+                                borderColor: '#ffffff',
+                                borderSize: 1.5,
+                            },
+                        },
+                        {
+                            type: 'polygon',
+                            ignoreEvent: true,
+                            attrs: {
+                                coordinates: isBuy
+                                    ? [
+                                          { x: p2.x, y: p2.y - 6 },
+                                          { x: p2.x - 5.5, y: p2.y - 14 },
+                                          { x: p2.x + 5.5, y: p2.y - 14 },
+                                      ]
+                                    : [
+                                          { x: p2.x, y: p2.y + 6 },
+                                          { x: p2.x - 5.5, y: p2.y + 14 },
+                                          { x: p2.x + 5.5, y: p2.y + 14 },
+                                      ],
+                            },
+                            styles: {
+                                style: 'fill',
+                                color: resultColor,
+                            },
+                        },
+                        {
+                            type: 'text',
+                            ignoreEvent: true,
+                            attrs: {
+                                x: p2.x,
+                                y: isBuy ? p2.y - 24 : p2.y + 24,
+                                text: `EXIT${reasonTag} @ ${exitVal.toFixed(dec)} · ${pnlText}${rText}`,
+                                align: 'center',
+                                baseline: 'middle',
+                            },
+                            styles: {
+                                color: '#ffffff',
+                                backgroundColor: resultColor,
+                                size: 10,
+                                weight: 'bold',
+                                paddingLeft: 6,
+                                paddingRight: 6,
+                                paddingTop: 3,
+                                paddingBottom: 3,
+                                borderRadius: 4,
+                            },
+                        }
+                    );
+                }
+
+                return figures;
+            },
+        });
+    } catch (_) {
+        // Ignore if already registered
+    }
+
+    // 8. Interactive Draggable Order Preview Line (Entry / SL / TP before execution)
+    try {
+        registerOverlay({
+            name: 'replayOrderPreviewLine',
+            totalStep: 2,
+            needDefaultPointFigure: false,
+            needDefaultXAxisFigure: false,
+            needDefaultYAxisFigure: false,
+            createPointFigures: ({ overlay, coordinates, bounding, precision }) => {
+                if (!coordinates || coordinates.length === 0) return [];
+                const y = coordinates[0].y;
+                const meta = (overlay?.extendData || {}) as {
+                    role?: 'ENTRY' | 'SL' | 'TP';
+                    label?: string;
+                    sublabel?: string;
+                    color?: string;
+                    decimals?: number;
+                    price?: number;
+                };
+                const roleColor =
+                    meta.color ||
+                    (meta.role === 'SL'
+                        ? '#ef4444'
+                        : meta.role === 'TP'
+                          ? '#10b981'
+                          : '#0ea5e9');
+                const dec = meta.decimals ?? precision?.price ?? 2;
+                const val = Number(overlay?.points?.[0]?.value ?? meta.price ?? 0);
+                const priceText = Number.isFinite(val) && val > 0 ? val.toFixed(dec) : '';
+                const labelText = [meta.label || meta.role || 'PREVIEW', priceText, meta.sublabel]
+                    .filter(Boolean)
+                    .join(' · ');
+
+                return [
+                    {
+                        type: 'line',
+                        attrs: {
+                            coordinates: [
+                                { x: 0, y },
+                                { x: bounding.width, y },
+                            ],
+                        },
+                        styles: {
+                            style: LineType.Dashed,
+                            color: roleColor,
+                            size: 1.6,
+                            dashedValue: [6, 4],
+                        },
+                    },
+                    {
+                        type: 'text',
+                        attrs: {
+                            x: Math.max(80, bounding.width - 14),
+                            y,
+                            text: `⇅ ${labelText}`,
+                            align: 'right',
+                            baseline: 'middle',
+                        },
+                        styles: {
+                            color: '#ffffff',
+                            backgroundColor: roleColor,
+                            size: 10,
+                            weight: 'bold',
+                            paddingLeft: 8,
+                            paddingRight: 8,
+                            paddingTop: 3.5,
+                            paddingBottom: 3.5,
+                            borderRadius: 4,
+                        },
+                    },
+                ];
+            },
+            createYAxisFigures: ({ overlay, coordinates, precision }) => {
+                if (!coordinates || coordinates.length === 0) return [];
+                const meta = (overlay?.extendData || {}) as {
+                    role?: 'ENTRY' | 'SL' | 'TP';
+                    color?: string;
+                    decimals?: number;
+                    price?: number;
+                };
+                const roleColor =
+                    meta.color ||
+                    (meta.role === 'SL'
+                        ? '#ef4444'
+                        : meta.role === 'TP'
+                          ? '#10b981'
+                          : '#0ea5e9');
+                const dec = meta.decimals ?? precision?.price ?? 2;
+                const val = Number(overlay?.points?.[0]?.value ?? meta.price ?? 0);
+                if (!Number.isFinite(val) || val <= 0) return [];
+
+                return [
+                    {
+                        type: 'text',
+                        attrs: {
+                            x: 0,
+                            y: coordinates[0].y,
+                            text: val.toFixed(dec),
+                            align: 'left',
+                            baseline: 'middle',
+                        },
+                        styles: {
+                            color: '#ffffff',
+                            backgroundColor: roleColor,
+                            size: 10,
+                            weight: 'bold',
+                            paddingLeft: 5,
+                            paddingRight: 5,
+                            paddingTop: 3,
+                            paddingBottom: 3,
+                            borderRadius: 3,
+                        },
+                    },
+                ];
+            },
+        });
+    } catch (_) {
+        // Ignore if already registered
+    }
 }

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { KeyRound, Lock, Mail } from 'lucide-react';
 import api from '../api';
+import { useLocale } from '../context/LocaleContext';
 import { AuthLayout } from '../layouts/AuthLayout';
 import { AuthCard, AuthIcon } from '../components/auth/AuthCard';
 import { Input } from '../components/ui/Input';
@@ -21,6 +22,8 @@ const RESEND_COOLDOWN_S = 300;
  */
 export const ForgotPassword = () => {
     const navigate = useNavigate();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [params] = useSearchParams();
 
     const fromLink = params.get('recover') === 'true' && !!params.get('token') && !!params.get('sig');
@@ -39,11 +42,17 @@ export const ForgotPassword = () => {
     const [done, setDone] = useState(false);
     const resend = useCountdown();
 
+    useEffect(() => {
+        if (fromLink && window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }, [fromLink]);
+
     const requestCode = async () => {
         setError(null);
         setSuccess(null);
         if (!EMAIL_RE.test(email.trim())) {
-            setFieldErrors({ email: 'Informe um e-mail válido.' });
+            setFieldErrors({ email: isEn ? 'Enter a valid email address.' : 'Informe um e-mail válido.' });
             return;
         }
         setFieldErrors({});
@@ -51,16 +60,23 @@ export const ForgotPassword = () => {
         try {
             const res = await api.post('/auth/forgot-password', { email: email.trim() });
             if (!res.data.success) {
-                setError(res.data.message || 'Erro ao enviar código.');
+                setError(res.data.message || (isEn ? 'Failed to send recovery code.' : 'Erro ao enviar código.'));
                 return;
             }
-            setToken(res.data.token);
-            setSig(res.data.sig);
+            setToken('');
+            setSig('');
             setStep('reset');
             resend.start(RESEND_COOLDOWN_S);
-            setSuccess('Código enviado para o seu e-mail.');
+            setSuccess(
+                res.data.message ||
+                    (isEn
+                        ? 'If this email is registered, we have sent a recovery code.'
+                        : 'Se o e-mail estiver registado, enviaremos um código de recuperação.')
+            );
         } catch (err) {
-            setError(getApiMessage(err, 'Erro ao conectar com o servidor'));
+            setError(
+                getApiMessage(err, isEn ? 'Unable to connect to the server.' : 'Erro ao conectar com o servidor')
+            );
         } finally {
             setIsLoading(false);
         }
@@ -77,29 +93,41 @@ export const ForgotPassword = () => {
         setSuccess(null);
 
         const errors: typeof fieldErrors = {};
-        if (!code.trim()) errors.code = 'Informe o código recebido.';
-        if (newPassword.length < MIN_PASSWORD_LENGTH) errors.password = `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres.`;
+        if (!code.trim()) errors.code = isEn ? 'Enter the recovery code.' : 'Informe o código recebido.';
+        if (newPassword.length < MIN_PASSWORD_LENGTH)
+            errors.password = isEn
+                ? `Minimum ${MIN_PASSWORD_LENGTH} characters.`
+                : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres.`;
         setFieldErrors(errors);
         if (Object.keys(errors).length) return;
 
         setIsLoading(true);
         try {
-            const res = await api.post('/auth/reset-password', {
+            const payload: Record<string, string> = {
                 email: email.trim(),
                 code: code.trim(),
-                token,
-                sig,
                 newPassword,
-            });
+            };
+            if (token && sig) {
+                payload.token = token;
+                payload.sig = sig;
+            }
+            const res = await api.post('/auth/reset-password', payload);
             if (res.data.success || res.status === 200 || res.status === 201) {
                 setDone(true);
-                setSuccess('Senha redefinida com sucesso! Redirecionando para o login...');
+                setSuccess(
+                    isEn
+                        ? 'Password updated successfully! Redirecting to sign in...'
+                        : 'Senha redefinida com sucesso! Redirecionando para o login...'
+                );
                 window.setTimeout(() => navigate('/login', { replace: true }), 2000);
             } else {
-                setError(res.data.message || 'Erro ao redefinir senha.');
+                setError(res.data.message || (isEn ? 'Failed to reset password.' : 'Erro ao redefinir senha.'));
             }
         } catch (err) {
-            setError(getApiMessage(err, 'Erro ao realizar a solicitação.'));
+            setError(
+                getApiMessage(err, isEn ? 'Unable to complete request.' : 'Erro ao realizar a solicitação.')
+            );
         } finally {
             setIsLoading(false);
         }
@@ -108,31 +136,39 @@ export const ForgotPassword = () => {
     return (
         <AuthLayout>
             <AuthCard
-                back={{ to: '/login', label: 'Voltar para login' }}
+                back={{ to: '/login', label: isEn ? 'Back to sign in' : 'Voltar para login' }}
                 icon={
                     <AuthIcon>
                         <KeyRound size={22} aria-hidden />
                     </AuthIcon>
                 }
-                title="Recuperar senha"
+                title={isEn ? 'Reset Password' : 'Recuperar senha'}
                 description={
                     step === 'request'
-                        ? 'Informe seu e-mail cadastrado para receber um código de recuperação.'
-                        : (
-                              <>
-                                  Insira o código enviado para <b className="text-fg">{email}</b> e defina uma nova senha.
-                              </>
-                          )
+                        ? isEn
+                            ? 'Enter your registered email to receive a password recovery code.'
+                            : 'Informe seu e-mail cadastrado para receber um código de recuperação.'
+                        : isEn
+                          ? (
+                                <>
+                                    Enter the code sent to <b className="text-fg">{email}</b> and set a new password.
+                                </>
+                            )
+                          : (
+                                <>
+                                    Insira o código enviado para <b className="text-fg">{email}</b> e defina uma nova senha.
+                                </>
+                            )
                 }
             >
                 {step === 'request' ? (
                     <form onSubmit={handleRequest} noValidate className="space-y-6">
                         <Input
                             variant="field"
-                            label="E-mail cadastrado"
+                            label={isEn ? 'Registered email' : 'E-mail cadastrado'}
                             type="email"
                             autoComplete="email"
-                            placeholder="exemplo@torex.com"
+                            placeholder={isEn ? 'trader@torexjournal.com' : 'exemplo@torex.com'}
                             icon={<Mail size={18} />}
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
@@ -141,14 +177,14 @@ export const ForgotPassword = () => {
                         />
                         {error && <Alert tone="error">{error}</Alert>}
                         <Button type="submit" variant="brand" size="lg" fullWidth isLoading={isLoading}>
-                            Enviar código de recuperação
+                            {isEn ? 'Send Recovery Code' : 'Enviar código de recuperação'}
                         </Button>
                     </form>
                 ) : (
                     <form onSubmit={handleReset} noValidate className="space-y-5">
                         <Input
                             variant="field"
-                            label="Código de verificação"
+                            label={isEn ? 'Verification code' : 'Código de verificação'}
                             inputMode="numeric"
                             autoComplete="one-time-code"
                             placeholder="123456"
@@ -161,21 +197,25 @@ export const ForgotPassword = () => {
                             autoFocus
                         />
                         <PasswordInput
-                            label="Nova senha"
+                            label={isEn ? 'New password' : 'Nova senha'}
                             autoComplete="new-password"
                             placeholder="••••••••"
                             icon={<Lock size={18} />}
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             error={fieldErrors.password}
-                            hint={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+                            hint={
+                                isEn
+                                    ? `Minimum ${MIN_PASSWORD_LENGTH} characters`
+                                    : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`
+                            }
                         />
 
                         {error && <Alert tone="error">{error}</Alert>}
                         {success && <Alert tone="success">{success}</Alert>}
 
                         <Button type="submit" variant="brand" size="lg" fullWidth isLoading={isLoading} disabled={done}>
-                            Redefinir senha
+                            {isEn ? 'Reset Password' : 'Redefinir senha'}
                         </Button>
 
                         <div className="text-center">
@@ -186,7 +226,13 @@ export const ForgotPassword = () => {
                                 onClick={requestCode}
                                 disabled={resend.active || isLoading || !email}
                             >
-                                {resend.active ? `Aguarde ${resend.remaining}s para reenviar` : 'Não recebeu o código? Reenviar'}
+                                {resend.active
+                                    ? isEn
+                                        ? `Wait ${resend.remaining}s to resend`
+                                        : `Aguarde ${resend.remaining}s para reenviar`
+                                    : isEn
+                                      ? "Didn't receive a code? Resend"
+                                      : 'Não recebeu o código? Reenviar'}
                             </Button>
                         </div>
                     </form>

@@ -31,8 +31,9 @@ export default {
                     disabled: token('fg-disabled'),
                 },
                 line: {
-                    DEFAULT: 'rgb(var(--ds-line) / 0.08)',
-                    strong: 'rgb(var(--ds-line) / 0.14)',
+                    subtle: 'rgb(var(--ds-line) / 0.05)',
+                    DEFAULT: 'rgb(var(--ds-line) / 0.07)',
+                    strong: 'rgb(var(--ds-line) / 0.13)',
                 },
                 accent: {
                     DEFAULT: token('accent'),
@@ -53,6 +54,7 @@ export default {
                     pos: token('data-pos'),
                     neg: token('data-neg'),
                     1: token('data-1'),
+                    radar: token('data-radar'),
                 },
 
                 // ---- Legacy v1 (hex, dark-only) — do not use in new code ----

@@ -4,8 +4,11 @@ import { Table, Inbox } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import api from '../../api';
 import { Trade } from '../../types';
+import { useLocale } from '../../context/LocaleContext';
 
 export const TradeHistory = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [trades, setTrades] = useState<Trade[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -34,24 +37,24 @@ export const TradeHistory = () => {
         <Card className="p-6">
             <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-bold text-fg uppercase tracking-wider flex items-center gap-2">
-                    <Table className="w-4 h-4 text-accent-fg" /> Histórico de Trades
+                    <Table className="w-4 h-4 text-accent-fg" /> {isEn ? 'Execution Blotter' : 'Histórico de Trades'}
                 </h2>
-                <Link to="/journal" className="text-sm text-accent-fg hover:text-emerald-300 font-medium">Ver todos →</Link>
+                <Link to="/journal" className="text-sm text-accent-fg hover:text-emerald-300 font-medium">{isEn ? 'View all →' : 'Ver todos →'}</Link>
             </div>
 
             <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                     <thead>
                         <tr className="border-b border-line-strong">
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Data/Hora</th>
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Símbolo</th>
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Sessão</th>
-                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Tipo</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Volume</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Entrada</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Saída</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Date/Time' : 'Data/Hora'}</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Symbol' : 'Símbolo'}</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Session' : 'Sessão'}</th>
+                            <th className="py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Side' : 'Tipo'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Size (Lots)' : 'Volume'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Entry' : 'Entrada'}</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Exit' : 'Saída'}</th>
                             <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Hold</th>
-                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">Resultado (P/L)</th>
+                            <th className="text-right py-3 px-4 font-semibold text-fg-muted uppercase tracking-wider text-xs">{isEn ? 'Net P&L' : 'Resultado (P/L)'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-line-strong">
@@ -84,7 +87,7 @@ export const TradeHistory = () => {
                                 return (
                                     <tr key={trade.ticket} className="hover:bg-surface-2/30 transition-colors">
                                         <td className="py-3 px-4 text-fg/80">
-                                            {date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                            {date.toLocaleDateString(isEn ? 'en-US' : 'pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                         </td>
                                         <td className="py-3 px-4 font-medium text-fg">{trade.symbol}</td>
                                         <td className="py-3 px-4 text-fg/80">
@@ -109,7 +112,7 @@ export const TradeHistory = () => {
                             <tr>
                                 <td colSpan={8} className="py-8 text-center text-fg-subtle">
                                     <Inbox className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                    <p>Nenhum trade registrado</p>
+                                    <p>{isEn ? 'No executions recorded' : 'Nenhum trade registrado'}</p>
                                 </td>
                             </tr>
                         )}

@@ -23,9 +23,18 @@ export const parseRetryAfter = (message: string, fallback = 60): number => {
     return fallback;
 };
 
-/** Friendly Portuguese messages for known registration errors. */
-export const getRegisterErrorMessage = (original: string): string => {
+/** Friendly messages for known registration errors in PT or EN. */
+export const getRegisterErrorMessage = (original: string, locale: 'pt' | 'en' = 'pt'): string => {
     const err = original?.toLowerCase() || '';
+    if (locale === 'en') {
+        if (err.includes('email already registered')) return 'This email address is already linked to an account.';
+        if (err.includes('invalid or expired otp')) return 'Invalid or expired verification code. Please request a new one.';
+        if (err.includes('otp is required')) return 'Email verification code is required.';
+        if (err.includes('connect')) return 'Unable to reach the server. Check your connection and try again.';
+        if (err.includes('validation')) return 'Invalid input. Please review the highlighted fields.';
+        if (!original) return 'Unable to complete registration. Please try again.';
+        return `Unable to complete registration: ${original}`;
+    }
     if (err.includes('email already registered')) return 'Este endereço de e-mail já está associado a uma conta.';
     if (err.includes('invalid or expired otp')) return 'Código de verificação inválido ou expirado. Tente novamente.';
     if (err.includes('otp is required')) return 'O código de verificação é obrigatório.';
@@ -36,4 +45,4 @@ export const getRegisterErrorMessage = (original: string): string => {
 };
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const MIN_PASSWORD_LENGTH = 6;
+export const MIN_PASSWORD_LENGTH = 8;

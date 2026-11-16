@@ -1,3 +1,6 @@
+import { formatTradeDateTime, formatTradeMt5Local } from './timezone';
+import { getCurrentLocale, type AppLocale } from '../context/LocaleContext';
+
 export type DocumentFormat = 'csv' | 'html' | 'excel' | 'pdf';
 
 export const TOREX_LOGO_URL =
@@ -32,6 +35,16 @@ export interface ExportDocumentOptions {
         totalSwap?: number;
     };
     trades: any[];
+    dailyNotesByDate?: Record<
+        string,
+        {
+            title?: string | null;
+            content?: string | null;
+            marketBias?: string | null;
+            mood?: string | null;
+            sentimentSummary?: string | null;
+        }
+    >;
 }
 
 const SAMPLE_TEMPLATE_TRADES = [
@@ -93,30 +106,12 @@ const SAMPLE_TEMPLATE_TRADES = [
 
 function formatDateTimePt(val: any): string {
     if (!val) return '-';
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return String(val);
-    return d.toLocaleString('pt-BR', {
-        timeZone: 'UTC',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-    });
+    return formatTradeDateTime(val, { includeSeconds: true, fallback: String(val) });
 }
 
 function formatDateMt5(val: any): string {
     if (!val) return '';
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return String(val);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const min = String(d.getUTCMinutes()).padStart(2, '0');
-    const ss = String(d.getUTCSeconds()).padStart(2, '0');
-    return `${yyyy}.${mm}.${dd} ${hh}:${min}:${ss}`;
+    return formatTradeMt5Local(val) || String(val);
 }
 
 function escapeCsvCell(val: any): string {
@@ -149,44 +144,191 @@ function sanitizeFileSlug(text: string): string {
         .replace(/^_+|_+$/g, '');
 }
 
+function escapeHtml(val: any): string {
+    if (val === null || val === undefined) return '';
+    return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function stripHtmlExport(val: any): string {
+    if (!val) return '';
+    return String(val)
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<\/(p|div|li|h[1-6]|blockquote)>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
+ * Garante que qualquer operação sem anotação individual herde automaticamente
+ * as anotações, viés macro e sentimento do Diário da respectiva data.
+ */
+function spreadDailyContextAcrossTrades(
+    trades: any[],
+    dailyNotesByDate?: ExportDocumentOptions['dailyNotesByDate']
+): any[] {
+    if (!Array.isArray(trades) || trades.length === 0) return [];
+
+    // Índice de contexto diário inferido de dailyNotesByDate + de outros trades do mesmo dia
+    const dateCtx = new Map<
+        string,
+        {
+            notes: string;
+            marketBias: string;
+            sentiment: string;
+            setup: string;
+        }
+    >();
+
+    if (dailyNotesByDate) {
+        for (const [dateKey, dn] of Object.entries(dailyNotesByDate)) {
+            if (!dn) continue;
+            dateCtx.set(dateKey.slice(0, 10), {
+                notes: stripHtmlExport(dn.content),
+                marketBias: dn.marketBias || '',
+                sentiment: dn.sentimentSummary || dn.mood || '',
+                setup: dn.title || '',
+            });
+        }
+    }
+
+    for (const t of trades) {
+        const ref = t.closeTime || t.close_time || t.openTime || t.open_time;
+        const dKey =
+            ref && !isNaN(new Date(ref).getTime())
+                ? new Date(ref).toISOString().slice(0, 10)
+                : '';
+        if (!dKey) continue;
+
+        const existing = dateCtx.get(dKey) || {
+            notes: '',
+            marketBias: '',
+            sentiment: '',
+            setup: '',
+        };
+
+        if (t.annotationSource === 'daily' && !existing.notes) {
+            existing.notes = stripHtmlExport(t.journalNotes || t.lesson || '');
+        }
+        if (t.marketBias && !existing.marketBias) {
+            existing.marketBias = String(t.marketBias);
+        }
+        if (t.annotationSource === 'daily' && t.sentimentSummary && !existing.sentiment) {
+            existing.sentiment = String(t.sentimentSummary);
+        }
+        if (existing.notes || existing.marketBias || existing.sentiment || existing.setup) {
+            dateCtx.set(dKey, existing);
+        }
+    }
+
+    return trades.map((t) => {
+        const ref = t.closeTime || t.close_time || t.openTime || t.open_time;
+        const dKey =
+            ref && !isNaN(new Date(ref).getTime())
+                ? new Date(ref).toISOString().slice(0, 10)
+                : '';
+        const dayFallback = dKey ? dateCtx.get(dKey) : undefined;
+
+        const ownRaw =
+            t.annotationSource === 'daily'
+                ? ''
+                : stripHtmlExport(
+                      t.tradeNote?.content || t.journalNotes || t.lesson || t.notes || ''
+                  );
+        const dailyRaw =
+            t.annotationSource === 'daily'
+                ? stripHtmlExport(t.journalNotes || t.lesson || dayFallback?.notes || '')
+                : dayFallback?.notes || '';
+
+        const hasOwn = Boolean(ownRaw);
+        const effectiveNotes = hasOwn ? ownRaw : dailyRaw;
+        const effectiveSource =
+            t.annotationSource && t.annotationSource !== 'none'
+                ? t.annotationSource
+                : hasOwn
+                ? 'trade'
+                : dailyRaw || dayFallback?.marketBias || dayFallback?.sentiment
+                ? 'daily'
+                : 'none';
+
+        return {
+            ...t,
+            setup: t.setup || t.tradeNote?.setup || dayFallback?.setup || '',
+            marketBias: t.marketBias || dayFallback?.marketBias || '',
+            sentimentSummary:
+                t.sentimentSummary || t.mood || dayFallback?.sentiment || '',
+            journalNotes: effectiveNotes,
+            annotationSource: effectiveSource,
+        };
+    });
+}
+
 /**
  * Constrói o CSV institucional estruturado com cabeçalho TorexJournal, metadados e tabela compatível com MT4/MT5/Torex
  */
-export function buildBrandedCsv(options: ExportDocumentOptions, isTemplate = false): string {
-    const emittedAt = new Date().toLocaleString('pt-BR');
+export function buildBrandedCsv(
+    options: ExportDocumentOptions,
+    isTemplate = false,
+    locale: AppLocale = getCurrentLocale()
+): string {
+    const isEn = locale === 'en';
+    const emittedAt = new Date().toLocaleString(isEn ? 'en-US' : 'pt-BR');
     const currency = options.currency || 'USD';
     const k = options.kpis;
+    const preparedTrades = isTemplate
+        ? options.trades
+        : spreadDailyContextAcrossTrades(options.trades, options.dailyNotesByDate);
 
     const metaLines: string[][] = [
-        ['# TOREX JOURNAL — DEMONSTRATIVO OFICIAL DE AUDITORIA E OPERACOES'],
-        ['# Plataforma', 'https://torexjournal.com', 'Logo Oficial', TOREX_LOGO_URL],
         [
-            '# Conta',
-            options.accountName || 'Consolidado',
-            'Corretora',
+            isEn
+                ? '# TOREX JOURNAL — OFFICIAL EXECUTION STATEMENT & AUDIT REPORT'
+                : '# TOREX JOURNAL — DEMONSTRATIVO OFICIAL DE AUDITORIA E OPERACOES',
+        ],
+        [
+            isEn ? '# Platform' : '# Plataforma',
+            'https://torexjournal.com',
+            isEn ? 'Official Logo' : 'Logo Oficial',
+            TOREX_LOGO_URL,
+        ],
+        [
+            isEn ? '# Account' : '# Conta',
+            options.accountName || (isEn ? 'Consolidated' : 'Consolidado'),
+            isEn ? 'Broker' : 'Corretora',
             options.broker || 'MetaTrader 5',
-            'Moeda',
+            isEn ? 'Currency' : 'Moeda',
             currency,
-            'Tipo',
+            isEn ? 'Type' : 'Tipo',
             options.accountType || 'DEMO/LIVE',
         ],
-        ['# Periodo', options.periodLabel || 'Todo o Historico', 'Emitido em', emittedAt],
+        [
+            isEn ? '# Period' : '# Periodo',
+            options.periodLabel || (isEn ? 'All-Time History' : 'Todo o Historico'),
+            isEn ? 'Issued' : 'Emitido em',
+            emittedAt,
+        ],
     ];
 
     if (k && !isTemplate) {
         metaLines.push([
-            '# Resumo KPIs',
-            `Lucro Liquido: ${currency} ${Number(k.netProfit || 0).toFixed(2)}`,
+            isEn ? '# KPI Summary' : '# Resumo KPIs',
+            `${isEn ? 'Net P&L' : 'Lucro Liquido'}: ${currency} ${Number(k.netProfit || 0).toFixed(2)}`,
             `Win Rate: ${Number(k.winRate || 0).toFixed(1)}%`,
             `Profit Factor: ${k.profitFactor ?? '0.00'}`,
-            `Total Trades: ${k.totalTrades ?? options.trades.length}`,
-            `Drawdown Max: ${currency} ${Number(k.maxDrawdown || 0).toFixed(2)}`,
+            `Total Trades: ${k.totalTrades ?? preparedTrades.length}`,
+            `${isEn ? 'Max Drawdown' : 'Drawdown Max'}: ${currency} ${Number(k.maxDrawdown || 0).toFixed(2)}`,
         ]);
     }
 
     metaLines.push([]);
 
     // Cabeçalho padrão compatível com re-importação automática no TorexJournal e MT4/MT5
+    // (as colunas extras de Diário/Sentimento ficam ao final para manter 100% de compatibilidade)
     const tableHeaders = [
         'Ticket',
         'Open Time',
@@ -205,15 +347,27 @@ export function buildBrandedCsv(options: ExportDocumentOptions, isTemplate = fal
         'Net PnL',
         'Session',
         'Account',
+        ...(isTemplate
+            ? []
+            : [
+                  'Setup',
+                  'Market Bias',
+                  'Sentiment / Mood',
+                  'Rating',
+                  'MFE',
+                  'MAE',
+                  'Note Source',
+                  'Notes',
+              ]),
     ];
 
-    const tradeRows = options.trades.map((t: any) => {
+    const tradeRows = preparedTrades.map((t: any) => {
         const profit = Number(t.profit ?? t.netPnl ?? 0);
         const commission = Number(t.commission ?? 0);
         const swap = Number(t.swap ?? 0);
         const netPnl = t.netPnl !== undefined ? Number(t.netPnl) : profit + commission + swap;
 
-        return [
+        const baseCols = [
             t.ticket ?? t.id ?? '',
             formatDateMt5(t.openTime || t.open_time),
             String(t.type || 'BUY').toLowerCase(),
@@ -231,6 +385,31 @@ export function buildBrandedCsv(options: ExportDocumentOptions, isTemplate = fal
             netPnl.toFixed(2),
             t.session || '',
             t.accountName || options.accountName || '',
+        ];
+
+        if (isTemplate) return baseCols;
+
+        const sourceLabel =
+            t.annotationSource === 'trade'
+                ? isEn
+                    ? 'Trade Note'
+                    : 'Nota do Trade'
+                : t.annotationSource === 'daily'
+                ? isEn
+                    ? 'Daily Log'
+                    : 'Diário do Dia'
+                : '';
+
+        return [
+            ...baseCols,
+            t.setup || '',
+            t.marketBias || '',
+            t.sentimentSummary || t.mood || '',
+            t.rating ? `${t.rating}/5` : '',
+            t.mfe !== null && t.mfe !== undefined ? Number(t.mfe).toFixed(2) : '',
+            t.mae !== null && t.mae !== undefined ? Number(t.mae).toFixed(2) : '',
+            sourceLabel,
+            t.journalNotes || stripHtmlExport(t.lesson) || '',
         ];
     });
 
@@ -250,32 +429,37 @@ export function buildBrandedCsv(options: ExportDocumentOptions, isTemplate = fal
 export function buildBrandedHtml(
     options: ExportDocumentOptions,
     mode: 'html' | 'pdf' | 'excel' = 'html',
-    isTemplate = false
+    isTemplate = false,
+    locale: AppLocale = getCurrentLocale()
 ): string {
-    const emittedAt = new Date().toLocaleString('pt-BR');
+    const isEn = locale === 'en';
+    const emittedAt = new Date().toLocaleString(isEn ? 'en-US' : 'pt-BR');
     const currency = options.currency || 'USD';
+    const preparedTrades = isTemplate
+        ? options.trades
+        : spreadDailyContextAcrossTrades(options.trades, options.dailyNotesByDate);
     const k = options.kpis || {
-        netProfit: options.trades.reduce(
+        netProfit: preparedTrades.reduce(
             (acc, t) => acc + Number(t.netPnl ?? t.profit ?? 0),
             0
         ),
-        grossProfit: options.trades
+        grossProfit: preparedTrades
             .filter((t) => Number(t.netPnl ?? t.profit ?? 0) > 0)
             .reduce((acc, t) => acc + Number(t.netPnl ?? t.profit ?? 0), 0),
         grossLoss: Math.abs(
-            options.trades
+            preparedTrades
                 .filter((t) => Number(t.netPnl ?? t.profit ?? 0) < 0)
                 .reduce((acc, t) => acc + Number(t.netPnl ?? t.profit ?? 0), 0)
         ),
-        totalTrades: options.trades.length,
-        wins: options.trades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) >= 0).length,
-        losses: options.trades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) < 0).length,
+        totalTrades: preparedTrades.length,
+        wins: preparedTrades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) >= 0).length,
+        losses: preparedTrades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) < 0).length,
         winRate:
-            options.trades.length > 0
+            preparedTrades.length > 0
                 ? Number(
                       (
-                          (options.trades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) >= 0).length /
-                              options.trades.length) *
+                          (preparedTrades.filter((t) => Number(t.netPnl ?? t.profit ?? 0) >= 0).length /
+                              preparedTrades.length) *
                           100
                       ).toFixed(1)
                   )
@@ -284,17 +468,17 @@ export function buildBrandedHtml(
         maxDrawdown: 0,
         maxDrawdownPercent: 0,
         roi: 0,
-        totalVolume: options.trades
+        totalVolume: preparedTrades
             .reduce((acc, t) => acc + Number(t.volume ?? t.size ?? 0), 0)
             .toFixed(2),
     };
 
     const netProfit = Number(k.netProfit || 0);
-    const totalVolume = options.trades
+    const totalVolume = preparedTrades
         .reduce((acc, t) => acc + Number(t.volume ?? t.size ?? 0), 0)
         .toFixed(2);
 
-    const rowsHtml = options.trades
+    const rowsHtml = preparedTrades
         .map((t: any) => {
             const profit = Number(t.profit ?? t.netPnl ?? 0);
             const commission = Number(t.commission ?? 0);
@@ -303,13 +487,28 @@ export function buildBrandedHtml(
             const isBuy = String(t.type || 'BUY').toUpperCase().includes('BUY');
             const isWin = net >= 0;
 
+            const setupBiasParts = [
+                t.setup,
+                t.marketBias ? `${isEn ? 'Bias' : 'Viés'}: ${t.marketBias}` : '',
+            ]
+                .filter(Boolean)
+                .join(' • ');
+            const sentimentStr = t.sentimentSummary || t.mood || '-';
+            const sourceBadge =
+                t.annotationSource === 'trade'
+                    ? '<span class="badge" style="background:#dbeafe;color:#1e40af;">Trade</span>'
+                    : t.annotationSource === 'daily'
+                    ? `<span class="badge" style="background:#d1fae5;color:#065f46;">${isEn ? 'Daily Log' : 'Diário do Dia'}</span>`
+                    : '-';
+            const notesStr = escapeHtml(t.journalNotes || stripHtmlExport(t.lesson) || '-');
+
             return `
             <tr>
-                <td class="mono">${t.ticket ?? t.id ?? ''}</td>
+                <td class="mono">${escapeHtml(t.ticket ?? t.id ?? '')}</td>
                 <td>${formatDateMt5(t.openTime || t.open_time) || formatDateTimePt(t.openTime || t.open_time)}</td>
-                <td><span class="badge ${isBuy ? 'badge-buy' : 'badge-sell'}">${String(t.type || 'BUY').toUpperCase()}</span></td>
+                <td><span class="badge ${isBuy ? 'badge-buy' : 'badge-sell'}">${escapeHtml(String(t.type || 'BUY').toUpperCase())}</span></td>
                 <td class="mono right">${Number(t.volume ?? t.size ?? 0).toFixed(2)}</td>
-                <td class="bold">${t.symbol || '-'}</td>
+                <td class="bold">${escapeHtml(t.symbol || '-')}</td>
                 <td class="mono right">${Number(t.openPrice ?? t.open_price ?? 0).toFixed(5)}</td>
                 <td class="mono right">${Number(t.sl ?? 0).toFixed(5)}</td>
                 <td class="mono right">${Number(t.tp ?? 0).toFixed(5)}</td>
@@ -318,15 +517,23 @@ export function buildBrandedHtml(
                 <td class="mono right">${commission.toFixed(2)}</td>
                 <td class="mono right">${swap.toFixed(2)}</td>
                 <td class="mono right bold ${isWin ? 'profit-pos' : 'profit-neg'}">${isWin ? '+' : ''}${net.toFixed(2)}</td>
-                <td>${t.session || '-'}</td>
-                <td>${t.accountName || options.accountName || '-'}</td>
+                <td>${escapeHtml(t.session || '-')}</td>
+                <td>${escapeHtml(t.accountName || options.accountName || '-')}</td>
+                ${
+                    isTemplate
+                        ? ''
+                        : `<td>${escapeHtml(setupBiasParts || '-')}</td>
+                <td>${escapeHtml(sentimentStr)}</td>
+                <td>${sourceBadge}</td>
+                <td style="max-width:260px;white-space:normal;">${notesStr}</td>`
+                }
             </tr>`;
         })
         .join('');
 
     const excelXmlHead =
         mode === 'excel'
-            ? `<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>TorexJournal Auditoria</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->`
+            ? `<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>${isEn ? 'TorexJournal Audit' : 'TorexJournal Auditoria'}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->`
             : '';
 
     const pdfToolbar =
@@ -335,25 +542,33 @@ export function buildBrandedHtml(
         <div class="no-print pdf-action-bar">
             <div style="display:flex;align-items:center;gap:10px;">
                 <img src="${TOREX_LOGO_URL}" alt="Torex Logo" style="width:28px;height:28px;border-radius:6px;object-fit:contain;" />
-                <span style="font-weight:700;font-size:13px;color:#f8fafc;">TOREX JOURNAL — Visualização de Impressão / Exportação PDF</span>
+                <span style="font-weight:700;font-size:13px;color:#f8fafc;">${isEn ? 'TOREX JOURNAL — Print Preview / PDF Export' : 'TOREX JOURNAL — Visualização de Impressão / Exportação PDF'}</span>
             </div>
             <div style="display:flex;gap:8px;">
                 <button onclick="window.print()" style="background:#10b981;color:#022c22;border:none;padding:8px 16px;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;">
-                    Salvar como PDF / Imprimir
+                    ${isEn ? 'Save as PDF / Print' : 'Salvar como PDF / Imprimir'}
                 </button>
                 <button onclick="window.close()" style="background:#1e293b;color:#cbd5e1;border:1px solid #334155;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;">
-                    Fechar
+                    ${isEn ? 'Close' : 'Fechar'}
                 </button>
             </div>
         </div>`
             : '';
 
     return `<!DOCTYPE html>
-<html lang="pt-BR" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<html lang="${isEn ? 'en' : 'pt-BR'}" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Torex Journal — ${isTemplate ? 'Modelo Oficial de Importação e Auditoria' : `Relatório Executivo (${options.accountName})`}</title>
+    <title>Torex Journal — ${
+        isTemplate
+            ? isEn
+                ? 'Official Execution Import & Audit Template'
+                : 'Modelo Oficial de Importação e Auditoria'
+            : isEn
+            ? `Executive Performance Statement (${options.accountName})`
+            : `Relatório Executivo (${options.accountName})`
+    }</title>
     ${excelXmlHead}
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -539,52 +754,64 @@ export function buildBrandedHtml(
                 <div>
                     <div class="brand-title">TOREX <span>JOURNAL</span></div>
                     <div class="brand-subtitle">
-                        ${isTemplate ? 'Documento Modelo Oficial de Importação e Sincronização de Operações' : 'Demonstrativo Executivo de Auditoria & Performance de Trading'}
+                        ${
+                            isTemplate
+                                ? isEn
+                                    ? 'Official Trade Ingestion & Sync Template'
+                                    : 'Documento Modelo Oficial de Importação e Sincronização de Operações'
+                                : isEn
+                                ? 'Executive Trading Audit & Performance Statement'
+                                : 'Demonstrativo Executivo de Auditoria & Performance de Trading'
+                        }
                     </div>
                 </div>
             </div>
             <div class="brand-meta">
-                <div>Conta: <strong>${options.accountName || 'Consolidado'}</strong> (${options.accountType || 'TRADING'})</div>
-                <div>Corretora: <strong>${options.broker || 'MetaTrader 5'}</strong> • Moeda: <strong>${currency}</strong></div>
-                <div>Período: <strong>${options.periodLabel || 'Todo o Histórico'}</strong></div>
-                <div>Emitido em: <strong>${emittedAt}</strong></div>
+                <div>${isEn ? 'Account:' : 'Conta:'} <strong>${options.accountName || (isEn ? 'Consolidated' : 'Consolidado')}</strong> (${options.accountType || 'TRADING'})</div>
+                <div>${isEn ? 'Broker:' : 'Corretora:'} <strong>${options.broker || 'MetaTrader 5'}</strong> • ${isEn ? 'Currency:' : 'Moeda:'} <strong>${currency}</strong></div>
+                <div>${isEn ? 'Period:' : 'Período:'} <strong>${options.periodLabel || (isEn ? 'All-Time History' : 'Todo o Histórico')}</strong></div>
+                <div>${isEn ? 'Issued:' : 'Emitido em:'} <strong>${emittedAt}</strong></div>
             </div>
         </div>
 
         <div class="section">
             <div class="account-strip">
-                <div><strong>Plataforma:</strong> Torex Journal Analytics (torexjournal.com)</div>
-                <div><strong>Formato do Documento:</strong> ${mode.toUpperCase()} Oficial Auditado</div>
-                <div><strong>Total de Operações Listadas:</strong> ${options.trades.length} registros</div>
-                <div><strong>Volume Total:</strong> ${totalVolume} lotes</div>
+                <div><strong>${isEn ? 'Platform:' : 'Plataforma:'}</strong> Torex Journal Analytics (torexjournal.com)</div>
+                <div><strong>${isEn ? 'Document Format:' : 'Formato do Documento:'}</strong> ${mode.toUpperCase()} ${isEn ? 'Audited Official' : 'Oficial Auditado'}</div>
+                <div><strong>${isEn ? 'Listed Executions:' : 'Total de Operações Listadas:'}</strong> ${options.trades.length} ${isEn ? 'records' : 'registros'}</div>
+                <div><strong>${isEn ? 'Total Volume:' : 'Volume Total:'}</strong> ${totalVolume} ${isEn ? 'lots' : 'lotes'}</div>
             </div>
 
             <div class="kpi-grid">
                 <div class="kpi-card">
-                    <div class="kpi-label">Resultado Líquido Total</div>
+                    <div class="kpi-label">${isEn ? 'Total Net P&L' : 'Resultado Líquido Total'}</div>
                     <div class="kpi-val ${netProfit >= 0 ? 'profit-pos' : 'profit-neg'}">
                         ${netProfit >= 0 ? '+' : ''}${currency} ${netProfit.toFixed(2)}
                     </div>
-                    <div class="kpi-sub">Ganhos: +$${Number(k.grossProfit || 0).toFixed(2)} | Perdas: -$${Number(k.grossLoss || 0).toFixed(2)}</div>
+                    <div class="kpi-sub">${isEn ? 'Gross Win' : 'Ganhos'}: +$${Number(k.grossProfit || 0).toFixed(2)} | ${isEn ? 'Gross Loss' : 'Perdas'}: -$${Number(k.grossLoss || 0).toFixed(2)}</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-label">Taxa de Acerto (Win Rate)</div>
+                    <div class="kpi-label">${isEn ? 'Win Rate' : 'Taxa de Acerto (Win Rate)'}</div>
                     <div class="kpi-val">${Number(k.winRate || 0).toFixed(1)}%</div>
                     <div class="kpi-sub">Wins: ${k.wins ?? 0} | Losses: ${k.losses ?? 0} (Total: ${k.totalTrades ?? options.trades.length})</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-label">Fator de Lucro (Profit Factor)</div>
+                    <div class="kpi-label">${isEn ? 'Profit Factor' : 'Fator de Lucro (Profit Factor)'}</div>
                     <div class="kpi-val">${k.profitFactor ?? '0.00'}</div>
-                    <div class="kpi-sub">Volume Negociado: ${k.totalVolume ?? totalVolume} lotes</div>
+                    <div class="kpi-sub">${isEn ? 'Volume Traded' : 'Volume Negociado'}: ${k.totalVolume ?? totalVolume} ${isEn ? 'lots' : 'lotes'}</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-label">Drawdown Máximo</div>
+                    <div class="kpi-label">${isEn ? 'Max Drawdown' : 'Drawdown Máximo'}</div>
                     <div class="kpi-val profit-neg">-${currency} ${Number(k.maxDrawdown || 0).toFixed(2)}</div>
-                    <div class="kpi-sub">Rebaixamento: ${k.maxDrawdownPercent ?? 0}% | ROI: ${k.roi ?? 0}%</div>
+                    <div class="kpi-sub">${isEn ? 'Drawdown' : 'Rebaixamento'}: ${k.maxDrawdownPercent ?? 0}% | ROI: ${k.roi ?? 0}%</div>
                 </div>
             </div>
 
-            <div class="section-title">Positions / Livro de Ordens Auditadas (Compatível com MT4 / MT5 / TorexJournal)</div>
+            <div class="section-title">${
+                isEn
+                    ? 'Positions / Audited Execution Ledger (MT4 / MT5 / TorexJournal Compatible)'
+                    : 'Positions / Livro de Ordens Auditadas (Compatível com MT4 / MT5 / TorexJournal)'
+            }</div>
             <table>
                 <thead>
                     <tr>
@@ -603,6 +830,19 @@ export function buildBrandedHtml(
                         <th>Profit</th>
                         <th>Session</th>
                         <th>Account</th>
+                        ${
+                            isTemplate
+                                ? ''
+                                : isEn
+                                ? `<th>Setup / Bias</th>
+                        <th>Sentiment</th>
+                        <th>Source</th>
+                        <th>Notes</th>`
+                                : `<th>Setup / Viés</th>
+                        <th>Sentimento</th>
+                        <th>Origem</th>
+                        <th>Anotações</th>`
+                        }
                     </tr>
                 </thead>
                 <tbody>
@@ -613,9 +853,13 @@ export function buildBrandedHtml(
 
         <div class="footer">
             <div>
-                <strong>TOREX JOURNAL</strong> — Relatório Oficial Gerado Automaticamente • Compatível com importação direta em CSV, HTML, Excel e PDF
+                <strong>TOREX JOURNAL</strong> — ${
+                    isEn
+                        ? 'Official Automated Performance Statement • Compatible with CSV, HTML, Excel, and PDF workflows'
+                        : 'Relatório Oficial Gerado Automaticamente • Compatível com importação direta em CSV, HTML, Excel e PDF'
+                }
             </div>
-            <div>Autenticidade verificada • ${emittedAt}</div>
+            <div>${isEn ? 'Verified Statement' : 'Autenticidade verificada'} • ${emittedAt}</div>
         </div>
     </div>
 </body>
@@ -625,42 +869,48 @@ export function buildBrandedHtml(
 /**
  * Exporta o relatório atual de trading no formato escolhido (CSV, HTML, Excel ou PDF)
  */
-export function exportTradingDocument(format: DocumentFormat, options: ExportDocumentOptions) {
-    const slug = sanitizeFileSlug(options.accountName || 'consolidado');
+export function exportTradingDocument(
+    format: DocumentFormat,
+    options: ExportDocumentOptions,
+    locale: AppLocale = getCurrentLocale()
+) {
+    const isEn = locale === 'en';
+    const slug = sanitizeFileSlug(options.accountName || (isEn ? 'consolidated' : 'consolidado'));
     const datePart = new Date().toISOString().split('T')[0];
+    const filePrefix = isEn ? 'torex_statement' : 'torex_relatorio';
 
     if (format === 'csv') {
-        const csvContent = buildBrandedCsv(options, false);
+        const csvContent = buildBrandedCsv(options, false, locale);
         triggerBlobDownload(
             csvContent,
-            `torex_relatorio_${slug}_${datePart}.csv`,
+            `${filePrefix}_${slug}_${datePart}.csv`,
             'text/csv;charset=utf-8;'
         );
         return;
     }
 
     if (format === 'html') {
-        const htmlContent = buildBrandedHtml(options, 'html', false);
+        const htmlContent = buildBrandedHtml(options, 'html', false, locale);
         triggerBlobDownload(
             htmlContent,
-            `torex_relatorio_${slug}_${datePart}.html`,
+            `${filePrefix}_${slug}_${datePart}.html`,
             'text/html;charset=utf-8;'
         );
         return;
     }
 
     if (format === 'excel') {
-        const excelContent = '\uFEFF' + buildBrandedHtml(options, 'excel', false);
+        const excelContent = '\uFEFF' + buildBrandedHtml(options, 'excel', false, locale);
         triggerBlobDownload(
             excelContent,
-            `torex_relatorio_${slug}_${datePart}.xls`,
+            `${filePrefix}_${slug}_${datePart}.xls`,
             'application/vnd.ms-excel;charset=utf-8;'
         );
         return;
     }
 
     if (format === 'pdf') {
-        const pdfHtml = buildBrandedHtml(options, 'pdf', false);
+        const pdfHtml = buildBrandedHtml(options, 'pdf', false, locale);
         const printWin = window.open('', '_blank', 'width=1280,height=900');
         if (!printWin) {
             window.print();
@@ -681,40 +931,48 @@ export function exportTradingDocument(format: DocumentFormat, options: ExportDoc
 /**
  * Baixa o documento modelo oficial do TorexJournal com Logo em qualquer formato (CSV, Excel, HTML ou PDF)
  */
-export function downloadImportTemplate(format: DocumentFormat, accountName?: string, broker?: string, currency?: string) {
+export function downloadImportTemplate(
+    format: DocumentFormat,
+    accountName?: string,
+    broker?: string,
+    currency?: string,
+    locale: AppLocale = getCurrentLocale()
+) {
+    const isEn = locale === 'en';
     const templateOptions: ExportDocumentOptions = {
-        accountName: accountName || 'Conta Modelo TorexJournal',
+        accountName: accountName || (isEn ? 'TorexJournal Sample Account' : 'Conta Modelo TorexJournal'),
         accountType: 'DEMO / LIVE',
         broker: broker || 'MetaTrader 5 / Deriv',
         currency: currency || 'USD',
-        periodLabel: 'Modelo Oficial de Preenchimento',
+        periodLabel: isEn ? 'Official Import Schema' : 'Modelo Oficial de Preenchimento',
         trades: SAMPLE_TEMPLATE_TRADES,
     };
+    const tplBase = isEn ? 'torex_journal_import_template' : 'torex_journal_modelo_oficial';
 
     if (format === 'csv') {
-        const csv = buildBrandedCsv(templateOptions, true);
-        triggerBlobDownload(csv, 'torex_journal_modelo_oficial.csv', 'text/csv;charset=utf-8;');
+        const csv = buildBrandedCsv(templateOptions, true, locale);
+        triggerBlobDownload(csv, `${tplBase}.csv`, 'text/csv;charset=utf-8;');
         return;
     }
 
     if (format === 'excel') {
-        const xls = '\uFEFF' + buildBrandedHtml(templateOptions, 'excel', true);
+        const xls = '\uFEFF' + buildBrandedHtml(templateOptions, 'excel', true, locale);
         triggerBlobDownload(
             xls,
-            'torex_journal_modelo_oficial.xls',
+            `${tplBase}.xls`,
             'application/vnd.ms-excel;charset=utf-8;'
         );
         return;
     }
 
     if (format === 'html') {
-        const html = buildBrandedHtml(templateOptions, 'html', true);
-        triggerBlobDownload(html, 'torex_journal_modelo_oficial.html', 'text/html;charset=utf-8;');
+        const html = buildBrandedHtml(templateOptions, 'html', true, locale);
+        triggerBlobDownload(html, `${tplBase}.html`, 'text/html;charset=utf-8;');
         return;
     }
 
     if (format === 'pdf') {
-        const pdfHtml = buildBrandedHtml(templateOptions, 'pdf', true);
+        const pdfHtml = buildBrandedHtml(templateOptions, 'pdf', true, locale);
         const printWin = window.open('', '_blank', 'width=1280,height=900');
         if (printWin) {
             printWin.document.open();

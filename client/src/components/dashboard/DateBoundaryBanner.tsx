@@ -1,4 +1,5 @@
 import { Calendar, HelpCircle, Check, ArrowRight } from 'lucide-react';
+import { useLocale } from '../../context/LocaleContext';
 
 interface DateBoundaryBannerProps {
     includeToday: boolean;
@@ -6,11 +7,16 @@ interface DateBoundaryBannerProps {
 }
 
 export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBannerProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const today = new Date();
     const yesterday = new Date();
     yesterday.setDate(today.getDate() - 1);
 
     const formatDate = (date: Date) => {
+        if (isEn) {
+            return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+        }
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = date.getFullYear();
@@ -30,24 +36,24 @@ export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBanne
                     <h3 className="text-sm font-bold text-fg flex items-center gap-1.5 leading-none">
                         {includeToday ? (
                             <>
-                                <span>Dados de hoje incluídos</span>
+                                <span>{isEn ? "Today's session data included" : 'Dados de hoje incluídos'}</span>
                                 <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
                             </>
                         ) : (
-                            'Exibindo dados consolidados'
+                            isEn ? 'Showing settled session data' : 'Exibindo dados consolidados'
                         )}
                     </h3>
                     <p className="text-xs text-fg-muted mt-1 flex items-center gap-1.5 font-mono">
                         {includeToday ? (
                             <>
-                                Até hoje: <span className="text-accent-fg font-semibold">{formatDate(today)}</span>
+                                {isEn ? 'Through today:' : 'Até hoje:'} <span className="text-accent-fg font-semibold">{formatDate(today)}</span>
                             </>
                         ) : (
                             <>
-                                Até ontem: <span className="text-indigo-400 font-semibold">{formatDate(yesterday)}</span>
+                                {isEn ? 'Through yesterday:' : 'Até ontem:'} <span className="text-indigo-400 font-semibold">{formatDate(yesterday)}</span>
                                 <span className="text-white/20">|</span>
-                                <span className="text-fg-subtle text-[10px] flex items-center gap-1" title="Por padrão, ocultamos dados parciais do dia de hoje para evitar ruído de operações em andamento.">
-                                    <HelpCircle size={12} className="cursor-help" /> dados até ontem
+                                <span className="text-fg-subtle text-[10px] flex items-center gap-1" title={isEn ? "By default, today's intraday partial data is hidden to avoid noise from open positions." : 'Por padrão, ocultamos dados parciais do dia de hoje para evitar ruído de operações em andamento.'}>
+                                    <HelpCircle size={12} className="cursor-help" /> {isEn ? 'settled through yesterday' : 'dados até ontem'}
                                 </span>
                             </>
                         )}
@@ -66,11 +72,11 @@ export const DateBoundaryBanner = ({ includeToday, onToggle }: DateBoundaryBanne
                 {includeToday ? (
                     <>
                         <Check size={14} className="text-accent-fg font-bold" />
-                        Remover dados de hoje
+                        {isEn ? "Exclude today's data" : 'Remover dados de hoje'}
                     </>
                 ) : (
                     <>
-                        <span>Puxar dados de hoje</span>
+                        <span>{isEn ? "Include today's data" : 'Puxar dados de hoje'}</span>
                         <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
                     </>
                 )}

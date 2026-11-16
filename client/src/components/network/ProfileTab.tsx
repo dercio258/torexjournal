@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Calendar, Grid, Camera } from 'lucide-react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 import { PostCard } from './PostCard';
 
 interface UserProfile {
@@ -20,6 +21,8 @@ interface UserProfile {
 
 export const ProfileTab = () => {
     const { user, updateUser } = useAuth();
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [posts, setPosts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -33,7 +36,6 @@ export const ProfileTab = () => {
     const fetchProfile = async () => {
         setLoading(true);
         try {
-            // Fetch 'me' profile
             const [profileRes, postsRes] = await Promise.all([
                 api.get('/network/profile/me'),
                 api.get('/network/profile/me/posts')
@@ -51,7 +53,6 @@ export const ProfileTab = () => {
     };
 
     const handleLike = async (postId: number) => {
-        // Optimistic update
         setPosts(posts.map(p => {
             if (p.id === postId) {
                 return {
@@ -70,8 +71,8 @@ export const ProfileTab = () => {
         }
     };
 
-    if (loading) return <div className="text-center text-fg-subtle py-10">Carregando perfil...</div>;
-    if (!profile) return <div className="text-center text-fg-subtle py-10">Perfil não encontrado.</div>;
+    if (loading) return <div className="text-center text-fg-subtle py-10 text-xs">{isEn ? 'Loading profile...' : 'Carregando perfil...'}</div>;
+    if (!profile) return <div className="text-center text-fg-subtle py-10 text-xs">{isEn ? 'Profile not found.' : 'Perfil não encontrado.'}</div>;
 
     const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -82,13 +83,11 @@ export const ProfileTab = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            const uploadRes = await api.post('/network/upload', formData, {
+            const uploadRes = await api.post('/auth/profile/avatar', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
 
-            const newAvatarUrl = uploadRes.data.imageUrl;
-
-            await api.put('/auth/profile', { avatarUrl: newAvatarUrl });
+            const newAvatarUrl = uploadRes.data.avatarUrl;
 
             setProfile({ ...profile, avatarUrl: newAvatarUrl });
             updateUser({ avatarUrl: newAvatarUrl });
@@ -103,31 +102,30 @@ export const ProfileTab = () => {
     const isOwnProfile = user?.id === profile.id;
 
     return (
-        <div className="h-full flex flex-col gap-6 overflow-y-auto custom-scrollbar pr-2">
-            {/* Profile Header */}
-            <div className="relative">
-                {/* Cover Image Placeholder */}
-                <div className="h-32 bg-gradient-to-r from-indigo-900/50 to-purple-900/50 rounded-t-3xl border border-line border-b-0"></div>
+        <div className="h-full flex flex-col gap-3 overflow-y-auto custom-scrollbar pr-1">
+            {/* Profile Header Card */}
+            <div className="bg-surface border border-line rounded-xl overflow-hidden">
+                <div className="h-20 bg-gradient-to-r from-surface-2 via-accent/10 to-surface-2 border-b border-line-subtle" />
 
-                <div className="bg-surface/40 backdrop-blur-xl border border-line rounded-b-3xl p-6 shadow-lg -mt-1 pt-12 relative">
-                    <div className="absolute -top-10 left-6">
+                <div className="p-4 sm:p-5 relative">
+                    <div className="flex flex-wrap items-end justify-between gap-3 -mt-10 mb-3">
                         <div
-                            className={`w-24 h-24 rounded-full bg-surface flex items-center justify-center text-fg/80 font-bold border-4 border-slate-900 overflow-hidden shadow-xl relative group ${isOwnProfile ? 'cursor-pointer' : ''}`}
+                            className={`w-16 h-16 rounded-full bg-surface-2 flex items-center justify-center text-fg font-bold border-2 border-surface ring-1 ring-line-strong overflow-hidden relative group ${isOwnProfile ? 'cursor-pointer' : ''}`}
                             onClick={() => isOwnProfile && fileInputRef.current?.click()}
                         >
-                            {isUploading ? (
+                            {isUploading && (
                                 <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+                                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-accent border-t-transparent" />
                                 </div>
-                            ) : null}
+                            )}
                             {profile.avatarUrl ? (
                                 <img src={profile.avatarUrl} alt={profile.username} className="w-full h-full object-cover" />
                             ) : (
-                                <span className="text-3xl">{profile.username?.[0]?.toUpperCase()}</span>
+                                <span className="text-xl">{profile.username?.[0]?.toUpperCase()}</span>
                             )}
                             {isOwnProfile && !isUploading && (
                                 <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Camera size={24} className="text-fg" />
+                                    <Camera size={16} className="text-white" />
                                 </div>
                             )}
                         </div>
@@ -140,55 +138,72 @@ export const ProfileTab = () => {
                         />
                     </div>
 
-                    <div className="flex justify-between items-start pl-24 ml-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <h2 className="text-2xl font-bold text-fg">{profile.name || profile.username}</h2>
-                            <p className="text-fg-subtle font-bold">@{profile.username}</p>
+                            <h2 className="text-base font-bold text-fg">{profile.name || profile.username}</h2>
+                            <p className="text-xs text-accent-fg font-mono">@{profile.username}</p>
                         </div>
-                        <button className="px-4 py-2 border border-line-strong text-fg/80 hover:text-fg hover:bg-surface-2 rounded-xl font-bold text-sm transition-all">
-                            Editar Perfil
-                        </button>
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap gap-6 text-sm text-fg-muted">
-                        <div className="flex items-center gap-2">
-                            <Calendar size={16} className="text-fg-subtle" />
-                            <span>Entrou em {new Date(profile.createdAt).toLocaleDateString()}</span>
+                        <div className="flex items-center gap-1.5 text-xs text-fg-subtle">
+                            <Calendar size={13} />
+                            <span>
+                                {isEn ? 'Joined' : 'Entrou em'}{' '}
+                                {new Date(profile.createdAt).toLocaleDateString(isEn ? 'en-US' : 'pt-BR')}
+                            </span>
                         </div>
                     </div>
 
-                    <div className="mt-6 flex gap-8 border-t border-line pt-6">
-                        <div className="text-center">
-                            <span className="block text-xl font-bold text-fg">{profile.stats.posts}</span>
-                            <span className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Posts</span>
+                    <div className="mt-4 flex gap-6 border-t border-line-subtle pt-3.5 tabular-nums">
+                        <div>
+                            <span className="block text-sm font-bold text-fg">{profile.stats.posts}</span>
+                            <span className="text-[10px] text-fg-subtle font-semibold uppercase tracking-wider">{isEn ? 'Posts' : 'Posts'}</span>
                         </div>
-                        <div className="text-center">
-                            <span className="block text-xl font-bold text-fg">{profile.stats.followers}</span>
-                            <span className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Seguidores</span>
+                        <div>
+                            <span className="block text-sm font-bold text-fg">{profile.stats.followers}</span>
+                            <span className="text-[10px] text-fg-subtle font-semibold uppercase tracking-wider">{isEn ? 'Followers' : 'Seguidores'}</span>
                         </div>
-                        <div className="text-center">
-                            <span className="block text-xl font-bold text-fg">{profile.stats.following}</span>
-                            <span className="text-xs text-fg-subtle font-bold uppercase tracking-wider">Seguindo</span>
+                        <div>
+                            <span className="block text-sm font-bold text-fg">{profile.stats.following}</span>
+                            <span className="text-[10px] text-fg-subtle font-semibold uppercase tracking-wider">{isEn ? 'Following' : 'Seguindo'}</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Content Tabs (Just Posts for now) */}
-            <div className="flex gap-1 p-1 bg-surface/50 rounded-xl w-fit border border-line mx-auto lg:mx-0">
-                <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 shadow-lg shadow-indigo-900/20">
-                    <Grid size={16} /> Publicações
-                </button>
+            {/* Content Tabs */}
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-fg-subtle px-1">
+                <Grid size={13} className="text-accent-fg" /> {isEn ? 'Posts' : 'Publicações'}
             </div>
 
-            {/* Posts Grid/List */}
-            <div className="space-y-6 pb-10">
+            {/* Posts List */}
+            <div className="space-y-3 pb-8">
                 {posts.length === 0 ? (
-                    <div className="text-center py-10 bg-surface/30 rounded-3xl border border-line border-dashed">
-                        <p className="text-fg-muted mb-4">Você ainda não publicou nada.</p>
+                    <div className="text-center py-10 bg-surface rounded-xl border border-line border-dashed">
+                        <p className="text-fg-muted text-xs">{isEn ? 'You have not posted anything yet.' : 'Você ainda não publicou nada.'}</p>
                     </div>
                 ) : (
-                    posts.map(post => <PostCard key={post.id} post={post} onLike={handleLike} />)
+                    posts.map(post => (
+                        <PostCard
+                            key={post.id}
+                            post={post}
+                            onLike={handleLike}
+                            onDeletePost={(deletedId) =>
+                                setPosts(prev => prev.filter(p => p.id !== deletedId))
+                            }
+                            onCommentAdded={(postId, comment) =>
+                                setPosts(prev =>
+                                    prev.map(p =>
+                                        p.id === postId
+                                            ? {
+                                                  ...p,
+                                                  commentsCount: (p.commentsCount || 0) + 1,
+                                                  comments: [...(p.comments || []), comment],
+                                              }
+                                            : p
+                                    )
+                                )
+                            }
+                        />
+                    ))
                 )}
             </div>
         </div>

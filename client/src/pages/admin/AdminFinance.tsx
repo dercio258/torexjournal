@@ -17,6 +17,7 @@ import {
 } from 'chart.js';
 import { Line, Pie, Doughnut } from 'react-chartjs-2';
 import { useChartTheme } from '../../hooks/useChartTheme';
+import { AdminLoadingState, AdminPageHeader } from './components/AdminPrimitives';
 
 ChartJS.register(
     CategoryScale,
@@ -52,11 +53,7 @@ export const AdminFinance = () => {
     }, []);
 
     if (isLoading) {
-        return (
-            <div className="flex justify-center items-center h-96">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
-            </div>
-        );
+        return <AdminLoadingState label="Calculando faturamento e métricas financeiras..." />;
     }
 
     const cards = [
@@ -102,7 +99,7 @@ export const AdminFinance = () => {
         if (dateFilter === 'all_time') return true;
         
         const dateObj = new Date(d);
-        const today = new Date('2026-06-11'); // Anchored to current system date
+        const today = new Date();
         
         if (dateFilter === 'this_month') {
             return dateObj.getFullYear() === today.getFullYear() && dateObj.getMonth() === today.getMonth();
@@ -287,49 +284,51 @@ export const AdminFinance = () => {
     };
 
     return (
-        <div className="space-y-8 pb-12 animate-in fade-in duration-500">
-            {/* Header section with Date Filter */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-fg">Financeiro & Métricas</h1>
-                    <p className="text-fg-muted mt-1">Análise detalhada de faturamento, planos e crescimento de usuários.</p>
-                </div>
-
-                {/* Date Filter Selector */}
-                <div className="flex bg-surface border border-line rounded-xl p-1 items-center">
-                    <button
-                        onClick={() => setDateFilter('this_month')}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                            dateFilter === 'this_month'
-                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-fg-muted hover:text-white'
-                        }`}
-                    >
-                        <Calendar size={14} />
-                        Este Mês
-                    </button>
-                    <button
-                        onClick={() => setDateFilter('last_3_months')}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                            dateFilter === 'last_3_months'
-                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-fg-muted hover:text-white'
-                        }`}
-                    >
-                        Últimos 3 Meses
-                    </button>
-                    <button
-                        onClick={() => setDateFilter('all_time')}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                            dateFilter === 'all_time'
-                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10'
-                                : 'text-fg-muted hover:text-white'
-                        }`}
-                    >
-                        Tudo
-                    </button>
-                </div>
-            </div>
+        <div className="space-y-8 pb-12 animate-in fade-in duration-300">
+            <AdminPageHeader
+                badge="Clientes & Receita"
+                title="Financeiro & Métricas"
+                subtitle="Análise detalhada de faturamento, assinantes ativos, meios de pagamento e retenção."
+                icon={<DollarSign className="h-5 w-5" />}
+                actions={
+                    <div className="flex bg-surface border border-line rounded-xl p-1 items-center">
+                        <button
+                            type="button"
+                            onClick={() => setDateFilter('this_month')}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                dateFilter === 'this_month'
+                                    ? 'bg-accent text-accent-on shadow-sm'
+                                    : 'text-fg-muted hover:text-fg hover:bg-surface-2'
+                            }`}
+                        >
+                            <Calendar size={14} />
+                            Este Mês
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setDateFilter('last_3_months')}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                dateFilter === 'last_3_months'
+                                    ? 'bg-accent text-accent-on shadow-sm'
+                                    : 'text-fg-muted hover:text-fg hover:bg-surface-2'
+                            }`}
+                        >
+                            Últimos 3 Meses
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setDateFilter('all_time')}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                dateFilter === 'all_time'
+                                    ? 'bg-accent text-accent-on shadow-sm'
+                                    : 'text-fg-muted hover:text-fg hover:bg-surface-2'
+                            }`}
+                        >
+                            Tudo
+                        </button>
+                    </div>
+                }
+            />
 
             {/* Metrics Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

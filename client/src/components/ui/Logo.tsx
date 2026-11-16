@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { BRAND } from '../../constants/brand';
 import { cn } from '../../lib/cn';
+import { getCurrentLocale } from '../../context/LocaleContext';
 
 interface LogoProps {
     /** Show the wordmark next to the mark. */
@@ -8,12 +9,14 @@ interface LogoProps {
     size?: 'sm' | 'md' | 'lg';
     /** Wrap in a link to this route. */
     to?: string;
+    ariaLabel?: string;
     className?: string;
 }
 
 const MARK_SIZE = { sm: 'h-8 w-8', md: 'h-10 w-10', lg: 'h-14 w-14' } as const;
 
-export const Logo = ({ withWordmark = true, size = 'md', to, className }: LogoProps) => {
+export const Logo = ({ withWordmark = true, size = 'md', to, ariaLabel, className }: LogoProps) => {
+    const isEn = getCurrentLocale() === 'en';
     const content = (
         <>
             <img
@@ -34,7 +37,7 @@ export const Logo = ({ withWordmark = true, size = 'md', to, className }: LogoPr
     return to ? (
         <Link
             to={to}
-            aria-label={`${BRAND.name} — página inicial`}
+            aria-label={ariaLabel ?? `${BRAND.name} — ${isEn ? 'home' : 'página inicial'}`}
             className={cn(classes, 'rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60')}
         >
             {content}

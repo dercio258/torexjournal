@@ -1,14 +1,21 @@
-
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { sanitizeReturnTo } from '../lib/attribution';
 
 export const GuestRoute = ({ children }: { children: React.ReactNode }) => {
     const { isAuthenticated } = useAuth();
+    const location = useLocation();
 
     if (isAuthenticated) {
-        // Redirect to dashboard (or where they came from) if already logged in
-        return <Navigate to="/dashboard" replace />;
+        const params = new URLSearchParams(location.search);
+        const queryReturnTo = sanitizeReturnTo(params.get('returnTo'));
+        const stateFrom = location.state?.from;
+        const stateReturnTo = stateFrom
+            ? sanitizeReturnTo(`${stateFrom.pathname || ''}${stateFrom.search || ''}${stateFrom.hash || ''}`)
+            : null;
+
+        return <Navigate to={queryReturnTo || stateReturnTo || '/dashboard'} replace />;
     }
 
     return <>{children}</>;

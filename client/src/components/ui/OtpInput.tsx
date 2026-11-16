@@ -1,5 +1,6 @@
 import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { cn } from '../../lib/cn';
+import { getCurrentLocale } from '../../context/LocaleContext';
 
 interface OtpInputProps {
     value: string[];
@@ -20,6 +21,7 @@ export interface OtpInputHandle {
 /** Segmented numeric code input with paste, arrow and backspace navigation. */
 export const OtpInput = forwardRef<OtpInputHandle, OtpInputProps>(
     ({ value, onChange, onComplete, length = 6, disabled, invalid, autoFocus, ...aria }, ref) => {
+        const isEn = getCurrentLocale() === 'en';
         const refs = useRef<(HTMLInputElement | null)[]>([]);
         const focusAt = (i: number) => refs.current[Math.max(0, Math.min(length - 1, i))]?.focus();
 
@@ -62,7 +64,7 @@ export const OtpInput = forwardRef<OtpInputHandle, OtpInputProps>(
         };
 
         return (
-            <div role="group" aria-label={`Código de ${length} dígitos`} className="flex justify-between gap-2 md:gap-3">
+            <div role="group" aria-label={isEn ? `${length}-digit code` : `Código de ${length} dígitos`} className="flex justify-between gap-2 md:gap-3">
                 {Array.from({ length }, (_, index) => (
                     <input
                         key={index}
@@ -72,7 +74,7 @@ export const OtpInput = forwardRef<OtpInputHandle, OtpInputProps>(
                         pattern="[0-9]*"
                         autoComplete={index === 0 ? 'one-time-code' : 'off'}
                         maxLength={1}
-                        aria-label={`Dígito ${index + 1}`}
+                        aria-label={isEn ? `Digit ${index + 1}` : `Dígito ${index + 1}`}
                         aria-invalid={invalid || undefined}
                         aria-describedby={aria['aria-describedby']}
                         value={value[index] ?? ''}

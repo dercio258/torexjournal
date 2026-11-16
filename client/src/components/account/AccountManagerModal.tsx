@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAccount, TradingAccount, AccountType } from '../../context/AccountContext';
+import { useLocale } from '../../context/LocaleContext';
 import { 
     X, 
     Briefcase, 
@@ -17,6 +18,8 @@ import {
 } from 'lucide-react';
 
 export const AccountManagerModal: React.FC = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const {
         accounts,
         isManagerOpen,
@@ -106,13 +109,17 @@ export const AccountManagerModal: React.FC = () => {
     };
 
     const handleRegenerateToken = async (accountId: string) => {
-        if (window.confirm('Tem certeza que deseja gerar um novo token EA para esta conta? Seus EAs precisarão ser atualizados com o novo token.')) {
+        if (window.confirm(
+            isEn
+                ? 'Generate a new EA token for this account? Your attached MetaTrader 5 EAs will need to be updated with the new token.'
+                : 'Tem certeza que deseja gerar um novo token EA para esta conta? Seus EAs precisarão ser atualizados com o novo token.'
+        )) {
             try {
                 await regenerateToken(accountId);
-                setSuccessMessage('Token EA regenerado com sucesso!');
+                setSuccessMessage(isEn ? 'EA token regenerated successfully!' : 'Token EA regenerado com sucesso!');
                 setTimeout(() => setSuccessMessage(null), 3000);
             } catch (err: any) {
-                setErrorMessage(err.response?.data?.message || 'Falha ao regenerar token');
+                setErrorMessage(err.response?.data?.message || (isEn ? 'Failed to regenerate EA token' : 'Falha ao regenerar token'));
             }
         }
     };
@@ -127,7 +134,7 @@ export const AccountManagerModal: React.FC = () => {
         }
 
         if (!formData.name.trim()) {
-            setErrorMessage('O nome da conta é obrigatório.');
+            setErrorMessage(isEn ? 'Account name is required.' : 'O nome da conta é obrigatório.');
             return;
         }
 
@@ -151,10 +158,10 @@ export const AccountManagerModal: React.FC = () => {
 
             if (editingAccount) {
                 await updateAccount(editingAccount.id, payload);
-                setSuccessMessage('Conta atualizada com sucesso!');
+                setSuccessMessage(isEn ? 'Account updated successfully!' : 'Conta atualizada com sucesso!');
             } else if (canCreateAccount) {
                 await createAccount(payload);
-                setSuccessMessage('Nova conta criada com sucesso!');
+                setSuccessMessage(isEn ? 'Trading account created successfully!' : 'Nova conta criada com sucesso!');
             }
 
             setTimeout(() => {
@@ -164,19 +171,25 @@ export const AccountManagerModal: React.FC = () => {
             }, 1000);
 
         } catch (err: any) {
-            setErrorMessage(err.response?.data?.message || err.message || 'Falha ao salvar conta');
+            setErrorMessage(err.response?.data?.message || err.message || (isEn ? 'Failed to save account' : 'Falha ao salvar conta'));
         } finally {
             setIsSubmitting(false);
         }
     };
 
     const handleDelete = async (account: TradingAccount) => {
-        const confirmMsg = `Tem certeza que deseja excluir a conta "${account.name}"?`;
+        const confirmMsg = isEn
+            ? `Are you sure you want to delete account "${account.name}"?`
+            : `Tem certeza que deseja excluir a conta "${account.name}"?`;
         if (window.confirm(confirmMsg)) {
             try {
                 await deleteAccount(account.id, false);
             } catch (err: any) {
-                if (window.confirm(`${err.response?.data?.message || err.message}\nDeseja forçar a exclusão permanente de todos os dados desta conta?`)) {
+                if (window.confirm(
+                    isEn
+                        ? `${err.response?.data?.message || err.message}\nForce permanent deletion of all execution data for this account?`
+                        : `${err.response?.data?.message || err.message}\nDeseja forçar a exclusão permanente de todos os dados desta conta?`
+                )) {
                     await deleteAccount(account.id, true);
                 }
             }
@@ -193,8 +206,12 @@ export const AccountManagerModal: React.FC = () => {
                             <Briefcase size={20} />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-fg">Gerenciar Contas de Trading</h2>
-                            <p className="text-xs text-fg-muted">Crie, isole e administre suas contas de trading</p>
+                            <h2 className="text-xl font-bold text-fg">
+                                {isEn ? 'Trading Accounts & Portfolios' : 'Gerenciar Contas de Trading'}
+                            </h2>
+                            <p className="text-xs text-fg-muted">
+                                {isEn ? 'Isolate and track live, demo, and prop firm accounts' : 'Crie, isole e administre suas contas de trading'}
+                            </p>
                         </div>
                     </div>
 
@@ -219,7 +236,7 @@ export const AccountManagerModal: React.FC = () => {
                                 : 'border-transparent text-fg-muted hover:text-fg'
                         }`}
                     >
-                        Minhas Contas ({accounts.filter(a => !a.isArchived).length})
+                        {isEn ? `My Accounts (${accounts.filter(a => !a.isArchived).length})` : `Minhas Contas (${accounts.filter(a => !a.isArchived).length})`}
                     </button>
 
                     {(editingAccount || canCreateAccount) && (
@@ -234,7 +251,9 @@ export const AccountManagerModal: React.FC = () => {
                             }`}
                         >
                             {editingAccount ? <Edit3 size={14} /> : <Plus size={14} />}
-                            {editingAccount ? 'Editar Conta' : 'Nova Conta'}
+                            {editingAccount
+                                ? (isEn ? 'Edit Account' : 'Editar Conta')
+                                : (isEn ? 'New Account' : 'Nova Conta')}
                         </button>
                     )}
                 </div>
@@ -258,13 +277,17 @@ export const AccountManagerModal: React.FC = () => {
                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                         <div className="flex items-center justify-between">
                             <span className="text-xs text-fg-muted">
-                                {showArchived ? 'Contas arquivadas' : 'Contas de trading ativas'}
+                                {showArchived
+                                    ? (isEn ? 'Archived accounts' : 'Contas arquivadas')
+                                    : (isEn ? 'Active trading accounts' : 'Contas de trading ativas')}
                             </span>
                             <button
                                 onClick={() => setShowArchived(!showArchived)}
                                 className="text-xs text-fg-muted hover:text-fg underline"
                             >
-                                {showArchived ? 'Ver contas ativas' : 'Ver contas arquivadas'}
+                                {showArchived
+                                    ? (isEn ? 'View active accounts' : 'Ver contas ativas')
+                                    : (isEn ? 'View archived' : 'Ver contas arquivadas')}
                             </button>
                         </div>
 
@@ -296,7 +319,7 @@ export const AccountManagerModal: React.FC = () => {
                                                     )}
                                                     {account.isPrimary && (
                                                         <span className="text-[10px] bg-emerald-500/20 text-accent-fg border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-semibold">
-                                                            Principal
+                                                            {isEn ? 'Primary' : 'Principal'}
                                                         </span>
                                                     )}
                                                 </div>
@@ -320,7 +343,7 @@ export const AccountManagerModal: React.FC = () => {
                                                     <>
                                                         <span>•</span>
                                                         <span className="font-mono text-fg font-semibold">
-                                                            Saldo: {formatMoney(Number(account.balance) || 0, account.currency)}
+                                                            {isEn ? 'Equity' : 'Saldo'}: {formatMoney(Number(account.balance) || 0, account.currency)}
                                                         </span>
                                                     </>
                                                 )}
@@ -329,7 +352,9 @@ export const AccountManagerModal: React.FC = () => {
                                             {/* Métricas Reais do Trading */}
                                             <div className="grid grid-cols-3 gap-2 p-2.5 rounded-xl bg-canvas border border-line mb-3 text-xs">
                                                 <div>
-                                                    <span className="text-[9px] text-fg-subtle uppercase tracking-wider block">Lucro Líquido</span>
+                                                    <span className="text-[9px] text-fg-subtle uppercase tracking-wider block">
+                                                        {isEn ? 'Net P&L' : 'Lucro Líquido'}
+                                                    </span>
                                                     <span className={`font-mono font-bold text-xs ${
                                                         (account.netPnl || 0) >= 0 ? 'text-accent-fg' : 'text-danger-fg'
                                                     }`}>
@@ -356,13 +381,13 @@ export const AccountManagerModal: React.FC = () => {
                                                 <div className="flex items-center justify-between text-[11px] text-fg-muted mb-1">
                                                     <span className="flex items-center gap-1">
                                                         <KeyRound size={11} className="text-indigo-400" />
-                                                        Token MT5 EA:
+                                                        {isEn ? 'MT5 EA Token:' : 'Token MT5 EA:'}
                                                     </span>
                                                     <button
                                                         onClick={() => setVisibleTokenId(isTokenVisible ? null : account.id)}
                                                         className="text-[10px] text-indigo-400 hover:text-indigo-300"
                                                     >
-                                                        {isTokenVisible ? 'Ocultar' : 'Mostrar'}
+                                                        {isTokenVisible ? (isEn ? 'Hide' : 'Ocultar') : (isEn ? 'Reveal' : 'Mostrar')}
                                                     </button>
                                                 </div>
                                                 <div className="flex items-center justify-between gap-2">
@@ -373,14 +398,14 @@ export const AccountManagerModal: React.FC = () => {
                                                         <button
                                                             onClick={() => handleCopyToken(account.id, token)}
                                                             className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg transition-colors"
-                                                            title="Copiar Token EA"
+                                                            title={isEn ? 'Copy EA Token' : 'Copiar Token EA'}
                                                         >
                                                             {copiedTokenId === account.id ? <Check size={12} className="text-accent-fg" /> : <Copy size={12} />}
                                                         </button>
                                                         <button
                                                             onClick={() => handleRegenerateToken(account.id)}
                                                             className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg transition-colors"
-                                                            title="Regenerar Token EA"
+                                                            title={isEn ? 'Regenerate EA Token' : 'Regenerar Token EA'}
                                                         >
                                                             <RefreshCw size={12} />
                                                         </button>
@@ -396,7 +421,7 @@ export const AccountManagerModal: React.FC = () => {
                                                     onClick={() => setPrimaryAccount(account.id)}
                                                     className="text-fg-muted hover:text-accent-fg text-[11px] font-medium transition-colors"
                                                 >
-                                                    Tornar Principal
+                                                    {isEn ? 'Set Primary' : 'Tornar Principal'}
                                                 </button>
                                             )}
 
@@ -407,7 +432,7 @@ export const AccountManagerModal: React.FC = () => {
                                                         setActiveManagerTab('create');
                                                     }}
                                                     className="p-1.5 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
-                                                    title="Editar"
+                                                    title={isEn ? 'Edit' : 'Editar'}
                                                 >
                                                     <Edit3 size={14} />
                                                 </button>
@@ -416,7 +441,7 @@ export const AccountManagerModal: React.FC = () => {
                                                     <button
                                                         onClick={() => restoreAccount(account.id)}
                                                         className="p-1.5 rounded-lg text-accent-fg hover:bg-emerald-500/10 transition-colors"
-                                                        title="Restaurar"
+                                                        title={isEn ? 'Restore' : 'Restaurar'}
                                                     >
                                                         <RotateCcw size={14} />
                                                     </button>
@@ -424,7 +449,7 @@ export const AccountManagerModal: React.FC = () => {
                                                     <button
                                                         onClick={() => archiveAccount(account.id)}
                                                         className="p-1.5 rounded-lg text-fg-muted hover:text-amber-400 hover:bg-surface-2 transition-colors"
-                                                        title="Arquivar"
+                                                        title={isEn ? 'Archive' : 'Arquivar'}
                                                     >
                                                         <Archive size={14} />
                                                     </button>
@@ -433,7 +458,7 @@ export const AccountManagerModal: React.FC = () => {
                                                 <button
                                                     onClick={() => handleDelete(account)}
                                                     className="p-1.5 rounded-lg text-fg-muted hover:text-danger-fg hover:bg-rose-500/10 transition-colors"
-                                                    title="Excluir"
+                                                    title={isEn ? 'Delete' : 'Excluir'}
                                                 >
                                                     <Trash2 size={14} />
                                                 </button>
@@ -453,47 +478,55 @@ export const AccountManagerModal: React.FC = () => {
                         {/* Formulário Principal */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Nome da Conta *</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">
+                                    {isEn ? 'Account Name *' : 'Nome da Conta *'}
+                                </label>
                                 <input
                                     type="text"
                                     value={formData.name}
                                     onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Ex: FTMO $100K, Exness Live..."
+                                    placeholder={isEn ? 'e.g., FTMO $100K, Exness Live...' : 'Ex: FTMO $100K, Exness Live...'}
                                     className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                     required
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Corretora / Broker *</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">
+                                    {isEn ? 'Broker / Prop Firm *' : 'Corretora / Broker *'}
+                                </label>
                                 <input
                                     type="text"
                                     value={formData.broker}
                                     onChange={e => setFormData({ ...formData, broker: e.target.value })}
-                                    placeholder="Ex: FTMO, Exness, IC Markets, Deriv..."
+                                    placeholder={isEn ? 'e.g., FTMO, Exness, IC Markets, Deriv...' : 'Ex: FTMO, Exness, IC Markets, Deriv...'}
                                     className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                     required
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Tipo de Conta</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">
+                                    {isEn ? 'Account Type' : 'Tipo de Conta'}
+                                </label>
                                 <select
                                     value={formData.type}
                                     onChange={e => setFormData({ ...formData, type: e.target.value as AccountType })}
                                     className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                 >
-                                    <option value="live">Live (Real)</option>
+                                    <option value="live">{isEn ? 'Live Capital' : 'Live (Real)'}</option>
                                     <option value="demo">Demo</option>
                                     <option value="prop_firm">Prop Firm</option>
-                                    <option value="challenge">Challenge (Desafio)</option>
-                                    <option value="funded">Funded (Financiada)</option>
-                                    <option value="custom">Personalizada</option>
+                                    <option value="challenge">{isEn ? 'Evaluation Challenge' : 'Challenge (Desafio)'}</option>
+                                    <option value="funded">Funded</option>
+                                    <option value="custom">{isEn ? 'Custom' : 'Personalizada'}</option>
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-medium text-fg-muted mb-1.5">Moeda Base</label>
+                                <label className="block text-xs font-medium text-fg-muted mb-1.5">
+                                    {isEn ? 'Base Currency' : 'Moeda Base'}
+                                </label>
                                 <select
                                     value={formData.currency}
                                     onChange={e => setFormData({ ...formData, currency: e.target.value })}
@@ -514,37 +547,43 @@ export const AccountManagerModal: React.FC = () => {
                             <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-4">
                                 <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
                                     <Award size={16} />
-                                    <span>Parâmetros de Avaliação da Prop Firm</span>
+                                    <span>{isEn ? 'Prop Firm Risk Parameters' : 'Parâmetros de Avaliação da Prop Firm'}</span>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                     <div>
-                                        <label className="block text-[11px] text-fg-muted mb-1">Meta de Lucro (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">
+                                            {isEn ? 'Profit Target (%)' : 'Meta de Lucro (%)'}
+                                        </label>
                                         <input
                                             type="number"
                                             value={formData.profitTarget || ''}
                                             onChange={e => setFormData({ ...formData, profitTarget: parseFloat(e.target.value) || 0 })}
-                                            placeholder="Ex: 10"
+                                            placeholder={isEn ? 'e.g. 10' : 'Ex: 10'}
                                             className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-[11px] text-fg-muted mb-1">Perda Máxima Diária (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">
+                                            {isEn ? 'Max Daily Loss (%)' : 'Perda Máxima Diária (%)'}
+                                        </label>
                                         <input
                                             type="number"
                                             value={formData.dailyLossLimit || ''}
                                             onChange={e => setFormData({ ...formData, dailyLossLimit: parseFloat(e.target.value) || 0 })}
-                                            placeholder="Ex: 5"
+                                            placeholder={isEn ? 'e.g. 5' : 'Ex: 5'}
                                             className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-[11px] text-fg-muted mb-1">Drawdown Máximo (%)</label>
+                                        <label className="block text-[11px] text-fg-muted mb-1">
+                                            {isEn ? 'Max Drawdown (%)' : 'Drawdown Máximo (%)'}
+                                        </label>
                                         <input
                                             type="number"
                                             value={formData.maxDrawdown || ''}
                                             onChange={e => setFormData({ ...formData, maxDrawdown: parseFloat(e.target.value) || 0 })}
-                                            placeholder="Ex: 10"
+                                            placeholder={isEn ? 'e.g. 10' : 'Ex: 10'}
                                             className="w-full px-3 py-2 rounded-lg bg-canvas border border-line text-fg text-xs font-mono focus:border-emerald-500/60 focus:outline-none"
                                         />
                                     </div>
@@ -561,14 +600,18 @@ export const AccountManagerModal: React.FC = () => {
                                 }}
                                 className="px-4 py-2 rounded-xl text-xs font-semibold text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors"
                             >
-                                Cancelar
+                                {isEn ? 'Cancel' : 'Cancelar'}
                             </button>
                             <button
                                 type="submit"
                                 disabled={isSubmitting}
                                 className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all disabled:opacity-50"
                             >
-                                {isSubmitting ? 'Salvando...' : editingAccount ? 'Salvar Alterações' : 'Criar Conta de Trading'}
+                                {isSubmitting
+                                    ? (isEn ? 'Saving...' : 'Salvando...')
+                                    : editingAccount
+                                    ? (isEn ? 'Save Changes' : 'Salvar Alterações')
+                                    : (isEn ? 'Create Trading Account' : 'Criar Conta de Trading')}
                             </button>
                         </div>
                     </form>

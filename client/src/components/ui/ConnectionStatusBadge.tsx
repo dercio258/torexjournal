@@ -3,8 +3,11 @@ import { useSocket } from '../../context/SocketContext';
 import { useAccount } from '../../context/AccountContext';
 import { Wifi, WifiOff, RefreshCw, Server, Activity, CheckCircle2, AlertCircle, ArrowUpRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useLocale } from '../../context/LocaleContext';
 
 export const ConnectionStatusBadge: React.FC = () => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const { isConnected: isWsConnected, mt5Status } = useSocket();
     const { selectedAccount, isConsolidated, refreshAccounts, isLoading: isAccountLoading } = useAccount();
     const [isOpen, setIsOpen] = useState(false);
@@ -28,7 +31,7 @@ export const ConnectionStatusBadge: React.FC = () => {
     const isMt5Connected = mt5Status === 'connected' || (Boolean(selectedAccount?.isConnected) && isWsConnected);
 
     let statusType: 'online' | 'connecting' | 'offline' = 'offline';
-    let statusLabel = 'Desconectado';
+    let statusLabel = isEn ? 'Disconnected' : 'Desconectado';
     let badgeClasses = 'bg-rose-500/10 border-rose-500/20 text-rose-600 dark:text-rose-400';
     let dotClasses = 'bg-rose-500';
 
@@ -44,7 +47,7 @@ export const ConnectionStatusBadge: React.FC = () => {
         dotClasses = 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.7)]';
     } else {
         statusType = 'offline';
-        statusLabel = 'Servidor Offline';
+        statusLabel = isEn ? 'Server Offline' : 'Servidor Offline';
         badgeClasses = 'bg-rose-500/10 border-rose-500/25 text-rose-600 dark:text-rose-400 hover:border-rose-500/40';
         dotClasses = 'bg-rose-500';
     }
@@ -60,21 +63,21 @@ export const ConnectionStatusBadge: React.FC = () => {
     };
 
     const formatLastSeen = (timestamp?: string | null) => {
-        if (!timestamp) return 'Sem registro recente';
+        if (!timestamp) return isEn ? 'No recent ping' : 'Sem registro recente';
         try {
             const date = new Date(timestamp);
             const now = new Date();
             const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-            if (diffSeconds < 30) return 'Agora mesmo';
-            if (diffSeconds < 60) return `Há ${diffSeconds}s`;
+            if (diffSeconds < 30) return isEn ? 'Just now' : 'Agora mesmo';
+            if (diffSeconds < 60) return isEn ? `${diffSeconds}s ago` : `Há ${diffSeconds}s`;
             const diffMinutes = Math.floor(diffSeconds / 60);
-            if (diffMinutes < 60) return `Há ${diffMinutes} min`;
+            if (diffMinutes < 60) return isEn ? `${diffMinutes}m ago` : `Há ${diffMinutes} min`;
             const diffHours = Math.floor(diffMinutes / 60);
-            if (diffHours < 24) return `Há ${diffHours}h`;
-            return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            if (diffHours < 24) return isEn ? `${diffHours}h ago` : `Há ${diffHours}h`;
+            return date.toLocaleDateString(isEn ? 'en-US' : 'pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
         } catch {
-            return 'Recente';
+            return isEn ? 'Recent' : 'Recente';
         }
     };
 
@@ -84,7 +87,7 @@ export const ConnectionStatusBadge: React.FC = () => {
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 select-none focus:outline-none ${badgeClasses}`}
-                title="Status da Conexão com MetaTrader 5"
+                title={isEn ? 'MetaTrader 5 Connection Status' : 'Status da Conexão com MetaTrader 5'}
             >
                 {/* Indicador pulsante */}
                 <span className="relative flex h-2 w-2">
@@ -117,13 +120,13 @@ export const ConnectionStatusBadge: React.FC = () => {
                     <div className="p-3 border-b border-line flex items-center justify-between bg-slate-50 dark:bg-[#0C0D12]">
                         <div className="flex items-center gap-2 text-xs font-bold text-fg ">
                             <Activity size={14} className="text-emerald-500 dark:text-emerald-400" />
-                            <span>Diagnóstico de Conexão</span>
+                            <span>{isEn ? 'Connection Diagnostics' : 'Diagnóstico de Conexão'}</span>
                         </div>
                         <button
                             onClick={handleManualRefresh}
                             disabled={isRefreshing || isAccountLoading}
                             className="p-1 rounded-md text-fg-subtle hover:text-fg dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-[#161822] transition-colors disabled:opacity-50"
-                            title="Recarregar status"
+                            title={isEn ? 'Refresh status' : 'Recarregar status'}
                         >
                             <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-emerald-500' : ''} />
                         </button>
@@ -136,15 +139,15 @@ export const ConnectionStatusBadge: React.FC = () => {
                             <div className="flex items-center gap-2">
                                 <Server size={14} className="text-fg-subtle dark:text-slate-400" />
                                 <div>
-                                    <div className="font-semibold text-fg leading-tight">Servidor Torex</div>
-                                    <div className="text-[10px] text-fg-subtle dark:text-slate-400">WebSocket / Hub em Tempo Real</div>
+                                    <div className="font-semibold text-fg leading-tight">{isEn ? 'Torex Server' : 'Servidor Torex'}</div>
+                                    <div className="text-[10px] text-fg-subtle dark:text-slate-400">{isEn ? 'WebSocket / Real-Time Hub' : 'WebSocket / Hub em Tempo Real'}</div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                                 {isWsConnected ? (
                                     <>
                                         <CheckCircle2 size={13} className="text-emerald-500" />
-                                        <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">ATIVO</span>
+                                        <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">{isEn ? 'ACTIVE' : 'ATIVO'}</span>
                                     </>
                                 ) : (
                                     <>
@@ -168,12 +171,12 @@ export const ConnectionStatusBadge: React.FC = () => {
                                 {isMt5Connected ? (
                                     <>
                                         <CheckCircle2 size={13} className="text-emerald-500" />
-                                        <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">SINCRONIZADO</span>
+                                        <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">{isEn ? 'SYNCED' : 'SINCRONIZADO'}</span>
                                     </>
                                 ) : (
                                     <>
                                         <AlertCircle size={13} className="text-amber-500" />
-                                        <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">DESCONECTADO</span>
+                                        <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400">{isEn ? 'DISCONNECTED' : 'DESCONECTADO'}</span>
                                     </>
                                 )}
                             </div>
@@ -182,22 +185,24 @@ export const ConnectionStatusBadge: React.FC = () => {
                         {/* 3. Informações da Conta Atual */}
                         <div className="pt-2 border-t border-line space-y-1.5">
                             <div className="flex justify-between items-center text-[11px]">
-                                <span className="text-fg-subtle dark:text-slate-400">Conta Ativa:</span>
+                                <span className="text-fg-subtle dark:text-slate-400">{isEn ? 'Active Account:' : 'Conta Ativa:'}</span>
                                 <span className="font-semibold text-fg truncate max-w-[150px]">
-                                    {isConsolidated ? 'Todas as Contas (Consolidado)' : (selectedAccount?.name || 'Conta Padrão')}
+                                    {isConsolidated
+                                        ? (isEn ? 'All Accounts (Consolidated)' : 'Todas as Contas (Consolidado)')
+                                        : (selectedAccount?.name || (isEn ? 'Default Account' : 'Conta Padrão'))}
                                 </span>
                             </div>
 
                             {!isConsolidated && selectedAccount && (
                                 <>
                                     <div className="flex justify-between items-center text-[11px]">
-                                        <span className="text-fg-subtle dark:text-slate-400">Corretora:</span>
+                                        <span className="text-fg-subtle dark:text-slate-400">{isEn ? 'Broker:' : 'Corretora:'}</span>
                                         <span className="font-mono text-fg-muted ">
                                             {selectedAccount.broker || 'MetaTrader 5'}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center text-[11px]">
-                                        <span className="text-fg-subtle dark:text-slate-400">Último Sinal:</span>
+                                        <span className="text-fg-subtle dark:text-slate-400">{isEn ? 'Last Ping:' : 'Último Sinal:'}</span>
                                         <span className="font-mono text-fg-muted ">
                                             {formatLastSeen(selectedAccount.lastSeen)}
                                         </span>
@@ -216,7 +221,7 @@ export const ConnectionStatusBadge: React.FC = () => {
                             }}
                             className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 text-xs font-semibold transition-colors"
                         >
-                            <span>Gerenciar Conexões MT5</span>
+                            <span>{isEn ? 'Manage MT5 Connections' : 'Gerenciar Conexões MT5'}</span>
                             <ArrowUpRight size={13} />
                         </button>
                     </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Check, Search, Globe } from 'lucide-react';
 import { COUNTRIES } from '../../constants/countries';
+import { useLocale } from '../../context/LocaleContext';
 
 interface Country {
     name: string;
@@ -16,7 +17,10 @@ interface CountryPhoneInputProps {
     placeholder?: string;
 }
 
-export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de telefone" }: CountryPhoneInputProps) => {
+export const CountryPhoneInput = ({ onChange, error, placeholder }: CountryPhoneInputProps) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
+    const resolvedPlaceholder = placeholder ?? (isEn ? 'Phone number' : 'Número de telefone');
     const [countries, setCountries] = useState<Country[]>([]);
     const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
     const [phoneNumber, setPhoneNumber] = useState('');
@@ -73,7 +77,7 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
     return (
         <div className="space-y-1">
             <label className="text-sm font-semibold text-gray-700 block mb-1">
-                Contacto
+                {isEn ? 'Phone' : 'Contacto'}
             </label>
             <div className="relative flex" ref={dropdownRef}>
                 {/* Country Dropdown Trigger */}
@@ -102,7 +106,7 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Buscar país..."
+                                    placeholder={isEn ? 'Search country...' : 'Buscar país...'}
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
                                     className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg outline-none focus:border-emerald-500 transition-all placeholder:text-gray-400"
@@ -114,7 +118,7 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
                         {/* List */}
                         <div className="overflow-y-auto flex-1 p-1">
                             {filteredCountries.length === 0 ? (
-                                <div className="p-4 text-center text-sm text-gray-500">Nenhum país encontrado</div>
+                                <div className="p-4 text-center text-sm text-gray-500">{isEn ? 'No country found' : 'Nenhum país encontrado'}</div>
                             ) : (
                                 filteredCountries.map(country => (
                                     <button
@@ -141,7 +145,7 @@ export const CountryPhoneInput = ({ onChange, error, placeholder = "Número de t
                         const val = e.target.value.replace(/\D/g, ''); // Only numbers allowed
                         setPhoneNumber(val);
                     }}
-                    placeholder={placeholder}
+                    placeholder={resolvedPlaceholder}
                     className={`flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-r-xl outline-none focus:border-emerald-500 focus:bg-white transition-all text-gray-900 placeholder:text-gray-400 ${error ? 'border-rose-300 focus:border-rose-500' : ''}`}
                 />
             </div>

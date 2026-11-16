@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useLocale } from '../../context/LocaleContext';
 
 interface CalendarWidgetProps {
     currentDate: Date;
@@ -16,6 +17,8 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     onMonthChange,
     trades
 }) => {
+    const { locale } = useLocale();
+    const isEn = locale === 'en';
     const getDaysInMonth = (date: Date) => {
         const year = date.getFullYear();
         const month = date.getMonth();
@@ -29,7 +32,7 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
     // Empty slots for previous month
     for (let i = 0; i < firstDay; i++) {
-        days.push(<div key={`empty-${i}`} className="aspect-square bg-slate-100/40 dark:bg-slate-900/10 border-r border-b border-slate-200/80 dark:border-slate-700/30" />);
+        days.push(<div key={`empty-${i}`} className="min-h-[52px] sm:min-h-[58px] rounded-lg bg-canvas-subtle/30" />);
     }
 
     // Days of the month
@@ -42,48 +45,50 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
 
         const pnl = dayTrades.reduce((acc, t) => acc + t.profit, 0);
         const hasTrades = dayTrades.length > 0;
-        const isSelected = selectedDate?.getDate() === day && selectedDate?.getMonth() === currentDate.getMonth() && selectedDate?.getFullYear() === currentDate.getFullYear();
-        const isToday = new Date().getDate() === day && new Date().getMonth() === currentDate.getMonth() && new Date().getFullYear() === currentDate.getFullYear();
+        const isSelected =
+            selectedDate?.getDate() === day &&
+            selectedDate?.getMonth() === currentDate.getMonth() &&
+            selectedDate?.getFullYear() === currentDate.getFullYear();
+        const isToday =
+            new Date().getDate() === day &&
+            new Date().getMonth() === currentDate.getMonth() &&
+            new Date().getFullYear() === currentDate.getFullYear();
 
-        let bgClass = "bg-white hover:bg-slate-50 dark:bg-slate-900/20 dark:hover:bg-slate-800/50";
+        let cellStyle = 'bg-canvas-subtle/60 hover:bg-surface-2 border-line-subtle';
         if (hasTrades) {
-            bgClass = pnl >= 0
-                ? "bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 dark:border-emerald-500/20"
-                : "bg-rose-50/70 hover:bg-rose-100/70 border-rose-200 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 dark:border-rose-500/20";
+            cellStyle =
+                pnl >= 0
+                    ? 'bg-emerald-500/[0.08] hover:bg-emerald-500/[0.14] border-emerald-500/25'
+                    : 'bg-rose-500/[0.08] hover:bg-rose-500/[0.14] border-rose-500/25';
         }
-
-        let borderClass = "border-r border-b border-slate-200/80 dark:border-slate-700/50";
         if (isSelected) {
-            bgClass = "bg-indigo-50 hover:bg-indigo-100/80 dark:bg-indigo-600/25 dark:hover:bg-indigo-600/35 ring-inset ring-2 ring-indigo-500 z-10";
-            borderClass = "border-transparent";
+            cellStyle += ' ring-1 ring-accent border-accent/50';
         }
 
         days.push(
             <div
                 key={day}
                 onClick={() => onDateSelect(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
-                className={`relative p-1.5 aspect-square cursor-pointer transition-all duration-200 flex flex-col justify-between group ${bgClass} ${borderClass}`}
+                className={`relative p-1.5 min-h-[52px] sm:min-h-[58px] rounded-lg border cursor-pointer transition-colors flex flex-col justify-between ${cellStyle}`}
             >
-                <div className="flex justify-between items-start">
-                    <span className={`text-sm font-bold ${
- isSelected 
- ? 'text-indigo-700 dark:text-white font-black' 
- : isToday 
- ? 'text-indigo-600 dark:text-indigo-400 font-black' 
- : 'text-fg-muted '
- }`}>
+                <div className="flex justify-between items-center">
+                    <span
+                        className={`text-[11px] font-semibold tabular-nums ${
+                            isSelected ? 'text-accent-fg font-bold' : isToday ? 'text-fg font-bold' : 'text-fg-muted'
+                        }`}
+                    >
                         {day}
                     </span>
-                    {isToday && <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>}
+                    {isToday && <span className="w-1.5 h-1.5 bg-accent rounded-full" />}
                 </div>
 
                 {hasTrades && (
-                    <div className="text-right flex flex-col items-end transform group-hover:scale-105 transition-transform">
-                        <div className="text-[9px] text-fg-subtle dark:text-slate-400 font-bold mb-0.5 leading-none opacity-80 uppercase tracking-tighter">
-                            {dayTrades.length} TX
-                        </div>
-                        <div className={`text-[11px] font-black font-mono tracking-tighter ${pnl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    <div className="text-right leading-tight">
+                        <div className={`text-[11px] font-bold font-mono tabular-nums ${pnl >= 0 ? 'text-accent-fg' : 'text-danger-fg'}`}>
                             {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(0)}
+                        </div>
+                        <div className="text-[9px] text-fg-subtle font-medium tabular-nums">
+                            {dayTrades.length} {dayTrades.length === 1 ? 'trade' : 'trades'}
                         </div>
                     </div>
                 )}
@@ -92,40 +97,40 @@ export const CalendarWidget: React.FC<CalendarWidgetProps> = ({
     }
 
     return (
-        <div className="bg-white dark:bg-slate-900/60 backdrop-blur-2xl border border-slate-200 dark:border-indigo-500/20 rounded-3xl overflow-hidden shadow-lg dark:shadow-2xl flex flex-col ring-1 ring-slate-900/5 dark:ring-white/5">
+        <div className="bg-surface border border-line rounded-xl p-3.5 sm:p-4 flex flex-col">
             {/* Calendar Header */}
-            <div className="flex items-center justify-between p-5 bg-gradient-to-b from-indigo-50/70 to-transparent dark:from-indigo-500/10 dark:to-transparent border-b border-slate-200 dark:border-slate-800/50">
-                <h3 className="font-bold text-fg flex items-center gap-2 text-xl">
-                    <span className="capitalize">{currentDate.toLocaleString('pt-BR', { month: 'long' })}</span>
-                    <span className="text-indigo-600 dark:text-indigo-400 font-mono text-lg">{currentDate.getFullYear()}</span>
+            <div className="flex items-center justify-between pb-3 mb-2 border-b border-line-subtle">
+                <h3 className="font-bold text-fg flex items-center gap-1.5 text-sm">
+                    <span className="capitalize">{currentDate.toLocaleString(isEn ? 'en-US' : 'pt-BR', { month: 'long' })}</span>
+                    <span className="text-fg-subtle font-mono text-xs">{currentDate.getFullYear()}</span>
                 </h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                     <button
                         onClick={() => onMonthChange(-1)}
-                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-fg-muted hover:text-fg transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
+                        className="h-7 w-7 flex items-center justify-center bg-canvas-subtle hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg transition-colors border border-line-subtle cursor-pointer"
                     >
-                        <ChevronLeft size={20} />
+                        <ChevronLeft size={14} />
                     </button>
                     <button
                         onClick={() => onMonthChange(1)}
-                        className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/50 dark:hover:bg-slate-700 rounded-xl text-fg-muted hover:text-fg transition-all shadow-sm border border-slate-200/80 dark:border-slate-700/50"
+                        className="h-7 w-7 flex items-center justify-center bg-canvas-subtle hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg transition-colors border border-line-subtle cursor-pointer"
                     >
-                        <ChevronRight size={20} />
+                        <ChevronRight size={14} />
                     </button>
                 </div>
             </div>
 
             {/* Days Header */}
-            <div className="grid grid-cols-7 bg-slate-50 dark:bg-slate-900 py-3 text-center border-b border-slate-200 dark:border-slate-800/50">
-                {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (
-                    <span key={i} className={`text-xs font-bold tracking-wider ${i === 0 || i === 6 ? 'text-rose-600 dark:text-rose-400' : 'text-fg-muted '}`}>
+            <div className="grid grid-cols-7 gap-1.5 pb-1.5 text-center">
+                {(isEn ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']).map((d, i) => (
+                    <span key={i} className="text-[10px] uppercase font-semibold tracking-wider text-fg-subtle">
                         {d}
                     </span>
                 ))}
             </div>
 
             {/* Calendar Grid */}
-            <div className="grid grid-cols-7 flex-1 content-start bg-slate-50/50 dark:bg-slate-950/20">
+            <div className="grid grid-cols-7 gap-1.5 flex-1 content-start">
                 {days}
             </div>
         </div>
