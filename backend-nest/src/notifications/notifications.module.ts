@@ -25,6 +25,8 @@ import { BroadcastNotificationEntity } from './broadcast-notification.entity';
 import { BroadcastingService } from './broadcast.service';
 import { SmsService } from './sms.service';
 import { EmailModule } from '../email/email.module';
+import { JwtModule } from '@nestjs/jwt';
+import { getJwtSecret } from '../common/security/security.config';
 
 @Module({
     imports: [
@@ -39,6 +41,14 @@ import { EmailModule } from '../email/email.module';
             WhatsAppLink,
             WhatsAppVerificationCode,
         ]),
+        JwtModule.registerAsync({
+            imports: [ConfigModule],
+            useFactory: (configService: ConfigService) => ({
+                secret: getJwtSecret(configService),
+                signOptions: { expiresIn: '24h' },
+            }),
+            inject: [ConfigService],
+        }),
         AlertsModule,
         EmailModule,
         TelegrafModule.forRootAsync({

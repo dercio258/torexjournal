@@ -6,6 +6,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { Context, Telegraf } from 'telegraf';
 import { InjectBot, Start, Update, On, Message, Ctx } from 'nestjs-telegraf';
+import { randomInt } from 'crypto';
 
 @Update()
 @Injectable()
@@ -36,7 +37,7 @@ export class TelegramService implements OnModuleInit {
     }
 
     async generateOtp(userId: string): Promise<string> {
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = randomInt(100000, 1000000).toString();
         // Store OTP with userId for 5 minutes (300000 ms)
         await this.cacheManager.set(`telegram_otp:${otp}`, userId, 300000);
         return otp;

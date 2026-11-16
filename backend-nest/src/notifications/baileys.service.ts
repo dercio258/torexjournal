@@ -20,7 +20,7 @@ export class BaileysService implements OnModuleInit {
         private eventEmitter: EventEmitter2
     ) {
         this.apiUrl = this.configService.get<string>('EVOLUTION_API_URL') || 'https://wa.ratixpay.co.mz';
-        this.apiKey = this.configService.get<string>('EVOLUTION_API_KEY') || 'ratixpay_secret_key_2026';
+        this.apiKey = (this.configService.get<string>('EVOLUTION_API_KEY') || '').trim();
         this.instanceName = this.configService.get<string>('EVOLUTION_API_INSTANCE_NAME') || 'torex_journal';
         this.baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
     }
@@ -28,6 +28,14 @@ export class BaileysService implements OnModuleInit {
     async onModuleInit() {
         if (this.configService.get('MT5_DEDICATED_SERVER') === 'true' || this.configService.get('WHATSAPP_ENABLED') !== 'true') {
             this.logger.log('WhatsApp (Baileys) desativado neste servidor (defina WHATSAPP_ENABLED=true para ativar).');
+            return;
+        }
+        if (!this.apiKey) {
+            const msg = 'EVOLUTION_API_KEY não configurada; integração WhatsApp (Baileys) não iniciada.';
+            if (this.configService.get<string>('NODE_ENV') === 'production') {
+                throw new Error(`FATAL: ${msg}`);
+            }
+            this.logger.warn(msg);
             return;
         }
         this.logger.log('Initializing BaileysService with Evolution API');

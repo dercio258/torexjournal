@@ -1,6 +1,8 @@
-import { Controller, Post, Body, Logger, Req, Headers, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, Logger, Req, Headers, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { SubscriptionService } from './subscription.service';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
+import { timingSafeEqualStr } from '../common/security/security.config';
 
 @Controller('webhook')
 export class WebhookController {
@@ -13,8 +15,14 @@ export class WebhookController {
 
     private verifySignature(req: any, signature: string) {
         const secret = this.configService.get<string>('DEBITO_WEBHOOK_SECRET') || this.configService.get<string>('WEBHOOK_SECRET', '');
+        const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+
         if (!secret) {
-            this.logger.warn('Webhook secret is not configured. Skipping signature verification.');
+            if (isProd) {
+                this.logger.error('CRITICAL: DEBITO_WEBHOOK_SECRET / WEBHOOK_SECRET is not configured in production.');
+                throw new UnauthorizedException('Webhook signature verification not configured');
+            }
+            this.logger.warn('Webhook secret is not configured in non-production. Skipping signature verification.');
             return;
         }
 
@@ -29,11 +37,11 @@ export class WebhookController {
             throw new BadRequestException('Raw body not available');
         }
 
-        const crypto = require('crypto');
         const hash = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-        if (hash !== signature) {
+        const normalizedSig = signature.replace(/^sha256=/i, '').trim();
+        if (!timingSafeEqualStr(hash, normalizedSig)) {
             this.logger.error('Invalid signature on webhook');
-            throw new BadRequestException('Invalid signature');
+            throw new UnauthorizedException('Invalid signature');
         }
         this.logger.log('Signature verified successfully.');
     }
@@ -43,33 +51,24 @@ export class WebhookController {
     @Post('c2b/emola')
     @Post('c2b/bank')
     async handleWebhook(@Req() req: any, @Body() body: any, @Headers('x-webhook-signature') signature: string) {
-        this.logger.log(`Received unified webhook. Signature header: ${signature}`);
-        
-        // Audit log
-        this.logger.log(`[Audit Log] Received webhook payload: ${JSON.stringify(body)}`);
+        this.logger.log(`Received unified webhook.`);
 
-        // Verify HMAC-SHA256 signature
+        // Verify HMAC-SHA256 signature BEFORE trusting or processing payload
         this.verifySignature(req, signature);
 
         // Extract reference/payment_id to poll and audit-confirm the status
-        let reference = body.reference_description || body.reference;
-        if (body.event && body.data) {
+        let reference = body?.reference_description || body?.reference;
+        if (body?.event && body?.data) {
             reference = body.data.reference || body.data.payment_id;
         }
 
         if (reference) {
             this.logger.log(`[Audit Log] Confirming status via polling check for reference: ${reference}`);
-            try {
-                // Poll check-status API directly to audit and verify status updates
-                await this.subscriptionService.handleDebitoStatusUpdate(reference);
-                this.logger.log(`[Audit Log] Polling verification check completed successfully for reference: ${reference}`);
-            } catch (err) {
-                this.logger.error(`[Audit Log] Polling verification check failed for reference ${reference}: ${err.message}. Falling back to payload processing.`);
-                // Fallback to direct webhook payload processing if polling fails
-                await this.subscriptionService.processDebitoWebhook(body);
-            }
+            // Always verify payment status directly via gateway API; do NOT fall back to trusting unverified body on polling error
+            await this.subscriptionService.handleDebitoStatusUpdate(reference);
+            this.logger.log(`[Audit Log] Polling verification check completed successfully for reference: ${reference}`);
         } else {
-            this.logger.warn('[Audit Log] No transaction reference found in webhook payload. Processing payload directly.');
+            this.logger.warn('[Audit Log] No transaction reference found in verified webhook payload. Processing payload.');
             await this.subscriptionService.processDebitoWebhook(body);
         }
 

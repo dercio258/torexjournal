@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { UserEntity } from '../users/user.entity';
 import { AccountEntity } from '../account/account.entity';
 
@@ -17,6 +17,8 @@ export enum ImportStatus {
 }
 
 @Entity('import_logs')
+@Index(['userId', 'createdAt'])
+@Index(['accountId', 'createdAt'])
 export class ImportLog {
     @PrimaryGeneratedColumn()
     id: number;

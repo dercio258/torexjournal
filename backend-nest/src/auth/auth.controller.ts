@@ -1,15 +1,48 @@
-import { Controller, Post, Body, UseGuards, Request, Get, Put, Res, Logger, Query } from '@nestjs/common';
+import {
+    Controller,
+    Post,
+    Body,
+    UseGuards,
+    Request,
+    Get,
+    Put,
+    Delete,
+    Res,
+    Logger,
+    Query,
+    UseInterceptors,
+    UploadedFile,
+} from '@nestjs/common';
 import { FastifyReply } from 'fastify';
+import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { AccountService } from '../account/account.service';
-import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { GoogleOauthGuard } from './google-oauth.guard';
 import { GithubOauthGuard } from './github-oauth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { PlanPermissionService } from '../payment/plan-permission.service';
 import { SubscriptionService } from '../payment/subscription.service';
 import { ConfigService } from '@nestjs/config';
+import { extractTrustedClientIp } from '../common/security/security.config';
+import {
+    LoginDto,
+    RefreshTokenDto,
+    SendOtpDto,
+    RegisterDto,
+    ForgotPasswordDto,
+    ResetPasswordDto,
+    Verify2faDto,
+    Resend2faDto,
+    UpdateProfileDto,
+    UpdateContactDto,
+    UpdatePreferencesDto,
+    Update2faDto,
+    Verify2faSetupDto,
+    OnboardingSurveyDto,
+    OAuthExchangeDto,
+} from './dto/auth.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -25,26 +58,26 @@ export class AuthController {
 
     @Post('login')
     @Throttle({ default: { limit: 9, ttl: 60000 } })
-    async login(@Body() body, @Request() req) {
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+    async login(@Body() body: LoginDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
 
         return this.authService.authenticateAndLogin(body.email, body.password, ip, userAgent);
     }
 
     @Post('refresh')
-    async refresh(@Body() body, @Request() req) {
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    @Throttle({ default: { limit: 15, ttl: 60000 } })
+    async refresh(@Body() body: RefreshTokenDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        if (!body.refreshToken) return { success: false, error: 'Refresh token is required' };
         return this.authService.refresh(body.refreshToken, ip, userAgent);
     }
 
     @Post('register')
     @Throttle({ default: { limit: 3, ttl: 60000 } }) // Limit: 3 req/min
-    async register(@Body() body, @Request() req) {
+    async register(@Body() body: RegisterDto, @Request() req) {
         try {
-            const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+            const ip = extractTrustedClientIp(req);
             const userAgent = req.headers['user-agent'];
             return await this.authService.register(body, ip, userAgent);
         } catch (e) {
@@ -54,9 +87,8 @@ export class AuthController {
 
     @Post('send-otp')
     @Throttle({ default: { limit: 3, ttl: 60000 } })
-    async sendOtp(@Body() body) {
+    async sendOtp(@Body() body: SendOtpDto) {
         try {
-            if (!body.email) return { success: false, error: 'Email is required' };
             return await this.authService.sendOtp(body.email);
         } catch (e) {
             return { success: false, error: e.message };
@@ -65,9 +97,8 @@ export class AuthController {
 
     @Post('forgot-password')
     @Throttle({ default: { limit: 3, ttl: 60000 } })
-    async forgotPassword(@Body() body) {
+    async forgotPassword(@Body() body: ForgotPasswordDto) {
         try {
-            if (!body.email) return { success: false, error: 'Email is required' };
             return await this.authService.forgotPassword(body.email);
         } catch (e) {
             return { success: false, error: e.message };
@@ -75,8 +106,8 @@ export class AuthController {
     }
 
     @Post('reset-password')
-    @Throttle({ default: { limit: 3, ttl: 60000 } })
-    async resetPassword(@Body() body) {
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
+    async resetPassword(@Body() body: ResetPasswordDto) {
         try {
             return await this.authService.resetPassword(body);
         } catch (e) {
@@ -84,13 +115,14 @@ export class AuthController {
         }
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('regenerate-token')
     async regenerateToken(@Request() req) {
         return this.authService.regenerateToken(req.user.id);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Post('logout')
     async logout(@Request() req) {
         const token = req.headers.authorization?.replace('Bearer ', '');
@@ -98,7 +130,7 @@ export class AuthController {
         return { success: true, message: 'Logged out successfully' };
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Get('profile')
     async getProfile(@Request() req) {
         try {
@@ -141,6 +173,8 @@ export class AuthController {
                 trialUsedAt: user.trialUsedAt,
                 trialJustGranted: trialResult.trialGranted,
                 trialDays: trialResult.trialDays,
+                preferredLocale: user.preferredLocale || 'pt',
+                timezone: user.timezone || null,
                 subscription: subscription ? {
                     id: subscription.id,
                     status: subscription.status,
@@ -155,22 +189,44 @@ export class AuthController {
         }
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Put('profile')
-    async updateProfile(@Request() req, @Body() body: { name?: string; avatarUrl?: string }) {
+    async updateProfile(@Request() req, @Body() body: UpdateProfileDto) {
         return this.usersService.updateProfile(req.user.id, {
             name: body.name,
-            avatarUrl: body.avatarUrl
+            username: body.username,
+            avatarUrl: body.avatarUrl,
+            dailyLossLimit: body.dailyLossLimit,
         });
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @Post('profile/avatar')
+    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true, maxFileSizeBytes: 5 * 1024 * 1024 }))
+    async uploadProfileAvatar(@Request() req, @UploadedFile() file) {
+        return this.usersService.uploadAvatar(req.user.id, file);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Delete('profile/avatar')
+    async deleteProfileAvatar(@Request() req) {
+        return this.usersService.deleteAvatar(req.user.id);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Put('contact')
-    async updateContact(@Request() req, @Body() body: { whatsapp: string }) {
+    async updateContact(@Request() req, @Body() body: UpdateContactDto) {
         return this.usersService.updateContact(req.user.id, body.whatsapp);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
+    @Put('preferences')
+    async updatePreferences(@Request() req, @Body() body: UpdatePreferencesDto) {
+        return this.usersService.updatePreferences(req.user.id, body);
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Get('app-token')
     async getAppToken(@Request() req, @Query('accountId') queryAccountId?: string) {
         const accountId = queryAccountId || (req.headers['x-account-id'] as string) || undefined;
@@ -178,41 +234,50 @@ export class AuthController {
     }
 
     @Post('verify-2fa')
-    async verify2fa(@Body() body, @Request() req) {
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    @Throttle({ default: { limit: 6, ttl: 60000 } })
+    async verify2fa(@Body() body: Verify2faDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        return this.authService.verify2fa(body.twoFactorToken || body.userId, body.otp, ip, userAgent);
+        return this.authService.verify2fa(body.twoFactorToken || body.userId || '', body.otp, ip, userAgent);
     }
 
     @Post('resend-2fa')
-    async resend2fa(@Body() body, @Request() req) {
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
+    @Throttle({ default: { limit: 3, ttl: 60000 } })
+    async resend2fa(@Body() body: Resend2faDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        return this.authService.resend2fa(body.twoFactorToken || body.userId, ip, userAgent);
+        return this.authService.resend2fa(body.twoFactorToken || body.userId || '', ip, userAgent);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Put('2fa')
-    async update2fa(@Request() req, @Body() body: { enabled: boolean }) {
+    async update2fa(@Request() req, @Body() body: Update2faDto) {
         return this.authService.setTwoFactor(req.user.id, body.enabled);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Post('2fa/setup')
     async setup2fa(@Request() req) {
         return this.authService.setupTwoFactor(req.user.id);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
     @Post('2fa/verify-setup')
-    async verify2faSetup(@Request() req, @Body() body: { token: string }) {
+    async verify2faSetup(@Request() req, @Body() body: Verify2faSetupDto) {
         return this.authService.verifyTwoFactorSetup(req.user.id, body.token);
     }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Post('onboarding')
-    async completeOnboarding(@Request() req, @Body() body: any) {
+    async completeOnboarding(@Request() req, @Body() body: OnboardingSurveyDto) {
         return this.authService.saveOnboardingSurvey(req.user.id, body);
+    }
+
+    @Post('oauth/exchange')
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    async exchangeOAuthCode(@Body() body: OAuthExchangeDto) {
+        return this.authService.exchangeOAuthCode(body.code);
     }
 
     @UseGuards(GoogleOauthGuard)
@@ -224,7 +289,7 @@ export class AuthController {
     @UseGuards(GoogleOauthGuard)
     @Get('google/callback')
     async googleAuthRedirect(@Request() req, @Res() res: FastifyReply) {
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
         const result = await this.authService.validateGoogleUser(req.user, ip, userAgent);
         
@@ -234,15 +299,15 @@ export class AuthController {
             return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
 
-        if (result.twoFactorRequired) {
-            return res.redirect(`${frontendUrl}/2fa?twoFactorToken=${result.twoFactorToken}`);
-        }
+        const code = await this.authService.createOAuthExchangeCode({
+            token: result.token || null,
+            twoFactorRequired: Boolean(result.twoFactorRequired),
+            twoFactorToken: result.twoFactorToken || null,
+            requiresContact: Boolean(result.requiresContact),
+        });
 
         const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
-        redirectUrl.searchParams.append('token', result.token);
-        redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
-        redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());
-
+        redirectUrl.searchParams.append('code', code);
         return res.redirect(redirectUrl.toString());
     }
 
@@ -255,7 +320,7 @@ export class AuthController {
     @UseGuards(GithubOauthGuard)
     @Get('github/callback')
     async githubAuthRedirect(@Request() req, @Res() res: FastifyReply) {
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+        const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
         const result = await this.authService.validateGithubUser(req.user, ip, userAgent);
 
@@ -265,15 +330,15 @@ export class AuthController {
             return res.status(500).send('Redirection error: FRONTEND_URL missing');
         }
 
-        if (result.twoFactorRequired) {
-            return res.redirect(`${frontendUrl}/2fa?twoFactorToken=${result.twoFactorToken}`);
-        }
+        const code = await this.authService.createOAuthExchangeCode({
+            token: result.token || null,
+            twoFactorRequired: Boolean(result.twoFactorRequired),
+            twoFactorToken: result.twoFactorToken || null,
+            requiresContact: Boolean(result.requiresContact),
+        });
 
         const redirectUrl = new URL(`${frontendUrl}/auth/callback`);
-        redirectUrl.searchParams.append('token', result.token);
-        redirectUrl.searchParams.append('onboardingCompleted', result.user.onboardingCompleted.toString());
-        redirectUrl.searchParams.append('requiresContact', result.requiresContact.toString());
-
+        redirectUrl.searchParams.append('code', code);
         return res.redirect(redirectUrl.toString());
     }
 }

@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { AccountEntity, AccountType } from './account.entity';
 import { AccountTransactionEntity, TransactionType } from './account-transaction.entity';
 import { TradeEntity } from '../mt5/trade.entity';
@@ -9,6 +11,9 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import * as crypto from 'crypto';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
+
+const RECONCILE_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 export interface AccountWithStats extends AccountEntity {
     tradesCount: number;
@@ -28,8 +33,18 @@ export class AccountService {
         @InjectRepository(TradeEntity)
         private tradeRepo: Repository<TradeEntity>,
         private dataSource: DataSource,
-        private clickHouseService: ClickHouseService
+        private clickHouseService: ClickHouseService,
+        @Inject(CACHE_MANAGER)
+        private cacheManager: Cache,
+        private planPermissionService: PlanPermissionService,
     ) { }
+
+    async invalidateReconcileCache(userId: string): Promise<void> {
+        if (!userId) return;
+        try {
+            await this.cacheManager.del(`accounts:reconciled:${userId}`);
+        } catch { }
+    }
 
     private generateToken(): string {
         return crypto.randomUUID().replace(/-/g, '').toUpperCase();
@@ -263,7 +278,18 @@ export class AccountService {
      * Lista todas as contas de trading pertencentes ao usuário com estatísticas básicas
      */
     async findAllByUser(userId: string, includeArchived = false): Promise<AccountWithStats[]> {
-        await this.reconcileUserMt5Accounts(userId);
+        const reconcileKey = `accounts:reconciled:${userId}`;
+        let alreadyReconciled = false;
+        try {
+            alreadyReconciled = Boolean(await this.cacheManager.get(reconcileKey));
+        } catch { }
+
+        if (!alreadyReconciled) {
+            await this.reconcileUserMt5Accounts(userId);
+            try {
+                await this.cacheManager.set(reconcileKey, 1, RECONCILE_CACHE_TTL_MS);
+            } catch { }
+        }
 
         const query: any = { userId };
         if (!includeArchived) {
@@ -327,10 +353,44 @@ export class AccountService {
         return this.validateAccountOwnership(id, userId);
     }
 
+    private isPropFirmAccountType(type?: AccountType): boolean {
+        return (
+            type === AccountType.PROP_FIRM ||
+            type === AccountType.CHALLENGE ||
+            type === AccountType.FUNDED
+        );
+    }
+
+    private async assertAccountPlanLimits(
+        userId: string,
+        opts: { creating?: boolean; restoring?: boolean; requestedType?: AccountType; currentAccountId?: string }
+    ): Promise<void> {
+        const tier = await this.planPermissionService.getUserPlan(userId);
+        if (tier === PlanTier.FREE) {
+            throw new ForbiddenException('Assinatura ativa necessária para criar ou gerenciar contas de trading.');
+        }
+
+        if (this.isPropFirmAccountType(opts.requestedType) && tier === PlanTier.BASIC) {
+            throw new ForbiddenException('Contas Prop Firm / Challenge / Funded requerem plano PRO ou PREMIUM.');
+        }
+
+        if ((opts.creating || opts.restoring) && tier === PlanTier.BASIC) {
+            const activeCount = await this.accountRepo.count({ where: { userId, isArchived: false } });
+            if (activeCount >= 1) {
+                throw new ForbiddenException(
+                    'O plano BASIC permite no máximo 1 conta ativa. Faça upgrade para PRO ou PREMIUM para múltiplas contas.'
+                );
+            }
+        }
+    }
+
     /**
-     * Cria uma nova conta de trading independente (sem limite restritivo de 3 contas)
+     * Cria uma nova conta de trading respeitando os limites do plano do usuário
      */
     async createAccount(userId: string, dto: CreateAccountDto) {
+        const requestedType = dto.type || AccountType.LIVE;
+        await this.assertAccountPlanLimits(userId, { creating: true, requestedType });
+
         const activeCount = await this.accountRepo.count({ where: { userId, isArchived: false } });
         const isFirstAccount = activeCount === 0;
         const initialBalance = dto.initialBalance ? Number(dto.initialBalance) : 0;
@@ -339,7 +399,7 @@ export class AccountService {
             userId,
             name: dto.name.trim(),
             broker: dto.broker.trim(),
-            type: dto.type || AccountType.LIVE,
+            type: requestedType,
             currency: (dto.currency || 'USD').toUpperCase(),
             initialBalance,
             balance: initialBalance,
@@ -374,9 +434,12 @@ export class AccountService {
     async updateAccount(id: string, userId: string, dto: UpdateAccountDto) {
         const account = await this.validateAccountOwnership(id, userId);
 
+        if (dto.type !== undefined) {
+            await this.assertAccountPlanLimits(userId, { requestedType: dto.type, currentAccountId: id });
+            account.type = dto.type;
+        }
         if (dto.name !== undefined) account.name = dto.name.trim();
         if (dto.broker !== undefined) account.broker = dto.broker.trim();
-        if (dto.type !== undefined) account.type = dto.type;
         if (dto.currency !== undefined) account.currency = dto.currency.toUpperCase();
         if (dto.propFirmRules !== undefined) account.propFirmRules = dto.propFirmRules;
         if (dto.initialBalance !== undefined) {
@@ -431,6 +494,13 @@ export class AccountService {
      */
     async restoreAccount(id: string, userId: string) {
         const account = await this.validateAccountOwnership(id, userId);
+        if (account.isArchived) {
+            await this.assertAccountPlanLimits(userId, {
+                restoring: true,
+                requestedType: account.type,
+                currentAccountId: id,
+            });
+        }
         account.isArchived = false;
         account.archivedAt = null;
         await this.accountRepo.save(account);
@@ -503,41 +573,55 @@ export class AccountService {
      * Registra uma movimentação de saldo (Depósito, Retirada, Ajuste, Bônus, Taxa)
      */
     async createTransaction(accountId: string, userId: string, dto: CreateTransactionDto) {
-        const account = await this.validateAccountOwnership(accountId, userId);
         const amount = Number(dto.amount);
-        let newBalance = Number(account.balance);
-
-        switch (dto.type) {
-            case TransactionType.DEPOSIT:
-            case TransactionType.BONUS:
-                newBalance += amount;
-                break;
-            case TransactionType.WITHDRAWAL:
-            case TransactionType.FEE:
-                newBalance -= amount;
-                break;
-            case TransactionType.ADJUSTMENT:
-                newBalance += amount; // Pode ser positivo ou negativo
-                break;
+        if (!Number.isFinite(amount)) {
+            throw new BadRequestException('Valor de transação inválido.');
         }
 
-        const tx = this.transactionRepo.create({
-            accountId,
-            type: dto.type,
-            amount,
-            date: dto.date ? new Date(dto.date) : new Date(),
-            description: dto.description || null,
-            balanceAfter: Number(newBalance.toFixed(2))
-        });
+        const savedTx = await this.dataSource.transaction(async (manager) => {
+            const account = await manager.findOne(AccountEntity, {
+                where: { id: accountId },
+                lock: { mode: 'pessimistic_write' },
+            });
 
-        await this.dataSource.transaction(async (manager) => {
-            await manager.save(AccountTransactionEntity, tx);
+            if (!account || account.userId !== userId) {
+                throw new ForbiddenException('Acesso negado a esta conta ou conta inexistente.');
+            }
+
+            let newBalance = Number(account.balance);
+
+            switch (dto.type) {
+                case TransactionType.DEPOSIT:
+                case TransactionType.BONUS:
+                    newBalance += amount;
+                    break;
+                case TransactionType.WITHDRAWAL:
+                case TransactionType.FEE:
+                    newBalance -= amount;
+                    break;
+                case TransactionType.ADJUSTMENT:
+                    newBalance += amount; // Pode ser positivo ou negativo
+                    break;
+            }
+
+            const tx = manager.create(AccountTransactionEntity, {
+                accountId,
+                type: dto.type,
+                amount,
+                date: dto.date ? new Date(dto.date) : new Date(),
+                description: dto.description || null,
+                balanceAfter: Number(newBalance.toFixed(2)),
+            });
+
+            const persistedTx = await manager.save(AccountTransactionEntity, tx);
             account.balance = Number(newBalance.toFixed(2));
             account.equity = Number(newBalance.toFixed(2));
             await manager.save(AccountEntity, account);
+            return persistedTx;
         });
 
-        return tx;
+        await this.invalidateReconcileCache(userId);
+        return savedTx;
     }
 
     /**

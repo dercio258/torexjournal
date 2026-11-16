@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { FinnhubController } from './finnhub.controller';
 import { FinnhubService } from './finnhub.service';
 import { EconomicCalendarModule } from '../economic-calendar/economic-calendar.module';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
-        EconomicCalendarModule
+        EconomicCalendarModule,
+        PaymentModule,
     ],
     controllers: [FinnhubController],
     providers: [FinnhubService],

@@ -1,8 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { UserEntity } from '../users/user.entity';
 import { Post } from './post.entity';
 
 @Entity('network_comments')
+@Index('IDX_network_comments_post_created', ['postId', 'createdAt'])
 export class Comment {
     @PrimaryGeneratedColumn()
     id: number;

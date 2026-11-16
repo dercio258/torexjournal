@@ -1,5 +1,5 @@
 
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { AccountEntity } from '../account/account.entity';
 
 export enum NotificationType {
@@ -11,6 +11,7 @@ export enum NotificationType {
 }
 
 @Entity('notifications')
+@Index(['accountId', 'isRead', 'createdAt'])
 export class NotificationEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;

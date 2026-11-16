@@ -13,6 +13,8 @@ export enum AccountType {
 }
 
 @Entity('accounts')
+@Index(['userId', 'isArchived', 'isPrimary'])
+@Index(['userId', 'mt5Id'])
 export class AccountEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;

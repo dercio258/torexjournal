@@ -6,9 +6,6 @@ import {
     UpdateDateColumn,
 } from 'typeorm';
 
-// TradingTier enum removed in favor of dynamic strings
-// export enum TradingTier { ... }
-
 @Entity('subscription_plan_configs')
 export class SubscriptionPlanConfig {
     @PrimaryGeneratedColumn('uuid')
@@ -41,6 +38,9 @@ export class SubscriptionPlanConfig {
 
     @Column('decimal', { precision: 10, scale: 2, default: 0 })
     trialPrice: number;
+
+    @Column('int', { nullable: true })
+    aiDailyCredits: number;
 
     @Column({ default: true })
     isActive: boolean;

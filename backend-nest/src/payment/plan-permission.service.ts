@@ -8,7 +8,44 @@ import { Cache } from 'cache-manager';
 export enum PlanTier {
     FREE = 'FREE',
     BASIC = 'BASIC',
+    PRO = 'PRO',
     PREMIUM = 'PREMIUM',
+}
+
+export const AI_DAILY_CREDITS_BY_TIER: Record<PlanTier, number> = {
+    [PlanTier.FREE]: 0,
+    [PlanTier.BASIC]: 100,
+    [PlanTier.PRO]: 2000,
+    [PlanTier.PREMIUM]: 20000,
+};
+
+const TIER_RANK: Record<PlanTier, number> = {
+    [PlanTier.FREE]: 0,
+    [PlanTier.BASIC]: 1,
+    [PlanTier.PRO]: 2,
+    [PlanTier.PREMIUM]: 3,
+};
+
+export function resolvePlanTierFromString(rawTier?: string | null): PlanTier {
+    const t = String(rawTier || '').trim().toUpperCase();
+    if (t === 'PREMIUM' || t === 'ELITE' || t === 'VIP' || t === 'ENTERPRISE') {
+        return PlanTier.PREMIUM;
+    }
+    if (t === 'PRO') {
+        return PlanTier.PRO;
+    }
+    if (t === 'BASIC' || t === 'BASICO') {
+        return PlanTier.BASIC;
+    }
+    return PlanTier.FREE;
+}
+
+export function resolveDefaultDailyCredits(rawTier?: string | null, configuredCredits?: number | null): number {
+    if (typeof configuredCredits === 'number' && configuredCredits > 0) {
+        return configuredCredits;
+    }
+    const tier = resolvePlanTierFromString(rawTier);
+    return AI_DAILY_CREDITS_BY_TIER[tier] ?? 0;
 }
 
 @Injectable()
@@ -46,7 +83,14 @@ export class PlanPermissionService {
             if (cached) {
                 if (cached === 'null') return null;
                 try {
-                    return JSON.parse(cached);
+                    const parsed = JSON.parse(cached);
+                    const periodEndMs = parsed?.currentPeriodEnd
+                        ? new Date(parsed.currentPeriodEnd).getTime()
+                        : null;
+                    if (!periodEndMs || periodEndMs > Date.now()) {
+                        return parsed;
+                    }
+                    await this.cacheManager.del(cacheKey);
                 } catch {
                     // Ignore parse error
                 }
@@ -73,11 +117,16 @@ export class PlanPermissionService {
             planConfig: sub.planConfig ? {
                 id: sub.planConfig.id,
                 tier: sub.planConfig.tier,
+                aiDailyCredits: sub.planConfig.aiDailyCredits ?? null,
             } : null
         };
 
         try {
-            await this.cacheManager.set(cacheKey, JSON.stringify(mappedSub), 3600000); // 1 hour
+            const remainingMs = sub.currentPeriodEnd
+                ? new Date(sub.currentPeriodEnd).getTime() - Date.now()
+                : 300000;
+            const ttlMs = Math.max(5000, Math.min(300000, remainingMs));
+            await this.cacheManager.set(cacheKey, JSON.stringify(mappedSub), ttlMs);
         } catch (err) {
             console.warn(`[PlanPermissionService] Cache set failed: ${err.message}`);
         }
@@ -87,43 +136,71 @@ export class PlanPermissionService {
     async getUserPlan(userId: string): Promise<PlanTier> {
         const cacheKey = `user_plan_tier:${userId}`;
         try {
-            const cachedPlan = await this.cacheManager.get<PlanTier>(cacheKey);
-            if (cachedPlan) {
-                return cachedPlan;
+            const cachedRaw = await this.cacheManager.get<string>(cacheKey);
+            if (cachedRaw) {
+                try {
+                    const parsed = JSON.parse(cachedRaw);
+                    if (
+                        parsed &&
+                        Object.values(PlanTier).includes(parsed.tier) &&
+                        (!parsed.expiresAt || Number(parsed.expiresAt) > Date.now())
+                    ) {
+                        return parsed.tier as PlanTier;
+                    }
+                } catch {
+                    // Legacy bare string cache entry — invalidate so expiry cannot be bypassed
+                }
+                await this.cacheManager.del(cacheKey);
             }
         } catch (err) {
             console.warn(`[PlanPermissionService] Cache get failed: ${err.message}`);
         }
 
         const activeSub = await this.getFullUserSubscription(userId);
-        let tier = PlanTier.FREE;
+        const tier = activeSub
+            ? resolvePlanTierFromString(activeSub.planConfig?.tier)
+            : PlanTier.FREE;
 
-        if (activeSub) {
-            const t = activeSub.planConfig?.tier?.toUpperCase();
-            if (t === 'PREMIUM' || t === 'PRO') tier = PlanTier.PREMIUM;
-            else if (t === 'BASIC') tier = PlanTier.BASIC;
-        }
+        const expiresAt = activeSub?.currentPeriodEnd
+            ? new Date(activeSub.currentPeriodEnd).getTime()
+            : null;
+        const ttlMs = expiresAt
+            ? Math.max(5000, Math.min(300000, expiresAt - Date.now()))
+            : 300000;
 
         try {
-            await this.cacheManager.set(cacheKey, tier, 3600000); // 1 hour
+            await this.cacheManager.set(cacheKey, JSON.stringify({ tier, expiresAt }), ttlMs);
         } catch (err) {
             console.warn(`[PlanPermissionService] Cache set failed: ${err.message}`);
         }
         return tier;
     }
 
+    async getUserAiDailyAllowance(userId: string): Promise<{
+        tier: PlanTier;
+        rawTier: string;
+        dailyLimit: number;
+    }> {
+        const activeSub = await this.getFullUserSubscription(userId);
+        if (!activeSub) {
+            return {
+                tier: PlanTier.FREE,
+                rawTier: 'FREE',
+                dailyLimit: 0,
+            };
+        }
+        const rawTier = String(activeSub.planConfig?.tier || 'BASIC').toUpperCase();
+        const tier = resolvePlanTierFromString(rawTier);
+        const dailyLimit = resolveDefaultDailyCredits(
+            rawTier,
+            activeSub.planConfig?.aiDailyCredits
+        );
+        return { tier, rawTier, dailyLimit };
+    }
+
     async checkPermission(userId: string, requiredTier: PlanTier): Promise<boolean> {
         const userPlan = await this.getUserPlan(userId);
-
-        if (requiredTier === PlanTier.PREMIUM) {
-            return userPlan === PlanTier.PREMIUM;
-        }
-
-        if (requiredTier === PlanTier.BASIC) {
-            return userPlan === PlanTier.BASIC || userPlan === PlanTier.PREMIUM;
-        }
-
-        return true;
+        return (TIER_RANK[userPlan] ?? 0) >= (TIER_RANK[requiredTier] ?? 0);
     }
 
     async enforcePermission(userId: string, requiredTier: PlanTier) {

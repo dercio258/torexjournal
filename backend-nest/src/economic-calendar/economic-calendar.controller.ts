@@ -39,6 +39,6 @@ export class EconomicCalendarController {
 
     @Get('events/:id')
     async getEventById(@Param('id') id: string) {
-        return this.calendarService.getEventById(id, false);
+        return this.calendarService.getEventById(id);
     }
 }

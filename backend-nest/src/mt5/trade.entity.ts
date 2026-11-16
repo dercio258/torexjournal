@@ -16,8 +16,12 @@ const numericTransformer = new ColumnNumericTransformer();
 
 @Entity('trades')
 @Index(['accountId', 'contractId'], { unique: true })
+@Index(['accountId', 'status', 'closeTime'])
+@Index(['accountId', 'ticket'])
+@Index(['accountId', 'symbol'])
 @Index(['accountId', 'closeTime'])
 @Index(['accountId', 'status'])
+@Index(['closeTime'])
 @Index(['importLogId'])
 export class TradeEntity {
     @PrimaryGeneratedColumn('uuid')
@@ -76,6 +80,12 @@ export class TradeEntity {
 
     @Column('decimal', { precision: 18, scale: 2, default: 0, transformer: numericTransformer })
     fees: number;
+
+    @Column('decimal', { precision: 18, scale: 2, nullable: true, transformer: numericTransformer })
+    mfe: number | null;
+
+    @Column('decimal', { precision: 18, scale: 2, nullable: true, transformer: numericTransformer })
+    mae: number | null;
 
     @Column({ length: 10, nullable: true })
     currency: string;

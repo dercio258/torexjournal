@@ -1,13 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiInsightEntity } from './ai-insight.entity';
-import { PREMIUM_SYSTEM_PROMPT, BASIC_SYSTEM_PROMPT, buildUserPrompt } from './prompts';
-import { PlanTier } from '../payment/plan-permission.service';
+import {
+    PREMIUM_SYSTEM_PROMPT,
+    BASIC_SYSTEM_PROMPT,
+    buildUserPrompt,
+    normalizeInsightsPayload,
+} from './prompts';
+import { PlanTier, PlanPermissionService } from '../payment/plan-permission.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PlanPermissionService } from '../payment/plan-permission.service';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
@@ -24,14 +28,16 @@ export class AiService {
     ) { }
 
     async generateInsights(accountId: string, userId: string, metrics: any, logId?: number) {
-        const geminiToken = this.configService.get<string>('api_token_gemin');
+        const geminiToken =
+            this.configService.get<string>('GEMINI_API_KEY') ||
+            this.configService.get<string>('api_token_gemin');
         const userPlan = await this.planPermissionService.getUserPlan(userId);
-        const systemPrompt = userPlan === PlanTier.PREMIUM ? PREMIUM_SYSTEM_PROMPT : BASIC_SYSTEM_PROMPT;
+        const isAdvancedPlan = userPlan === PlanTier.PREMIUM || userPlan === PlanTier.PRO;
+        const systemPrompt = isAdvancedPlan ? PREMIUM_SYSTEM_PROMPT : BASIC_SYSTEM_PROMPT;
         const userPrompt = buildUserPrompt(JSON.stringify({ metrics, tier: userPlan }, null, 2));
 
         if (geminiToken) {
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiToken}`;
                 const body = {
                     systemInstruction: {
                         parts: [{ text: systemPrompt }]
@@ -40,6 +46,7 @@ export class AiService {
                         parts: [{ text: userPrompt }]
                     }],
                     generationConfig: {
+                        temperature: 0.15,
                         responseMimeType: "application/json",
                         responseSchema: {
                             type: "object",
@@ -47,7 +54,17 @@ export class AiService {
                                 headline: { type: "string" },
                                 insights: {
                                     type: "array",
-                                    items: { type: "string" }
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            text: { type: "string" },
+                                            severity: {
+                                                type: "string",
+                                                enum: ["green", "yellow", "red"]
+                                            }
+                                        },
+                                        required: ["text", "severity"]
+                                    }
                                 },
                                 actions: {
                                     type: "array",
@@ -60,11 +77,49 @@ export class AiService {
                     }
                 };
 
-                this.logger.log(`Requesting insights from Gemini API (gemini-2.5-flash) for account ${accountId}...`);
-                const response = await firstValueFrom(this.httpService.post(url, body, {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: 45000 // 45s timeout
-                }));
+                const configuredModel = (
+                    this.configService.get<string>('GEMINI_MODEL') || ''
+                ).trim();
+                const candidates = [
+                    ...(configuredModel.toLowerCase().startsWith('gemini') ? [configuredModel] : []),
+                    'gemini-3.8-flash',
+                    'gemini-3.1-flash-lite',
+                ].filter((m, idx, arr) => arr.indexOf(m) === idx);
+
+                let response: any = null;
+                let lastErr: any = null;
+                for (let i = 0; i < candidates.length; i++) {
+                    const candidateModel = candidates[i];
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${geminiToken}`;
+                    try {
+                        this.logger.log(`Requesting insights from Gemini API (${candidateModel}) for account ${accountId}...`);
+                        response = await firstValueFrom(this.httpService.post(url, body, {
+                            headers: { 'Content-Type': 'application/json' },
+                            timeout: 45000 // 45s timeout
+                        }));
+                        break;
+                    } catch (err: any) {
+                        lastErr = err;
+                        const status = Number(err?.response?.status);
+                        if (status === 400 || status === 401 || status === 403) {
+                            throw err;
+                        }
+                        const retryable =
+                            status === 404 ||
+                            status === 503 ||
+                            status === 429 ||
+                            err?.code === 'ECONNABORTED';
+                        if (!retryable || i === candidates.length - 1) {
+                            throw err;
+                        }
+                        this.logger.warn(
+                            `Gemini API (${candidateModel}) unavailable (${status || err?.code || err?.message}). Retrying with ${candidates[i + 1]}...`
+                        );
+                    }
+                }
+                if (!response) {
+                    throw lastErr || new Error("No response returned from Gemini API");
+                }
 
                 const candidate = response.data?.candidates?.[0];
                 const contentText = candidate?.content?.parts?.[0]?.text;
@@ -72,7 +127,12 @@ export class AiService {
                     throw new Error("No text content returned from Gemini API");
                 }
 
-                const result = JSON.parse(contentText.trim());
+                const cleanJson = contentText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const parsed = JSON.parse(cleanJson);
+                const result = normalizeInsightsPayload(parsed);
+                if (!result) {
+                    throw new Error("Invalid insights schema returned from Gemini API");
+                }
 
                 // Save to DB
                 const insightEntity = this.aiInsightRepo.create({
@@ -80,7 +140,7 @@ export class AiService {
                     importLogId: logId,
                     headline: result.headline,
                     insights: result.insights,
-                    actions: result.actions || [],
+                    actions: result.actions,
                 });
 
                 await this.aiInsightRepo.save(insightEntity);
@@ -88,8 +148,8 @@ export class AiService {
 
                 // Send Notification if requested by the AI
                 if (result.notify) {
-                    const title = userPlan === PlanTier.PREMIUM ? '⚠️ Alerta de IA Torex' : 'ℹ️ Alerta do Sistema Torex';
-                    const message = userPlan === PlanTier.PREMIUM
+                    const title = isAdvancedPlan ? '⚠️ Alerta de IA Torex' : 'ℹ️ Alerta do Sistema Torex';
+                    const message = isAdvancedPlan
                         ? `O assistente identificou avisos de alto risco: ${result.headline}`
                         : `Novo resumo de performance disponível: ${result.headline}`;
 
@@ -102,7 +162,7 @@ export class AiService {
 
                 return insightEntity;
 
-            } catch (geminiErr) {
+            } catch (geminiErr: any) {
                 this.logger.warn(`Gemini API failed: ${geminiErr.message}. Falling back to old AI endpoint...`);
             }
         }
@@ -118,8 +178,18 @@ export class AiService {
             const host = this.configService.get<string>('LLAMA_SERVER_HOST') || '127.0.0.1';
             const port = this.configService.get<string>('LLAMA_SERVER_PORT') || '8080';
             url = `http://${host}:${port}/v1/chat/completions`;
-        } else if (iaApiKey) {
-            headers['Authorization'] = `Bearer ${iaApiKey}`;
+        } else {
+            const isProd = this.configService.get<string>('NODE_ENV') === 'production';
+            const isLocal = url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost');
+            if (isProd && url.startsWith('http://') && !isLocal) {
+                throw new HttpException(
+                    'IA_ENDPOINT deve utilizar HTTPS em produção para proteger dados financeiros em trânsito.',
+                    HttpStatus.BAD_GATEWAY,
+                );
+            }
+            if (iaApiKey) {
+                headers['Authorization'] = `Bearer ${iaApiKey}`;
+            }
         }
 
         const body = {
@@ -149,10 +219,11 @@ export class AiService {
             const data = response.data;
             const contentString = data.choices[0]?.message?.content || '{}';
 
-            const cleanString = contentString.replace(/```json/g, '').replace(/```/g, '').trim();
-            const result = JSON.parse(cleanString);
+            const cleanString = contentString.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleanString);
+            const result = normalizeInsightsPayload(parsed);
 
-            if (!result.headline || !Array.isArray(result.insights)) {
+            if (!result) {
                 throw new Error("Invalid schema returned from AI model");
             }
 
@@ -161,15 +232,15 @@ export class AiService {
                 importLogId: logId,
                 headline: result.headline,
                 insights: result.insights,
-                actions: result.actions || [],
+                actions: result.actions,
             });
 
             await this.aiInsightRepo.save(insightEntity);
             this.logger.log(`AI Insights saved successfully for account ${accountId}`);
 
             if (result.notify) {
-                const title = userPlan === PlanTier.PREMIUM ? '⚠️ Alerta de IA Torex' : 'ℹ️ Alerta do Sistema Torex';
-                const message = userPlan === PlanTier.PREMIUM
+                const title = isAdvancedPlan ? '⚠️ Alerta de IA Torex' : 'ℹ️ Alerta do Sistema Torex';
+                const message = isAdvancedPlan
                     ? `O assistente identificou avisos de alto risco: ${result.headline}`
                     : `Novo resumo de performance disponível: ${result.headline}`;
 
@@ -182,7 +253,7 @@ export class AiService {
 
             return insightEntity;
 
-        } catch (e) {
+        } catch (e: any) {
             this.logger.error(`AI Insight Generation Failed: ${e.message}`);
             return null;
         }

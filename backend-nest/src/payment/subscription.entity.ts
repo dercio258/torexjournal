@@ -6,6 +6,7 @@ import {
     UpdateDateColumn,
     ManyToOne,
     JoinColumn,
+    Index,
 } from 'typeorm';
 import { UserEntity } from '../users/user.entity';
 import { SubscriptionPlanConfig } from './subscription-plan.entity';
@@ -25,6 +26,9 @@ export enum SubscriptionCycle {
 }
 
 @Entity('subscriptions')
+@Index(['userId', 'status', 'currentPeriodEnd'])
+@Index(['paymentReference'])
+@Index(['debitoTransactionId'])
 export class Subscription {
     @PrimaryGeneratedColumn('uuid')
     id: string;

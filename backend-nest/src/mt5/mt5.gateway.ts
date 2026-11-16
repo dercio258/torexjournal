@@ -8,25 +8,129 @@ import {
     MessageBody,
     ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, Optional } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Not, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { browser } from '../proto/browser_packet';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { AccountEntity } from '../account/account.entity';
+import { UserEntity } from '../users/user.entity';
+import { SessionEntity } from '../auth/session.entity';
+import { TelemetryService } from '../common/observability/telemetry.service';
+import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
 
 @WebSocketGateway({
     cors: {
-        origin: '*',
+        origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+            if (isCorsOriginAllowed(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('CORS origin denied'));
+            }
+        },
+        credentials: true,
     },
 })
 export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer() server: Server;
     private logger: Logger = new Logger('Mt5Gateway');
-    private clients = new Map<any, { authenticated: boolean; userId?: string; timeout?: NodeJS.Timeout }>();
+    private clients = new Map<
+        any,
+        { authenticated: boolean; userId?: string; timeout?: NodeJS.Timeout }
+    >();
 
-    constructor(private readonly jwtService: JwtService) {}
+    constructor(
+        private readonly jwtService: JwtService,
+        @Optional() private readonly configService?: ConfigService,
+        @Optional()
+        @InjectRepository(AccountEntity)
+        private readonly accountRepo?: Repository<AccountEntity>,
+        @Optional()
+        @InjectRepository(UserEntity)
+        private readonly userRepo?: Repository<UserEntity>,
+        @Optional()
+        @InjectRepository(SessionEntity)
+        private readonly sessionRepo?: Repository<SessionEntity>,
+        @Optional()
+        @Inject(CACHE_MANAGER)
+        private readonly cacheManager?: Cache,
+        @Optional() private readonly telemetry?: TelemetryService,
+    ) {}
 
     afterInit() {
         this.logger.log('WebSocket Gateway Initialized (Socket.IO + Protobuf/JSON Hybrid)');
+    }
+
+    private async resolveActualMt5ConnectionState(userId: string): Promise<boolean> {
+        if (!this.accountRepo || !userId) return false;
+        try {
+            const count = await this.accountRepo.count({
+                where: {
+                    userId,
+                    isConnected: true,
+                    isArchived: false,
+                    broker: Not('Deriv'),
+                },
+            });
+            return count > 0;
+        } catch {
+            return false;
+        }
+    }
+
+    private async verifySocketToken(rawToken?: string): Promise<string | null> {
+        if (!rawToken) return null;
+        const cleanToken = String(rawToken).replace(/^Bearer\s+/i, '').trim();
+        if (!cleanToken) return null;
+
+        const payload: any = await this.jwtService.verifyAsync(cleanToken, {
+            secret: getJwtSecret(this.configService),
+        });
+        const userId = payload?.id || payload?.sub;
+        if (!userId || payload?.isTwoFactorPending) {
+            throw new Error('Token pendente ou sem utilizador válido');
+        }
+
+        // Verify session is active (respects logout/session revocation)
+        let sessionActive = false;
+        if (this.cacheManager) {
+            const cached = await this.cacheManager.get(`user_session:${cleanToken}`).catch(() => null);
+            if (cached === 'active') sessionActive = true;
+        }
+        if (!sessionActive && this.sessionRepo) {
+            const session = await this.sessionRepo.findOne({
+                where: { token: cleanToken, isActive: true },
+                select: ['id', 'expiresAt'],
+            });
+            if (session && new Date() <= session.expiresAt) {
+                sessionActive = true;
+            }
+        } else if (!this.sessionRepo && !this.cacheManager) {
+            sessionActive = true;
+        }
+        if (!sessionActive) {
+            throw new Error('Sessão expirada ou revogada');
+        }
+
+        // Verify blocked status & 2FA completion
+        if (this.userRepo) {
+            const user = await this.userRepo.findOne({
+                where: { id: userId },
+                select: ['id', 'isBlocked', 'twoFactorEnabled', 'isTwoFactorConfirmed'],
+            });
+            if (!user || user.isBlocked) {
+                throw new Error('Conta bloqueada ou não encontrada');
+            }
+            if (user.twoFactorEnabled && user.isTwoFactorConfirmed && !payload.isTwoFactorVerified) {
+                throw new Error('Verificação 2FA pendente');
+            }
+        }
+
+        return userId;
     }
 
     async handleConnection(client: Socket) {
@@ -37,17 +141,20 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
 
         if (handshakeToken) {
             try {
-                const payload = this.jwtService.verify(handshakeToken);
-                const userId = payload.id || payload.sub;
-                this.clients.set(client, { authenticated: true, userId });
-                if (userId && typeof client.join === 'function') {
-                    client.join(`mt5_user:${userId}`);
+                const userId = await this.verifySocketToken(handshakeToken);
+                if (userId) {
+                    this.clients.set(client, { authenticated: true, userId });
+                    this.telemetry?.setWsActiveClients(this.clients.size);
+                    if (typeof client.join === 'function') {
+                        client.join(`mt5_user:${userId}`);
+                    }
+                    if (typeof client.emit === 'function') {
+                        const isConnected = await this.resolveActualMt5ConnectionState(userId);
+                        client.emit('mt5_connection_status', { isConnected });
+                    }
+                    return;
                 }
-                if (typeof client.emit === 'function') {
-                    client.emit('mt5_connection_status', { isConnected: true });
-                }
-                return;
-            } catch (e) {
+            } catch (e: any) {
                 this.logger.debug(`Handshake token verification failed: ${e.message}`);
             }
         }
@@ -63,6 +170,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         }, 10000);
 
         this.clients.set(client, { authenticated: false, timeout });
+        this.telemetry?.setWsActiveClients(this.clients.size);
 
         if (typeof client.on === 'function') {
             client.on('message', (data: any) => this.handleRawMessage(client, data));
@@ -74,10 +182,14 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         const clientData = this.clients.get(client);
         if (clientData?.timeout) clearTimeout(clientData.timeout);
         this.clients.delete(client);
+        this.telemetry?.setWsActiveClients(this.clients.size);
     }
 
     @SubscribeMessage('mt5_auth')
-    async handleSocketAuth(@MessageBody() data: { token?: string }, @ConnectedSocket() client: Socket) {
+    async handleSocketAuth(
+        @MessageBody() data: { token?: string },
+        @ConnectedSocket() client: Socket,
+    ) {
         if (!data?.token) return;
         await this.handleAuth(client, { token: data.token });
     }
@@ -113,7 +225,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
                     client.send(encoded);
                 }
             }
-        } catch (e) {
+        } catch (e: any) {
             this.logger.debug(`Packet decode skipped: ${e.message}`);
         }
     }
@@ -122,18 +234,24 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         if (!auth || !auth.token) return;
 
         try {
-            const payload = this.jwtService.verify(auth.token);
-            const userId = payload.id || payload.sub;
+            const userId = await this.verifySocketToken(auth.token);
+            if (!userId) {
+                throw new Error('Token inválido');
+            }
             const clientData = this.clients.get(client);
             if (clientData) {
                 if (clientData.timeout) clearTimeout(clientData.timeout);
                 clientData.authenticated = true;
                 clientData.userId = userId;
-                if (userId && typeof client.join === 'function') {
+                if (typeof client.join === 'function') {
                     client.join(`mt5_user:${userId}`);
                 }
+                if (typeof client.emit === 'function') {
+                    const isConnected = await this.resolveActualMt5ConnectionState(userId);
+                    client.emit('mt5_connection_status', { isConnected });
+                }
             }
-        } catch (e) {
+        } catch (e: any) {
             this.logger.warn(`WS Auth failed: ${e.message}`);
             if (typeof client.disconnect === 'function') {
                 client.disconnect(true);
@@ -143,9 +261,16 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         }
     }
 
-    private broadcast(packet: browser.IBrowserPacket, eventName?: string, jsonPayload?: any, userId?: string) {
+    private broadcast(
+        packet: browser.IBrowserPacket,
+        eventName?: string,
+        jsonPayload?: any,
+        userId?: string,
+    ) {
         if (!userId) {
-            this.logger.warn(`Blocked unscoped WS broadcast (${eventName || packet.type}): userId is required to prevent cross-user data leakage.`);
+            this.logger.warn(
+                `Blocked unscoped WS broadcast (${eventName || packet.type}): userId is required.`,
+            );
             return;
         }
 
@@ -173,7 +298,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
                 } else if (client.readyState === 1 && typeof client.send === 'function') {
                     client.send(buffer);
                 }
-            } catch (e) {
+            } catch (e: any) {
                 this.logger.warn(`Failed to send to client: ${e.message}`);
             }
         });
@@ -203,15 +328,42 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         );
     }
 
-    broadcastConnectionStatus(data: { isConnected: boolean }, userId?: string) {
+    broadcastConnectionStatus(
+        data: { isConnected: boolean; accountId?: string; mt5Id?: string },
+        userId?: string,
+    ) {
         this.broadcast(
             {
                 type: browser.PacketType.CONNECTION_STATUS,
-                connectionStatus: data,
+                connectionStatus: { isConnected: data.isConnected },
             },
             'mt5_connection_status',
             data,
             userId,
         );
+    }
+
+    broadcastBehaviorAlert(payload: Record<string, any>, userId?: string) {
+        if (!userId) {
+            this.logger.warn('Blocked unscoped WS behavior alert broadcast: userId is required.');
+            return;
+        }
+
+        const roomName = `mt5_user:${userId}`;
+        if (this.server && typeof this.server.to === 'function') {
+            this.server.to(roomName).emit('mt5_behavior_alert', payload);
+            return;
+        }
+
+        this.clients.forEach((clientData, client) => {
+            if (!clientData?.authenticated || clientData.userId !== userId) return;
+            try {
+                if (typeof client.emit === 'function') {
+                    client.emit('mt5_behavior_alert', payload);
+                }
+            } catch (e: any) {
+                this.logger.warn(`Failed to emit mt5_behavior_alert to client: ${e?.message || e}`);
+            }
+        });
     }
 }

@@ -8,28 +8,27 @@ export class AppTokenGuard implements CanActivate {
     constructor(
         @InjectRepository(AccountEntity)
         private accountRepo: Repository<AccountEntity>,
-    ) { }
+    ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const request = context.switchToHttp().getRequest<any>();
-        // Headers are lowercase in Express unless configured otherwise
-        const token = request.headers['x-app-token'] as string || request.body.token;
+        const rawHeaderToken = request.headers?.['x-app-token'];
+        const rawBodyToken = request.body?.token;
+        const token = String(rawHeaderToken || rawBodyToken || '').trim();
 
-        if (!token) {
+        if (!token || token.length < 8) {
             throw new UnauthorizedException('Missing App Token');
         }
 
-        // We check if any account owns this token
-        // Optimization: In real world, we might cache this or check specifically against the MT5 ID payload if provided
-        // But for generic 'save-history', we just need ANY valid app token.
-        // However, we should probably attach the account to the request for the controller to use.
-        const account = await this.accountRepo.findOne({ where: { appToken: token } });
+        const account = await this.accountRepo.findOne({
+            where: { appToken: token },
+            select: ['id', 'userId', 'appToken', 'mt5Id'],
+        });
 
         if (!account) {
             throw new UnauthorizedException('Invalid App Token');
         }
 
-        // Attach account to request object
         request['account'] = account;
         return true;
     }

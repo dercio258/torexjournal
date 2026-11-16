@@ -44,8 +44,18 @@ export class Mt5Controller {
     @Get('import-history')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.BASIC)
-    async getImportHistory(@Req() req, @Query('accountId') accountId?: string) {
-        return this.mt5Service.getImportHistory(req.user.id, accountId);
+    async getImportHistory(
+        @Req() req,
+        @Query('accountId') accountId?: string,
+        @Query('page') pageStr?: string,
+        @Query('limit') limitStr?: string,
+        @Query('paginated') paginated?: string
+    ) {
+        return this.mt5Service.getImportHistory(req.user.id, accountId, {
+            page: pageStr ? parseInt(pageStr, 10) : undefined,
+            limit: limitStr ? parseInt(limitStr, 10) : undefined,
+            paginated: paginated === 'true' || paginated === '1',
+        });
     }
 
     @Delete('import-history/:id/revert')
@@ -56,6 +66,7 @@ export class Mt5Controller {
     }
 
     @Post('data')
+    @UseGuards(AppTokenGuard)
     @HttpCode(200)
     async syncData(@Body() data: Mt5DataDto) {
         await this.mt5Queue.add('sync-data', data, {
@@ -85,7 +96,8 @@ export class Mt5Controller {
     }
 
     @Post(':id/command')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PRO)
     async sendCommand(@Param('id') id: string, @Body() body: { type: number, payload?: string }, @Req() req) {
         const cleanId = (id || '').trim();
         const whereConds: any[] = [{ mt5Id: cleanId, userId: req.user.id }];
@@ -106,9 +118,38 @@ export class Mt5Controller {
 
     @Post('journal/:ticket')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.PREMIUM)
+    @RequirePlan(PlanTier.PRO)
     async updateJournal(@Body() data: any, @Param('ticket') ticket: string, @Req() req) {
         return this.mt5Service.updateJournal(ticket, data, req.user.id);
+    }
+
+    @Post('trades/:id/behavior-feedback')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async submitBehaviorFeedback(
+        @Param('id') id: string,
+        @Body() body: { verdict: 'CONFIRM' | 'FALSE_POSITIVE'; correctedFlags?: string[]; note?: string },
+        @Req() req,
+    ) {
+        return this.mt5Service.submitBehaviorFeedback(id, body, req.user.id);
+    }
+
+    @Get('behavior-analytics')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async getBehaviorAnalytics(@Req() req, @Query('accountId') accountId?: string) {
+        return this.mt5Service.getBehaviorAnalytics(req.user.id, accountId);
+    }
+
+    @Get('behavior-review-queue')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async getBehaviorReviewQueue(
+        @Req() req,
+        @Query('accountId') accountId?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.mt5Service.getBehaviorReviewQueue(req.user.id, accountId, Number(limit) || 50);
     }
 
     @Post('manual')
@@ -119,6 +160,7 @@ export class Mt5Controller {
     }
 
     @Post('ping')
+    @UseGuards(AppTokenGuard)
     @HttpCode(200)
     async ping(@Headers('x-app-token') token: string) {
         if (token) {
@@ -128,16 +170,18 @@ export class Mt5Controller {
     }
 
     @Get('worker/status')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async getWorkerStatus() {
         return {
-            workers: this.mt5WorkerService.getWorkerStatus(),
+            workers: this.mt5WorkerService.getWorkerStatus(undefined, false),
             pendingTasks: this.mt5WorkerService.getPendingTasks(false).length
         };
     }
 
     @Get('cloud/status')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async getCloudStatus(
         @Req() req,
         @Query('accountId') accountId?: string,
@@ -147,7 +191,8 @@ export class Mt5Controller {
     }
 
     @Get('cloud/task/:taskId')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async getCloudTaskStatus(@Param('taskId') taskId: string, @Req() req) {
         const task = this.mt5WorkerService.getTaskById(taskId);
         if (task && task.options?.userId && task.options.userId !== req.user.id) {
@@ -171,7 +216,7 @@ export class Mt5Controller {
 
     @Post('cloud/connect')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.PREMIUM)
+    @RequirePlan(PlanTier.PRO)
     async connectCloud(@Body() body: { login: string; pass: string; server: string; accountId?: string }, @Req() req) {
         const cleanLogin = (body.login || '').toString().trim();
         const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().trim());
@@ -276,7 +321,7 @@ export class Mt5Controller {
 
     @Post('cloud/sync')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.PREMIUM)
+    @RequirePlan(PlanTier.PRO)
     async syncCloud(@Body() body: { login?: string; accountId?: string; forceFull?: boolean }, @Req() req) {
         let account: AccountEntity | null = null;
         const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
@@ -305,7 +350,7 @@ export class Mt5Controller {
             return { success: false, message: 'Nenhuma conta MT5 vinculada para sincronizar.' };
         }
         const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
-        const taskType = body.forceFull ? WorkerTaskType.FORCE_FULL_SYNC : WorkerTaskType.SYNC_ACCOUNT;
+        const taskType = body.forceFull === false ? WorkerTaskType.SYNC_ACCOUNT : WorkerTaskType.FORCE_FULL_SYNC;
         const task = this.mt5WorkerService.createAccountTask(
             taskType,
             cleanLogin,
@@ -325,7 +370,7 @@ export class Mt5Controller {
 
     @Post('cloud/disconnect')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.PREMIUM)
+    @RequirePlan(PlanTier.PRO)
     async disconnectCloud(@Body() body: { login: string; accountId?: string }, @Req() req) {
         const cleanLogin = (body.login || '').toString().trim();
         const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
@@ -362,5 +407,62 @@ export class Mt5Controller {
         }
 
         return { success: true, message: 'Terminal desconectado', taskId: task.id };
+    }
+
+    /**
+     * Returns the Shared MT5 Demo Account used across all Backtest & Replay sessions for market data.
+     */
+    @Get('market-feed-demo')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async getMarketFeedDemo(@Req() req) {
+        return this.mt5WorkerService.getSharedDemoFeedAccount(req.user.id);
+    }
+
+    /**
+     * Saves and connects the Shared MT5 Demo Account to be reused across all Backtest & Replay sessions.
+     */
+    @Post('market-feed-demo')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PRO)
+    async saveMarketFeedDemo(
+        @Body() body: { login: string; pass?: string; server: string },
+        @Req() req,
+    ) {
+        return this.mt5WorkerService.saveSharedDemoFeedAccount(req.user.id, body);
+    }
+
+    /**
+     * Uses the saved Shared MT5 Demo Account to log into MT5 and pull 500-candle historical
+     * batches for a newly created or opened Backtest Session.
+     */
+    @Post('market-feed-demo/prefetch-session')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async prefetchSessionWithDemo(
+        @Body()
+        body: {
+            sessionId?: string;
+            symbols: string[];
+            timeframe: string;
+            fromDate?: string;
+            toDate?: string;
+            demoLogin?: string;
+            demoPass?: string;
+            demoServer?: string;
+        },
+        @Req() req,
+    ) {
+        return this.mt5WorkerService.prefetchSessionWithDemoAccount(req.user.id, body);
+    }
+
+    /**
+     * Triggers an automated MT5 Economic Calendar synchronization via the connected MT5 Demo/Worker instance.
+     */
+    @Post('calendar/sync')
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.PRO)
+    async triggerCalendarSync(@Req() req) {
+        return this.mt5WorkerService.triggerMt5CalendarSync(req.user.id);
     }
 }

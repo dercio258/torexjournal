@@ -13,19 +13,23 @@ export class PlanGuard implements CanActivate {
     ) { }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const requiredTier = this.reflector.get<PlanTier>(REQUIRED_PLAN, context.getHandler());
+        const requiredTier = this.reflector.getAllAndOverride<PlanTier>(REQUIRED_PLAN, [
+            context.getHandler(),
+            context.getClass(),
+        ]);
         if (!requiredTier) {
             return true;
         }
 
         const request = context.switchToHttp().getRequest();
         const user = request.user;
+        const userId = user?.id || user?.userId;
 
-        if (!user) {
+        if (!userId) {
             return false;
         }
 
-        const hasPermission = await this.planPermissionService.checkPermission(user.id, requiredTier);
+        const hasPermission = await this.planPermissionService.checkPermission(userId, requiredTier);
         if (!hasPermission) {
             throw new ForbiddenException(`Funcionalidade restrita ao plano ${requiredTier}`);
         }

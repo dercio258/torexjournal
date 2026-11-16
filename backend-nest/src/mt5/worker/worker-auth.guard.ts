@@ -8,16 +8,24 @@ export class WorkerAuthGuard implements CanActivate, OnModuleInit {
 
     constructor(private readonly configService: ConfigService) { }
 
+    private isStrictMode(): boolean {
+        return (
+            this.configService.get<string>('NODE_ENV') === 'production' ||
+            this.configService.get<string>('STRICT_WORKER_KEY') === 'true'
+        );
+    }
+
     onModuleInit() {
+        const strictMode = this.isStrictMode();
         const configuredKey = this.configService.get<string>('WORKER_KEY')
             || this.configService.get<string>('MT5_WORKER_KEY');
         if (!configuredKey || configuredKey === 'secret_worker_key_change_me') {
             this.logger.warn(
-                'SECURITY WARNING: WORKER_KEY está usando o valor padrão! ' +
-                'Defina uma WORKER_KEY forte (64 hex) em backend-nest/.env e mt5-server/.env e ative STRICT_WORKER_KEY=true.'
+                'SECURITY WARNING: WORKER_KEY está usando o valor padrão ou está ausente! ' +
+                'Defina uma WORKER_KEY forte (64 hex) em backend-nest/.env e mt5-server/.env.'
             );
-            if (this.configService.get<string>('STRICT_WORKER_KEY') === 'true') {
-                throw new Error('FATAL: WORKER_KEY segura é obrigatória quando STRICT_WORKER_KEY=true.');
+            if (strictMode) {
+                throw new Error('FATAL: WORKER_KEY segura é obrigatória em produção ou quando STRICT_WORKER_KEY=true.');
             }
         }
     }
@@ -29,7 +37,7 @@ export class WorkerAuthGuard implements CanActivate, OnModuleInit {
         const workerId = headers['x-worker-id'];
         const workerKey = headers['x-worker-key'];
 
-        const strictMode = this.configService.get<string>('STRICT_WORKER_KEY') === 'true';
+        const strictMode = this.isStrictMode();
         const configuredKey = this.configService.get<string>('WORKER_KEY')
             || this.configService.get<string>('MT5_WORKER_KEY');
 

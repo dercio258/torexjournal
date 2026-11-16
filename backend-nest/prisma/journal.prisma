@@ -1,0 +1,126 @@
+// ============================================================================
+// TOREX JOURNAL — Esquema de Referência Prisma ORM (PostgreSQL)
+// Módulo: Trading Journal (Trades, Daily Notes, Trade Notes & General Notes)
+// ============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+}
+
+enum GeneralNoteCategory {
+  PLAYBOOK
+  RISK_RULES
+  PSYCHOLOGY
+  GENERAL
+}
+
+model Trade {
+  id          String      @id @default(uuid()) @db.Uuid
+  accountId   String      @map("account_id")
+  ticket      String?
+  symbol      String
+  side        TradeSide   @map("type")
+  status      TradeStatus @default(CLOSED)
+
+  openTime    DateTime?   @map("open_time")
+  closeTime   DateTime?   @map("close_time")
+
+  openPrice   Decimal     @map("open_price") @db.Decimal(18, 5)
+  closePrice  Decimal     @map("close_price") @db.Decimal(18, 5)
+  volume      Decimal     @db.Decimal(18, 4)
+
+  profit      Decimal     @db.Decimal(18, 2)
+  commission  Decimal     @default(0) @db.Decimal(18, 2)
+  swap        Decimal     @default(0) @db.Decimal(18, 2)
+  netPnl      Decimal?    @map("net_pnl") @db.Decimal(20, 2)
+
+  /// Maximum Favorable Excursion ($) — excursão máxima positiva durante a operação
+  mfe         Decimal?    @db.Decimal(18, 2)
+  /// Maximum Adverse Excursion ($) — excursão máxima negativa (calor suportado)
+  mae         Decimal?    @db.Decimal(18, 2)
+
+  tradeNote   TradeNote?
+
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@index([accountId, closeTime])
+  @@index([accountId, status])
+  @@map("trades")
+}
+
+model DailyNote {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id")
+  accountKey  String   @default("all") @map("account_key")
+  date        DateTime @db.Date
+
+  title       String?
+  content     String   @default("") @db.Text
+  mood        String?
+  marketBias  String?  @map("market_bias")
+  psychCheck  Json     @default("{}") @map("psych_check")
+  images      Json     @default("[]")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, accountKey, date])
+  @@index([userId, date(sort: Desc)])
+  @@map("daily_notes")
+}
+
+model TradeNote {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id")
+  tradeId       String   @unique @map("trade_id") @db.Uuid
+
+  content       String   @default("") @db.Text
+  screenshotUrl String?  @map("screenshot_url")
+  screenshots   Json     @default("[]")
+  setup         String?
+  mistakes      String?  @db.Text
+  lessons       String?  @db.Text
+  rating        Int      @default(0)
+  psychCheck    Json     @default("{}") @map("psych_check")
+
+  trade         Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("trade_notes")
+}
+
+model GeneralNote {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @map("user_id")
+  title       String
+  category    GeneralNoteCategory @default(GENERAL)
+  content     String              @default("") @db.Text
+  images      Json                @default("[]")
+  pinned      Boolean             @default(false)
+  isTemplate  Boolean             @default(false) @map("is_template")
+
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@index([userId, isTemplate, pinned])
+  @@map("general_notes")
+}

@@ -1,14 +1,19 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { AccountEntity } from '../account/account.entity';
 import { UserEntity } from '../users/user.entity';
 
 @Entity('backtest_sessions')
+@Index('IDX_backtest_sessions_user_client_id', ['userId', 'clientSessionId'])
+@Index('IDX_backtest_sessions_user_mode_updated', ['userId', 'mode', 'updatedAt'])
 export class BacktestSession {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
     @Column({ name: 'user_id' })
     userId: string;
+
+    @Column({ name: 'client_session_id', type: 'varchar', length: 120, nullable: true })
+    clientSessionId: string | null;
 
     @ManyToOne(() => UserEntity, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'user_id' })

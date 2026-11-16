@@ -82,7 +82,7 @@ export interface CandleQuery {
 export interface CandleResponse {
     candles: any[];
     /** Always a real market source: this service never fabricates prices. */
-    source: 'tradingview';
+    source: 'tradingview' | 'mt5' | 'yahoo' | 'binance';
     tvSymbol: string;
     timeframe: string;
 }
@@ -101,14 +101,170 @@ export interface CandleBatchResponse extends CandleResponse {
 @Injectable()
 export class TradingViewService {
     private readonly logger = new Logger(TradingViewService.name);
+    private readonly mt5MemoryStore = new Map<string, any[]>();
+    private readonly inFlightCandles = new Map<string, Promise<CandleResponse>>();
+    private readonly lastParquetMirrorAt = new Map<string, number>();
 
     constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) { }
+
+    private mirrorCandlesToQuantParquet(symbol: string, timeframe: string, candles: any[]): void {
+        if (!Array.isArray(candles) || candles.length < 20) return;
+        const baseSym = this.normalizeBaseSymbol(symbol);
+        const tfKey = (timeframe || '15m').toLowerCase();
+        const throttleKey = `${baseSym}:${tfKey}`;
+        const now = Date.now();
+        if (now - (this.lastParquetMirrorAt.get(throttleKey) || 0) < 45_000) return;
+        this.lastParquetMirrorAt.set(throttleKey, now);
+
+        const quantUrl = process.env.QUANT_ENGINE_URL || 'http://127.0.0.1:8090';
+        const payload = {
+            symbol: baseSym,
+            timeframe: tfKey,
+            sourcePreference: 'MT5_TV',
+            candles: candles
+                .filter((c) => Number(c?.timestamp) > 0 && Number(c?.open) > 0 && Number(c?.high) > 0 && Number(c?.low) > 0 && Number(c?.close) > 0)
+                .map((c) => ({
+                    timestamp: Number(c.timestamp),
+                    open: Number(c.open),
+                    high: Number(c.high),
+                    low: Number(c.low),
+                    close: Number(c.close),
+                    volume: Math.max(0, Number(c.volume || 0)),
+                })),
+        };
+        if (payload.candles.length < 20) return;
+
+        void fetch(`${quantUrl}/api/quant/market-data/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(5000),
+        }).catch(() => {});
+    }
+
+    private normalizeBaseSymbol(symbol: string): string {
+        const clean = (symbol || 'XAUUSD').trim().toUpperCase().replace(/^.*:/, '').replace(/[^A-Z0-9]/g, '');
+        if (clean.startsWith('XAUUSD') || clean.startsWith('GOLD')) return 'XAUUSD';
+        if (clean.startsWith('XAGUSD') || clean.startsWith('SILVER')) return 'XAGUSD';
+        if (clean.startsWith('EURUSD')) return 'EURUSD';
+        if (clean.startsWith('GBPUSD')) return 'GBPUSD';
+        if (clean.startsWith('USDJPY')) return 'USDJPY';
+        if (clean.startsWith('AUDUSD')) return 'AUDUSD';
+        if (clean.startsWith('USDCAD')) return 'USDCAD';
+        if (clean.startsWith('USDCHF')) return 'USDCHF';
+        if (clean.startsWith('NZDUSD')) return 'NZDUSD';
+        if (clean.startsWith('EURGBP')) return 'EURGBP';
+        if (clean.startsWith('EURJPY')) return 'EURJPY';
+        if (clean.startsWith('GBPJPY')) return 'GBPJPY';
+        if (clean.startsWith('BTCUSD')) return 'BTCUSD';
+        if (clean.startsWith('ETHUSD')) return 'ETHUSD';
+        if (clean.startsWith('SOLUSD')) return 'SOLUSD';
+        if (clean.startsWith('NAS100') || clean.startsWith('US100') || clean.startsWith('USTEC')) return 'NAS100';
+        if (clean.startsWith('US30') || clean.startsWith('DJ30')) return 'US30';
+        if (clean.startsWith('SPX500') || clean.startsWith('US500')) return 'SPX500';
+        if (clean.startsWith('GER40') || clean.startsWith('DE30') || clean.startsWith('DE40')) return 'GER40';
+        if (clean.startsWith('UK100')) return 'UK100';
+        if (clean.startsWith('USOIL') || clean.startsWith('WTI') || clean.startsWith('XTIUSD')) return 'USOIL';
+        if (/^(USD|EUR|GBP|JPY|AUD|CAD|CHF|NZD){2}[A-Z0-9]{0,5}$/.test(clean)) return clean.slice(0, 6);
+        return clean || 'XAUUSD';
+    }
+
+    /**
+     * Ingests OHLCV candle batches extracted from MetaTrader 5 (Demo Feed or Trade Sync)
+     * into Redis + in-memory store for instant backtest & replay serving.
+     */
+    async ingestMt5CandleBatch(
+        symbol: string,
+        timeframe: string,
+        rawCandles: Array<{
+            timestamp?: number;
+            time?: number;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            volume?: number;
+        }>,
+    ): Promise<{ symbol: string; timeframe: string; stored: number }> {
+        const baseSym = this.normalizeBaseSymbol(symbol);
+        const tvTimeframe = this.normalizeTimeframe(timeframe);
+        const storeKey = `mt5_candles:${baseSym}:${tvTimeframe}`;
+
+        const incoming = (rawCandles || [])
+            .map((c) => {
+                const rawTs = Number(c.timestamp ?? c.time ?? 0);
+                const timestamp = rawTs > 0 && rawTs < 1e11 ? rawTs * 1000 : rawTs;
+                return {
+                    timestamp,
+                    open: Number(c.open),
+                    high: Number(c.high),
+                    low: Number(c.low),
+                    close: Number(c.close),
+                    volume: Number(c.volume || 0),
+                };
+            })
+            .filter((c) => c.timestamp > 0 && Number.isFinite(c.open) && Number.isFinite(c.close));
+
+        if (incoming.length === 0) {
+            return { symbol: baseSym, timeframe: tvTimeframe, stored: 0 };
+        }
+
+        let existing = this.mt5MemoryStore.get(storeKey) || [];
+        if (existing.length === 0) {
+            const fromRedis = await this.cacheManager.get<any[]>(storeKey);
+            if (Array.isArray(fromRedis)) existing = fromRedis;
+        }
+
+        const byTs = new Map<number, any>();
+        for (const bar of existing) byTs.set(bar.timestamp, bar);
+        for (const bar of incoming) byTs.set(bar.timestamp, bar);
+
+        const merged = Array.from(byTs.values())
+            .sort((a, b) => a.timestamp - b.timestamp)
+            .slice(-15000);
+
+        this.mt5MemoryStore.set(storeKey, merged);
+        await this.cacheManager.set(storeKey, merged, 86_400_000); // 24h in Redis
+
+        this.logger.log(`[MT5-FEED] Lote OHLCV armazenado: ${baseSym} (${tvTimeframe}) -> +${incoming.length} velas (Total em cache: ${merged.length})`);
+        return { symbol: baseSym, timeframe: tvTimeframe, stored: merged.length };
+    }
+
+    async getMt5CachedCandles(symbol: string, timeframe: string): Promise<any[]> {
+        const baseSym = this.normalizeBaseSymbol(symbol);
+        const tvTimeframe = this.normalizeTimeframe(timeframe);
+        const storeKey = `mt5_candles:${baseSym}:${tvTimeframe}`;
+        const mem = this.mt5MemoryStore.get(storeKey);
+        if (mem && mem.length > 0) return mem;
+        const redis = await this.cacheManager.get<any[]>(storeKey);
+        if (Array.isArray(redis) && redis.length > 0) {
+            this.mt5MemoryStore.set(storeKey, redis);
+            return redis;
+        }
+        return [];
+    }
 
     private normalizeSymbol(symbol: string): string {
         if (!symbol) return 'OANDA:EURUSD';
         const clean = symbol.trim().toUpperCase();
-        if (clean.includes(':')) return clean;
-        return DEFAULT_SYMBOL_MAP[clean] || `OANDA:${clean}`;
+        const base = this.normalizeBaseSymbol(clean);
+        if (!clean.includes(':')) {
+            return DEFAULT_SYMBOL_MAP[base] || DEFAULT_SYMBOL_MAP[clean] || `OANDA:${clean}`;
+        }
+        const [exchange, rawTicker] = clean.split(':');
+        // Remap frontend generic aliases (e.g. BINANCE:BTCUSD -> BINANCE:BTCUSDT, OANDA:NAS100 -> OANDA:NAS100USD, FX:EURUSD -> OANDA:EURUSD)
+        if (
+            DEFAULT_SYMBOL_MAP[base] &&
+            ((exchange === 'BINANCE' && !rawTicker.endsWith('USDT')) ||
+                (exchange === 'OANDA' && ['NAS100', 'US30', 'SPX500', 'GER40', 'UK100', 'USOIL'].includes(rawTicker)) ||
+                exchange === 'FX' ||
+                exchange === 'TV' ||
+                exchange === 'CFD' ||
+                exchange === 'INDEX')
+        ) {
+            return DEFAULT_SYMBOL_MAP[base];
+        }
+        return clean;
     }
 
     private normalizeTimeframe(tf: string): string {
@@ -160,9 +316,195 @@ export class TradingViewService {
         }
     }
 
+    private async fetchPublicHttpFallbackCandles(
+        symbol: string,
+        timeframe: string,
+        range: number,
+        toTs: number,
+        earliestTs?: number,
+    ): Promise<{ candles: any[]; source: 'yahoo' | 'binance' }> {
+        const base = this.normalizeBaseSymbol(symbol);
+        const tvTf = this.normalizeTimeframe(timeframe);
+        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(6000)
+            : undefined;
+
+        const CRYPTO_PAIR_MAP: Record<string, string> = {
+            BTCUSD: 'BTCUSDT',
+            ETHUSD: 'ETHUSDT',
+            SOLUSD: 'SOLUSDT',
+        };
+        const BINANCE_INTERVAL_MAP: Record<string, string> = {
+            '1': '1m',
+            '5': '5m',
+            '15': '15m',
+            '30': '30m',
+            '60': '1h',
+            '120': '2h',
+            '240': '4h',
+            '1D': '1d',
+            '1W': '1w',
+            '1M': '1M',
+        };
+
+        const binancePair = CRYPTO_PAIR_MAP[base] || (base.endsWith('USDT') ? base : null);
+        if (binancePair) {
+            try {
+                const bInterval = BINANCE_INTERVAL_MAP[tvTf] || '1h';
+                const limit = Math.min(range, 1000);
+                const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binancePair)}&interval=${encodeURIComponent(bInterval)}&endTime=${Math.floor(toTs)}&limit=${limit}`;
+                const res = await fetch(url, { headers, signal });
+                if (res.ok) {
+                    const raw: any = await res.json();
+                    if (Array.isArray(raw)) {
+                        const candles = raw
+                            .map((k: any[]) => ({
+                                timestamp: Number(k[0]),
+                                open: Number(k[1]),
+                                high: Number(k[2]),
+                                low: Number(k[3]),
+                                close: Number(k[4]),
+                                volume: Number(k[5] || 0),
+                            }))
+                            .filter(
+                                (c) =>
+                                    Number.isFinite(c.timestamp) &&
+                                    c.timestamp > 0 &&
+                                    Number.isFinite(c.open) &&
+                                    Number.isFinite(c.high) &&
+                                    Number.isFinite(c.low) &&
+                                    Number.isFinite(c.close) &&
+                                    c.timestamp <= toTs &&
+                                    (!earliestTs || c.timestamp >= earliestTs),
+                            )
+                            .sort((a, b) => a.timestamp - b.timestamp);
+
+                        if (candles.length > 0) {
+                            return { candles, source: 'binance' };
+                        }
+                    }
+                }
+            } catch (err: any) {
+                this.logger.debug(`Binance public klines fallback failed for ${binancePair}: ${err?.message || err}`);
+            }
+        }
+
+        const YAHOO_TICKER_MAP: Record<string, string> = {
+            XAUUSD: 'GC=F',
+            XAGUSD: 'SI=F',
+            USOIL: 'CL=F',
+            NAS100: '^NDX',
+            US30: '^DJI',
+            SPX500: '^GSPC',
+            GER40: '^GDAXI',
+            UK100: '^FTSE',
+            BTCUSD: 'BTC-USD',
+            ETHUSD: 'ETH-USD',
+            SOLUSD: 'SOL-USD',
+        };
+        const yahooTicker = YAHOO_TICKER_MAP[base] || (/^[A-Z]{6}$/.test(base) ? `${base}=X` : null);
+        if (!yahooTicker) {
+            return { candles: [], source: 'yahoo' };
+        }
+
+        const YAHOO_TF_CONFIG: Record<string, { yInterval: string; maxDays: number; aggBars: number }> = {
+            '1': { yInterval: '1m', maxDays: 6, aggBars: 1 },
+            '5': { yInterval: '5m', maxDays: 58, aggBars: 1 },
+            '15': { yInterval: '15m', maxDays: 58, aggBars: 1 },
+            '30': { yInterval: '30m', maxDays: 58, aggBars: 1 },
+            '60': { yInterval: '60m', maxDays: 720, aggBars: 1 },
+            '120': { yInterval: '60m', maxDays: 720, aggBars: 2 },
+            '240': { yInterval: '60m', maxDays: 720, aggBars: 4 },
+            '1D': { yInterval: '1d', maxDays: 3650, aggBars: 1 },
+            '1W': { yInterval: '1wk', maxDays: 3650, aggBars: 1 },
+            '1M': { yInterval: '1mo', maxDays: 3650, aggBars: 1 },
+        };
+
+        const { yInterval, maxDays, aggBars } = YAHOO_TF_CONFIG[tvTf] || { yInterval: '60m', maxDays: 720, aggBars: 1 };
+        const intervalMs = this.getIntervalMs(tvTf);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const minAllowedSec = nowSec - maxDays * 86400;
+        const period2 = Math.floor(toTs / 1000);
+
+        if (period2 <= minAllowedSec + 60) {
+            return { candles: [], source: 'yahoo' };
+        }
+
+        const minPaddingSec = intervalMs <= 3_600_000 ? 4 * 86400 : 3600;
+        const spanSec = Math.max(minPaddingSec, Math.ceil((range * aggBars * intervalMs * 1.8) / 1000));
+        const period1 = Math.max(minAllowedSec, period2 - spanSec);
+
+        try {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?period1=${period1}&period2=${period2}&interval=${encodeURIComponent(yInterval)}&includePrePost=false`;
+            const res = await fetch(url, { headers, signal });
+            if (!res.ok) {
+                return { candles: [], source: 'yahoo' };
+            }
+
+            const data: any = await res.json();
+            const result = data?.chart?.result?.[0];
+            const rawTsList: any[] = Array.isArray(result?.timestamp) ? result.timestamp : [];
+            const quote = result?.indicators?.quote?.[0] || {};
+            const opens: any[] = Array.isArray(quote.open) ? quote.open : [];
+            const highs: any[] = Array.isArray(quote.high) ? quote.high : [];
+            const lows: any[] = Array.isArray(quote.low) ? quote.low : [];
+            const closes: any[] = Array.isArray(quote.close) ? quote.close : [];
+            const volumes: any[] = Array.isArray(quote.volume) ? quote.volume : [];
+
+            let bars = rawTsList
+                .map((sec, idx) => ({
+                    timestamp: Number(sec) * 1000,
+                    open: Number(opens[idx]),
+                    high: Number(highs[idx]),
+                    low: Number(lows[idx]),
+                    close: Number(closes[idx]),
+                    volume: Number(volumes[idx] || 0),
+                }))
+                .filter(
+                    (c) =>
+                        Number.isFinite(c.timestamp) &&
+                        c.timestamp > 0 &&
+                        Number.isFinite(c.open) &&
+                        Number.isFinite(c.high) &&
+                        Number.isFinite(c.low) &&
+                        Number.isFinite(c.close) &&
+                        c.open > 0 &&
+                        c.close > 0,
+                )
+                .sort((a, b) => a.timestamp - b.timestamp);
+
+            if (aggBars > 1 && bars.length > 0) {
+                const buckets = new Map<number, any>();
+                for (const bar of bars) {
+                    const bucketTs = Math.floor(bar.timestamp / intervalMs) * intervalMs;
+                    const existing = buckets.get(bucketTs);
+                    if (!existing) {
+                        buckets.set(bucketTs, { ...bar, timestamp: bucketTs });
+                    } else {
+                        existing.high = Math.max(existing.high, bar.high);
+                        existing.low = Math.min(existing.low, bar.low);
+                        existing.close = bar.close;
+                        existing.volume += bar.volume;
+                    }
+                }
+                bars = Array.from(buckets.values()).sort((a, b) => a.timestamp - b.timestamp);
+            }
+
+            const candles = bars
+                .filter((c) => c.timestamp <= toTs && (!earliestTs || c.timestamp >= earliestTs))
+                .slice(-range);
+
+            return { candles, source: 'yahoo' };
+        } catch (err: any) {
+            this.logger.debug(`Yahoo fallback failed for ${yahooTicker}: ${err?.message || err}`);
+            return { candles: [], source: 'yahoo' };
+        }
+    }
+
     /**
-     * Real candles from TradingView. Throws when the feed is unavailable:
-     * the caller must surface the outage instead of receiving made-up prices.
+     * Real candles prioritized from synced MT5 cache, then TradingView WebSocket,
+     * with keyless public HTTP fallback (Binance / Yahoo Finance). Throws only when all real feeds fail.
      */
     async getCandles(symbol: string, timeframe: string = '1H', query: CandleQuery): Promise<CandleResponse> {
         const tvSymbol = this.normalizeSymbol(symbol);
@@ -178,57 +520,120 @@ export class TradingViewService {
         const cached = await this.cacheManager.get<CandleResponse>(cacheKey);
         if (cached?.candles?.length) return cached;
 
-        const raw = await new Promise<any[]>((resolve, reject) => {
-            let settled = false;
-            const client = new TradingView.Client();
-            const chart = new client.Session.Chart();
-            const finish = (fn: () => void) => {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timer);
-                try { client.end(); } catch (_) {}
-                fn();
-            };
+        const existingFlight = this.inFlightCandles.get(cacheKey);
+        if (existingFlight) return existingFlight;
 
-            const timer = setTimeout(() => finish(() => reject(new Error('TradingView WebSocket timeout'))), 8000);
+        const flightPromise = (async (): Promise<CandleResponse> => {
+            // 1. Prioritize MT5 synced/ingested candles when sufficient bars exist in the requested window
+            const mt5Bars = await this.getMt5CachedCandles(symbol, timeframe);
+            const mt5InWindow = mt5Bars
+                .filter((c) => c.timestamp <= toTs && (!query.earliestTs || c.timestamp >= query.earliestTs))
+                .sort((a, b) => a.timestamp - b.timestamp);
 
-            chart.setMarket(tvSymbol, {
-                timeframe: tvTimeframe as any,
-                range,
-                // Library expects seconds; omit when "now" so the live edge is returned.
-                ...(toTs < now - intervalMs ? { to: Math.floor(toTs / 1000) } : {}),
-            });
+            if (mt5InWindow.length >= Math.min(30, Math.floor(range * 0.25))) {
+                const mt5Result: CandleResponse = {
+                    candles: mt5InWindow.slice(-range),
+                    source: 'mt5',
+                    tvSymbol,
+                    timeframe: tvTimeframe,
+                };
+                await this.cacheManager.set(cacheKey, mt5Result, 60_000);
+                return mt5Result;
+            }
 
-            chart.onUpdate(() => {
-                if (!chart.periods || chart.periods.length === 0) return;
-                const periods = [...chart.periods];
-                finish(() => resolve(periods));
-            });
+            try {
+                const raw = await new Promise<any[]>((resolve, reject) => {
+                    let settled = false;
+                    const client = new TradingView.Client();
+                    const chart = new client.Session.Chart();
+                    const finish = (fn: () => void) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        try { client.end(); } catch (_) {}
+                        fn();
+                    };
 
-            chart.onError((...err: any[]) => finish(() => reject(new Error(err.map(String).join(' ') || 'TradingView error'))));
-        });
+                    const timer = setTimeout(() => finish(() => reject(new Error('TradingView WebSocket timeout'))), 5000);
 
-        const candles = raw
-            .map(p => ({
-                timestamp: p.time * 1000,
-                open: Number(p.open),
-                high: Number(p.max),
-                low: Number(p.min),
-                close: Number(p.close),
-                volume: Number(p.volume || 0),
-            }))
-            .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close))
-            .filter(c => !query.earliestTs || c.timestamp >= query.earliestTs)
-            .sort((a, b) => a.timestamp - b.timestamp);
+                    chart.setMarket(tvSymbol, {
+                        timeframe: tvTimeframe as any,
+                        range,
+                        // Library expects seconds; omit when "now" so the live edge is returned.
+                        ...(toTs < now - intervalMs ? { to: Math.floor(toTs / 1000) } : {}),
+                    });
 
-        if (candles.length === 0) {
-            throw new Error(`TradingView returned no bars for ${tvSymbol} (${tvTimeframe}) in the allowed window`);
+                    chart.onUpdate(() => {
+                        if (!chart.periods || chart.periods.length === 0) return;
+                        const periods = [...chart.periods];
+                        finish(() => resolve(periods));
+                    });
+
+                    chart.onError((...err: any[]) => finish(() => reject(new Error(err.map(String).join(' ') || 'TradingView error'))));
+                });
+
+                const candles = raw
+                    .map(p => ({
+                        timestamp: p.time * 1000,
+                        open: Number(p.open),
+                        high: Number(p.max),
+                        low: Number(p.min),
+                        close: Number(p.close),
+                        volume: Number(p.volume || 0),
+                    }))
+                    .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close))
+                    .filter(c => !query.earliestTs || c.timestamp >= query.earliestTs)
+                    .sort((a, b) => a.timestamp - b.timestamp);
+
+                if (candles.length === 0) {
+                    throw new Error(`TradingView returned no bars for ${tvSymbol} (${tvTimeframe}) in the allowed window`);
+                }
+
+                this.mirrorCandlesToQuantParquet(symbol, timeframe, candles);
+                const result: CandleResponse = { candles, source: 'tradingview', tvSymbol, timeframe: tvTimeframe };
+                // cache-manager v7 TTL is in milliseconds.
+                await this.cacheManager.set(cacheKey, result, 60_000);
+                return result;
+            } catch (tvError: any) {
+                if (mt5InWindow.length > 0) {
+                    const slicedMt5 = mt5InWindow.slice(-range);
+                    this.mirrorCandlesToQuantParquet(symbol, timeframe, slicedMt5);
+                    const partialMt5Result: CandleResponse = {
+                        candles: slicedMt5,
+                        source: 'mt5',
+                        tvSymbol,
+                        timeframe: tvTimeframe,
+                    };
+                    await this.cacheManager.set(cacheKey, partialMt5Result, 60_000);
+                    return partialMt5Result;
+                }
+
+                const fallback = await this.fetchPublicHttpFallbackCandles(symbol, tvTimeframe, range, toTs, query.earliestTs);
+                if (fallback.candles.length > 0) {
+                    this.logger.warn(
+                        `TradingView unavailable for ${tvSymbol} (${tvError?.message || tvError}); served ${fallback.candles.length} bars via ${fallback.source} HTTP fallback`,
+                    );
+                    this.mirrorCandlesToQuantParquet(symbol, timeframe, fallback.candles);
+                    const fallbackResult: CandleResponse = {
+                        candles: fallback.candles,
+                        source: fallback.source,
+                        tvSymbol,
+                        timeframe: tvTimeframe,
+                    };
+                    await this.cacheManager.set(cacheKey, fallbackResult, 60_000);
+                    return fallbackResult;
+                }
+
+                throw tvError;
+            }
+        })();
+
+        this.inFlightCandles.set(cacheKey, flightPromise);
+        try {
+            return await flightPromise;
+        } finally {
+            this.inFlightCandles.delete(cacheKey);
         }
-
-        const result: CandleResponse = { candles, source: 'tradingview', tvSymbol, timeframe: tvTimeframe };
-        // cache-manager v7 TTL is in milliseconds.
-        await this.cacheManager.set(cacheKey, result, 60_000);
-        return result;
     }
 
     /**
@@ -267,24 +672,60 @@ export class TradingViewService {
         const cachedBatch = await this.cacheManager.get<CandleResponse>(batchCacheKey);
         let candles: any[] = [];
         let fromCache = false;
+        let dataSource: CandleResponse['source'] = 'tradingview';
 
-        if (cachedBatch?.candles?.length) {
+        // 1. Check MT5 Demo / Synced Candle Store first
+        const mt5Bars = await this.getMt5CachedCandles(symbol, timeframe);
+        const mt5InWindow = mt5Bars.filter(
+            (c) => c.timestamp <= effectiveTo && (!options.earliestTs || c.timestamp >= options.earliestTs),
+        );
+
+        if (mt5InWindow.length >= Math.min(50, chunkSize * 0.25)) {
+            candles = mt5InWindow.slice(-chunkSize);
+            fromCache = true;
+            dataSource = 'mt5';
+        } else if (cachedBatch?.candles?.length) {
             candles = cachedBatch.candles;
             fromCache = true;
+            dataSource = cachedBatch.source || 'tradingview';
         } else {
-            const fetched = await this.getCandles(symbol, timeframe, {
-                range: chunkSize,
-                toTs: effectiveTo,
-                earliestTs: options.earliestTs,
-            });
-            candles = fetched.candles;
-            // Historical batches are immutable once closed; cache for 10 minutes
-            await this.cacheManager.set(batchCacheKey, fetched, 600_000);
+            try {
+                const fetched = await this.getCandles(symbol, timeframe, {
+                    range: chunkSize,
+                    toTs: effectiveTo,
+                    earliestTs: options.earliestTs,
+                });
+                // Merge any MT5 bars we have with the fetched bars
+                if (mt5InWindow.length > 0) {
+                    const mergedMap = new Map<number, any>();
+                    for (const b of fetched.candles) mergedMap.set(b.timestamp, b);
+                    for (const b of mt5InWindow) mergedMap.set(b.timestamp, b);
+                    candles = Array.from(mergedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+                    dataSource = 'mt5';
+                } else {
+                    candles = fetched.candles;
+                    dataSource = fetched.source || 'tradingview';
+                }
+                // Historical batches are immutable once closed; cache for 10 minutes
+                await this.cacheManager.set(batchCacheKey, { ...fetched, candles, source: dataSource }, 600_000);
+            } catch (err) {
+                if (mt5InWindow.length > 0) {
+                    candles = mt5InWindow.slice(-chunkSize);
+                    fromCache = true;
+                    dataSource = 'mt5';
+                } else {
+                    throw err;
+                }
+            }
         }
 
         const filtered = candles
             .filter(c => c.timestamp <= effectiveTo && (!options.earliestTs || c.timestamp >= options.earliestTs))
             .sort((a, b) => a.timestamp - b.timestamp);
+
+        if (filtered.length >= 20 && (!fromCache || dataSource === 'mt5')) {
+            this.mirrorCandlesToQuantParquet(symbol, timeframe, filtered);
+        }
 
         const earliestLoadedTs = filtered.length > 0 ? filtered[0].timestamp : null;
         const latestLoadedTs = filtered.length > 0 ? filtered[filtered.length - 1].timestamp : null;
@@ -302,7 +743,7 @@ export class TradingViewService {
 
         return {
             candles: filtered,
-            source: 'tradingview',
+            source: dataSource,
             tvSymbol,
             timeframe: tvTimeframe,
             chunkSize,

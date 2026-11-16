@@ -1,6 +1,7 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
 @Entity('sessions')
+@Index('IDX_sessions_user_active_expires', ['userId', 'isActive', 'expiresAt'])
 export class SessionEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;

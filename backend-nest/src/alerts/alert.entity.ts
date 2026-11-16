@@ -20,6 +20,7 @@ export enum AlertSeverity {
 }
 
 @Entity('alerts')
+@Index('IDX_alerts_user_resolved_created', ['userId', 'resolved', 'createdAt'])
 export class AlertEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;

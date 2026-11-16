@@ -17,14 +17,23 @@ export class PaymentService {
     async getPricingConfig() {
         const basicPlan = await this.planConfigRepo.findOne({ where: { tier: 'BASIC' } });
         const proPlan = await this.planConfigRepo.findOne({ where: { tier: 'PRO' } });
+        const premiumPlan = await this.planConfigRepo.findOne({ where: { tier: 'PREMIUM' } });
 
-        const basicoPrice = basicPlan ? Number(basicPlan.monthlyPrice) : this.configService.get<number>('PLANO_BASICO_PRICE', 1);
-        const premiumPrice = proPlan ? Number(proPlan.monthlyPrice) : this.configService.get<number>('PLANO_PREMIUN_PRICE', 1);
+        const basicoPrice = basicPlan
+            ? Number(basicPlan.monthlyPrice)
+            : Number(this.configService.get<number>('PLANO_BASICO_PRICE', 9));
+        const proPrice = proPlan
+            ? Number(proPlan.monthlyPrice)
+            : Number(this.configService.get<number>('PLANO_PRO_PRICE') ?? this.configService.get<number>('PLANO_PREMIUN_PRICE', 19));
+        const premiumPrice = premiumPlan
+            ? Number(premiumPlan.monthlyPrice)
+            : Number(this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proPrice * 2, 39)));
 
         return {
             basicoPrice,
+            proPrice,
             premiumPrice,
-            exchangeRate: this.configService.get<number>('EXCENCHE', 65),
+            exchangeRate: Number(this.configService.get<number>('EXCENCHE', 65)),
         };
     }
 }

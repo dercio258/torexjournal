@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { SessionEntity } from './session.entity';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import { getJwtSecret } from '../common/security/security.config';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -20,12 +21,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         super({
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
             ignoreExpiration: false,
-            secretOrKey: configService.get<string>('JWT_SECRET') || 'default_secret_key',
+            secretOrKey: getJwtSecret(configService),
             passReqToCallback: true,
         });
     }
 
     async validate(req: any, payload: any) {
+        if (payload?.isTwoFactorPending) {
+            throw new UnauthorizedException('Token temporário de 2FA não autorizado nesta rota');
+        }
         const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
         if (!token) {
             throw new UnauthorizedException('Token não encontrado no cabeçalho da requisição');

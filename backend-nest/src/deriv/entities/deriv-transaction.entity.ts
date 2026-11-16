@@ -1,6 +1,7 @@
 import { Entity, Column, PrimaryColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
 @Entity('deriv_transactions')
+@Index('IDX_deriv_tx_user_contract', ['userId', 'contractId', 'transactionTime'])
 export class DerivTransactionEntity {
     @PrimaryColumn()
     transactionId: string; // From Deriv transaction_id (string to support UUIDs)

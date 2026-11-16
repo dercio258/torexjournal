@@ -4,86 +4,202 @@ import {
     OnGatewayConnection,
     OnGatewayDisconnect,
     MessageBody,
-    ConnectedSocket
+    ConnectedSocket,
 } from '@nestjs/websockets';
 import * as Ws from '@nestjs/websockets';
 const SubscribeMessage: any = (Ws as any).SubscribeMessage;
 import { Server, Socket } from 'socket.io';
-import { Injectable, UseGuards, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
 import { NetworkService } from './network.service';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { UserEntity } from '../users/user.entity';
+import { SessionEntity } from '../auth/session.entity';
+import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
 
 @WebSocketGateway({
     cors: {
-        origin: '*',
+        origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+            if (isCorsOriginAllowed(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error('CORS origin denied'));
+            }
+        },
+        credentials: true,
     },
-    namespace: 'network'
+    namespace: 'network',
 })
 @Injectable()
 export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect {
+    private readonly logger = new Logger(NetworkGateway.name);
+
     @WebSocketServer()
     server: Server;
 
     constructor(
         @Inject(forwardRef(() => NetworkService))
         private readonly networkService: NetworkService,
-        private readonly jwtService: JwtService
-    ) { }
+        private readonly jwtService: JwtService,
+        private readonly configService: ConfigService,
+        @Optional()
+        @InjectRepository(UserEntity)
+        private readonly userRepo?: Repository<UserEntity>,
+        @Optional()
+        @InjectRepository(SessionEntity)
+        private readonly sessionRepo?: Repository<SessionEntity>,
+        @Optional()
+        @Inject(CACHE_MANAGER)
+        private readonly cacheManager?: Cache,
+    ) {}
 
-    async handleConnection(client: Socket) {
+    private async verifyUserIdFromToken(rawToken?: string): Promise<string | null> {
+        if (!rawToken) return null;
+        const cleanToken = String(rawToken).replace(/^Bearer\s+/i, '').trim();
+        if (!cleanToken) return null;
+
         try {
-            const token = client.handshake.auth.token || client.handshake.headers.authorization;
-            if (!token) {
-                client.disconnect();
-                return;
+            const payload = await this.jwtService.verifyAsync(cleanToken, {
+                secret: getJwtSecret(this.configService),
+            });
+            const userId = payload?.id || payload?.sub;
+            if (!userId || payload?.isTwoFactorPending) {
+                return null;
             }
-            
-            const decoded = this.jwtService.decode(token) as any;
-            if (decoded) {
-                const userId = decoded.sub || decoded.id;
-                if (userId) {
-                    client.data.userId = userId;
-                    client.join(`user_room:${userId}`);
-                    console.log(`Client ${client.id} joined room user_room:${userId}`);
+
+            // Ensure session is still active (not logged out / revoked)
+            let sessionActive = false;
+            if (this.cacheManager) {
+                const cached = await this.cacheManager.get(`user_session:${cleanToken}`).catch(() => null);
+                if (cached === 'active') sessionActive = true;
+            }
+            if (!sessionActive && this.sessionRepo) {
+                const session = await this.sessionRepo.findOne({
+                    where: { token: cleanToken, isActive: true },
+                    select: ['id', 'expiresAt'],
+                });
+                if (session && new Date() <= session.expiresAt) {
+                    sessionActive = true;
+                }
+            } else if (!this.sessionRepo && !this.cacheManager) {
+                sessionActive = true;
+            }
+            if (!sessionActive) return null;
+
+            // Enforce blocked status & 2FA verification
+            if (this.userRepo) {
+                const user = await this.userRepo.findOne({
+                    where: { id: userId },
+                    select: ['id', 'isBlocked', 'twoFactorEnabled', 'isTwoFactorConfirmed'],
+                });
+                if (!user || user.isBlocked) return null;
+                if (user.twoFactorEnabled && user.isTwoFactorConfirmed && !payload.isTwoFactorVerified) {
+                    return null;
                 }
             }
-            console.log(`Client connected to Network: ${client.id}`);
-        } catch (e) {
-            client.disconnect();
+
+            return userId;
+        } catch {
+            return null;
         }
     }
 
-    handleDisconnect(client: Socket) {
-        console.log(`Client disconnected from Network: ${client.id}`);
+    async handleConnection(client: Socket) {
+        try {
+            const rawToken =
+                client.handshake.auth?.token ||
+                client.handshake.headers?.authorization;
+            const userId = await this.verifyUserIdFromToken(rawToken);
+            if (!userId) {
+                client.disconnect(true);
+                return;
+            }
+
+            client.data.userId = userId;
+            client.join(`user_room:${userId}`);
+        } catch {
+            client.disconnect(true);
+        }
+    }
+
+    handleDisconnect(_client: Socket) {
+        // Disconnected cleanly
     }
 
     @OnEvent('notification.created')
     handleNotificationCreated(payload: { userId: string; notification: any }) {
         if (payload && payload.userId && payload.notification) {
-            // Emite de forma segura para a sala do usuário
-            this.server.to(`user_room:${payload.userId}`).emit('notification', payload.notification);
+            this.server
+                .to(`user_room:${payload.userId}`)
+                .emit('notification', payload.notification);
         }
     }
 
     @SubscribeMessage('msgToServer')
     async handleMessage(
-        @MessageBody() payload: { content: string, token: string },
-        @ConnectedSocket() client: Socket
+        @MessageBody()
+        payload: { content: string; token?: string; room?: string },
+        @ConnectedSocket() client: Socket,
     ) {
         try {
-            const decoded = this.jwtService.decode(payload.token) as any;
-            if (!decoded || !decoded.sub) return;
+            const userId =
+                client.data?.userId ||
+                (await this.verifyUserIdFromToken(payload?.token));
+            if (!userId || !payload?.content?.trim()) return;
 
-            const userId = decoded.sub;
+            const safeRoom = String(payload.room || 'global')
+                .trim()
+                .slice(0, 50);
 
-            // Save to DB
-            const message = await this.networkService.saveChatMessage(userId, payload.content);
+            const message = await this.networkService.saveChatMessage(
+                userId,
+                payload.content.trim().slice(0, 4000),
+                safeRoom,
+            );
 
-            // Broadcast to all
             this.server.emit('msgToClient', message);
-        } catch (e) {
-            console.error('Error handling message', e);
+        } catch (e: any) {
+            this.logger.warn(`Error handling channel message: ${e?.message || e}`);
+        }
+    }
+
+    @SubscribeMessage('dmToServer')
+    async handleDirectMessage(
+        @MessageBody()
+        payload: { recipientId: string; content: string; token?: string },
+        @ConnectedSocket() client: Socket,
+    ) {
+        try {
+            const senderId =
+                client.data?.userId ||
+                (await this.verifyUserIdFromToken(payload?.token));
+            if (
+                !senderId ||
+                !payload?.recipientId ||
+                !payload?.content?.trim()
+            ) {
+                return;
+            }
+
+            await this.networkService.sendDirectMessage(
+                senderId,
+                payload.recipientId,
+                payload.content.trim().slice(0, 4000),
+            );
+        } catch (e: any) {
+            this.logger.warn(`Error handling direct message: ${e?.message || e}`);
+        }
+    }
+
+    broadcastDirectMessage(senderId: string, recipientId: string, message: any) {
+        this.server.to(`user_room:${recipientId}`).emit('dmToClient', message);
+        if (senderId !== recipientId) {
+            this.server.to(`user_room:${senderId}`).emit('dmToClient', message);
         }
     }
 
@@ -93,5 +209,13 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
     broadcastInteraction(data: any) {
         this.server.emit('interaction', data);
+    }
+
+    broadcastLessonInteraction(data: any) {
+        this.server.emit('lessonInteraction', data);
+    }
+
+    broadcastLessonCatalogUpdated() {
+        this.server.emit('lessonCatalogUpdated', { timestamp: Date.now() });
     }
 }

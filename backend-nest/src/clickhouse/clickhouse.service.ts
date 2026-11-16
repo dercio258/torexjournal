@@ -1,16 +1,31 @@
-import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { ClickHouseClient } from '@clickhouse/client';
 import { CLICKHOUSE_CLIENT } from './clickhouse.constants';
 
 @Injectable()
-export class ClickHouseService implements OnModuleInit {
+export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(ClickHouseService.name);
+    private tickBuffer: Array<{
+        timestamp: string;
+        symbol: string;
+        bid: number;
+        ask: number;
+        last: number;
+        volume: number;
+        mt5Id: string;
+    }> = [];
+    private tickFlushTimer: ReturnType<typeof setInterval> | null = null;
+    private isFlushingTicks = false;
 
     constructor(
         @Inject(CLICKHOUSE_CLIENT) private readonly client: ClickHouseClient
     ) {}
 
     async onModuleInit() {
+        this.tickFlushTimer = setInterval(() => {
+            void this.flushTicksBuffer();
+        }, 1000);
+
         try {
             this.logger.log('Initializing ClickHouse tables...');
             
@@ -73,6 +88,31 @@ export class ClickHouseService implements OnModuleInit {
         }
     }
 
+    async onModuleDestroy() {
+        if (this.tickFlushTimer) {
+            clearInterval(this.tickFlushTimer);
+            this.tickFlushTimer = null;
+        }
+        await this.flushTicksBuffer();
+    }
+
+    private async flushTicksBuffer(): Promise<void> {
+        if (this.isFlushingTicks || this.tickBuffer.length === 0) return;
+        this.isFlushingTicks = true;
+        const batch = this.tickBuffer.splice(0, 1000);
+        try {
+            await this.client.insert({
+                table: 'market_ticks',
+                values: batch,
+                format: 'JSONEachRow',
+            });
+        } catch (e) {
+            this.logger.error(`Failed to flush ${batch.length} market ticks to ClickHouse: ${e.message}`);
+        } finally {
+            this.isFlushingTicks = false;
+        }
+    }
+
     async saveTrade(trade: any) {
         try {
             await this.client.insert({
@@ -102,21 +142,20 @@ export class ClickHouseService implements OnModuleInit {
     async saveTick(tick: any) {
         try {
             const formattedTime = new Date(tick.timestamp).toISOString().replace('T', ' ').replace('Z', '');
-            await this.client.insert({
-                table: 'market_ticks',
-                values: [{
-                    timestamp: formattedTime,
-                    symbol: tick.symbol,
-                    bid: Number(tick.bid),
-                    ask: Number(tick.ask),
-                    last: Number(tick.last || 0),
-                    volume: Number(tick.volume || 0),
-                    mt5Id: String(tick.mt5Id || '')
-                }],
-                format: 'JSONEachRow'
+            this.tickBuffer.push({
+                timestamp: formattedTime,
+                symbol: tick.symbol,
+                bid: Number(tick.bid),
+                ask: Number(tick.ask),
+                last: Number(tick.last || 0),
+                volume: Number(tick.volume || 0),
+                mt5Id: String(tick.mt5Id || ''),
             });
+            if (this.tickBuffer.length >= 250) {
+                void this.flushTicksBuffer();
+            }
         } catch (e) {
-            this.logger.error(`Failed to save tick for ${tick?.symbol} to ClickHouse: ${e.message}`);
+            this.logger.error(`Failed to buffer tick for ${tick?.symbol} to ClickHouse: ${e.message}`);
         }
     }
 

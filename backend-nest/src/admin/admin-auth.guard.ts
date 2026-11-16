@@ -1,12 +1,13 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { getJwtSecret } from '../common/security/security.config';
 
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
     constructor(
         private jwtService: JwtService,
-        private configService: ConfigService
+        private configService: ConfigService,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -18,19 +19,20 @@ export class AdminAuthGuard implements CanActivate {
         }
 
         const token = authHeader.split(' ')[1];
-        const secret = this.configService.get<string>('JWT_SECRET');
+        const secret = getJwtSecret(this.configService);
 
         try {
             const payload = await this.jwtService.verifyAsync(token, { secret });
-            const adminEmail = this.configService.get<string>('ADMIN_EMAIL');
+            const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '').trim().toLowerCase();
+            const tokenEmail = String(payload?.email || '').trim().toLowerCase();
 
-            if (payload.role !== 'admin' || payload.email !== adminEmail || !payload.isAdmin) {
+            if (!adminEmail || payload.role !== 'admin' || tokenEmail !== adminEmail || !payload.isAdmin) {
                 throw new UnauthorizedException('Acesso não autorizado para administradores');
             }
 
             request.admin = payload;
             return true;
-        } catch (error) {
+        } catch {
             throw new UnauthorizedException('Sessão de administrador inválida ou expirada');
         }
     }

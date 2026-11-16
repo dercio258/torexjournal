@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, ForbiddenException, Optional } from '@nestjs/common';
+import { randomInt, randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual } from 'typeorm';
@@ -8,7 +9,7 @@ import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
 import { DebitoService } from './debito.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { EmailService } from '../email/email.service';
+import { EmailProducerService } from '../email/email-producer.service';
 import { UserEntity } from '../users/user.entity';
 import { SmsService } from '../notifications/sms.service';
 import { SmsTemplates } from '../notifications/sms-templates';
@@ -16,6 +17,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class SubscriptionService implements OnModuleInit {
@@ -26,7 +28,7 @@ export class SubscriptionService implements OnModuleInit {
         private alertsService: AlertsService,
         private debitoService: DebitoService,
         private notificationsService: NotificationsService,
-        private emailService: EmailService,
+        private emailProducer: EmailProducerService,
         @InjectRepository(SubscriptionPlanConfig)
         private planConfigRepo: Repository<SubscriptionPlanConfig>,
         @InjectRepository(Subscription)
@@ -36,56 +38,115 @@ export class SubscriptionService implements OnModuleInit {
         private smsService: SmsService,
         @Inject(CACHE_MANAGER) private cacheManager: Cache,
         @InjectQueue('subscription-queue') private subscriptionQueue: Queue,
-        @InjectQueue('email-queue') private emailQueue: Queue,
+        @Optional() private analyticsService?: AnalyticsService,
     ) { }
 
     async onModuleInit() {
+        try {
+            await this.planConfigRepo.manager.query(
+                `ALTER TABLE "subscription_plan_configs" ADD COLUMN IF NOT EXISTS "aiDailyCredits" integer`
+            );
+        } catch (err: any) {
+            this.logger.warn(`SubscriptionPlanConfig DDL check warning: ${err?.message || err}`);
+        }
         await this.seedDefaultPlans();
     }
 
     async seedDefaultPlans() {
-        const tiers = ['BASIC', 'PRO'];
-        for (const tier of tiers) {
-            const exists = await this.planConfigRepo.findOne({ where: { tier } });
+        const basicEnvPrice = Number(this.configService.get<number>('PLANO_BASICO_PRICE', 9));
+        const proEnvPrice = Number(
+            this.configService.get<number>('PLANO_PRO_PRICE') ??
+            this.configService.get<number>('PLANO_PREMIUN_PRICE', 19)
+        );
+        const premiumEnvPrice = Number(
+            this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proEnvPrice * 2, 39))
+        );
+
+        const defaultConfigs: Array<{
+            tier: string;
+            description: string;
+            features: string[];
+            defaultPrice: number;
+            envKey?: string;
+            aiDailyCredits: number;
+        }> = [
+            {
+                tier: 'BASIC',
+                description: 'Para quem está começando no trading',
+                features: [
+                    '100 Créditos de IA / dia (Torex AI)',
+                    'Painel de Performance',
+                    'Diário & Calendário',
+                    'Importação Manual (CSV / HTML)',
+                    'Acesso à Network (Leitura)',
+                    'Gestão Emocional',
+                ],
+                defaultPrice: basicEnvPrice,
+                envKey: 'PLANO_BASICO_PRICE',
+                aiDailyCredits: 100,
+            },
+            {
+                tier: 'PRO',
+                description: 'Para traders consistentes em evolução',
+                features: [
+                    '2.000 Créditos de IA / dia (Torex AI Pro)',
+                    'Tudo do Plano Básico',
+                    'Auto-Sync (MT4, MT5, Deriv)',
+                    'Backtest & Replay Ilimitado',
+                    'Relatórios Executivos',
+                    'Interação na Network (Postar/Comentar)',
+                ],
+                defaultPrice: proEnvPrice,
+                envKey: 'PLANO_PRO_PRICE',
+                aiDailyCredits: 2000,
+            },
+            {
+                tier: 'PREMIUM',
+                description: 'Performance institucional máxima com IA intensiva',
+                features: [
+                    '20.000 Créditos de IA / dia (Torex AI Ultra)',
+                    'Tudo do Plano Pro',
+                    'Coaching Avançado de IA & Alertas em Tempo Real',
+                    'Gestão Multi-Contas & Prop Firm',
+                    'Calendário Econômico Completo',
+                    'Suporte Prioritário VIP',
+                ],
+                defaultPrice: premiumEnvPrice,
+                envKey: 'PLANO_PREMIUM_PRICE',
+                aiDailyCredits: 20000,
+            },
+        ];
+
+        for (const cfg of defaultConfigs) {
+            const exists = await this.planConfigRepo.findOne({ where: { tier: cfg.tier } });
             if (!exists) {
-                this.logger.log(`Seeding missing plan tier: ${tier}`);
-                if (tier === 'BASIC') {
-                    await this.planConfigRepo.save({
-                        tier: 'BASIC',
-                        description: 'Para quem está começando',
-                        features: ['Acesso ao Painel', 'Diário Limitado', 'Suporte Básico'],
-                        monthlyPrice: Number(this.configService.get<number>('PLANO_BASICO_PRICE', 1)),
-                        annualDiscountPercent: 20,
-                        trialEnabled: false,
-                        trialDays: 0,
-                        trialPrice: 0,
-                        isActive: true
-                    });
-                } else if (tier === 'PRO') {
-                    await this.planConfigRepo.save({
-                        tier: 'PRO',
-                        description: 'Para traders profissionais',
-                        features: ['Tudo do Básico', 'Análises Avançadas', 'Sem Limites', 'Suporte VIP'],
-                        monthlyPrice: Number(this.configService.get<number>('PLANO_PREMIUN_PRICE', 1)),
-                        annualDiscountPercent: 20,
-                        trialEnabled: false,
-                        trialDays: 0,
-                        trialPrice: 0,
-                        isActive: true
-                    });
-                }
+                this.logger.log(`Seeding missing plan tier: ${cfg.tier} (${cfg.aiDailyCredits} AI credits/day)`);
+                await this.planConfigRepo.save({
+                    tier: cfg.tier,
+                    description: cfg.description,
+                    features: cfg.features,
+                    monthlyPrice: cfg.defaultPrice,
+                    annualDiscountPercent: 20,
+                    trialEnabled: false,
+                    trialDays: 0,
+                    trialPrice: 0,
+                    aiDailyCredits: cfg.aiDailyCredits,
+                    isActive: true,
+                });
             } else {
                 let updated = false;
                 if (!exists.isActive) {
-                    this.logger.log(`Re-activating existing plan tier: ${tier}`);
+                    this.logger.log(`Re-activating existing plan tier: ${cfg.tier}`);
                     exists.isActive = true;
                     updated = true;
                 }
-                const envPriceKey = tier === 'BASIC' ? 'PLANO_BASICO_PRICE' : 'PLANO_PREMIUN_PRICE';
-                const currentEnvPrice = Number(this.configService.get<number>(envPriceKey, 1));
-                if (Number(exists.monthlyPrice) !== currentEnvPrice) {
-                    this.logger.log(`Updating plan tier price for ${tier}: DB price is ${exists.monthlyPrice}, Env price is ${currentEnvPrice}`);
-                    exists.monthlyPrice = currentEnvPrice;
+                if (!exists.aiDailyCredits || exists.aiDailyCredits <= 0) {
+                    exists.aiDailyCredits = cfg.aiDailyCredits;
+                    updated = true;
+                }
+                const rawEnvVal = cfg.envKey ? this.configService.get(cfg.envKey) : undefined;
+                if (rawEnvVal !== undefined && rawEnvVal !== '' && Number(exists.monthlyPrice) !== Number(rawEnvVal)) {
+                    exists.monthlyPrice = Number(rawEnvVal);
                     updated = true;
                 }
                 if (updated) {
@@ -102,7 +163,7 @@ export class SubscriptionService implements OnModuleInit {
         const day = String(now.getDate()).padStart(2, '0');
         const hour = String(now.getHours()).padStart(2, '0');
         const min = String(now.getMinutes()).padStart(2, '0');
-        const rand = Math.floor(1000 + Math.random() * 9000);
+        const rand = randomBytes(4).toString('hex').toUpperCase();
         return `TOREX${year}${month}${day}${hour}${min}${rand}`;
     }
 
@@ -197,30 +258,44 @@ export class SubscriptionService implements OnModuleInit {
                 timeoutMs: 3 * 60 * 1000
             }, { delay: 10000 });
 
-            // Notification: Initiation
+            // Notification: Initiation (Redis Queue + In-app without duplicate email)
             const user = await this.userRepo.findOne({ where: { id: userId } });
             if (user?.email) {
-                await this.emailService.sendTemplatedEmail(user.email, 'PAYMENT_INITIATED', {
-                    userName: user.name,
-                    amount: amount.toString(),
-                    method: paymentMethod,
-                    reference: reference
-                });
+                await this.emailProducer.enqueue(
+                    user.email,
+                    'PAYMENT_INITIATED',
+                    {
+                        userName: user.name || undefined,
+                        plan: config.tier,
+                        amount,
+                        currency: 'MZN',
+                        method: paymentMethod,
+                        reference,
+                    },
+                    { jobId: `payment-initiated:${sub.id}` },
+                );
             }
 
-            await this.notificationsService.create(userId, {
-                title: 'Pagamento Iniciado ⏳',
-                message: `Lançamos um pedido de pagamento de MT ${amount} via ${paymentMethod.toUpperCase()}. Confirme no seu telemóvel.`,
-            });
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: 'Pagamento Iniciado',
+                    message: `Solicitação de pagamento de ${amount} MZN via ${paymentMethod.toUpperCase()} gerada. Confirme no seu telemóvel.`,
+                },
+                { skipEmail: true },
+            );
 
             return { success: true, reference };
         } catch (error) {
             this.logger.error(`Mobile subscription failed: ${error.message}`);
-            // Notification: Failure
-            await this.notificationsService.create(userId, {
-                title: 'Falha no Pagamento ❌',
-                message: `Não conseguimos iniciar o seu pagamento via ${paymentMethod.toUpperCase()}: ${error.message}`,
-            });
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: 'Falha ao Iniciar Pagamento',
+                    message: `Não foi possível iniciar a transação via ${paymentMethod.toUpperCase()}: ${error.message}`,
+                },
+                { skipEmail: true },
+            );
             throw error;
         }
     }
@@ -399,19 +474,30 @@ export class SubscriptionService implements OnModuleInit {
             
             const user = await this.userRepo.findOne({ where: { id: subscription.userId } });
             if (user?.email) {
-                await this.emailService.sendTemplatedEmail(user.email, 'PAYMENT_FAILED', {
-                    userName: user.name,
-                    reference: resolvedRef,
-                    reason: (eventStatus === 'CANCELLED' || eventStatus === 'payment.failed') 
-                        ? 'O pagamento foi cancelado ou falhou.' 
-                        : `O pagamento falhou com status: ${eventStatus}`
-                });
+                await this.emailProducer.enqueue(
+                    user.email,
+                    'PAYMENT_FAILED',
+                    {
+                        userName: user.name || undefined,
+                        plan: subscription.planConfig?.tier,
+                        reference: resolvedRef,
+                        reason:
+                            eventStatus === 'CANCELLED' || eventStatus === 'payment.failed'
+                                ? 'A transação foi cancelada ou não autorizada pela operadora.'
+                                : `Status reportado pela operadora: ${eventStatus}`,
+                    },
+                    { jobId: `payment-failed:${subscription.id}` },
+                );
             }
 
-            await this.notificationsService.create(subscription.userId, {
-                title: 'Pagamento Falhou ❌',
-                message: `O seu pagamento de referência ${resolvedRef} falhou ou foi cancelado.`,
-            });
+            await this.notificationsService.create(
+                subscription.userId,
+                {
+                    title: 'Pagamento Não Concluído',
+                    message: `A transação de referência ${resolvedRef} não foi confirmada pela operadora.`,
+                },
+                { skipEmail: true },
+            );
             subscription.status = SubscriptionStatus.CANCELLED;
             if (paymentId) {
                 subscription.debitoTransactionId = paymentId;
@@ -424,12 +510,6 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     private async activateSubscription(subscription: Subscription, reference: string) {
-        if (subscription.status === SubscriptionStatus.ACTIVE) {
-            this.logger.warn(`Subscription ${subscription.id} (Ref: ${reference}) is already active. Skipping activation.`);
-            return;
-        }
-
-        this.logger.log(`Activating subscription ${subscription.id} for user ${subscription.userId} (Ref: ${reference})`);
         const now = new Date();
         const expiry = new Date(now);
         if (subscription.cycle === SubscriptionCycle.YEARLY) {
@@ -437,49 +517,77 @@ export class SubscriptionService implements OnModuleInit {
         } else {
             expiry.setMonth(now.getMonth() + 1);
         }
+
+        // Acquire row-level pessimistic_write lock inside transaction to prevent double-activation race conditions
+        const activated = await this.subscriptionRepo.manager.transaction(async (manager) => {
+            const lockedSub = await manager.findOne(Subscription, {
+                where: { id: subscription.id },
+                lock: { mode: 'pessimistic_write' },
+            });
+
+            if (!lockedSub || lockedSub.status === SubscriptionStatus.ACTIVE) {
+                return false;
+            }
+
+            lockedSub.currentPeriodEnd = expiry;
+            lockedSub.status = SubscriptionStatus.ACTIVE;
+            await manager.save(Subscription, lockedSub);
+            return true;
+        });
+
+        if (!activated) {
+            this.logger.warn(`Subscription ${subscription.id} (Ref: ${reference}) is already active. Skipping activation.`);
+            return;
+        }
+
         subscription.currentPeriodEnd = expiry;
-        
-        // Ensure status is updated before saving
         subscription.status = SubscriptionStatus.ACTIVE;
-        await this.subscriptionRepo.save(subscription);
+        this.logger.log(`Activating subscription ${subscription.id} for user ${subscription.userId} (Ref: ${reference})`);
 
         // Invalidate user plan cache in Redis
         await this.cacheManager.del(`user_plan_tier:${subscription.userId}`).catch(() => {});
         await this.cacheManager.del(`user_subscription_status:${subscription.userId}`).catch(() => {});
 
         // Schedule warning and renewal jobs in Bull Queue
-        const warningTime = subscription.currentPeriodEnd.getTime() - 5 * 24 * 60 * 60 * 1000;
+        const warningTime = expiry.getTime() - 5 * 24 * 60 * 60 * 1000;
         const warningDelay = warningTime - Date.now();
         if (warningDelay > 0) {
             await this.subscriptionQueue.add('expiration-warning', {
                 subscriptionId: subscription.id
-            }, { delay: warningDelay });
+            }, { delay: warningDelay, jobId: `exp-warn-sched:${subscription.id}` });
             this.logger.log(`Scheduled expiration warning job for subscription ${subscription.id} in ${warningDelay}ms`);
         }
 
-        const renewalDelay = subscription.currentPeriodEnd.getTime() - Date.now();
+        const renewalDelay = expiry.getTime() - Date.now();
         if (renewalDelay > 0) {
             await this.subscriptionQueue.add('renewal-charge', {
                 subscriptionId: subscription.id
-            }, { delay: renewalDelay });
+            }, { delay: renewalDelay, jobId: `renewal-sched:${subscription.id}` });
             this.logger.log(`Scheduled renewal charge job for subscription ${subscription.id} in ${renewalDelay}ms`);
         }
 
         await this.alertsService.create(subscription.userId, {
             type: AlertType.SYSTEM,
             severity: AlertSeverity.INFO,
-            title: 'Assinatura Ativada ✅',
-            description: `Sua assinatura foi ativada com sucesso via Webhook! Validade até ${expiry.toLocaleDateString()}.`,
+            title: 'Assinatura Ativada',
+            description: `Sua assinatura foi ativada com sucesso. Vigência até ${expiry.toLocaleDateString('pt-PT')}.`,
             metadata: { reference }
         });
 
         const user = await this.userRepo.findOne({ where: { id: subscription.userId } });
         if (user?.email) {
-            await this.emailService.sendTemplatedEmail(user.email, 'PAYMENT_SUCCESS', {
-                userName: user.name,
-                plan: subscription.planConfig.tier,
-                expiryDate: expiry.toLocaleDateString()
-            });
+            await this.emailProducer.enqueue(
+                user.email,
+                'PAYMENT_SUCCESS',
+                {
+                    userName: user.name || undefined,
+                    plan: subscription.planConfig?.tier || 'Profissional',
+                    cycle: subscription.cycle === SubscriptionCycle.YEARLY ? 'Anual' : 'Mensal',
+                    reference,
+                    expiryDate: expiry.toISOString(),
+                },
+                { jobId: `payment-success:${subscription.id}` },
+            );
         }
 
         // Dispatch Payment SMS (Systemic)
@@ -487,20 +595,48 @@ export class SubscriptionService implements OnModuleInit {
             await this.smsService.sendSms(
                 user.id, 
                 user.whatsapp, 
-                SmsTemplates.PAYMENT_CONFIRMED(user.name, subscription.planConfig.tier),
+                SmsTemplates.PAYMENT_CONFIRMED(user.name, subscription.planConfig?.tier || 'PRO'),
                 true // isSystemic
             );
         }
 
-        await this.notificationsService.create(subscription.userId, {
-            title: 'Pagamento Confirmado! 🎉',
-            message: `Sua assinatura ${subscription.planConfig.tier} está ativa até ${expiry.toLocaleDateString()}.`,
+        await this.notificationsService.create(
+            subscription.userId,
+            {
+                title: 'Pagamento Confirmado',
+                message: `Sua assinatura ${subscription.planConfig?.tier || 'PRO'} está ativa até ${expiry.toLocaleDateString('pt-PT')}.`,
+            },
+            { skipEmail: true },
+        );
+
+        const monthly = Number(subscription.planConfig?.monthlyPrice || 0);
+        const discount = Number(subscription.planConfig?.annualDiscountPercent || 0);
+        const revenue =
+            subscription.cycle === SubscriptionCycle.YEARLY
+                ? Number((monthly * 12 * (1 - discount / 100)).toFixed(2))
+                : monthly;
+
+        void this.analyticsService?.recordAuthOrBillingConversion({
+            eventName: 'purchase',
+            userId: subscription.userId,
+            email: user?.email,
+            visitorId: user?.visitorId,
+            revenue,
+            currency: 'USD',
+            attributionData: user?.attributionData,
+            metadata: {
+                subscriptionId: subscription.id,
+                plan: subscription.planConfig?.tier || 'PRO',
+                cycle: subscription.cycle,
+                paymentMethod: subscription.paymentMethod,
+                reference,
+            },
         });
 
         this.logger.log(`Subscription activated via webhook for reference: ${reference}`);
     }
 
-    async handleDebitoStatusUpdate(reference: string) {
+    async handleDebitoStatusUpdate(reference: string, expectedUserId?: string) {
         // Find subscription by either Torex reference or Debito ID
         const subscription = await this.subscriptionRepo.findOne({
             where: [
@@ -511,6 +647,10 @@ export class SubscriptionService implements OnModuleInit {
         });
 
         if (!subscription) return;
+
+        if (expectedUserId && subscription.userId !== expectedUserId) {
+            throw new ForbiddenException('Acesso negado a esta referência de assinatura.');
+        }
 
         // Use Debito ID for polling if available, OTHERWISE DO NOT POLL (prevents 404s with internal refs)
         if (!subscription.debitoTransactionId) {
@@ -536,10 +676,29 @@ export class SubscriptionService implements OnModuleInit {
             
             // Send notification ONLY if not already cancelled (redundancy check)
             if (subscription.status !== SubscriptionStatus.CANCELLED) {
-                await this.notificationsService.create(subscription.userId, {
-                    title: 'Pagamento Falhou ❌',
-                    message: `O seu pagamento de referência ${reference} não foi concluído (${result.status}).`,
-                });
+                const user = await this.userRepo.findOne({ where: { id: subscription.userId } });
+                if (user?.email) {
+                    await this.emailProducer.enqueue(
+                        user.email,
+                        'PAYMENT_FAILED',
+                        {
+                            userName: user.name || undefined,
+                            plan: subscription.planConfig?.tier,
+                            reference,
+                            reason: `Transação não autorizada (${result.status}).`,
+                        },
+                        { jobId: `payment-failed:${subscription.id}` },
+                    );
+                }
+
+                await this.notificationsService.create(
+                    subscription.userId,
+                    {
+                        title: 'Pagamento Não Concluído',
+                        message: `O pagamento de referência ${reference} não foi concluído (${result.status}).`,
+                    },
+                    { skipEmail: true },
+                );
                 
                 subscription.status = SubscriptionStatus.CANCELLED;
                 await this.subscriptionRepo.save(subscription);
@@ -680,13 +839,17 @@ export class SubscriptionService implements OnModuleInit {
 
         if (!sub || !sub.user || !sub.user.email) return;
 
-        this.logger.log(`Sending remarketing follow-up to ${sub.user.email} for subscription ${sub.id}`);
+        this.logger.log(`Enqueueing remarketing follow-up to ${sub.user.email} for subscription ${sub.id}`);
         
-        await this.emailService.sendTemplatedEmail(sub.user.email, 'SYSTEM_ALERT', {
-            title: 'Sentimos sua falta! 👋',
-            message: `Olá ${sub.user.name}, notamos que sua tentativa de assinatura do plano ${sub.planConfig.tier} não foi concluída. Se precisar de ajuda para finalizar seu pagamento ou tiver alguma dúvida, estamos à disposição!`,
-            type: 'MARKETING'
-        });
+        await this.emailProducer.enqueue(
+            sub.user.email,
+            'REMARKETING_FOLLOWUP',
+            {
+                userName: sub.user.name || undefined,
+                plan: sub.planConfig?.tier,
+            },
+            { jobId: `remarketing:${sub.id}` },
+        );
 
         sub.followUpSent = true;
         await this.subscriptionRepo.save(sub);
@@ -695,20 +858,43 @@ export class SubscriptionService implements OnModuleInit {
     async scheduleRemarketingFollowup(subscriptionId: string) {
         await this.subscriptionQueue.add('remarketing-followup', {
             subscriptionId
-        }, { delay: 2 * 24 * 60 * 60 * 1000 });
+        }, { delay: 2 * 24 * 60 * 60 * 1000, jobId: `remarketing-trigger:${subscriptionId}` });
         this.logger.log(`Scheduled remarketing follow-up job for subscription ${subscriptionId} in 2 days`);
     }
 
     async getFinancialStats() {
-        const subscriptions = await this.subscriptionRepo.find({
-            relations: ['planConfig', 'user'],
-            order: { createdAt: 'ASC' }
-        });
-        const users = await this.userRepo.find({
-            order: { createdAt: 'ASC' }
-        });
+        const cacheKey = 'admin:financial_stats';
+        try {
+            const cached = await this.cacheManager.get(cacheKey);
+            if (cached) return cached;
+        } catch {}
 
-        const totalUsers = users.length;
+        const [subscriptions, userDailyCounts, totalUsersCount] = await Promise.all([
+            this.subscriptionRepo
+                .createQueryBuilder('s')
+                .leftJoin('s.planConfig', 'pc')
+                .select([
+                    's.id',
+                    's.userId',
+                    's.status',
+                    's.cycle',
+                    's.paymentMethod',
+                    's.paymentReference',
+                    's.createdAt',
+                    'pc.id',
+                    'pc.tier',
+                    'pc.monthlyPrice',
+                    'pc.annualDiscountPercent',
+                ])
+                .orderBy('s.createdAt', 'ASC')
+                .getMany(),
+            this.userRepo.query(
+                `SELECT TO_CHAR("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COUNT(*)::int AS cnt FROM users GROUP BY 1 ORDER BY 1 ASC`,
+            ),
+            this.userRepo.count(),
+        ]);
+
+        const totalUsers = totalUsersCount;
         const activeSubs = subscriptions.filter(s => s.status === SubscriptionStatus.ACTIVE);
         const activeSubscribers = activeSubs.length;
 
@@ -778,7 +964,7 @@ export class SubscriptionService implements OnModuleInit {
         }
 
         const classificationMap: Record<string, 'new' | 'renewal' | 'upgrade'> = {};
-        for (const [userId, userSubs] of Object.entries(userSubMap)) {
+        for (const [, userSubs] of Object.entries(userSubMap)) {
             userSubs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
             let lastTier: string | null = null;
             for (let i = 0; i < userSubs.length; i++) {
@@ -812,13 +998,14 @@ export class SubscriptionService implements OnModuleInit {
 
         let userCumulative = 0;
         const userGroups: Record<string, number> = {};
-        for (const user of users) {
-            const dateStr = formatDate(user.createdAt);
-            userGroups[dateStr] = (userGroups[dateStr] || 0) + 1;
+        for (const row of userDailyCounts || []) {
+            if (row?.day) {
+                userGroups[row.day] = Number(row.cnt || 0);
+            }
         }
 
         const allDates = Array.from(new Set([
-            ...users.map(u => formatDate(u.createdAt)),
+            ...Object.keys(userGroups),
             ...subscriptions.map(s => formatDate(s.createdAt))
         ])).sort();
 
@@ -831,7 +1018,7 @@ export class SubscriptionService implements OnModuleInit {
             }
         }
 
-        return {
+        const result = {
             totalUsers,
             activeSubscribers,
             estimatedMonthlyRevenue: estimatedMonthlyRevenueMZN,
@@ -841,6 +1028,12 @@ export class SubscriptionService implements OnModuleInit {
             statuses,
             dailyMetrics
         };
+
+        try {
+            await this.cacheManager.set(cacheKey, result, 60_000); // 60s cache
+        } catch {}
+
+        return result;
     }
 
     async markWarningAsShown(userId: string) {
@@ -912,33 +1105,13 @@ export class SubscriptionService implements OnModuleInit {
         hasUsedTrial: boolean;
         reason?: string;
     }> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user) {
-            return { trialGranted: false, hasUsedTrial: false, reason: 'user_not_found' };
-        }
-
-        if (user.hasUsedTrial) {
-            return { trialGranted: false, hasUsedTrial: true, reason: 'trial_already_used' };
-        }
-
-        // Check if trial campaign is currently active
+        // Check if trial campaign is currently active before acquiring DB lock
         const campaign = await this.getTrialCampaignStatus();
         if (!campaign.active) {
-            return { trialGranted: false, hasUsedTrial: false, reason: 'campaign_inactive' };
+            const u = await this.userRepo.findOne({ where: { id: userId }, select: ['id', 'hasUsedTrial'] });
+            return { trialGranted: false, hasUsedTrial: Boolean(u?.hasUsedTrial), reason: 'campaign_inactive' };
         }
 
-        // Check if user already has an active subscription
-        const now = new Date();
-        const activeSub = await this.subscriptionRepo.findOne({
-            where: { userId, status: SubscriptionStatus.ACTIVE },
-            relations: ['planConfig']
-        });
-
-        if (activeSub && activeSub.currentPeriodEnd && activeSub.currentPeriodEnd > now) {
-            return { trialGranted: false, hasUsedTrial: false, reason: 'has_active_subscription' };
-        }
-
-        // Find PRO plan config to attach
         const proPlan = await this.planConfigRepo.findOne({
             where: [{ tier: 'PRO' }, { tier: 'PREMIUM' }]
         });
@@ -949,55 +1122,99 @@ export class SubscriptionService implements OnModuleInit {
         }
 
         const trialDays = campaign.trialDays || 30;
-        const expiryDate = new Date();
+        const now = new Date();
+        const expiryDate = new Date(now);
         expiryDate.setDate(expiryDate.getDate() + trialDays);
 
-        // Create trial subscription
-        const sub = this.subscriptionRepo.create({
-            userId: user.id,
-            planConfigId: proPlan.id,
-            planConfig: proPlan,
-            status: SubscriptionStatus.ACTIVE,
-            cycle: SubscriptionCycle.MONTHLY,
-            paymentMethod: 'TRIAL',
-            paymentReference: `TRIAL_${trialDays}D_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            currentPeriodEnd: expiryDate,
+        const txResult = await this.userRepo.manager.transaction(async (manager) => {
+            const user = await manager.findOne(UserEntity, {
+                where: { id: userId },
+                lock: { mode: 'pessimistic_write' },
+            });
+
+            if (!user) {
+                return { status: 'user_not_found' as const };
+            }
+
+            if (user.hasUsedTrial) {
+                return { status: 'trial_already_used' as const };
+            }
+
+            const activeSub = await manager.findOne(Subscription, {
+                where: { userId, status: SubscriptionStatus.ACTIVE },
+            });
+
+            if (activeSub && activeSub.currentPeriodEnd && activeSub.currentPeriodEnd > now) {
+                return { status: 'has_active_subscription' as const };
+            }
+
+            const sub = manager.create(Subscription, {
+                userId: user.id,
+                planConfigId: proPlan.id,
+                planConfig: proPlan,
+                status: SubscriptionStatus.ACTIVE,
+                cycle: SubscriptionCycle.MONTHLY,
+                paymentMethod: 'TRIAL',
+                paymentReference: `TRIAL_${trialDays}D_${Date.now()}_${randomBytes(3).toString('hex').toUpperCase()}`,
+                currentPeriodEnd: expiryDate,
+            });
+
+            await manager.save(Subscription, sub);
+
+            user.hasUsedTrial = true;
+            user.trialUsedAt = new Date();
+            await manager.save(UserEntity, user);
+
+            return {
+                status: 'granted' as const,
+                subId: sub.id,
+                email: user.email,
+                userName: user.name || user.username || undefined,
+                visitorId: user.visitorId,
+                attributionData: user.attributionData,
+            };
         });
 
-        await this.subscriptionRepo.save(sub);
-
-        // Mark user as having used the trial
-        user.hasUsedTrial = true;
-        user.trialUsedAt = new Date();
-        await this.userRepo.save(user);
+        if (txResult.status !== 'granted') {
+            return {
+                trialGranted: false,
+                hasUsedTrial: txResult.status === 'trial_already_used',
+                reason: txResult.status,
+            };
+        }
 
         // Invalidate cache immediately so PlanPermissionService reflects PREMIUM tier instantly
         await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
         await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
 
-        this.logger.log(`🎉 [SubscriptionService] Trial granted to user ${user.email} for ${trialDays} days (until ${expiryDate.toISOString()})`);
+        this.logger.log(`[SubscriptionService] Trial granted to user ${txResult.email} for ${trialDays} days (until ${expiryDate.toISOString()})`);
 
-        // Send confirmation email via queue or direct
-        const formattedDate = expiryDate.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        const dashboardUrl = `${this.configService.get<string>('FRONTEND_URL', 'http://localhost:5173')}/dashboard`;
-
-        try {
-            await this.emailQueue.add('trial-welcome', {
-                email: user.email,
-                userName: user.name || user.username || 'Trader',
-                days: trialDays,
-                expiryDate: formattedDate,
-                dashboardUrl
-            }, { removeOnComplete: true });
-        } catch (err) {
-            this.logger.warn(`Could not enqueue trial-welcome email: ${err.message}. Sending direct fallback.`);
-            this.emailService.sendTemplatedEmail(user.email, 'TRIAL_WELCOME', {
-                userName: user.name || user.username || 'Trader',
-                days: trialDays,
-                expiryDate: formattedDate,
-                dashboardUrl
-            }).catch(e => this.logger.error(`Direct email fallback failed: ${e.message}`));
+        if (txResult.email) {
+            await this.emailProducer.enqueue(
+                txResult.email,
+                'TRIAL_WELCOME',
+                {
+                    userName: txResult.userName,
+                    plan: proPlan.tier,
+                    days: trialDays,
+                    expiryDate: expiryDate.toISOString(),
+                },
+                { jobId: `trial-welcome:${txResult.subId}` },
+            );
         }
+
+        void this.analyticsService?.recordAuthOrBillingConversion({
+            eventName: 'trial_start',
+            userId,
+            email: txResult.email,
+            visitorId: txResult.visitorId,
+            attributionData: txResult.attributionData,
+            metadata: {
+                subscriptionId: txResult.subId,
+                plan: proPlan.tier,
+                trialDays,
+            },
+        });
 
         return {
             trialGranted: true,
@@ -1035,6 +1252,7 @@ export class SubscriptionService implements OnModuleInit {
                 return { success: true, message: 'Usuário já não possui plano ativo.' };
             }
 
+            const cancelledPlan = activeSubs[0]?.planConfig?.tier || 'Profissional';
             for (const sub of activeSubs) {
                 sub.status = SubscriptionStatus.CANCELLED;
                 sub.currentPeriodEnd = now;
@@ -1044,10 +1262,23 @@ export class SubscriptionService implements OnModuleInit {
             await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
             await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
 
-            await this.notificationsService.create(userId, {
-                title: 'Assinatura Encerrada ℹ️',
-                message: `Seu plano foi cancelado pela administração.${data.reason ? ` Motivo: ${data.reason}` : ''}`,
-            });
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: 'Assinatura Encerrada',
+                    message: `Sua assinatura foi cancelada.${data.reason ? ` Observação: ${data.reason}` : ''}`,
+                },
+                { skipEmail: true },
+            );
+
+            if (user.email) {
+                await this.emailProducer.enqueue(user.email, 'SUBSCRIPTION_CANCELLED', {
+                    userName: user.name || undefined,
+                    plan: cancelledPlan,
+                    effectiveDate: now.toISOString(),
+                    reason: data.reason,
+                });
+            }
 
             return { success: true, message: 'Plano do usuário cancelado com sucesso.' };
         }
@@ -1082,17 +1313,22 @@ export class SubscriptionService implements OnModuleInit {
 
             const formattedDate = newExpiry.toLocaleDateString('pt-PT');
 
-            await this.notificationsService.create(userId, {
-                title: 'Plano Estendido! 🚀',
-                message: `A validade do seu plano ${activeSub.planConfig?.tier || 'Ativo'} foi estendida pela administração até ${formattedDate}.${data.reason ? ` Obs: ${data.reason}` : ''}`,
-            });
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: 'Vigência do Plano Estendida',
+                    message: `A validade do seu plano ${activeSub.planConfig?.tier || 'Ativo'} foi estendida até ${formattedDate}.${data.reason ? ` Obs: ${data.reason}` : ''}`,
+                },
+                { skipEmail: true },
+            );
 
             if (user.email) {
-                await this.emailService.sendTemplatedEmail(user.email, 'SYSTEM_ALERT', {
-                    title: 'Plano Estendido com Sucesso!',
-                    message: `Olá ${user.name || 'Trader'}, sua assinatura do plano ${activeSub.planConfig?.tier || 'Premium'} foi estendida pelo administrador. Sua nova data de expiração é ${formattedDate}.`,
-                    type: 'SYSTEM'
-                }).catch(err => this.logger.warn(`Could not send extension email: ${err.message}`));
+                await this.emailProducer.enqueue(user.email, 'PAYMENT_SUCCESS', {
+                    userName: user.name || undefined,
+                    plan: activeSub.planConfig?.tier || 'Profissional',
+                    cycle: 'Extensão Administrativa',
+                    expiryDate: newExpiry.toISOString(),
+                });
             }
 
             return {
@@ -1158,10 +1394,14 @@ export class SubscriptionService implements OnModuleInit {
 
             const formattedDate = expiryDate.toLocaleDateString('pt-PT');
 
-            await this.notificationsService.create(userId, {
-                title: `Plano ${planConfig.tier} Atribuído! 🎉`,
-                message: `Um administrador atribuiu o plano ${planConfig.tier} à sua conta com validade até ${formattedDate}.${data.reason ? ` Obs: ${data.reason}` : ''}`,
-            });
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: `Plano ${planConfig.tier} Atribuído`,
+                    message: `O plano ${planConfig.tier} foi ativado na sua conta com validade até ${formattedDate}.${data.reason ? ` Obs: ${data.reason}` : ''}`,
+                },
+                { skipEmail: true },
+            );
 
             await this.alertsService.create(userId, {
                 type: AlertType.SYSTEM,
@@ -1172,11 +1412,17 @@ export class SubscriptionService implements OnModuleInit {
             }).catch(e => this.logger.warn(`Could not create alert: ${e.message}`));
 
             if (user.email) {
-                await this.emailService.sendTemplatedEmail(user.email, 'PAYMENT_SUCCESS', {
-                    userName: user.name || 'Trader',
-                    plan: planConfig.tier,
-                    expiryDate: formattedDate
-                }).catch(err => this.logger.warn(`Could not send assignment email: ${err.message}`));
+                await this.emailProducer.enqueue(
+                    user.email,
+                    'PAYMENT_SUCCESS',
+                    {
+                        userName: user.name || undefined,
+                        plan: planConfig.tier,
+                        reference: newSub.paymentReference,
+                        expiryDate: expiryDate.toISOString(),
+                    },
+                    { jobId: `payment-success:${newSub.id}` },
+                );
             }
 
             return {

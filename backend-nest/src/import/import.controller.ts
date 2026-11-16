@@ -20,7 +20,12 @@ export class ImportController {
     ) { }
 
     @Post('report')
-    @UseInterceptors(new FastifyFileInterceptor('file'))
+    @UseInterceptors(
+        new FastifyFileInterceptor('file', {
+            allowedImageOnly: false,
+            maxFileSizeBytes: 25 * 1024 * 1024,
+        }),
+    )
     async uploadReport(
         @UploadedFile() file: any,
         @Req() req,

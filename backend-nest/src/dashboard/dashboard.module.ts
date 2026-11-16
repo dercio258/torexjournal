@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
+import { JournalService } from './journal.service';
 import { SessionService } from './session.service';
 import { TradeEntity } from '../mt5/trade.entity';
 import { PositionEntity } from '../mt5/position.entity';
@@ -10,6 +11,16 @@ import { AccountEntity } from '../account/account.entity';
 import { TechnicalJournal } from './technical-journal.entity';
 import { MentalLog } from './mental-log.entity';
 import { BacktestSession } from './backtest-session.entity';
+import {
+    BacktestStrategyEntity,
+    BacktestSessionBlobEntity,
+    BacktestHypothesisEntity,
+} from './backtest-normalized.entity';
+import {
+    DailyNoteEntity,
+    TradeNoteEntity,
+    GeneralNoteEntity,
+} from './journal-notes.entity';
 
 import { UserEntity } from '../users/user.entity';
 import { EmailModule } from '../email/email.module';
@@ -20,13 +31,33 @@ import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([TradeEntity, PositionEntity, AccountEntity, MentalLog, TechnicalJournal, BacktestSession, UserEntity]),
+        TypeOrmModule.forFeature([
+            TradeEntity,
+            PositionEntity,
+            AccountEntity,
+            MentalLog,
+            TechnicalJournal,
+            BacktestSession,
+            BacktestStrategyEntity,
+            BacktestSessionBlobEntity,
+            BacktestHypothesisEntity,
+            DailyNoteEntity,
+            TradeNoteEntity,
+            GeneralNoteEntity,
+            UserEntity,
+        ]),
         EmailModule,
         NotificationsModule,
-        PaymentModule
+        PaymentModule,
     ],
     controllers: [DashboardController],
-    providers: [DashboardService, SessionService, WeeklyReportService, RiskManagementService],
-    exports: [DashboardService, SessionService]
+    providers: [
+        DashboardService,
+        JournalService,
+        SessionService,
+        WeeklyReportService,
+        RiskManagementService,
+    ],
+    exports: [DashboardService, JournalService, SessionService],
 })
-export class DashboardModule { }
+export class DashboardModule {}

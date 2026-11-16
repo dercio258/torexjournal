@@ -1,17 +1,42 @@
 import { Controller, Get, Query, UseGuards, Post, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
-import { OandaService } from './oanda.service';
 import { MarketDataParserService } from './market-data-parser.service';
+import { TradingViewService } from '../tradingview/tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
+
+const LEGACY_GRANULARITY_MAP: Record<string, string> = {
+    M1: '1m',
+    M5: '5m',
+    M15: '15m',
+    M30: '30m',
+    H1: '1h',
+    H2: '2h',
+    H4: '4h',
+    D: '1D',
+    D1: '1D',
+    W: '1W',
+    M: '1M',
+};
+
+function parseOptionalTimestamp(value?: string): number | undefined {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+        const num = Number(trimmed);
+        return Number.isFinite(num) && num > 0 ? (num < 1e12 ? num * 1000 : num) : undefined;
+    }
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
 
 @Controller('market-data')
 @UseGuards(JwtAuthGuard, PlanGuard)
 @RequirePlan(PlanTier.BASIC)
 export class MarketDataController {
     constructor(
-        private readonly oandaService: OandaService,
+        private readonly tradingViewService: TradingViewService,
         private readonly marketDataParser: MarketDataParserService
     ) { }
 
@@ -22,13 +47,26 @@ export class MarketDataController {
         @Query('to') to: string,
         @Query('granularity') granularity: string = 'M5',
     ) {
-        const fromDate = new Date(from);
-        const toDate = new Date(to);
+        const normalizedKey = (granularity || 'M5').trim().toUpperCase();
+        const tf = LEGACY_GRANULARITY_MAP[normalizedKey] || granularity || '5m';
+        const fromTs = parseOptionalTimestamp(from);
+        const toTs = parseOptionalTimestamp(to);
 
-        // Add a buffer to 'from' and 'to' if needed, or rely on frontend to pass correct range.
-        // For trade replay, we might want some context before and after.
+        const batch = await this.tradingViewService.getCandlesBatch(symbol || 'XAUUSD', tf, {
+            fromTs,
+            toTs,
+            chunkSize: 500,
+        });
 
-        return this.oandaService.getCandles(symbol, fromDate, toDate, granularity);
+        return batch.candles.map((c) => ({
+            timestamp: c.timestamp,
+            time: new Date(c.timestamp).toISOString(),
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+        }));
     }
 
     @Post('upload-mt5')

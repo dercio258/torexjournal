@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { AccountService } from './account.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -46,9 +48,11 @@ export class AccountController {
     }
 
     /**
-     * Cria uma nova conta de trading (máximo de 3 contas por usuário)
+     * Cria uma nova conta de trading (limites validados por plano no backend)
      */
     @Post()
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async createAccount(@Request() req, @Body() dto: CreateAccountDto) {
         return this.accountService.createAccount(req.user.id, dto);
     }
@@ -57,6 +61,8 @@ export class AccountController {
      * Atualiza dados de uma conta de trading
      */
     @Put(':id')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async updateAccount(
         @Request() req,
         @Param('id') id: string,
@@ -69,6 +75,8 @@ export class AccountController {
      * Define uma conta como principal
      */
     @Post(':id/primary')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async setPrimary(@Request() req, @Param('id') id: string) {
         return this.accountService.setPrimary(id, req.user.id);
     }
@@ -77,6 +85,8 @@ export class AccountController {
      * Arquiva uma conta
      */
     @Post(':id/archive')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async archiveAccount(@Request() req, @Param('id') id: string) {
         return this.accountService.archiveAccount(id, req.user.id);
     }
@@ -85,6 +95,8 @@ export class AccountController {
      * Restaura uma conta arquivada
      */
     @Post(':id/restore')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async restoreAccount(@Request() req, @Param('id') id: string) {
         return this.accountService.restoreAccount(id, req.user.id);
     }
@@ -93,6 +105,8 @@ export class AccountController {
      * Exclui uma conta de trading
      */
     @Delete(':id')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async deleteAccount(
         @Request() req,
         @Param('id') id: string,
@@ -105,6 +119,8 @@ export class AccountController {
      * Regenera o token de conexão EA para a conta
      */
     @Post(':id/token/regenerate')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async regenerateToken(@Request() req, @Param('id') id: string) {
         return this.accountService.regenerateAppToken(id, req.user.id);
     }
@@ -121,6 +137,8 @@ export class AccountController {
      * Registra nova transação de saldo (depósito, retirada, etc.)
      */
     @Post(':id/transactions')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async createTransaction(
         @Request() req,
         @Param('id') id: string,
@@ -133,6 +151,8 @@ export class AccountController {
      * Reset de conexão (retrocompatibilidade)
      */
     @Post('reset-connection')
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async resetConnection(@Request() req, @Body('accountId') accountId?: string) {
         return this.accountService.resetConnection(req.user.id, accountId);
     }

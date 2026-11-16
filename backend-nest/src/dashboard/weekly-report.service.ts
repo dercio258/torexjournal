@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AccountEntity } from '../account/account.entity';
+import { EmailProducerService } from '../email/email-producer.service';
+import { EmailTemplatePayloadMap } from '../email/templates';
 import { UserEntity } from '../users/user.entity';
 import { DashboardService } from './dashboard.service';
-import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class WeeklyReportService {
@@ -12,43 +14,70 @@ export class WeeklyReportService {
 
     constructor(
         @InjectRepository(UserEntity)
-        private userRepo: Repository<UserEntity>,
-        private dashboardService: DashboardService,
-        private emailService: EmailService,
-    ) { }
+        private readonly userRepo: Repository<UserEntity>,
+        @InjectRepository(AccountEntity)
+        private readonly accountRepo: Repository<AccountEntity>,
+        private readonly dashboardService: DashboardService,
+        private readonly emailProducer: EmailProducerService,
+    ) {}
 
     @Cron('0 9 * * 0') // Sunday at 09:00 AM
     async handleWeeklyReport() {
-        this.logger.log('Starting weekly performance reports...');
-        
+        if (process.env.MT5_DEDICATED_SERVER === 'true') return;
+        this.logger.log('Preparing weekly performance reports for Redis dispatch...');
+
         const users = await this.userRepo.find();
-        
+        const weekKey = new Date().toISOString().slice(0, 10);
+        const batch: Array<{
+            to: string;
+            template: 'WEEKLY_SUMMARY';
+            data: EmailTemplatePayloadMap['WEEKLY_SUMMARY'];
+            jobId: string;
+        }> = [];
+
         for (const user of users) {
             if (!user.email) continue;
 
             try {
                 const summary = await this.dashboardService.getWeeklySummary(user.id);
                 if (!summary || summary.totalTrades === 0) {
-                    this.logger.debug(`Skipping weekly report for user ${user.id} (no trades)`);
                     continue;
                 }
 
-                await this.emailService.sendTemplatedEmail(
-                    user.email,
-                    'WEEKLY_SUMMARY',
-                    {
-                        userName: user.name || user.username || 'Trader',
-                        ...summary,
-                        subject: `Relatório Semanal: ${summary.totalPnL >= 0 ? 'Lucro' : 'Prejuízo'} de ${summary.totalPnL.toFixed(2)} MT`
-                    }
+                const primaryAccount = await this.accountRepo.findOne({
+                    where: [
+                        { userId: user.id, isPrimary: true, isArchived: false },
+                        { userId: user.id, isArchived: false },
+                    ],
+                });
+                const currency = primaryAccount?.currency || 'USD';
+
+                batch.push({
+                    to: user.email,
+                    template: 'WEEKLY_SUMMARY',
+                    data: {
+                        userName: user.name || user.username || undefined,
+                        totalPnL: Number(summary.totalPnL || 0),
+                        currency,
+                        winRate: Number(summary.winRate || 0),
+                        totalTrades: Number(summary.totalTrades || 0),
+                        topLessons: summary.topLessons || [],
+                        period: summary.period,
+                    },
+                    jobId: `weekly-summary:${user.id}:${weekKey}`,
+                });
+            } catch (error: any) {
+                this.logger.error(
+                    `Failed to compute weekly summary for user ${user.id}: ${error?.message || error}`,
                 );
-                
-                this.logger.log(`Weekly report sent to ${user.email}`);
-            } catch (error) {
-                this.logger.error(`Failed to send weekly report to ${user.id}: ${error.message}`);
             }
         }
-        
-        this.logger.log('Weekly performance reports completed.');
+
+        if (batch.length > 0) {
+            const queued = await this.emailProducer.enqueueBulk(batch, { priority: 3 });
+            this.logger.log(`Enqueued ${queued} weekly performance reports in Redis.`);
+        } else {
+            this.logger.log('Weekly report run finished: 0 eligible users with trades this week.');
+        }
     }
 }

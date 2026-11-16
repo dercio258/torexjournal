@@ -9,6 +9,8 @@ import { UserEntity } from '../users/user.entity';
 import { LeaderboardService } from './leaderboard.service';
 import { LeaderboardController } from './leaderboard.controller';
 import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
+import { AdminAuthGuard } from '../admin/admin-auth.guard';
+import { getJwtSecret } from '../common/security/security.config';
 
 @Module({
     imports: [
@@ -22,14 +24,14 @@ import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({
-                secret: configService.get<string>('JWT_SECRET') || 'dev_secret',
+                secret: getJwtSecret(configService),
                 signOptions: { expiresIn: '12h' },
             }),
             inject: [ConfigService],
         }),
     ],
     controllers: [LeaderboardController],
-    providers: [LeaderboardService, OptionalJwtAuthGuard],
+    providers: [LeaderboardService, OptionalJwtAuthGuard, AdminAuthGuard],
     exports: [LeaderboardService],
 })
 export class LeaderboardModule {}

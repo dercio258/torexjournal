@@ -14,9 +14,11 @@ import { AccountEntity } from '../account/account.entity';
 import { EmailModule } from '../email/email.module';
 import { PaymentModule } from '../payment/payment.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { AuditLogEntity } from './audit-log.entity';
 import { AuditLogService } from './audit-log.service';
 import { SessionEntity } from './session.entity';
+import { getJwtSecret } from '../common/security/security.config';
 
 @Module({
     imports: [
@@ -27,7 +29,7 @@ import { SessionEntity } from './session.entity';
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({
-                secret: configService.get<string>('JWT_SECRET') || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET missing'); })() : 'dev_secret'),
+                secret: getJwtSecret(configService),
                 signOptions: { expiresIn: '24h' },
             }),
             inject: [ConfigService],
@@ -35,10 +37,11 @@ import { SessionEntity } from './session.entity';
         EmailModule,
         PaymentModule,
         NotificationsModule,
-        ConfigModule
+        AnalyticsModule,
+        ConfigModule,
     ],
     providers: [AuthService, JwtStrategy, GoogleStrategy, GithubStrategy, AuditLogService],
     controllers: [AuthController],
     exports: [AuthService, AuditLogService],
 })
-export class AuthModule { }
+export class AuthModule {}

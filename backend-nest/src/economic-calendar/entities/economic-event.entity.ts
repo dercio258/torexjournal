@@ -88,8 +88,12 @@ export class EconomicEvent {
     @Column({ type: 'text', nullable: true })
     description: string | null;
 
-    @Column({ type: 'varchar', length: 50, default: 'MANUAL' })
-    source: string; // 'MANUAL'
+    @Column({ name: 'external_id', type: 'varchar', length: 64, nullable: true })
+    @Index('IDX_economic_events_external_id')
+    externalId: string | null;
+
+    @Column({ type: 'varchar', length: 50, default: 'MT5_CALENDAR' })
+    source: string; // 'MT5_CALENDAR'
 
     @CreateDateColumn({ name: 'created_at' })
     createdAt: Date;

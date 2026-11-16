@@ -18,7 +18,9 @@
         "migration:generate": "npm run typeorm -- -d ./src/data-source.ts migration:generate",
         "migration:run": "npm run typeorm -- -d ./src/data-source.ts migration:run",
         "migration:run:prod": "typeorm migration:run -d ./dist/data-source.js",
-        "migration:revert": "npm run typeorm -- -d ./src/data-source.ts migration:revert"
+        "migration:revert": "npm run typeorm -- -d ./src/data-source.ts migration:revert",
+        "ai:training-report": "ts-node -r tsconfig-paths/register src/scripts/export-ai-training-report.ts",
+        "ml:train-behavior": "..\\quant-engine\\.venv\\Scripts\\python.exe ..\\quant-engine\\scripts\\build_and_train_behavior_ml.py"
     },
     "dependencies": {
         "@clickhouse/client": "^1.23.0",

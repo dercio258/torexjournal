@@ -1,9 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm';
 import { UserEntity } from '../users/user.entity';
 import { Comment } from './comment.entity';
 import { Like } from './like.entity';
 
 @Entity('network_posts')
+@Index('IDX_network_posts_likes_created', ['likesCount', 'createdAt'])
+@Index('IDX_network_posts_user_created', ['userId', 'createdAt'])
 export class Post {
     @PrimaryGeneratedColumn()
     id: number;

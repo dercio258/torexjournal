@@ -21,6 +21,7 @@ import { DebitoService } from './debito.service';
 import { SubscriptionProcessor } from './subscription.processor';
 import { WebhookController } from './webhook.controller';
 import { EmailModule } from '../email/email.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { PlanGuard } from './plan.guard';
 
 @Module({
@@ -34,7 +35,8 @@ import { PlanGuard } from './plan.guard';
         ConfigModule,
         forwardRef(() => AlertsModule),
         forwardRef(() => NotificationsModule),
-        EmailModule
+        EmailModule,
+        AnalyticsModule
     ],
     providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor, PlanGuard],
     controllers: [PaymentController, SubscriptionController, PaymentsController, WebhookController],

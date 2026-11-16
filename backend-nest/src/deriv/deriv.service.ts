@@ -76,7 +76,13 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             return `deriv-sec-${jwtSecret.trim()}`;
         }
 
-        return 'cossa-trading-deriv-default-secret-key-32b';
+        if (this.configService.get<string>('NODE_ENV') === 'production') {
+            throw new Error(
+                'CRITICAL SECURITY ERROR: DERIV_ENCRYPTION_KEY ou JWT_SECRET obrigatório em produção.',
+            );
+        }
+
+        return 'torex_dev_only_deriv_key_do_not_use_in_prod';
     }
 
     private async discoverAccountsViaRest(token: string): Promise<any[] | null> {
@@ -644,6 +650,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                 this.logger.log(`Fetching portfolio for open positions (user ${userId})`);
                 const portfolioRes: any = await client.request({ portfolio: 1 }, 'portfolio');
                 const openPositions = portfolioRes.portfolio?.contracts || [];
+                const portfolioBatch: any[] = [];
 
                 for (const pos of openPositions) {
                     const contractId = pos.contract_id?.toString();
@@ -652,7 +659,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                     const buyId = `buy_${pos.transaction_id}`;
                     const buyDate = this.mt5Service.safeDate(pos.purchase_time);
 
-                    await this.transactionRepo.upsert({
+                    portfolioBatch.push({
                         transactionId: buyId,
                         contractId: contractId,
                         userId,
@@ -661,9 +668,13 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                         currency: pos.currency || 'USD',
                         transactionTime: buyDate || new Date(),
                         raw: pos
-                    }, ['transactionId']);
+                    });
 
                     contractsToEnrich.add(contractId);
+                }
+
+                if (portfolioBatch.length > 0) {
+                    await this.transactionRepo.upsert(portfolioBatch, ['transactionId']);
                 }
             } catch (e) {
                 this.logger.warn(`Failed to fetch portfolio for user ${userId}: ${e.message}`);
@@ -691,6 +702,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                         break;
                     }
 
+                    const statementBatchByTx = new Map<string, any>();
                     for (const t of statementTxs) {
                         const contractId = t.contract_id?.toString();
                         if (!contractId || !['buy', 'sell'].includes(t.action_type)) continue;
@@ -698,7 +710,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                         const txId = `${t.action_type}_${t.transaction_id}`;
                         const txDate = this.mt5Service.safeDate(t.transaction_time);
 
-                        await this.transactionRepo.upsert({
+                        statementBatchByTx.set(txId, {
                             transactionId: txId,
                             contractId: contractId,
                             userId,
@@ -708,9 +720,13 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                             currency: t.currency || 'USD',
                             transactionTime: txDate || new Date(),
                             raw: t
-                        }, ['transactionId']);
+                        });
 
                         contractsToEnrich.add(contractId);
+                    }
+
+                    if (statementBatchByTx.size > 0) {
+                        await this.transactionRepo.upsert(Array.from(statementBatchByTx.values()), ['transactionId']);
                     }
 
                     if (statementTxs.length < 100) hasMore = false;
@@ -745,6 +761,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                         break;
                     }
 
+                    const profitBatchByTx = new Map<string, any>();
                     for (const t of transactions) {
                         const contractId = (t.contract_id || t.transaction_id).toString();
                         const buyId = `buy_${t.transaction_id}`;
@@ -753,8 +770,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                         const buyDate = this.mt5Service.safeDate(t.purchase_time);
                         const sellDate = this.mt5Service.safeDate(t.sell_time);
 
-                        // Save Buy Transaction if missing
-                        await this.transactionRepo.upsert({
+                        profitBatchByTx.set(buyId, {
                             transactionId: buyId,
                             contractId: contractId,
                             userId,
@@ -763,10 +779,9 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                             currency: t.currency || 'USD',
                             transactionTime: buyDate || new Date(),
                             raw: t
-                        }, ['transactionId']);
+                        });
 
-                        // Save Sell Transaction
-                        await this.transactionRepo.upsert({
+                        profitBatchByTx.set(sellId, {
                             transactionId: sellId,
                             contractId: contractId,
                             userId,
@@ -775,9 +790,13 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                             currency: t.currency || 'USD',
                             transactionTime: sellDate || buyDate || new Date(),
                             raw: t
-                        }, ['transactionId']);
+                        });
 
                         contractsToEnrich.add(contractId);
+                    }
+
+                    if (profitBatchByTx.size > 0) {
+                        await this.transactionRepo.upsert(Array.from(profitBatchByTx.values()), ['transactionId']);
                     }
 
                     if (transactions.length < 100) hasMore = false;

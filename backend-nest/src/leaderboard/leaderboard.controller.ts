@@ -2,6 +2,7 @@ import { Controller, Get, Post, Query, UseGuards, Req } from '@nestjs/common';
 import { LeaderboardService, LeaderboardFilterDto } from './leaderboard.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
+import { AdminAuthGuard } from '../admin/admin-auth.guard';
 
 @Controller('leaderboard')
 export class LeaderboardController {
@@ -22,7 +23,7 @@ export class LeaderboardController {
     }
 
     @Post('recalculate')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AdminAuthGuard)
     async recalculate() {
         await this.leaderboardService.recalculateRanks();
         return { success: true, message: 'Classificação recalculada com sucesso.' };

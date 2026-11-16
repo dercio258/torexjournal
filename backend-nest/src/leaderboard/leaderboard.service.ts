@@ -195,6 +195,22 @@ export class LeaderboardService implements OnModuleInit {
         };
     }
 
+    private async getCacheVersion(): Promise<number> {
+        try {
+            const ver = await this.cacheManager.get<number>('leaderboard:cache_version');
+            return typeof ver === 'number' && ver > 0 ? ver : 1;
+        } catch {
+            return 1;
+        }
+    }
+
+    private async bumpCacheVersion(): Promise<void> {
+        try {
+            const current = await this.getCacheVersion();
+            await this.cacheManager.set('leaderboard:cache_version', current + 1, 86_400_000);
+        } catch { }
+    }
+
     /**
      * Retorna a lista ranqueada de traders para o Leaderboard
      */
@@ -205,7 +221,8 @@ export class LeaderboardService implements OnModuleInit {
             await this.recalculateRanks();
         }
 
-        const cacheKey = `leaderboard:list:${JSON.stringify(filters)}:${currentUserId || 'guest'}`;
+        const version = await this.getCacheVersion();
+        const cacheKey = `leaderboard:v${version}:list:${JSON.stringify(filters)}:${currentUserId || 'guest'}`;
         try {
             const cached = await this.cacheManager.get(cacheKey);
             if (cached) return cached;
@@ -252,35 +269,26 @@ export class LeaderboardService implements OnModuleInit {
      * Retorna o perfil de ranking do usuário autenticado
      */
     async getMyRank(userId: string) {
-        let rank = await this.rankRepo.findOne({ where: { userId } });
+        const rank = await this.rankRepo.findOne({ where: { userId } });
         if (!rank) {
-            await this.recalculateRanks();
-            rank = await this.rankRepo.findOne({ where: { userId } });
-        }
+            const autoRecalcCooldownKey = 'leaderboard:auto_recalc_cooldown';
+            let onCooldown = false;
+            try {
+                onCooldown = Boolean(await this.cacheManager.get(autoRecalcCooldownKey));
+            } catch { }
 
-        if (!rank) {
-            const user = await this.userRepo.findOne({ where: { id: userId } });
-            return {
-                userId,
-                rank: 999,
-                name: user?.name || user?.username || 'Trader',
-                username: user?.username || `trader_${userId.slice(0, 5)}`,
-                avatarUrl: user?.avatarUrl || null,
-                currency: 'USD',
-                tier: 'BRONZE',
-                tierLevel: 'CALIBRANDO',
-                winRate: 0,
-                tradesCount: 0,
-                streak: 0,
-                profitFactor: 0,
-                riskReward: 0,
-                totalPnL: 0,
-                compositeScore: 0,
-                scoreBreakdown: { vol: 0, time: 0, cons: 0, wr: 0, pf: 0, rr: 0 },
-                badges: [],
-                isCurrentUser: true,
-                qualified: false,
-            };
+            if (!onCooldown) {
+                try {
+                    await this.cacheManager.set(autoRecalcCooldownKey, 1, 5 * 60 * 1000);
+                } catch { }
+                // Executa em segundo plano sem travar a resposta HTTP do usuário
+                this.recalculateRanks().catch((err) =>
+                    this.logger.warn(`Background leaderboard recalculation failed: ${err?.message || err}`),
+                );
+            }
+
+            // Calcula instantaneamente (< 5ms via SQL agregado) apenas os dados do usuário atual
+            return this.computeSingleUserPreviewRank(userId);
         }
 
         return {
@@ -290,47 +298,273 @@ export class LeaderboardService implements OnModuleInit {
         };
     }
 
+    private async computeSingleUserPreviewRank(userId: string) {
+        const [user, accounts] = await Promise.all([
+            this.userRepo.findOne({
+                where: { id: userId },
+                select: ['id', 'username', 'name', 'email', 'avatarUrl', 'createdAt'],
+            }),
+            this.accountRepo.find({
+                where: { userId, type: Not(AccountType.DEMO), isArchived: false },
+                select: ['id', 'currency'],
+            }),
+        ]);
+
+        const accountIds = accounts.map((a) => a.id);
+        let tradesCount = 0;
+        let activeDays = 0;
+        let wins = 0;
+        let losses = 0;
+        let grossProfit = 0;
+        let grossLoss = 0;
+        let totalPnL = 0;
+        let maxStreak = 0;
+
+        if (accountIds.length > 0) {
+            const [aggRows, streakRows] = await Promise.all([
+                this.tradeRepo.query(
+                    `
+                    SELECT
+                        COUNT(*)::int AS "tradesCount",
+                        COUNT(DISTINCT DATE(t.close_time AT TIME ZONE 'UTC'))::int AS "activeDays",
+                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0)::int AS "wins",
+                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0)::int AS "losses",
+                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0), 0)::float AS "grossProfit",
+                        COALESCE(SUM(ABS(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0))) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0), 0)::float AS "grossLoss",
+                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)), 0)::float AS "totalPnL"
+                    FROM trades t
+                    WHERE t.account_id = ANY($1)
+                      AND t.status = 'CLOSED'
+                    `,
+                    [accountIds],
+                ),
+                this.tradeRepo.query(
+                    `
+                    WITH nonzero AS (
+                        SELECT
+                            (COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0) AS is_win,
+                            ROW_NUMBER() OVER (ORDER BY t.close_time ASC, t.id ASC) AS rn_all,
+                            ROW_NUMBER() OVER (PARTITION BY (COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0) ORDER BY t.close_time ASC, t.id ASC) AS rn_part
+                        FROM trades t
+                        WHERE t.account_id = ANY($1)
+                          AND t.status = 'CLOSED'
+                          AND COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) <> 0
+                    ),
+                    streaks AS (
+                        SELECT COUNT(*)::int AS len
+                        FROM nonzero
+                        WHERE is_win = true
+                        GROUP BY (rn_all - rn_part)
+                    )
+                    SELECT COALESCE(MAX(len), 0)::int AS "maxStreak" FROM streaks
+                    `,
+                    [accountIds],
+                ),
+            ]);
+
+            const agg = aggRows?.[0];
+            if (agg) {
+                tradesCount = Number(agg.tradesCount || 0);
+                activeDays = Number(agg.activeDays || 0);
+                wins = Number(agg.wins || 0);
+                losses = Number(agg.losses || 0);
+                grossProfit = Number(agg.grossProfit || 0);
+                grossLoss = Number(agg.grossLoss || 0);
+                totalPnL = Number(agg.totalPnL || 0);
+            }
+            maxStreak = Number(streakRows?.[0]?.maxStreak || 0);
+        }
+
+        const now = new Date();
+        const userCreatedAt = user?.createdAt ? new Date(user.createdAt) : now;
+        const platformDays = Math.max(
+            1,
+            Math.floor((now.getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24)),
+        );
+        const effectiveTotal = wins + losses || 1;
+        const winRate = tradesCount > 0 ? Number(((wins / effectiveTotal) * 100).toFixed(1)) : 0;
+        const profitFactor =
+            tradesCount > 0
+                ? grossLoss === 0
+                    ? Number((grossProfit > 0 ? 3.0 : 1.0).toFixed(2))
+                    : Number((grossProfit / grossLoss).toFixed(2))
+                : 0;
+        const avgWin = wins > 0 ? grossProfit / wins : 0;
+        const avgLoss = losses > 0 ? grossLoss / losses : 1;
+        const riskReward = tradesCount > 0 ? Number((avgLoss === 0 ? 1 : avgWin / avgLoss).toFixed(2)) : 0;
+
+        const { compositeScore, scoreBreakdown } = this.calculateCompositeScore({
+            tradesCount,
+            activeDays,
+            platformDays,
+            winRate,
+            profitFactor,
+            riskReward,
+            streak: maxStreak,
+            totalPnL: Number(totalPnL.toFixed(2)),
+        });
+
+        const badges = this.calculateBadges({
+            winRate,
+            streak: maxStreak,
+            profitFactor,
+            riskReward,
+            tradesCount,
+            activeDays,
+            totalPnL: Number(totalPnL.toFixed(2)),
+        });
+
+        return {
+            userId,
+            rank: 999,
+            name: user?.name || user?.username || 'Trader',
+            username: user?.username || `trader_${userId.slice(0, 5)}`,
+            avatarUrl: user?.avatarUrl || null,
+            currency: accounts[0]?.currency || 'USD',
+            tier: 'BRONZE',
+            tierLevel: tradesCount > 0 ? 'BRONZE' : 'CALIBRANDO',
+            winRate,
+            tradesCount,
+            streak: maxStreak,
+            profitFactor,
+            riskReward,
+            totalPnL: Number(totalPnL.toFixed(2)),
+            compositeScore: tradesCount > 0 ? compositeScore : 0,
+            scoreBreakdown:
+                tradesCount > 0
+                    ? scoreBreakdown
+                    : { vol: 0, time: 0, cons: 0, wr: 0, pf: 0, rr: 0 },
+            badges,
+            isCurrentUser: true,
+            qualified: tradesCount > 0,
+        };
+    }
+
     /**
      * Recalcula o ranking avaliando todos os usuários reais, contas NÃO-DEMO e trades reais
-     * Focado em número de operações, consistência, tempo na plataforma e eficiência
+     * via SQL agregado nativo (GROUP BY + Window Function) sem loops N+1 em memória.
      */
     async recalculateRanks() {
-        this.logger.log('Recalculating Leaderboard Rankings for all real users...');
+        this.logger.log('Recalculating Leaderboard Rankings via SQL aggregation...');
 
-        // 1. Limpar benchmarks artificiais anteriores para garantir pureza dos dados reais
+        // 1. Limpar benchmarks artificiais anteriores
         try {
             await this.rankRepo.delete({ isBenchmark: true });
         } catch (e) {}
 
-        // 2. Buscar todos os usuários cadastrados e ativos
-        const allUsers = await this.userRepo.find({
-            where: [
-                { isBlocked: false },
-                { isBlocked: null as any },
-            ],
-        });
-
-        // 3. Buscar todas as contas ativas NÃO-DEMO
-        const realAccounts = await this.accountRepo.find({
-            where: {
-                type: Not(AccountType.DEMO),
-                isArchived: false,
-            },
-        });
+        // 2. Buscar apenas colunas necessárias dos usuários e contas NÃO-DEMO em paralelo
+        const [allUsers, realAccounts] = await Promise.all([
+            this.userRepo.find({
+                where: [{ isBlocked: false }, { isBlocked: null as any }],
+                select: ['id', 'username', 'name', 'email', 'avatarUrl', 'createdAt'],
+            }),
+            this.accountRepo.find({
+                where: {
+                    type: Not(AccountType.DEMO),
+                    isArchived: false,
+                },
+                select: ['id', 'userId', 'currency'],
+            }),
+        ]);
 
         const userAccountsMap = new Map<string, AccountEntity[]>();
+        const allValidAccountIds: string[] = [];
         for (const acc of realAccounts) {
             if (!acc.userId) continue;
             const list = userAccountsMap.get(acc.userId) || [];
             list.push(acc);
             userAccountsMap.set(acc.userId, list);
+            allValidAccountIds.push(acc.id);
+        }
+
+        // 3. Agregar todas as métricas e sequências (maxStreak) direto no PostgreSQL em 2 queries únicas!
+        const metricsByUserId = new Map<
+            string,
+            {
+                tradesCount: number;
+                activeDays: number;
+                wins: number;
+                losses: number;
+                grossProfit: number;
+                grossLoss: number;
+                totalPnL: number;
+            }
+        >();
+        const streakByUserId = new Map<string, number>();
+
+        if (allValidAccountIds.length > 0) {
+            const [aggRows, streakRows] = await Promise.all([
+                this.tradeRepo.query(
+                    `
+                    SELECT
+                        a.user_id AS "userId",
+                        COUNT(*)::int AS "tradesCount",
+                        COUNT(DISTINCT DATE(t.close_time AT TIME ZONE 'UTC'))::int AS "activeDays",
+                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0)::int AS "wins",
+                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0)::int AS "losses",
+                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0), 0)::float AS "grossProfit",
+                        COALESCE(SUM(ABS(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0))) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0), 0)::float AS "grossLoss",
+                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)), 0)::float AS "totalPnL"
+                    FROM trades t
+                    INNER JOIN accounts a ON a.id::text = t.account_id
+                    WHERE t.account_id = ANY($1)
+                      AND t.status = 'CLOSED'
+                    GROUP BY a.user_id
+                    `,
+                    [allValidAccountIds],
+                ),
+                this.tradeRepo.query(
+                    `
+                    WITH nonzero AS (
+                        SELECT
+                            a.user_id AS "userId",
+                            (COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0) AS is_win,
+                            ROW_NUMBER() OVER (PARTITION BY a.user_id ORDER BY t.close_time ASC, t.id ASC) AS rn_all,
+                            ROW_NUMBER() OVER (PARTITION BY a.user_id, (COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0) ORDER BY t.close_time ASC, t.id ASC) AS rn_part
+                        FROM trades t
+                        INNER JOIN accounts a ON a.id::text = t.account_id
+                        WHERE t.account_id = ANY($1)
+                          AND t.status = 'CLOSED'
+                          AND COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) <> 0
+                    ),
+                    streaks AS (
+                        SELECT "userId", COUNT(*)::int AS len
+                        FROM nonzero
+                        WHERE is_win = true
+                        GROUP BY "userId", (rn_all - rn_part)
+                    )
+                    SELECT "userId", MAX(len)::int AS "maxStreak"
+                    FROM streaks
+                    GROUP BY "userId"
+                    `,
+                    [allValidAccountIds],
+                ),
+            ]);
+
+            for (const row of aggRows || []) {
+                if (!row.userId) continue;
+                metricsByUserId.set(row.userId, {
+                    tradesCount: Number(row.tradesCount || 0),
+                    activeDays: Number(row.activeDays || 0),
+                    wins: Number(row.wins || 0),
+                    losses: Number(row.losses || 0),
+                    grossProfit: Number(row.grossProfit || 0),
+                    grossLoss: Number(row.grossLoss || 0),
+                    totalPnL: Number(row.totalPnL || 0),
+                });
+            }
+
+            for (const row of streakRows || []) {
+                if (!row.userId) continue;
+                streakByUserId.set(row.userId, Number(row.maxStreak || 0));
+            }
         }
 
         const realUsersData: Partial<LeaderboardRankEntity>[] = [];
         const now = new Date();
         const usedUsernames = new Set<string>();
 
-        // 4. Calcular métricas para cada usuário cadastrado
+        // 4. Calcular scores compostos em memória (O(U), sem queries por usuário)
         for (const user of allUsers) {
             let baseName = '';
             if (user.username && !user.username.includes(' ') && user.username.length <= 15) {
@@ -342,6 +576,7 @@ export class LeaderboardService implements OnModuleInit {
             } else {
                 baseName = 'trader';
             }
+            if (!baseName) baseName = 'trader';
 
             let uniqueName = baseName;
             let counter = 2;
@@ -353,49 +588,16 @@ export class LeaderboardService implements OnModuleInit {
             user.username = uniqueName;
 
             const accounts = userAccountsMap.get(user.id) || [];
-            const accountIds = accounts.map((a) => a.id);
-            let trades: TradeEntity[] = [];
+            const agg = metricsByUserId.get(user.id);
+            const tradesCount = agg?.tradesCount || 0;
+            const activeDays = agg?.activeDays || 0;
+            const wins = agg?.wins || 0;
+            const losses = agg?.losses || 0;
+            const grossProfit = agg?.grossProfit || 0;
+            const grossLoss = agg?.grossLoss || 0;
+            const totalPnL = agg?.totalPnL || 0;
+            const maxStreak = streakByUserId.get(user.id) || 0;
 
-            if (accountIds.length > 0) {
-                trades = await this.tradeRepo.find({
-                    where: {
-                        accountId: In(accountIds),
-                        status: 'CLOSED',
-                    },
-                    order: { closeTime: 'ASC' },
-                });
-            }
-
-            const activeDaysSet = new Set<string>();
-            let wins = 0;
-            let losses = 0;
-            let grossProfit = 0;
-            let grossLoss = 0;
-            let currentStreak = 0;
-            let maxStreak = 0;
-            let totalPnL = 0;
-
-            for (const t of trades) {
-                if (t.closeTime) {
-                    const dayKey = new Date(t.closeTime).toISOString().slice(0, 10);
-                    activeDaysSet.add(dayKey);
-                }
-                const profit = Number(t.profit || t.netPnl || 0);
-                totalPnL += profit;
-                if (profit > 0) {
-                    wins++;
-                    grossProfit += profit;
-                    currentStreak++;
-                    if (currentStreak > maxStreak) maxStreak = currentStreak;
-                } else if (profit < 0) {
-                    losses++;
-                    grossLoss += Math.abs(profit);
-                    currentStreak = 0;
-                }
-            }
-
-            const tradesCount = trades.length;
-            const activeDays = activeDaysSet.size;
             const userCreatedAt = user.createdAt ? new Date(user.createdAt) : now;
             const platformDays = Math.max(1, Math.floor((now.getTime() - userCreatedAt.getTime()) / (1000 * 60 * 60 * 24)));
 
@@ -571,42 +773,41 @@ export class LeaderboardService implements OnModuleInit {
             rankedTraders.push(t);
         });
 
-        // 6. Persistir no banco
-        const processedUserIds = new Set<string>();
+        // 6. Persistir no banco em lote (sem queries N+1 por usuário)
+        const processedUserIds = Array.from(
+            new Set(rankedTraders.map((t) => t.userId).filter(Boolean) as string[]),
+        );
 
-        for (const trader of rankedTraders) {
-            if (trader.userId) processedUserIds.add(trader.userId);
+        const existingRanks = await this.rankRepo.find({
+            select: ['id', 'userId'],
+        });
+        const existingIdByUserId = new Map<string, string>();
+        const staleRankIds: string[] = [];
+        const processedSet = new Set<string>(processedUserIds);
 
-            const existing = await this.rankRepo.findOne({
-                where: { userId: trader.userId },
-            });
-
-            if (existing) {
-                await this.rankRepo.update(existing.id, trader);
+        for (const r of existingRanks) {
+            if (r.userId && processedSet.has(r.userId) && !existingIdByUserId.has(r.userId)) {
+                existingIdByUserId.set(r.userId, r.id);
             } else {
-                await this.rankRepo.save(this.rankRepo.create(trader));
+                staleRankIds.push(r.id);
             }
         }
 
-        // Remover quaisquer registros obsoletos que não correspondam aos usuários atuais
-        const allRanks = await this.rankRepo.find();
-        for (const r of allRanks) {
-            if (r.userId && !processedUserIds.has(r.userId)) {
-                await this.rankRepo.delete(r.id);
-            } else if (!r.userId) {
-                await this.rankRepo.delete(r.id);
-            }
+        if (staleRankIds.length > 0) {
+            await this.rankRepo.delete(staleRankIds);
         }
 
-        // Limpar cache
-        try {
-            const store = (this.cacheManager as any)?.store;
-            if (typeof store?.reset === 'function') {
-                await store.reset();
-            } else if (typeof (this.cacheManager as any)?.reset === 'function') {
-                await (this.cacheManager as any).reset();
-            }
-        } catch (e) {}
+        const entitiesToSave = rankedTraders.map((trader) => {
+            const existingId = trader.userId ? existingIdByUserId.get(trader.userId) : undefined;
+            return this.rankRepo.create(existingId ? { id: existingId, ...trader } : trader);
+        });
+
+        if (entitiesToSave.length > 0) {
+            await this.rankRepo.save(entitiesToSave, { chunk: 200 });
+        }
+
+        // Invalidar apenas o namespace de cache do Leaderboard (sem limpar sessões/OTPs globais no Redis)
+        await this.bumpCacheVersion();
 
         this.logger.log(`Ranking recalculated for ${realUsersData.length} real traders.`);
     }

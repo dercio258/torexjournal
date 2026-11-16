@@ -51,10 +51,28 @@ export class Mt5WorkerController {
 
     @Post('sync/trades')
     @HttpCode(200)
-    async syncTrades(@Body() body: { accountId: number; login?: string; server?: string; trades?: any[]; deals?: any[]; lastDealTicket?: number }) {
+    async syncTrades(
+        @Body()
+        body: {
+            accountId: number;
+            login?: string;
+            server?: string;
+            serverTzOffsetSec?: number;
+            trades?: any[];
+            deals?: any[];
+            lastDealTicket?: number;
+        },
+    ) {
         const deals = body.trades || body.deals || [];
         const login = body.login || body.accountId?.toString();
-        return this.workerService.syncTrades(body.accountId, login, deals, body.lastDealTicket, body.server);
+        return this.workerService.syncTrades(
+            body.accountId,
+            login,
+            deals,
+            body.lastDealTicket,
+            body.server,
+            body.serverTzOffsetSec,
+        );
     }
 
     @Post('sync/positions')
@@ -78,5 +96,17 @@ export class Mt5WorkerController {
     @HttpCode(200)
     async handleEvent(@Body() body: any) {
         return this.workerService.recordWorkerEvent(body);
+    }
+
+    @Post('sync/candles')
+    @HttpCode(200)
+    async syncCandles(@Body() body: any) {
+        return this.workerService.syncCandlesBatch(body);
+    }
+
+    @Post('sync/calendar')
+    @HttpCode(200)
+    async syncCalendar(@Body() body: any) {
+        return this.workerService.syncEconomicCalendar(body);
     }
 }

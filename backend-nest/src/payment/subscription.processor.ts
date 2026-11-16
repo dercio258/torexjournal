@@ -7,7 +7,7 @@ import { Subscription, SubscriptionStatus } from './subscription.entity';
 import { SubscriptionService } from './subscription.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
-import { EmailService } from '../email/email.service';
+import { EmailProducerService } from '../email/email-producer.service';
 import { SmsService } from '../notifications/sms.service';
 import { SmsTemplates } from '../notifications/sms-templates';
 
@@ -21,19 +21,19 @@ export class SubscriptionProcessor {
         private readonly subscriptionRepo: Repository<Subscription>,
         private readonly subscriptionService: SubscriptionService,
         private readonly alertsService: AlertsService,
-        private readonly emailService: EmailService,
+        private readonly emailProducer: EmailProducerService,
         private readonly smsService: SmsService,
         @InjectQueue('subscription-queue')
-        private readonly subscriptionQueue: Queue
-    ) { }
+        private readonly subscriptionQueue: Queue,
+    ) {}
 
     @Process('check-pending')
     async handleCheckPending(job: Job) {
         const { subscriptionId, reference, pollType, startTime, timeoutMs } = job.data;
-        
+
         const sub = await this.subscriptionRepo.findOne({
             where: { id: subscriptionId },
-            relations: ['user']
+            relations: ['user', 'planConfig'],
         });
 
         if (!sub) {
@@ -42,47 +42,60 @@ export class SubscriptionProcessor {
         }
 
         if (sub.status !== SubscriptionStatus.APPROVAL_PENDING) {
-            this.logger.log(`Subscription ${subscriptionId} (Ref: ${reference}) is already resolved to ${sub.status}. Stopping polling.`);
+            this.logger.log(
+                `Subscription ${subscriptionId} (Ref: ${reference}) resolved to ${sub.status}. Stopping polling.`,
+            );
             return;
         }
 
         const elapsed = Date.now() - startTime;
         if (elapsed >= timeoutMs) {
-            this.logger.log(`Pending payment timeout reached for subscription ${subscriptionId} (Ref: ${reference}). Cancelling.`);
+            this.logger.log(
+                `Pending payment timeout reached for subscription ${subscriptionId} (Ref: ${reference}). Cancelling.`,
+            );
             sub.status = SubscriptionStatus.CANCELLED;
             await this.subscriptionRepo.save(sub);
 
-            if (sub.user && sub.user.email) {
-                await this.emailService.sendTemplatedEmail(sub.user.email, 'PAYMENT_FAILED', {
-                    userName: sub.user.name,
-                    reference: reference,
-                    reason: 'O tempo limite de pagamento expirou.'
-                });
+            if (sub.user?.email) {
+                await this.emailProducer.enqueue(
+                    sub.user.email,
+                    'PAYMENT_FAILED',
+                    {
+                        userName: sub.user.name || undefined,
+                        plan: sub.planConfig?.tier,
+                        reference,
+                        reason: 'O tempo limite de confirmação da transação expirou.',
+                    },
+                    { jobId: `payment-failed:${sub.id}` },
+                );
             }
 
-            // Schedule remarketing follow-up in 2 days
-            await this.subscriptionQueue.add('remarketing-followup', {
-                subscriptionId: sub.id
-            }, { delay: 2 * 24 * 60 * 60 * 1000 });
+            await this.subscriptionQueue.add(
+                'remarketing-followup',
+                { subscriptionId: sub.id },
+                {
+                    delay: 2 * 24 * 60 * 60 * 1000,
+                    jobId: `remarketing-trigger:${sub.id}`,
+                },
+            );
 
             return;
         }
 
         try {
-            this.logger.log(`Checking status (Bull) for subscription ${subscriptionId} (Ref: ${reference})`);
             await this.subscriptionService.handleDebitoStatusUpdate(reference);
         } catch (err: any) {
-            this.logger.error(`Error in check-pending status update for reference ${reference}: ${err.message}`);
+            this.logger.error(
+                `Error in check-pending status update for reference ${reference}: ${err?.message || err}`,
+            );
         }
 
-        // Check if still pending
         const updatedSub = await this.subscriptionRepo.findOne({ where: { id: subscriptionId } });
         if (updatedSub && updatedSub.status === SubscriptionStatus.APPROVAL_PENDING) {
-            let nextDelay = 10000; // 10s for mobile
+            let nextDelay = 10000;
             if (pollType === 'card') {
                 nextDelay = elapsed < 5 * 60 * 1000 ? 60000 : 10 * 60 * 1000;
             }
-            this.logger.log(`Rescheduling check-pending for subscription ${subscriptionId} in ${nextDelay}ms`);
             await this.subscriptionQueue.add('check-pending', job.data, { delay: nextDelay });
         }
     }
@@ -90,45 +103,51 @@ export class SubscriptionProcessor {
     @Process('expiration-warning')
     async handleExpirationWarning(job: Job) {
         const { subscriptionId } = job.data;
-        
+
         const sub = await this.subscriptionRepo.findOne({
             where: { id: subscriptionId },
-            relations: ['user', 'planConfig']
+            relations: ['user', 'planConfig'],
         });
 
         if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
-            this.logger.log(`Skipping expiration warning: Subscription ${subscriptionId} is not active (${sub?.status || 'NOT_FOUND'}).`);
             return;
         }
 
-        this.logger.log(`Sending expiration warning for subscription ${subscriptionId} to user ${sub.userId}`);
+        this.logger.log(
+            `Processing 5-day expiration warning for subscription ${subscriptionId} (user=${sub.userId})`,
+        );
 
         if (sub.user) {
+            const planName = sub.planConfig?.tier || 'Profissional';
             await this.alertsService.create(sub.userId, {
                 type: AlertType.SYSTEM,
                 severity: AlertSeverity.WARNING,
-                title: 'Sua assinatura expira em 5 dias! ⏳',
-                description: `Sua assinatura do plano ${sub.planConfig?.tier || 'atual'} está chegando ao fim. Renove agora para não perder o acesso às suas métricas e ferramentas.`,
-                metadata: { expiryDate: sub.currentPeriodEnd, subId: sub.id }
+                title: 'Assinatura próxima do vencimento (5 dias)',
+                description: `Sua assinatura do plano ${planName} encerra em 5 dias. Renove antecipadamente para manter o acesso contínuo.`,
+                metadata: { expiryDate: sub.currentPeriodEnd, subId: sub.id },
             });
 
-            // Send Email
-            await this.emailService.sendTemplatedEmail(sub.user.email, 'GENERAL_NOTIFICATION', {
-                userName: sub.user.name,
-                title: 'Acção Necessária: Sua Assinatura Expira em Breve',
-                subtitle: 'RENOVAÇÃO DE PLANO',
-                message: `Sua assinatura do plano ${sub.planConfig?.tier || 'atual'} termina em apenas 5 dias (${new Date(sub.currentPeriodEnd).toLocaleDateString()}).\n\nGaranta a continuidade do seu diário de trading e não perca o acesso aos seus dados históricos e relatórios avançados.`,
-                buttonUrl: `${process.env.BASE_URL || ''}/pricing`,
-                buttonLabel: 'Renovar Assinatura Agora'
-            });
+            // Deterministic jobId shared with NotificationsCronService prevents duplicate emails
+            if (sub.user.email) {
+                await this.emailProducer.enqueue(
+                    sub.user.email,
+                    'SUBSCRIPTION_EXPIRING',
+                    {
+                        userName: sub.user.name || undefined,
+                        plan: String(planName),
+                        daysRemaining: 5,
+                        expiryDate: new Date(sub.currentPeriodEnd).toISOString(),
+                    },
+                    { jobId: `sub-expiring-5d:${sub.id}` },
+                );
+            }
 
-            // Send SMS
             if (sub.user.whatsapp) {
                 await this.smsService.sendSms(
                     sub.user.id,
                     sub.user.whatsapp,
                     SmsTemplates.EXPIRATION_REMINDER(sub.user.name, 5),
-                    true // isSystemic
+                    true,
                 );
             }
         }
@@ -137,43 +156,63 @@ export class SubscriptionProcessor {
     @Process('renewal-charge')
     async handleRenewalCharge(job: Job) {
         const { subscriptionId } = job.data;
-        
+
         const sub = await this.subscriptionRepo.findOne({
             where: { id: subscriptionId },
-            relations: ['user', 'planConfig']
+            relations: ['user', 'planConfig'],
         });
 
         if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
-            this.logger.log(`Skipping renewal charge: Subscription ${subscriptionId} is not active (${sub?.status || 'NOT_FOUND'}).`);
             return;
         }
 
         try {
-            this.logger.log(`Attempting automatic renewal charge for user ${sub.userId} subscription ${sub.id}`);
+            this.logger.log(
+                `Attempting automatic renewal charge for user ${sub.userId} subscription ${sub.id}`,
+            );
             await this.subscriptionService.renewActiveSubscription(sub.userId);
-            
-            // Mark the old active subscription as EXPIRED as we transition to the new payment flow
+
             sub.status = SubscriptionStatus.EXPIRED;
             await this.subscriptionRepo.save(sub);
         } catch (error: any) {
-            this.logger.warn(`Automatic renewal failed: ${error.message}. Expiring subscription.`);
-            
+            this.logger.warn(
+                `Automatic renewal failed for sub ${sub.id}: ${error?.message || error}. Expiring subscription.`,
+            );
+
             sub.status = SubscriptionStatus.EXPIRED;
             await this.subscriptionRepo.save(sub);
 
             if (sub.user) {
+                const planName = sub.planConfig?.tier || 'Profissional';
                 await this.alertsService.create(sub.userId, {
                     type: AlertType.SYSTEM,
                     severity: AlertSeverity.WARNING,
-                    title: 'Assinatura Expirada ⏳',
-                    description: `Sua assinatura do plano ${sub.planConfig?.tier || 'atual'} expirou. Renove agora para recuperar o acesso.`,
-                    metadata: { subId: sub.id }
+                    title: 'Assinatura Expirada',
+                    description: `A vigência do plano ${planName} encerrou. Renove sua assinatura para recuperar o acesso completo.`,
+                    metadata: { subId: sub.id },
                 });
 
-                // Schedule remarketing follow-up in 2 days
-                await this.subscriptionQueue.add('remarketing-followup', {
-                    subscriptionId: sub.id
-                }, { delay: 2 * 24 * 60 * 60 * 1000 });
+                if (sub.user.email) {
+                    await this.emailProducer.enqueue(
+                        sub.user.email,
+                        'SUBSCRIPTION_EXPIRED',
+                        {
+                            userName: sub.user.name || undefined,
+                            plan: String(planName),
+                            expiredAt: new Date(sub.currentPeriodEnd || new Date()).toISOString(),
+                        },
+                        { jobId: `sub-expired:${sub.id}` },
+                    );
+                }
+
+                await this.subscriptionQueue.add(
+                    'remarketing-followup',
+                    { subscriptionId: sub.id },
+                    {
+                        delay: 2 * 24 * 60 * 60 * 1000,
+                        jobId: `remarketing-trigger:${sub.id}`,
+                    },
+                );
             }
         }
     }
@@ -183,25 +222,28 @@ export class SubscriptionProcessor {
         const { subscriptionId } = job.data;
 
         const sub = await this.subscriptionRepo.findOne({
-            where: { id: subscriptionId }
+            where: { id: subscriptionId },
         });
 
         if (!sub) return;
 
-        if (sub.status !== SubscriptionStatus.CANCELLED && sub.status !== SubscriptionStatus.EXPIRED) {
-            this.logger.log(`Skipping remarketing for subscription ${subscriptionId}: status is ${sub.status}`);
+        if (
+            sub.status !== SubscriptionStatus.CANCELLED &&
+            sub.status !== SubscriptionStatus.EXPIRED
+        ) {
             return;
         }
 
         if (sub.followUpSent) {
-            this.logger.log(`Remarketing follow-up already sent for subscription ${subscriptionId}`);
             return;
         }
 
         try {
             await this.subscriptionService.sendFollowUpEmail(sub.id);
         } catch (err: any) {
-            this.logger.error(`Failed to send follow-up for sub ${sub.id}: ${err.message}`);
+            this.logger.error(
+                `Failed to enqueue follow-up for sub ${sub.id}: ${err?.message || err}`,
+            );
         }
     }
 }

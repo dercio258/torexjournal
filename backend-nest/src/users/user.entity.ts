@@ -1,8 +1,10 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany, Index } from 'typeorm';
 import { Subscription } from '../payment/subscription.entity';
 import { Post } from '../network/post.entity';
 
 @Entity('users')
+@Index('IDX_users_refresh_token', ['refreshToken'])
+@Index('IDX_users_created_at', ['createdAt'])
 export class UserEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -99,4 +101,55 @@ export class UserEntity {
 
     @Column({ name: 'trial_used_at', type: 'timestamp', nullable: true })
     trialUsedAt: Date;
+
+    @Column({ name: 'preferred_locale', length: 8, default: 'pt' })
+    preferredLocale: string;
+
+    @Column({ name: 'timezone', length: 64, nullable: true })
+    timezone: string;
+
+    @Column({ name: 'attribution_data', type: 'jsonb', nullable: true })
+    attributionData: any;
+
+    @Column({ name: 'visitor_id', length: 120, nullable: true })
+    visitorId: string | null;
+
+    @Column({ name: 'acquisition_source', length: 160, nullable: true })
+    acquisitionSource: string | null;
+
+    @Column({ name: 'acquisition_medium', length: 160, nullable: true })
+    acquisitionMedium: string | null;
+
+    @Column({ name: 'acquisition_campaign', length: 200, nullable: true })
+    acquisitionCampaign: string | null;
+
+    @Column({ name: 'acquisition_content', length: 200, nullable: true })
+    acquisitionContent: string | null;
+
+    @Column({ name: 'acquisition_term', length: 200, nullable: true })
+    acquisitionTerm: string | null;
+
+    @Column({ name: 'landing_path', length: 512, nullable: true })
+    landingPath: string | null;
+
+    @Column({ name: 'referrer', length: 1024, nullable: true })
+    referrer: string | null;
+
+    @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
+    lastLoginAt: Date | null;
+
+    @Column({ name: 'last_active_at', type: 'timestamp', nullable: true })
+    lastActiveAt: Date | null;
+
+    @Column({ name: 'last_action_type', type: 'varchar', length: 64, nullable: true })
+    lastActionType: string | null;
+
+    @Column({ name: 'last_action_label', type: 'varchar', length: 180, nullable: true })
+    lastActionLabel: string | null;
+
+    @Column({ name: 'last_action_path', type: 'varchar', length: 255, nullable: true })
+    lastActionPath: string | null;
+
+    @Column({ name: 'email_verified_at', type: 'timestamp', nullable: true })
+    emailVerifiedAt: Date | null;
 }

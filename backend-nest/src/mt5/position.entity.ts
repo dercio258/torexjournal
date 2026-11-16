@@ -1,8 +1,10 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { AccountEntity } from '../account/account.entity';
 import { ColumnNumericTransformer } from '../common/transformers/numeric.transformer';
 
 @Entity('positions')
+@Index(['accountId', 'ticket'])
+@Index(['accountId', 'openTime'])
 export class PositionEntity {
     @PrimaryGeneratedColumn('uuid')
     id: string;

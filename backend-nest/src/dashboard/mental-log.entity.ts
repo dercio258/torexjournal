@@ -1,8 +1,9 @@
 
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { AccountEntity } from '../account/account.entity';
 
 @Entity('mental_logs')
+@Index('IDX_mental_logs_account_date', ['accountId', 'date'])
 export class MentalLog {
     @PrimaryGeneratedColumn()
     id: number;

@@ -10,6 +10,7 @@ const DAY_MS = 86_400_000;
 export const REPLAY_LIMITS: Record<PlanTier, { maxDays: number; maxBars: number }> = {
     [PlanTier.FREE]: { maxDays: 15, maxBars: 350 },
     [PlanTier.BASIC]: { maxDays: 45, maxBars: 800 },
+    [PlanTier.PRO]: { maxDays: 365, maxBars: 2500 },
     [PlanTier.PREMIUM]: { maxDays: 365, maxBars: 2500 },
 };
 
@@ -39,7 +40,7 @@ export class TradingViewController {
             earliestTs,
             // ISO date; the client formats it in the user's locale.
             earliestDate: new Date(earliestTs).toISOString().slice(0, 10),
-            isPaid: tier === PlanTier.PREMIUM || tier === PlanTier.BASIC,
+            isPaid: tier !== PlanTier.FREE,
         };
     }
 
@@ -64,8 +65,14 @@ export class TradingViewController {
         const { maxBars, earliestTs } = await this.limitsFor(req);
         const requested = parseInt(range, 10) || maxBars;
         const toTs = to ? parseInt(to, 10) : undefined;
-        // `from` can only narrow the window, never extend it past the plan.
-        const fromTs = from ? Math.max(parseInt(from, 10) || 0, earliestTs) : earliestTs;
+        // When an explicit historical trade/session window (`to` or `from`) is requested, preserve generous pre-session lookback context (45 days) for indicators & structure
+        const parsedFromParam = from ? parseInt(from, 10) : undefined;
+        const fromTs =
+            parsedFromParam && parsedFromParam > 0
+                ? Math.max(0, parsedFromParam - 45 * DAY_MS)
+                : toTs && toTs < earliestTs
+                  ? undefined
+                  : earliestTs;
 
         try {
             return await this.tvService.getCandles(symbol, timeframe, {
@@ -95,20 +102,29 @@ export class TradingViewController {
         @Query('to') to?: string,
     ) {
         const { maxBars, earliestTs } = await this.limitsFor(req);
-        const parsedChunkSize = Math.min(parseInt(chunkSize || '500', 10) || 500, Math.max(500, maxBars));
+        const parsedChunkSize = Math.min(parseInt(chunkSize || '500', 10) || 500, maxBars);
         const parsedChunkIndex = parseInt(chunkIndex || '0', 10) || 0;
         const parsedCursorTo = cursorTo ? parseInt(cursorTo, 10) : undefined;
         const parsedTo = to ? parseInt(to, 10) : undefined;
-        const parsedFrom = from ? Math.max(parseInt(from, 10) || 0, earliestTs) : earliestTs;
+        const parsedFromParam = from ? parseInt(from, 10) : undefined;
+        // Preserve at least 45 days of pre-session lookback context before `from` so indicators (EMA/RSI/SMC) and short/weekend sessions never clip to 0 bars
+        const lookbackSafeFrom =
+            parsedFromParam && parsedFromParam > 0 ? Math.max(0, parsedFromParam - 45 * DAY_MS) : undefined;
+        const effectiveEarliestTs =
+            lookbackSafeFrom !== undefined ||
+            (parsedCursorTo && parsedCursorTo < earliestTs) ||
+            (parsedTo && parsedTo < earliestTs)
+                ? lookbackSafeFrom
+                : earliestTs;
 
         try {
             return await this.tvService.getCandlesBatch(symbol, timeframe, {
                 chunkSize: parsedChunkSize,
                 chunkIndex: parsedChunkIndex,
                 cursorTo: parsedCursorTo,
-                fromTs: parsedFrom,
+                fromTs: lookbackSafeFrom ?? effectiveEarliestTs,
                 toTs: parsedTo,
-                earliestTs,
+                earliestTs: effectiveEarliestTs,
             });
         } catch (error) {
             throw new ServiceUnavailableException(`Falha ao carregar lote de velas TradingView: ${error.message}`);

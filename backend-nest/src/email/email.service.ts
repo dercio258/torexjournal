@@ -1,100 +1,223 @@
-import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EmailTemplateData, Templates, TemplateSubjects, BASE_LAYOUT } from './email-templates';
+import * as nodemailer from 'nodemailer';
+import { TelemetryService } from '../common/observability/telemetry.service';
+import { AnalyticsService } from '../analytics/analytics.service';
+import {
+    BASE_LAYOUT,
+    EmailTemplateName,
+    EmailTemplatePayloadMap,
+    escapeHtml,
+    htmlToPlainText,
+    renderCleanParagraphs,
+    renderEmailTemplate,
+    renderHeading,
+    renderStatusEyebrow,
+} from './email-templates';
 
 @Injectable()
-export class EmailService {
+export class EmailService implements OnModuleDestroy {
     private transporter: nodemailer.Transporter;
     private readonly logger = new Logger(EmailService.name);
 
-    constructor(private configService: ConfigService) {
+    constructor(
+        private readonly configService: ConfigService,
+        @Optional() private readonly telemetry?: TelemetryService,
+        @Optional() private readonly analyticsService?: AnalyticsService,
+    ) {
         this.transporter = this.createTransporter();
+    }
+
+    onModuleDestroy() {
+        try {
+            this.transporter?.close?.();
+        } catch {
+            // Ignore close errors on shutdown
+        }
+    }
+
+    private parseBoolean(value: unknown, fallback: boolean): boolean {
+        if (value === undefined || value === null || value === '') return fallback;
+        if (typeof value === 'boolean') return value;
+        const normalized = String(value).trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+        return fallback;
     }
 
     private createTransporter(): nodemailer.Transporter {
-        const host = this.configService.get<string>('MAIL_HOST') || this.configService.get<string>('SMTP_HOST') || 'mail.ratixpay.co.mz';
-        const port = this.configService.get<number>('MAIL_PORT') || this.configService.get<number>('SMTP_PORT') || 587;
-        const secure = this.configService.get<boolean>('SMTP_SECURE') ?? false; // Port 587 usually requires secure: false (STARTTLS)
-        const user = this.configService.get<string>('MAIL_USER') || this.configService.get<string>('Email_notification');
-        const pass = this.configService.get<string>('MAIL_PASS') || this.configService.get<string>('Email_notification_pass');
+        const host =
+            this.configService.get<string>('MAIL_HOST') ||
+            this.configService.get<string>('SMTP_HOST') ||
+            'mail.ratixpay.co.mz';
+        const rawPort =
+            this.configService.get<string | number>('MAIL_PORT') ||
+            this.configService.get<string | number>('SMTP_PORT') ||
+            587;
+        const port = Number(rawPort) || 587;
+        const secure = this.parseBoolean(
+            this.configService.get('SMTP_SECURE') ?? this.configService.get('MAIL_SECURE'),
+            port === 465,
+        );
+        const user =
+            this.configService.get<string>('MAIL_USER') ||
+            this.configService.get<string>('Email_notification');
+        const pass =
+            this.configService.get<string>('MAIL_PASS') ||
+            this.configService.get<string>('Email_notification_pass');
 
         return nodemailer.createTransport({
+            pool: true,
+            maxConnections: 5,
+            maxMessages: 100,
             host,
             port,
             secure,
-            auth: {
-                user,
-                pass,
-            },
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 20000,
+            auth: user && pass ? { user, pass } : undefined,
             tls: {
-                rejectUnauthorized: false
-            }
+                rejectUnauthorized: this.parseBoolean(
+                    this.configService.get('SMTP_TLS_REJECT_UNAUTHORIZED'),
+                    true,
+                ),
+            },
         });
     }
 
-    private initializeTransporter() {
+    private resetTransporter(): void {
+        try {
+            this.transporter?.close?.();
+        } catch {
+            // Ignore close failure
+        }
         this.transporter = this.createTransporter();
     }
 
-    async sendEmail(to: string, subject: string, text: string, html?: string): Promise<boolean> {
-        const user = this.configService.get<string>('MAIL_USER') || this.configService.get<string>('Email_notification');
-        const pass = this.configService.get<string>('MAIL_PASS') || this.configService.get<string>('Email_notification_pass');
+    async sendEmail(
+        to: string,
+        subject: string,
+        text: string,
+        html?: string,
+        options: {
+            throwOnError?: boolean;
+            templateName?: string;
+            broadcastId?: string;
+            userId?: string;
+            utmCampaign?: string;
+            utmMedium?: string;
+        } = {},
+    ): Promise<boolean> {
+        const startedAt = Date.now();
+        const templateLabel = options.templateName || 'RAW';
+        const user =
+            this.configService.get<string>('MAIL_USER') ||
+            this.configService.get<string>('Email_notification');
+        const pass =
+            this.configService.get<string>('MAIL_PASS') ||
+            this.configService.get<string>('Email_notification_pass');
+
+        const baseHtml = html || this.wrapProfessionalTemplate(subject, text);
+        const resolvedText = text && text.trim().length > 0 ? text : htmlToPlainText(baseHtml);
+
+        const decorated = this.analyticsService
+            ? await this.analyticsService.createEmailTrackingTokenAndDecorateHtml({
+                  to,
+                  template: templateLabel,
+                  subject,
+                  html: baseHtml,
+                  userId: options.userId || null,
+                  broadcastId: options.broadcastId || null,
+                  utmCampaign: options.utmCampaign || null,
+                  utmMedium: options.utmMedium || null,
+              })
+            : { html: baseHtml, token: null };
+        const resolvedHtml = decorated.html;
 
         if (!user || !pass) {
-            this.logger.warn('Mock Email Dispatch (SMTP not fully configured in .env):');
-            this.logger.warn(`To: ${to} | Subject: ${subject}`);
+            this.logger.warn(
+                `SMTP mock dispatch -> to=${to} template=${templateLabel} subject="${subject}"`,
+            );
+            this.telemetry?.recordEmailSent(templateLabel, Date.now() - startedAt, true);
             return true;
         }
 
         try {
-            const from = this.configService.get<string>('MAIL_FROM') || this.configService.get<string>('SMTP_FROM') || `"Torex Journal" <${user}>`;
+            const from =
+                this.configService.get<string>('MAIL_FROM') ||
+                this.configService.get<string>('SMTP_FROM') ||
+                `"Torex Journal" <${user}>`;
+
             const info = await this.transporter.sendMail({
                 from,
                 to,
                 subject,
-                text,
-                html: html || this.wrapProfessionalTemplate(subject, text),
+                text: resolvedText,
+                html: resolvedHtml,
             });
-            this.logger.log(`Email sent: ${info.messageId}`);
+
+            const durationMs = Date.now() - startedAt;
+            this.telemetry?.recordEmailSent(templateLabel, durationMs, false);
+            this.logger.log(
+                `Delivered email template=${templateLabel} to=${to} msgId=${info.messageId} (${durationMs}ms)`,
+            );
             return true;
         } catch (error: any) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const errorCode = (error as any)?.code;
-            
-            this.logger.error(`Error sending email to ${to}:`, errorMessage);
-            
-            // Retry once if connection was dropped
-            if (errorCode === 'ECONNECTION' || errorCode === 'ETIMEDOUT') {
-                this.initializeTransporter();
-                return this.sendEmail(to, subject, text, html);
+            const errorCode = error?.code;
+
+            // Reset pooled transporter on dropped socket so Bull's next retry gets a fresh connection
+            if (
+                errorCode === 'ECONNECTION' ||
+                errorCode === 'ETIMEDOUT' ||
+                errorCode === 'ESOCKET' ||
+                errorCode === 'ECONNRESET'
+            ) {
+                this.resetTransporter();
+            }
+
+            this.logger.error(
+                `SMTP error sending ${templateLabel} to ${to} [code=${errorCode || 'UNKNOWN'}]: ${errorMessage}`,
+            );
+
+            if (options.throwOnError) {
+                throw error;
             }
             return false;
         }
     }
 
-    async sendTemplatedEmail(to: string, template: keyof typeof Templates, data: any): Promise<boolean> {
-        const templateFn = Templates[template] as any;
-        if (!templateFn) {
-            this.logger.error(`Template ${template} not found`);
-            return false;
-        }
+    async sendTemplatedEmail<K extends EmailTemplateName>(
+        to: string,
+        template: K,
+        data: EmailTemplatePayloadMap[K],
+        options: {
+            throwOnError?: boolean;
+            broadcastId?: string;
+            userId?: string;
+            utmCampaign?: string;
+            utmMedium?: string;
+        } = {},
+    ): Promise<boolean> {
+        const rendered = renderEmailTemplate(template, data);
+        const finalSubject = (data as any)?.subject || rendered.subject;
 
-        const html = templateFn(data);
-        const defaultSubjectFn = (TemplateSubjects as any)[template];
-        const subject = data.subject || (defaultSubjectFn ? defaultSubjectFn(data) : data.title) || 'Torex Journal Notice';
-        
-        return this.sendEmail(to, subject, data.message || '', html);
+        return this.sendEmail(to, finalSubject, rendered.text, rendered.html, {
+            throwOnError: options.throwOnError,
+            templateName: template,
+            broadcastId: options.broadcastId,
+            userId: options.userId,
+            utmCampaign: options.utmCampaign,
+            utmMedium: options.utmMedium,
+        });
     }
 
     private wrapProfessionalTemplate(title: string, content: string): string {
         const innerContent = `
-            <div class="badge">NOTIFICAÇÃO INSTITUCIONAL</div>
-            <h1 class="h1-title">${title}</h1>
-            <div class="divider"></div>
-            <div>
-                ${content.split('\n').map(p => p.trim() ? `<p>${p}</p>` : '').join('')}
-            </div>
+            ${renderStatusEyebrow('Comunicado Institucional', 'slate')}
+            ${renderHeading(escapeHtml(title))}
+            ${renderCleanParagraphs(content || '')}
         `;
         return BASE_LAYOUT(innerContent);
     }

@@ -2,6 +2,9 @@ import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus, Logge
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { join, resolve, extname, basename } from 'path';
 import * as fs from 'fs';
+import { getCorrelationId } from '../observability/correlation.context';
+import { TelemetryService } from '../observability/telemetry.service';
+import { formatErrorDetails } from '../observability/error-formatter';
 
 const MIME_TYPES: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
@@ -27,6 +30,8 @@ const MIME_TYPES: Record<string, string> = {
 @Catch()
 export class GenericExceptionFilter implements ExceptionFilter {
     private readonly logger = new Logger(GenericExceptionFilter.name);
+
+    constructor(private readonly telemetry?: TelemetryService) {}
     private readonly clientDist = [
         join(process.cwd(), '..', 'client', 'dist'),
         join(process.cwd(), 'client', 'dist'),
@@ -72,7 +77,12 @@ export class GenericExceptionFilter implements ExceptionFilter {
         const request = ctx.getRequest<FastifyRequest>();
 
         const url = request.raw?.url || request.url || '';
-        const cleanPath = decodeURIComponent(url.split('?')[0]);
+        let cleanPath = '/';
+        try {
+            cleanPath = decodeURIComponent(url.split('?')[0]);
+        } catch {
+            cleanPath = url.split('?')[0] || '/';
+        }
 
         if (
             exception instanceof NotFoundException &&
@@ -132,18 +142,45 @@ export class GenericExceptionFilter implements ExceptionFilter {
         let message = 'Ocorreu um erro interno no servidor. Por favor, tente novamente mais tarde.';
         let error = 'Internal Server Error';
 
+        const correlationId =
+            (request.headers?.['x-correlation-id'] as string) || getCorrelationId();
+
         if (exception instanceof HttpException) {
             status = exception.getStatus();
             const resObj: any = exception.getResponse();
+            let detailedLogReason = '';
             if (typeof resObj === 'string') {
                 message = resObj;
+                detailedLogReason = resObj;
             } else if (typeof resObj === 'object' && resObj !== null) {
-                message = Array.isArray(resObj.message) ? resObj.message[0] : (resObj.message || message);
+                if (Array.isArray(resObj.message)) {
+                    message = resObj.message[0] || message;
+                    detailedLogReason = resObj.message.join('; ');
+                } else {
+                    message = resObj.message || message;
+                    detailedLogReason = String(resObj.message || message);
+                }
                 error = resObj.error || error;
             }
+            if (status >= 500) {
+                const causeText = exception.cause ? ` | cause: ${formatErrorDetails(exception.cause)}` : '';
+                this.logger.error(
+                    `HTTP ${status} (${error}) em ${request.method} ${cleanPath}: ${detailedLogReason || message}${causeText}`,
+                    exception.stack,
+                );
+                this.telemetry?.recordError('http', `${request.method} ${cleanPath}: ${detailedLogReason || message}`, correlationId, { status });
+            } else if (status >= 400 && cleanPath.startsWith('/api') && status !== HttpStatus.UNAUTHORIZED && status !== HttpStatus.NOT_FOUND) {
+                this.logger.warn(
+                    `HTTP ${status} (${error}) em ${request.method} ${cleanPath}: ${detailedLogReason || message}`,
+                );
+            }
         } else {
-            // Log non-HTTP exceptions (like database errors or system crashes) internally
-            this.logger.error(`Uncaught Exception on ${cleanPath}:`, exception?.stack || exception);
+            const formattedCause = formatErrorDetails(exception);
+            this.logger.error(
+                `Exceção não tratada em ${request.method} ${cleanPath}: ${formattedCause}`,
+                exception?.stack,
+            );
+            this.telemetry?.recordError('unhandled', `${request.method} ${cleanPath}: ${formattedCause}`, correlationId);
             if (cleanPath.includes('/mt5-worker/')) {
                 message = exception?.message || message;
             }
@@ -151,10 +188,14 @@ export class GenericExceptionFilter implements ExceptionFilter {
 
         // Impede que CDNs (como Cloudflare) façam cache de respostas 404/500
         response.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+        if (correlationId) {
+            response.header('X-Correlation-Id', correlationId);
+        }
         response.status(status).send({
             statusCode: status,
             message: message,
-            error: error
+            error: error,
+            ...(correlationId ? { correlationId } : {}),
         });
     }
 }

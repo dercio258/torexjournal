@@ -1,12 +1,12 @@
 import { Controller, Get, UseGuards, Request } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SubscriptionService } from './subscription.service';
 
 @Controller('payments')
 export class PaymentsController {
     constructor(private readonly subscriptionService: SubscriptionService) { }
 
-    @UseGuards(AuthGuard('jwt'))
+    @UseGuards(JwtAuthGuard)
     @Get()
     async getUserPayments(@Request() req) {
         const userId = req.user.id || req.user.userId;

@@ -1,5 +1,5 @@
 
-import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { TelegramService } from './telegram.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -13,8 +13,22 @@ export class NotificationsController {
     ) { }
 
     @Get()
-    async findAll(@Req() req) {
-        return this.notificationsService.findAll(req.user.id);
+    async findAll(
+        @Req() req,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('paginated') paginated?: string,
+    ) {
+        return this.notificationsService.findAll(req.user.id, {
+            page: page ? Number(page) : undefined,
+            limit: limit ? Number(limit) : undefined,
+            paginated: paginated === 'true' || paginated === '1',
+        });
+    }
+
+    @Patch('read-all')
+    async markAllAsRead(@Req() req) {
+        return this.notificationsService.markAllAsRead(req.user.id);
     }
 
     @Patch(':id/read')

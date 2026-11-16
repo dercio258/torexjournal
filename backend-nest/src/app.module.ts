@@ -11,10 +11,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join, isAbsolute } from 'path';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
-import * as redisStore from 'cache-manager-redis-store';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import Redis from 'ioredis';
+import Keyv from 'keyv';
+import { IoRedisKeyvStore } from './common/cache/ioredis-keyv.store';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+import { SecurityModule } from './common/security/security.module';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler.storage';
+import { ObservabilityModule } from './common/observability/observability.module';
+import { DatabaseIndexBootstrapService } from './common/database/database-index-bootstrap.service';
 
 import { Mt5Module } from './mt5/mt5.module';
 import { AuthModule } from './auth/auth.module';
@@ -28,6 +35,7 @@ import { MarketDataModule } from './market-data/market-data.module';
 import { AiModule } from './ai/ai.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { ClickHouseModule } from './clickhouse/clickhouse.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 // Módulos adicionais para o Servidor Principal (desativados quando MT5_DEDICATED_SERVER=true)
 import { DerivModule } from './deriv/deriv.module';
@@ -40,6 +48,8 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
 const isMt5Dedicated = process.env.MT5_DEDICATED_SERVER === 'true';
 
 const appImports: any[] = [
+  SecurityModule,
+  ObservabilityModule,
   ClickHouseModule,
   ScheduleModule.forRoot(),
   EventEmitterModule.forRoot(),
@@ -52,23 +62,43 @@ const appImports: any[] = [
   CacheModule.registerAsync({
     isGlobal: true,
     imports: [ConfigModule],
-    useFactory: async (configService: ConfigService) => ({
-      store: redisStore as unknown as any,
-      host: configService.get('REDIS_HOST'),
-      port: configService.get('REDIS_PORT'),
-      password: configService.get('REDIS_PASSWORD'),
-      ttl: 600000, // 10 minutes default (in ms for cache-manager v5+)
-    }),
+    useFactory: async (configService: ConfigService) => {
+      const host = configService.get<string>('REDIS_HOST') || '127.0.0.1';
+      const port = Number(configService.get<number>('REDIS_PORT') || 6379);
+      const password = configService.get<string>('REDIS_PASSWORD');
+      const redisClient = new Redis({
+        host,
+        port,
+        password: password || undefined,
+        maxRetriesPerRequest: 2,
+        enableReadyCheck: true,
+      });
+      const keyvStore = new IoRedisKeyvStore(redisClient);
+      const keyvInstance = new Keyv({
+        store: keyvStore,
+        namespace: '',
+        useKeyPrefix: false,
+      });
+      return {
+        stores: [keyvInstance],
+        ttl: 600000,
+      };
+    },
     inject: [ConfigService],
   }),
-  // Rate Limiting (Global)
+  // Rate Limiting (Global, Redis-backed via RedisThrottlerStorage)
   ThrottlerModule.forRootAsync({
-    imports: [ConfigModule],
-    inject: [ConfigService],
-    useFactory: (config: ConfigService) => [{
-      ttl: 60000, // 1 minute
-      limit: 100, // 100 requests per minute limit
-    }],
+    imports: [ConfigModule, SecurityModule],
+    inject: [ConfigService, RedisThrottlerStorage],
+    useFactory: (_config: ConfigService, storage: RedisThrottlerStorage) => ({
+      throttlers: [
+        {
+          ttl: 60000, // 1 minute
+          limit: 100, // 100 requests per minute limit
+        },
+      ],
+      storage,
+    }),
   }),
   TypeOrmModule.forRootAsync({
     imports: [ConfigModule],
@@ -108,6 +138,7 @@ const appImports: any[] = [
   MarketDataModule,
   AiModule,
   AlertsModule,
+  AnalyticsModule,
   // Carrega módulos web completos apenas no servidor principal
   ...(isMt5Dedicated
     ? []
@@ -125,9 +156,14 @@ const appImports: any[] = [
   imports: appImports,
   controllers: [],
   providers: [
+    DatabaseIndexBootstrapService,
     {
       provide: APP_GUARD,
       useClass: CustomThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: IdempotencyInterceptor,
     },
   ],
 })
