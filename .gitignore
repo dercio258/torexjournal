@@ -137,3 +137,16 @@ C:\MT5_INSTANCES/
 
 # Cloned upstream source (reference only, not part of the build)
 klinecharts-pro/
+
+
+# Torex AI Training Reports & Datasets
+backend-nest/reports/
+
+# Behavioral ML Datasets & PyTorch Checkpoints
+quant-engine/artifacts/
+quant-engine/datasets/
+
+# Local data: user uploads (personal data) and regenerable market data
+uploads/
+quant-engine/data/parquet/
+quant-engine/data/ai_eval/embeddings_cache.json
