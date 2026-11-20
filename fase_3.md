@@ -83,7 +83,7 @@
 
 ## 6. Matriz de Verificação
 
-- [ ] Backend `tsc --noEmit` (`npx tsc -p backend-nest/tsconfig.json --noEmit`)
-- [ ] Backend Jest (Fase 3 + IA Orchestration + Learning Security + Growth/PWA)
-- [ ] Frontend Unit Tests (`npm --prefix client run test:unit`)
-- [ ] Frontend Production Build (`npm --prefix client run build`)
+- [x] Backend `tsc --noEmit` (`npx tsc -p backend-nest/tsconfig.json --noEmit`)
+- [x] Backend Jest (Fase 3 + IA Orchestration + Learning Security + Growth/PWA)
+- [x] Frontend Unit Tests (`npm --prefix client run test:unit`)
+- [x] Frontend Production Build (`npm --prefix client run build`)

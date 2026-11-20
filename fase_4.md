@@ -74,7 +74,7 @@ Este documento consolida todas as correções estruturais P1 (segurança, confia
 
 ## 5. Matriz de Verificação
 
-- [ ] Backend TypeScript Check (`backend-nest/node_modules/.bin/tsc.cmd -p backend-nest/tsconfig.json --noEmit`)
-- [ ] Backend Jest Suites (Fases 1–4 + IA + Brokers + Segurança & Afiliados)
-- [ ] Frontend Unit Tests (`npm --prefix client run test:unit`)
-- [ ] Frontend Production Build (`npm --prefix client run build`)
+- [x] Backend TypeScript Check (`backend-nest/node_modules/.bin/tsc.cmd -p backend-nest/tsconfig.json --noEmit`)
+- [x] Backend Jest Suites (Fases 1–4 + IA + Brokers + Segurança & Afiliados)
+- [x] Frontend Unit Tests (`npm --prefix client run test:unit`)
+- [x] Frontend Production Build (`npm --prefix client run build`)
