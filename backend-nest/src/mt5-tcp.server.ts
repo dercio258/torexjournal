@@ -19,8 +19,107 @@ interface TcpClientSession {
     authenticated: boolean;
     userId?: string;
     accountId?: string;
+    mt5Id?: string;
     appToken?: string;
     lastHbPersistedAt?: number;
+}
+
+/**
+ * Decodifica um inteiro Base-128 Varint do Wire Format do Protobuf (até 5 bytes / uint32).
+ */
+export function readProtobufVarint(
+    buffer: Buffer,
+    startOffset: number,
+): { value: number; nextOffset: number } | null {
+    let result = 0;
+    let shift = 0;
+    let offset = startOffset;
+
+    while (offset < buffer.length && shift <= 28) {
+        const byte = buffer[offset++];
+        result |= (byte & 0x7f) << shift;
+        if ((byte & 0x80) === 0) {
+            return { value: result >>> 0, nextOffset: offset };
+        }
+        shift += 7;
+    }
+
+    return null;
+}
+
+/**
+ * Avança o cursor sobre um campo Protobuf de qualquer wireType suportado (0, 1, 2, 5).
+ */
+export function skipProtobufField(
+    buffer: Buffer,
+    offset: number,
+    wireType: number,
+): number | null {
+    if (wireType === 0) {
+        const res = readProtobufVarint(buffer, offset);
+        return res ? res.nextOffset : null;
+    }
+    if (wireType === 1) {
+        return offset + 8 <= buffer.length ? offset + 8 : null;
+    }
+    if (wireType === 2) {
+        const lenRes = readProtobufVarint(buffer, offset);
+        if (!lenRes) return null;
+        const end = lenRes.nextOffset + lenRes.value;
+        return end <= buffer.length ? end : null;
+    }
+    if (wireType === 5) {
+        return offset + 4 <= buffer.length ? offset + 4 : null;
+    }
+    return null;
+}
+
+/**
+ * Extrai o conteúdo UTF-8 de um campo string/bytes (wireType === 2) com suporte completo a Varint multi-byte
+ * e navegação sequencial para campos de índice > 1 (ex.: fieldNum = 2 após fieldNum = 1).
+ */
+export function decodeProtobufStringField(
+    buffer: Buffer,
+    targetFieldNum: number,
+): string | null {
+    if (!buffer || buffer.length === 0 || targetFieldNum <= 0) {
+        return null;
+    }
+
+    let offset = 0;
+    while (offset < buffer.length) {
+        const tagRes = readProtobufVarint(buffer, offset);
+        if (!tagRes) break;
+
+        offset = tagRes.nextOffset;
+        const wireType = tagRes.value & 0x07;
+        const fieldNum = tagRes.value >>> 3;
+
+        if (fieldNum === 0) break;
+
+        if (fieldNum === targetFieldNum) {
+            if (wireType !== 2) {
+                return null;
+            }
+            const lenRes = readProtobufVarint(buffer, offset);
+            if (!lenRes) return null;
+
+            const start = lenRes.nextOffset;
+            const end = start + lenRes.value;
+            if (end > buffer.length) {
+                return null;
+            }
+            return buffer.subarray(start, end).toString('utf-8');
+        }
+
+        const skipped = skipProtobufField(buffer, offset, wireType);
+        if (skipped === null || skipped <= offset) {
+            break;
+        }
+        offset = skipped;
+    }
+
+    return null;
 }
 
 @Injectable()
@@ -33,6 +132,7 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
     private lastRedisErrorKey = '';
 
     private clients = new Map<string, TcpClientSession>();
+    private accountToSocketId = new Map<string, string>();
 
     constructor(
         private configService: ConfigService,
@@ -141,6 +241,13 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
     }
 
     private cleanupClient(id: string) {
+        const session = this.clients.get(id);
+        if (session?.accountId && this.accountToSocketId.get(session.accountId) === id) {
+            this.accountToSocketId.delete(session.accountId);
+        }
+        if (session?.mt5Id && this.accountToSocketId.get(session.mt5Id) === id) {
+            this.accountToSocketId.delete(session.mt5Id);
+        }
         this.clients.delete(id);
     }
 
@@ -173,12 +280,26 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
 
         // --- HANDLER: MARKET DATA (ID 3) ---
         if (msgId === 3) {
-            const symbol = this.extractStringField(payload, 1);
-            const jsonStr = this.extractStringField(payload, 2);
+            const symbolField = this.extractStringField(payload, 1);
+            const secondField = this.extractStringField(payload, 2);
+            const rawJsonStr =
+                secondField ??
+                (symbolField && symbolField.trim().startsWith('{') ? symbolField : null);
+            const resolvedSymbolHint =
+                symbolField && !symbolField.trim().startsWith('{') ? symbolField.trim() : undefined;
 
-            if (symbol && jsonStr) {
+            if (rawJsonStr) {
                 try {
-                    const data = JSON.parse(jsonStr);
+                    const parsedData = JSON.parse(rawJsonStr);
+                    const enrichedData = {
+                        ts: Date.now(),
+                        ...(resolvedSymbolHint ? { symbol: resolvedSymbolHint } : {}),
+                        ...parsedData,
+                        token: client.appToken || parsedData?.token,
+                        userId: client.userId || parsedData?.userId || undefined,
+                        accountId: client.accountId || parsedData?.accountId || undefined,
+                    };
+
                     this.redis
                         .xadd(
                             'stream:mt5_market_data',
@@ -187,41 +308,56 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
                             10000,
                             '*',
                             'data',
-                            JSON.stringify({
-                                ts: Date.now(),
-                                symbol,
-                                token: client.appToken,
-                                ...data,
-                            }),
-                        )
-                        .catch((err) => this.logRedisErrorThrottled('XADD stream:mt5_market_data', err));
-                } catch {
-                    // ignore malformed JSON
-                }
-            }
-        }
-
-        // --- HANDLER: TRADE DATA (ID 4) ---
-        if (msgId === 4) {
-            const jsonStr = this.extractStringField(payload, 1);
-            if (jsonStr) {
-                try {
-                    JSON.parse(jsonStr);
-                    this.redis
-                        .xadd(
-                            'stream:mt5_trade_data',
-                            'MAXLEN',
-                            '~',
-                            5000,
-                            '*',
-                            'data',
-                            jsonStr,
+                            JSON.stringify(enrichedData),
                             'userId',
                             client.userId || '',
                             'accountId',
                             client.accountId || '',
+                            'token',
+                            client.appToken || '',
                         )
-                        .catch((err) => this.logRedisErrorThrottled('XADD stream:mt5_trade_data', err));
+                        .catch((err) => this.logRedisErrorThrottled('XADD stream:mt5_market_data', err));
+                } catch (e) {
+                    this.logger.warn(
+                        `JSON de market data inválido via TCP (account=${client.accountId || 'n/a'}): ${formatErrorDetails(e)}`,
+                    );
+                }
+            }
+            return;
+        }
+
+        // --- HANDLER: TRADE DATA (ID 4) ---
+        if (msgId === 4) {
+            const jsonStr =
+                this.extractStringField(payload, 1) ?? this.extractStringField(payload, 2);
+            if (jsonStr) {
+                try {
+                    const parsedTrades = JSON.parse(jsonStr);
+                    const normalizedTrades = Array.isArray(parsedTrades)
+                        ? parsedTrades
+                        : parsedTrades && typeof parsedTrades === 'object'
+                        ? [parsedTrades]
+                        : null;
+
+                    if (normalizedTrades) {
+                        this.redis
+                            .xadd(
+                                'stream:mt5_trade_data',
+                                'MAXLEN',
+                                '~',
+                                5000,
+                                '*',
+                                'data',
+                                JSON.stringify(normalizedTrades),
+                                'userId',
+                                client.userId || '',
+                                'accountId',
+                                client.accountId || '',
+                                'token',
+                                client.appToken || '',
+                            )
+                            .catch((err) => this.logRedisErrorThrottled('XADD stream:mt5_trade_data', err));
+                    }
                 } catch (e) {
                     this.logger.warn(
                         `JSON de trade inválido recebido via TCP (account=${client.accountId || 'n/a'}): ${formatErrorDetails(e)}`,
@@ -231,8 +367,10 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    public sendCommand(socketId: string, cmdType: number, payloadStr: string = ''): boolean {
-        const client = this.clients.get(socketId);
+    public sendCommand(targetId: string, cmdType: number, payloadStr: string = ''): boolean {
+        const directClient = this.clients.get(targetId);
+        const mappedSocketId = !directClient ? this.accountToSocketId.get(targetId) : undefined;
+        const client = directClient || (mappedSocketId ? this.clients.get(mappedSocketId) : undefined);
         if (!client || !client.authenticated) return false;
 
         const payloadBuffer = Buffer.alloc(1 + Buffer.byteLength(payloadStr));
@@ -255,11 +393,18 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
         try {
             const account = await this.mt5Service.validateAppToken(token);
             if (account) {
+                const socketId = `${client.socket.remoteAddress}:${client.socket.remotePort}`;
+                const cleanMt5Id = account.mt5Id ? String(account.mt5Id).trim() : undefined;
                 client.authenticated = true;
                 client.userId = account.userId;
                 client.accountId = account.id;
+                client.mt5Id = cleanMt5Id;
                 client.appToken = token;
                 client.lastHbPersistedAt = Date.now();
+                this.accountToSocketId.set(account.id, socketId);
+                if (cleanMt5Id) {
+                    this.accountToSocketId.set(cleanMt5Id, socketId);
+                }
                 this.logger.log(
                     `MT5 TCP client authenticated: ${client.socket.remoteAddress} (account=${account.id})`,
                 );
@@ -285,27 +430,6 @@ export class Mt5TcpServer implements OnModuleInit, OnModuleDestroy {
     }
 
     private extractStringField(buffer: Buffer, fieldNum: number): string | null {
-        let offset = 0;
-        const len = buffer.length;
-
-        while (offset < len) {
-            if (offset + 1 >= len) break;
-
-            const key = buffer[offset++];
-            const wireType = key & 7;
-            const field = key >> 3;
-
-            if (field === fieldNum) {
-                if (wireType === 2) {
-                    const strLen = buffer[offset++];
-                    if (offset + strLen <= len) {
-                        return buffer.subarray(offset, offset + strLen).toString('utf-8');
-                    }
-                }
-                return null;
-            }
-            return null;
-        }
-        return null;
+        return decodeProtobufStringField(buffer, fieldNum);
     }
 }

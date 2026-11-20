@@ -1,7 +1,8 @@
-import { Injectable, ForbiddenException, Inject } from '@nestjs/common';
+import { Injectable, ForbiddenException, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Subscription, SubscriptionStatus } from './subscription.entity';
+import { UserEntity } from '../users/user.entity';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 
@@ -55,10 +56,13 @@ export class PlanPermissionService {
         private subscriptionRepo: Repository<Subscription>,
         @Inject(CACHE_MANAGER)
         private cacheManager: Cache,
+        @Optional()
+        @InjectRepository(UserEntity)
+        private userRepo?: Repository<UserEntity>,
     ) { }
 
     async getFullUserSubscription(userId: string): Promise<Subscription | null> {
-        const sub = await this.subscriptionRepo.findOne({
+        const subs = await this.subscriptionRepo.find({
             where: {
                 userId,
                 status: SubscriptionStatus.ACTIVE,
@@ -66,14 +70,25 @@ export class PlanPermissionService {
             relations: ['planConfig'],
         });
 
-        if (!sub) return null;
+        if (!subs || subs.length === 0) return null;
 
-        const now = new Date();
-        if (sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() < now.getTime()) {
-            return null;
-        }
+        const nowMs = Date.now();
+        const validSubs = subs.filter(
+            (sub) => !sub.currentPeriodEnd || new Date(sub.currentPeriodEnd).getTime() > nowMs,
+        );
 
-        return sub;
+        if (validSubs.length === 0) return null;
+
+        validSubs.sort((a, b) => {
+            const rankA = TIER_RANK[resolvePlanTierFromString(a.planConfig?.tier)] ?? 0;
+            const rankB = TIER_RANK[resolvePlanTierFromString(b.planConfig?.tier)] ?? 0;
+            if (rankB !== rankA) return rankB - rankA;
+            const expA = a.currentPeriodEnd ? new Date(a.currentPeriodEnd).getTime() : 0;
+            const expB = b.currentPeriodEnd ? new Date(b.currentPeriodEnd).getTime() : 0;
+            return expB - expA;
+        });
+
+        return validSubs[0];
     }
 
     async getCachedUserSubscription(userId: string): Promise<any | null> {
@@ -181,21 +196,37 @@ export class PlanPermissionService {
         rawTier: string;
         dailyLimit: number;
     }> {
-        const activeSub = await this.getFullUserSubscription(userId);
+        const [activeSub, user] = await Promise.all([
+            this.getFullUserSubscription(userId),
+            this.userRepo
+                ? this.userRepo
+                      .findOne({
+                          where: { id: userId },
+                          select: ['id', 'referralAiBonusUntil'],
+                      })
+                      .catch(() => null)
+                : Promise.resolve(null),
+        ]);
+
+        const bonusExpiresAt = user?.referralAiBonusUntil
+            ? new Date(user.referralAiBonusUntil).getTime()
+            : 0;
+        const referralDailyBonus = bonusExpiresAt > Date.now() ? 50 : 0;
+
         if (!activeSub) {
             return {
                 tier: PlanTier.FREE,
                 rawTier: 'FREE',
-                dailyLimit: 0,
+                dailyLimit: referralDailyBonus,
             };
         }
         const rawTier = String(activeSub.planConfig?.tier || 'BASIC').toUpperCase();
         const tier = resolvePlanTierFromString(rawTier);
-        const dailyLimit = resolveDefaultDailyCredits(
+        const baseLimit = resolveDefaultDailyCredits(
             rawTier,
             activeSub.planConfig?.aiDailyCredits
         );
-        return { tier, rawTier, dailyLimit };
+        return { tier, rawTier, dailyLimit: baseLimit + referralDailyBonus };
     }
 
     async checkPermission(userId: string, requiredTier: PlanTier): Promise<boolean> {

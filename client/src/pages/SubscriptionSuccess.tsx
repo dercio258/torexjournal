@@ -1,33 +1,75 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { CheckCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { useLocale } from '../context/LocaleContext';
+import { useAuth } from '../context/AuthContext';
 import { trackConversion } from '../lib/tracking';
+import api from '../api';
 
 export const SubscriptionSuccess = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const location = useLocation();
     const { locale } = useLocale();
+    const { refreshProfile } = useAuth();
     const isEn = locale === 'en';
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
 
     useEffect(() => {
+        let cancelled = false;
         const subscriptionId = searchParams.get('subscription_id');
-        // Show success if query param exists OR if navigated with location state
-        if (subscriptionId || location.state?.method || location.state?.success) {
-            setStatus('success');
-            trackConversion('purchase', {
-                metadata: {
-                    subscriptionId: subscriptionId || undefined,
-                    method: location.state?.method || 'card',
-                },
-            });
-        } else {
-            setStatus('error');
-        }
-    }, [searchParams, location]);
+        const paymentStatusParam = (searchParams.get('payment_status') || '').toLowerCase();
+
+        const verifyOutcome = async () => {
+            if (paymentStatusParam === 'failed' || paymentStatusParam === 'cancelled') {
+                if (!cancelled) setStatus('error');
+                return;
+            }
+
+            if (paymentStatusParam === 'active' || location.state?.method || location.state?.success) {
+                void refreshProfile().catch(() => {});
+                if (!cancelled) {
+                    setStatus('success');
+                    trackConversion('purchase', {
+                        metadata: {
+                            subscriptionId: subscriptionId || undefined,
+                            method: location.state?.method || 'card',
+                        },
+                    });
+                }
+                return;
+            }
+
+            if (subscriptionId) {
+                try {
+                    await api.post(`/subscription/check-status/${encodeURIComponent(subscriptionId)}`).catch(() => {});
+                    const statusRes = await api.get('/subscription/status');
+                    if (cancelled) return;
+                    if (statusRes.data?.hasActive) {
+                        void refreshProfile().catch(() => {});
+                        setStatus('success');
+                        trackConversion('purchase', {
+                            metadata: {
+                                subscriptionId,
+                                method: 'card',
+                            },
+                        });
+                        return;
+                    }
+                } catch {
+                    // Fall through to error state when subscription cannot be confirmed active
+                }
+            }
+
+            if (!cancelled) setStatus('error');
+        };
+
+        void verifyOutcome();
+        return () => {
+            cancelled = true;
+        };
+    }, [searchParams, location, refreshProfile]);
 
     return (
         <div className="min-h-screen bg-canvas flex items-center justify-center p-4">
@@ -68,7 +110,7 @@ export const SubscriptionSuccess = () => {
                 {status === 'error' && (
                     <>
                         <div className="w-20 h-20 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <CheckCircle className="w-10 h-10 text-rose-500" />
+                            <AlertCircle className="w-10 h-10 text-rose-500" />
                         </div>
                         <h2 className="text-2xl font-bold text-fg mb-2">
                             {isEn ? 'Verification Failed' : 'Algo deu errado'}

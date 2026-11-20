@@ -1,9 +1,8 @@
 /**
  * Script de Ativacao do Maior Plano (PRO / PREMIUM - ANUAL) em Producao
- * Usuario alvo padrao: raphaelmanguele.jr@gmail.com
  *
  * Uso na VPS Linux:
- *   node backend-nest/scripts/activate_max_plan.js [email_opcional]
+ *   node backend-nest/scripts/activate_max_plan.js <email-do-usuario>
  */
 
 const path = require('path');
@@ -14,9 +13,22 @@ const { Client } = require('pg');
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-const TARGET_EMAIL = (process.argv[2] || 'raphaelmanguele.jr@gmail.com').trim().toLowerCase();
+const TARGET_EMAIL = (process.argv[2] || process.env.TARGET_USER_EMAIL || '').trim().toLowerCase();
 
 async function activateMaxPlan() {
+    if (!TARGET_EMAIL) {
+        console.error('❌ Uso: node backend-nest/scripts/activate_max_plan.js <email-do-usuario>');
+        process.exit(1);
+    }
+
+    const dbUser = process.env.DB_USER || process.env.DB_USERNAME;
+    const dbPass = process.env.DB_PASS || process.env.DB_PASSWORD;
+    const dbName = process.env.DB_NAME || process.env.DB_DATABASE;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias no ambiente.');
+        process.exit(1);
+    }
+
     console.log('================================================================================');
     console.log(` ATIVACAO DO MAIOR PLANO (PRO / PREMIUM) PARA: ${TARGET_EMAIL}`);
     console.log(' Timestamp:', new Date().toISOString());
@@ -25,9 +37,9 @@ async function activateMaxPlan() {
     const pgConfig = {
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '5432', 10),
-        user: process.env.DB_USER || process.env.DB_USERNAME || 'postgres',
-        password: process.env.DB_PASS || process.env.DB_PASSWORD || 'postgres',
-        database: process.env.DB_NAME || process.env.DB_DATABASE || 'trading_cossa',
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     };
 
     const pg = new Client(pgConfig);

@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, NotFoundException, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Subscription } from 'rxjs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -7,6 +8,7 @@ import { DerivAuthEntity } from './entities/deriv-auth.entity';
 import { DerivTransactionEntity } from './entities/deriv-transaction.entity';
 import { DerivClient } from './deriv.client';
 import { CryptoUtil } from '../common/utils/crypto.util';
+import { getJwtSecret } from '../common/security/security.config';
 import { ConfigService } from '@nestjs/config';
 import { Mt5Service } from '../mt5/mt5.service';
 import { ImportMethod } from '../mt5/import-log.entity';
@@ -17,13 +19,32 @@ import { NormalizationService } from '../import/normalization/normalization.serv
 @Injectable()
 export class DerivService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(DerivService.name);
-    private clients: Map<string, DerivClient> = new Map(); // userId -> DerivClient
+    private clients: Map<string, DerivClient> = new Map(); // connKey (${userId}:${derivAccountId}) -> DerivClient
     private contractCache: Map<string, { data: any, timestamp: number }> = new Map();
-    private enrichmentQueue: Array<{ contractId: string, userId: string, client: DerivClient }> = [];
-    private pendingEnrichmentSet: Set<string> = new Set(); // accountId:contractId
+    private enrichmentQueue: Array<{ contractId: string, userId: string, derivAccountId: string, connKey: string, client: DerivClient }> = [];
+    private pendingEnrichmentSet: Set<string> = new Set(); // accountEntityId:contractId
     private isProcessingQueue = false;
-    private subscriptions: Map<string, Subscription> = new Map(); // userId -> Subscription
-    private accountIds: Map<string, string> = new Map(); // userId -> AccountEntity.id
+    private subscriptions: Map<string, Subscription> = new Map(); // connKey -> Subscription
+    private accountIds: Map<string, string> = new Map(); // connKey -> AccountEntity.id
+    private reconnectingConnKeys: Set<string> = new Set();
+
+    private buildConnKey(userId: string, derivAccountId: string): string {
+        return `${userId}:${derivAccountId}`;
+    }
+
+    private disconnectConnection(connKey: string) {
+        if (this.subscriptions.has(connKey)) {
+            this.subscriptions.get(connKey)?.unsubscribe();
+            this.subscriptions.delete(connKey);
+        }
+        const existingClient = this.clients.get(connKey);
+        if (existingClient) {
+            existingClient.disconnect();
+            this.clients.delete(connKey);
+        }
+        this.accountIds.delete(connKey);
+        this.reconnectingConnKeys.delete(connKey);
+    }
 
     constructor(
         @InjectRepository(DerivAuthEntity)
@@ -36,7 +57,8 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         private readonly accountRepo: Repository<AccountEntity>,
         private readonly configService: ConfigService,
         private readonly mt5Service: Mt5Service,
-        private readonly normalizationService: NormalizationService
+        private readonly normalizationService: NormalizationService,
+        @Optional() private readonly eventEmitter?: EventEmitter2,
     ) { }
 
     async onModuleInit() {
@@ -64,25 +86,37 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             client.disconnect();
         }
         this.clients.clear();
+        this.contractCache.clear();
+        this.enrichmentQueue.length = 0;
+        this.pendingEnrichmentSet.clear();
+    }
+
+    private setCachedContract(contractId: string, contract: any): void {
+        const now = Date.now();
+        const ttlMs = 5 * 60_000;
+        const maxEntries = 500;
+        for (const [key, entry] of this.contractCache.entries()) {
+            if (now - entry.timestamp > ttlMs) {
+                this.contractCache.delete(key);
+            }
+        }
+        if (this.contractCache.has(contractId)) {
+            this.contractCache.delete(contractId);
+        }
+        while (this.contractCache.size >= maxEntries) {
+            const oldestKey = this.contractCache.keys().next().value;
+            if (oldestKey === undefined) break;
+            this.contractCache.delete(oldestKey);
+        }
+        this.contractCache.set(contractId, { data: contract, timestamp: now });
     }
 
     private getEncryptionKey(): string {
         const key = this.configService.get<string>('DERIV_ENCRYPTION_KEY');
         if (key && key.trim().length > 0) return key.trim();
 
-        const jwtSecret = this.configService.get<string>('JWT_SECRET');
-        if (jwtSecret && jwtSecret.trim().length > 0) {
-            this.logger.warn('DERIV_ENCRYPTION_KEY not set; using derived key from JWT_SECRET');
-            return `deriv-sec-${jwtSecret.trim()}`;
-        }
-
-        if (this.configService.get<string>('NODE_ENV') === 'production') {
-            throw new Error(
-                'CRITICAL SECURITY ERROR: DERIV_ENCRYPTION_KEY ou JWT_SECRET obrigatório em produção.',
-            );
-        }
-
-        return 'torex_dev_only_deriv_key_do_not_use_in_prod';
+        const jwtSecret = getJwtSecret(this.configService);
+        return `deriv-sec-${jwtSecret}`;
     }
 
     private async discoverAccountsViaRest(token: string): Promise<any[] | null> {
@@ -128,13 +162,6 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
     }
 
     async connect(userId: string, token: string) {
-        // Disconnect existing client for this user if any
-        if (this.clients.has(userId)) {
-            this.clients.get(userId).disconnect();
-            this.clients.delete(userId);
-            this.accountIds.delete(userId);
-        }
-
         const client = new DerivClient();
 
         // 1. Try modern REST discovery per developers.deriv.com/llms.txt
@@ -169,10 +196,19 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                 accountData = authResponse.authorize;
             }
 
+            const derivAccountId = String(accountData?.loginid || selectedRestAccount?.account_id || '').trim();
+            if (!derivAccountId) {
+                throw new Error('Conta Deriv inválida retornada na autorização');
+            }
+            const connKey = this.buildConnKey(userId, derivAccountId);
+
+            // Disconnect only any pre-existing connection for THIS same Deriv account (multi-account safe)
+            this.disconnectConnection(connKey);
+
             const encryptionKey = this.getEncryptionKey();
             const encryptedToken = CryptoUtil.encrypt(token, encryptionKey);
 
-            let auth = await this.derivAuthRepo.findOne({ where: { userId, accountId: accountData.loginid } });
+            let auth = await this.derivAuthRepo.findOne({ where: { userId, accountId: derivAccountId } });
             if (auth) {
                 auth.encryptedToken = encryptedToken;
                 auth.isActive = true;
@@ -181,7 +217,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             } else {
                 auth = this.derivAuthRepo.create({
                     userId,
-                    accountId: accountData.loginid,
+                    accountId: derivAccountId,
                     encryptedToken,
                     currency: accountData.currency,
                     isActive: true,
@@ -191,7 +227,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
 
             const platformAccount = await this.ensureAccountExists(
                 userId,
-                accountData.loginid,
+                derivAccountId,
                 accountData.currency,
                 parseFloat(accountData.balance) || 0,
                 accountData.is_virtual === 1
@@ -200,14 +236,15 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             auth.accountEntityId = platformAccount.id;
             await this.derivAuthRepo.save(auth);
 
-            this.accountIds.set(userId, platformAccount.id);
-            this.clients.set(userId, client);
-            this.setupSubscriptions(userId, client);
-            this.syncHistory(userId, client);
+            this.accountIds.set(connKey, platformAccount.id);
+            this.clients.set(connKey, client);
+            this.attachReconnectHandler(auth, token, client, connKey);
+            this.setupSubscriptions(userId, derivAccountId, client);
+            this.syncHistory(userId, derivAccountId, client);
 
             return { 
                 success: true, 
-                account: accountData.loginid,
+                account: derivAccountId,
                 currency: accountData.currency,
                 balance: parseFloat(accountData.balance) || 0,
                 accountEntityId: platformAccount.id
@@ -218,13 +255,40 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    private attachReconnectHandler(
+        auth: DerivAuthEntity,
+        token: string,
+        client: DerivClient,
+        connKey: string,
+    ) {
+        client.setReconnectUrlResolver(() => this.getOtpWebSocketUrl(token, auth.accountId));
+        client.onConnectionChange().subscribe(async (isConnected) => {
+            if (!isConnected || this.reconnectingConnKeys.has(connKey)) {
+                return;
+            }
+            if (client.getIsAuthorized() && this.subscriptions.has(connKey)) {
+                return;
+            }
+            this.reconnectingConnKeys.add(connKey);
+            this.logger.log(`Deriv client reconnected (${connKey}). Re-authorizing...`);
+            try {
+                if (!client.getIsAuthorized()) {
+                    await client.request({ authorize: token }, 'authorize', 45000);
+                    client.setAuthorized(true);
+                }
+                this.setupSubscriptions(auth.userId, auth.accountId, client);
+            } catch (err: any) {
+                this.logger.error(`Re-authorization failed for ${connKey}: ${err?.message || err}`);
+            } finally {
+                this.reconnectingConnKeys.delete(connKey);
+            }
+        });
+    }
+
     private async connectAccount(auth: DerivAuthEntity) {
-        // Disconnect existing client for this user if any
-        if (this.clients.has(auth.userId)) {
-            this.clients.get(auth.userId).disconnect();
-            this.clients.delete(auth.userId);
-            this.accountIds.delete(auth.userId);
-        }
+        const connKey = this.buildConnKey(auth.userId, auth.accountId);
+        // Disconnect only existing client for THIS specific Deriv account
+        this.disconnectConnection(connKey);
 
         const encryptionKey = this.getEncryptionKey();
         const token = CryptoUtil.decrypt(auth.encryptedToken, encryptionKey);
@@ -259,12 +323,13 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                 await this.derivAuthRepo.update({ id: auth.id }, { accountEntityId: platformAccount.id });
             }
 
-            this.accountIds.set(auth.userId, platformAccount.id);
-            this.clients.set(auth.userId, client);
-            this.setupSubscriptions(auth.userId, client);
-            this.syncHistory(auth.userId, client);
+            this.accountIds.set(connKey, platformAccount.id);
+            this.clients.set(connKey, client);
+            this.attachReconnectHandler(auth, token, client, connKey);
+            this.setupSubscriptions(auth.userId, auth.accountId, client);
+            this.syncHistory(auth.userId, auth.accountId, client);
         } catch (err) {
-            this.logger.error(`Initial authorization failed for user ${auth.userId}: ${err.message}`);
+            this.logger.error(`Initial authorization failed for ${connKey}: ${err.message}`);
             client.disconnect();
             const errorMsg = err.message?.toLowerCase() || '';
             if (
@@ -275,28 +340,11 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                 errorMsg.includes('invalid') ||
                 errorMsg.includes('rejected')
             ) {
-                this.logger.warn(`Disabling DerivAuth for user ${auth.userId} due to authorization/status error.`);
+                this.logger.warn(`Disabling DerivAuth for ${connKey} due to authorization/status error.`);
                 await this.derivAuthRepo.update({ userId: auth.userId, accountId: auth.accountId }, { isActive: false });
             }
             return;
         }
-
-        // Handle re-authorization and re-subscriptions on reconnection
-        client.onConnectionChange().subscribe(async isConnected => {
-            if (isConnected) {
-                this.logger.log(`Deriv client reconnected for user ${auth.userId}. Re-authorizing...`);
-                try {
-                    const refreshedOtpUrl = await this.getOtpWebSocketUrl(token, auth.accountId);
-                    if (!refreshedOtpUrl) {
-                        await client.request({ authorize: token }, 'authorize', 45000);
-                        client.setAuthorized(true);
-                    }
-                    this.setupSubscriptions(auth.userId, client);
-                } catch (err) {
-                    this.logger.error(`Re-authorization failed for user ${auth.userId}: ${err.message}`);
-                }
-            }
-        });
     }
 
     private async ensureAccountExists(
@@ -346,11 +394,12 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         return account;
     }
 
-    private setupSubscriptions(userId: string, client: DerivClient) {
+    private setupSubscriptions(userId: string, derivAccountId: string, client: DerivClient) {
+        const connKey = this.buildConnKey(userId, derivAccountId);
         try {
-            if (this.subscriptions.has(userId)) {
-                this.subscriptions.get(userId).unsubscribe();
-                this.subscriptions.delete(userId);
+            if (this.subscriptions.has(connKey)) {
+                this.subscriptions.get(connKey)?.unsubscribe();
+                this.subscriptions.delete(connKey);
             }
 
             const compositeSub = new Subscription();
@@ -360,10 +409,10 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             const txSub = client.onMessage('transaction').subscribe((msg: any) => {
                 try {
                     if (msg.transaction && msg.transaction.action) {
-                        this.handleTransaction(userId, msg.transaction);
+                        this.handleTransaction(userId, derivAccountId, msg.transaction);
                     }
                 } catch (err) {
-                    this.logger.error(`Error handling transaction for user ${userId}: ${err.message}`);
+                    this.logger.error(`Error handling transaction for ${connKey}: ${err.message}`);
                 }
             });
             compositeSub.add(txSub);
@@ -373,10 +422,10 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             const balSub = client.onMessage('balance').subscribe((msg: any) => {
                 try {
                     if (msg.balance) {
-                        this.handleBalanceUpdate(userId, msg.balance);
+                        this.handleBalanceUpdate(connKey, msg.balance);
                     }
                 } catch (err) {
-                    this.logger.error(`Error handling balance update for user ${userId}: ${err.message}`);
+                    this.logger.error(`Error handling balance update for ${connKey}: ${err.message}`);
                 }
             });
             compositeSub.add(balSub);
@@ -386,23 +435,24 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             const pocSub = client.onMessage('proposal_open_contract').subscribe((msg: any) => {
                 try {
                     if (msg.proposal_open_contract && msg.proposal_open_contract.contract_id) {
-                        this.handleProposalOpenContract(userId, msg.proposal_open_contract);
+                        this.handleProposalOpenContract(userId, derivAccountId, msg.proposal_open_contract);
                     }
                 } catch (err) {
-                    this.logger.error(`Error handling proposal_open_contract for user ${userId}: ${err.message}`);
+                    this.logger.error(`Error handling proposal_open_contract for ${connKey}: ${err.message}`);
                 }
             });
             compositeSub.add(pocSub);
 
-            this.subscriptions.set(userId, compositeSub);
-            this.logger.log(`Subscriptions (transaction, balance & open contracts) active for user ${userId}`);
+            this.subscriptions.set(connKey, compositeSub);
+            this.logger.log(`Subscriptions (transaction, balance & open contracts) active for ${connKey}`);
         } catch (err) {
-            this.logger.error(`Failed to setup subscriptions for user ${userId}: ${err.message}`);
+            this.logger.error(`Failed to setup subscriptions for ${connKey}: ${err.message}`);
         }
     }
 
-    private async handleProposalOpenContract(userId: string, contract: any) {
-        const accountId = this.accountIds.get(userId);
+    private async handleProposalOpenContract(userId: string, derivAccountId: string, contract: any) {
+        const connKey = this.buildConnKey(userId, derivAccountId);
+        const accountId = this.accountIds.get(connKey);
         if (!accountId || !contract?.contract_id) return;
 
         const contractId = contract.contract_id.toString();
@@ -412,7 +462,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             await this.consolidateTrade(userId, accountId, contractId, contract);
 
             if (contract.is_sold === 1 || contract.is_expired === 1) {
-                const client = this.clients.get(userId);
+                const client = this.clients.get(connKey);
                 if (client) {
                     client.send({ balance: 1 });
                 }
@@ -422,8 +472,8 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async handleBalanceUpdate(userId: string, balanceData: any) {
-        const accountId = this.accountIds.get(userId);
+    private async handleBalanceUpdate(connKey: string, balanceData: any) {
+        const accountId = this.accountIds.get(connKey);
         if (!accountId) return;
 
         const newBalance = parseFloat(balanceData.balance) || 0;
@@ -435,19 +485,20 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
-    private async handleTransaction(userId: string, transaction: any) {
+    private async handleTransaction(userId: string, derivAccountId: string, transaction: any) {
         if (!transaction?.id || !transaction?.action) {
             return;
         }
 
-        const accountId = this.accountIds.get(userId);
+        const connKey = this.buildConnKey(userId, derivAccountId);
+        const accountId = this.accountIds.get(connKey);
         if (!accountId) {
-            this.logger.warn(`No AccountEntity ID for user ${userId}, dropping transaction ${transaction.id}`);
+            this.logger.warn(`No AccountEntity ID for ${connKey}, dropping transaction ${transaction.id}`);
             return;
         }
 
         const realTxId = (transaction.transaction_id || transaction.id).toString();
-        this.logger.log(`New transaction for user ${userId} (Account: ${accountId}): ${transaction.action} | ID: ${realTxId}`);
+        this.logger.log(`New transaction for ${connKey} (Account: ${accountId}): ${transaction.action} | ID: ${realTxId}`);
 
         // 1. Save raw transaction
         const txDate = this.mt5Service.safeDate(transaction.transaction_time);
@@ -465,20 +516,21 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
 
         // 2. Identify if it's a trade-related action
         if (transaction.action && ['buy', 'sell'].includes(transaction.action) && transaction.contract_id) {
-            this.processTradeSync(userId, transaction.contract_id.toString());
+            this.processTradeSync(userId, derivAccountId, transaction.contract_id.toString());
         }
     }
 
-    private processTradeSync(userId: string, contractId: string) {
-        const client = this.clients.get(userId);
-        const accountId = this.accountIds.get(userId);
+    private processTradeSync(userId: string, derivAccountId: string, contractId: string) {
+        const connKey = this.buildConnKey(userId, derivAccountId);
+        const client = this.clients.get(connKey);
+        const accountId = this.accountIds.get(connKey);
         if (!client || !accountId) return;
 
         const dedupeKey = `${accountId}:${contractId}`;
         if (this.pendingEnrichmentSet.has(dedupeKey)) return;
 
         this.pendingEnrichmentSet.add(dedupeKey);
-        this.enrichmentQueue.push({ contractId, userId, client });
+        this.enrichmentQueue.push({ contractId, userId, derivAccountId, connKey, client });
         this.processEnrichmentQueue();
     }
 
@@ -488,17 +540,17 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
 
         while (this.enrichmentQueue.length > 0) {
             const item = this.enrichmentQueue[0]; // Peek at first item
-            const { contractId, userId, client } = item;
-            const accountId = this.accountIds.get(userId);
+            const { contractId, userId, connKey } = item;
+            const accountId = this.accountIds.get(connKey);
             const dedupeKey = `${accountId}:${contractId}`;
             let success = true;
 
             try {
                 if (accountId) {
-                    success = await this.enrichTrade(userId, accountId, contractId);
+                    success = await this.enrichTrade(userId, connKey, accountId, contractId);
                 }
             } catch (err) {
-                this.logger.error(`Failed to enrich trade ${contractId} for user ${userId}: ${err.message}`);
+                this.logger.error(`Failed to enrich trade ${contractId} for ${connKey}: ${err.message}`);
                 success = true; // Skip if fatal unexpected error wrapper
             } finally {
                 if (!success) {
@@ -517,8 +569,8 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         this.isProcessingQueue = false;
     }
 
-    private async enrichTrade(userId: string, accountId: string, contractId: string): Promise<boolean> {
-        const client = this.clients.get(userId);
+    private async enrichTrade(userId: string, connKey: string, accountId: string, contractId: string): Promise<boolean> {
+        const client = this.clients.get(connKey);
         if (!client) return true; // Stop trying if client disconnected
 
         try {
@@ -534,7 +586,7 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             const contract = contractRes.proposal_open_contract;
 
             if (contract) {
-                this.contractCache.set(contractId, { data: contract, timestamp: Date.now() });
+                this.setCachedContract(contractId, contract);
                 await this.consolidateTrade(userId, accountId, contractId, contract);
                 return true;
             } else {
@@ -631,14 +683,23 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         };
 
         await this.tradeRepo.upsert(tradeData, ['accountId', 'contractId']);
+        if (this.eventEmitter && userId) {
+            this.eventEmitter.emit('trades.imported', {
+                userId,
+                accountId,
+                count: 1,
+                source: 'deriv',
+            });
+        }
         this.logger.debug(`Consolidated and Normalized trade ${contractId} via Adapter. PnL: ${normalizedTrade.profit}`);
     }
 
-    private async syncHistory(userId: string, client: DerivClient) {
-        this.logger.log(`Starting robust history sync for user ${userId}`);
-        const accountId = this.accountIds.get(userId);
+    private async syncHistory(userId: string, derivAccountId: string, client: DerivClient) {
+        const connKey = this.buildConnKey(userId, derivAccountId);
+        this.logger.log(`Starting robust history sync for ${connKey}`);
+        const accountId = this.accountIds.get(connKey);
         if (!accountId) {
-            this.logger.error(`No official account ID for user ${userId}, cancelling history sync`);
+            this.logger.error(`No official account ID for ${connKey}, cancelling history sync`);
             return;
         }
 
@@ -811,25 +872,26 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             // 4. Enqueue all discovered contracts for full detail enrichment
             if (contractsToEnrich.size > 0) {
                 for (const contractId of Array.from(contractsToEnrich)) {
-                    this.processTradeSync(userId, contractId);
+                    this.processTradeSync(userId, derivAccountId, contractId);
                 }
-                this.logger.log(`Enqueued ${contractsToEnrich.size} unique contracts for enrichment for user ${userId}`);
+                this.logger.log(`Enqueued ${contractsToEnrich.size} unique contracts for enrichment (${connKey})`);
             }
 
             // 5. Immediate repair for existing malformed trades
-            await this.repairMalformedTrades(userId);
+            await this.repairMalformedTrades(userId, derivAccountId);
 
-            // 6. Record last sync timestamp
-            await this.derivAuthRepo.update({ userId, isActive: true }, { lastSyncAt: new Date() });
-            this.logger.log(`History sync successfully finalized for user ${userId}`);
+            // 6. Record last sync timestamp for this account
+            await this.derivAuthRepo.update({ userId, accountId: derivAccountId, isActive: true }, { lastSyncAt: new Date() });
+            this.logger.log(`History sync successfully finalized for ${connKey}`);
         } catch (e) {
-            this.logger.error(`History sync failed completely for user ${userId}`, e.stack);
+            this.logger.error(`History sync failed completely for ${connKey}`, e.stack);
         }
     }
 
-    async repairMalformedTrades(userId: string) {
-        this.logger.log(`Scanning for malformed trades to repair for user ${userId}`);
-        const accountId = this.accountIds.get(userId);
+    async repairMalformedTrades(userId: string, derivAccountId: string) {
+        const connKey = this.buildConnKey(userId, derivAccountId);
+        this.logger.log(`Scanning for malformed trades to repair for ${connKey}`);
+        const accountId = this.accountIds.get(connKey);
         if (!accountId) return;
 
         const malformed = await this.tradeRepo.createQueryBuilder('trade')
@@ -838,18 +900,35 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             .getMany();
 
         if (malformed.length > 0) {
-            this.logger.log(`Found ${malformed.length} malformed/partial trades for user ${userId} (Account: ${accountId}). Attempting repair...`);
+            this.logger.log(`Found ${malformed.length} malformed/partial trades for ${connKey} (Account: ${accountId}). Attempting repair...`);
             for (const trade of malformed) {
                 if (trade.contractId) {
-                    this.processTradeSync(userId, trade.contractId);
+                    this.processTradeSync(userId, derivAccountId, trade.contractId);
                 }
             }
         }
     }
 
-    async getStatus(userId: string) {
-        const auth = await this.derivAuthRepo.findOne({ where: { userId, isActive: true } });
-        if (!auth) {
+    private async findTargetAuths(userId: string, requestedAccountId?: string): Promise<DerivAuthEntity[]> {
+        const activeAuths = await this.derivAuthRepo.find({
+            where: { userId, isActive: true },
+            order: { updatedAt: 'DESC' },
+        });
+        if (!requestedAccountId || requestedAccountId === 'all') {
+            return activeAuths;
+        }
+        const matched = activeAuths.filter(
+            (a) => a.accountEntityId === requestedAccountId || a.accountId === requestedAccountId,
+        );
+        return matched.length > 0 ? matched : [];
+    }
+
+    async getStatus(userId: string, requestedAccountId?: string) {
+        const allAuths = await this.derivAuthRepo.find({
+            where: { userId, isActive: true },
+            order: { updatedAt: 'DESC' },
+        });
+        if (allAuths.length === 0) {
             return {
                 isConnected: false,
                 isStreaming: false,
@@ -859,76 +938,109 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
                 equity: 0,
                 accountName: null,
                 accountEntityId: null,
-                lastSyncAt: null
+                lastSyncAt: null,
+                accounts: [],
             };
         }
 
-        const accountId = auth.accountEntityId || this.accountIds.get(userId);
-        let account: AccountEntity | null = null;
-        if (accountId) {
-            account = await this.accountRepo.findOne({ where: { id: accountId } });
-        }
-        if (!account) {
-            account = await this.accountRepo.findOne({ where: { userId, mt5Id: auth.accountId } });
-        }
+        const primaryAuth =
+            (requestedAccountId && requestedAccountId !== 'all'
+                ? allAuths.find((a) => a.accountEntityId === requestedAccountId || a.accountId === requestedAccountId)
+                : undefined) || allAuths[0];
 
-        const isWsConnected = this.clients.get(userId)?.getIsAuthorized() || false;
+        const summarized = await Promise.all(
+            allAuths.map(async (auth) => {
+                const connKey = this.buildConnKey(userId, auth.accountId);
+                const entityId = auth.accountEntityId || this.accountIds.get(connKey);
+                let account: AccountEntity | null = null;
+                if (entityId) {
+                    account = await this.accountRepo.findOne({ where: { id: entityId } });
+                }
+                if (!account) {
+                    account = await this.accountRepo.findOne({ where: { userId, mt5Id: auth.accountId } });
+                }
+                const isStreaming = this.clients.get(connKey)?.getIsAuthorized() || false;
+                return {
+                    isConnected: true,
+                    isStreaming,
+                    accountId: auth.accountId,
+                    currency: account?.currency || auth.currency || 'USD',
+                    balance: account ? Number(account.balance) : (auth.metadata?.balance || 0),
+                    equity: account ? Number(account.equity) : (auth.metadata?.balance || 0),
+                    accountName: account?.name || `Deriv (${auth.accountId})`,
+                    accountEntityId: account?.id || auth.accountEntityId || null,
+                    lastSyncAt: auth.lastSyncAt || account?.lastSeen || auth.updatedAt,
+                };
+            }),
+        );
+
+        const primarySummary =
+            summarized.find((s) => s.accountId === primaryAuth.accountId) || summarized[0];
 
         return {
-            isConnected: true,
-            isStreaming: isWsConnected,
-            accountId: auth.accountId,
-            currency: account?.currency || auth.currency || 'USD',
-            balance: account ? Number(account.balance) : (auth.metadata?.balance || 0),
-            equity: account ? Number(account.equity) : (auth.metadata?.balance || 0),
-            accountName: account?.name || `Deriv (${auth.accountId})`,
-            accountEntityId: account?.id || auth.accountEntityId,
-            lastSyncAt: auth.lastSyncAt || account?.lastSeen || auth.updatedAt
+            ...primarySummary,
+            accounts: summarized,
         };
     }
 
-    async triggerSync(userId: string) {
-        const auth = await this.derivAuthRepo.findOne({ where: { userId, isActive: true } });
-        if (!auth) {
+    async triggerSync(userId: string, requestedAccountId?: string) {
+        const targets = await this.findTargetAuths(userId, requestedAccountId);
+        if (targets.length === 0) {
             throw new NotFoundException('Nenhuma conta Deriv ativa vinculada a este usuário');
         }
 
-        let client = this.clients.get(userId);
-        if (!client || !client.getIsAuthorized()) {
-            await this.connectAccount(auth);
-            client = this.clients.get(userId);
+        let started = 0;
+        for (const auth of targets) {
+            const connKey = this.buildConnKey(userId, auth.accountId);
+            let client = this.clients.get(connKey);
+            if (!client || !client.getIsAuthorized()) {
+                await this.connectAccount(auth);
+                client = this.clients.get(connKey);
+            }
+            if (client) {
+                started += 1;
+                this.syncHistory(userId, auth.accountId, client).catch(err => {
+                    this.logger.error(`Error during triggerSync for ${connKey}: ${err.message}`);
+                });
+            }
         }
 
-        if (client) {
-            this.syncHistory(userId, client).catch(err => {
-                this.logger.error(`Error during triggerSync for user ${userId}: ${err.message}`);
-            });
-            return { success: true, message: 'Sincronização de histórico iniciada em segundo plano' };
+        if (started > 0) {
+            return { success: true, count: started, message: 'Sincronização de histórico iniciada em segundo plano' };
         }
 
         throw new Error('Não foi possível conectar com o servidor da Deriv');
     }
 
-    async disconnect(userId: string) {
-        if (this.subscriptions.has(userId)) {
-            this.subscriptions.get(userId).unsubscribe();
-            this.subscriptions.delete(userId);
+    async disconnect(userId: string, requestedAccountId?: string) {
+        const targets = await this.findTargetAuths(userId, requestedAccountId);
+
+        if (requestedAccountId && requestedAccountId !== 'all') {
+            for (const auth of targets) {
+                const connKey = this.buildConnKey(userId, auth.accountId);
+                const entityId = auth.accountEntityId || this.accountIds.get(connKey);
+                this.disconnectConnection(connKey);
+                if (entityId) {
+                    await this.accountRepo.update({ id: entityId }, { isConnected: false });
+                }
+                await this.derivAuthRepo.update({ id: auth.id }, { isActive: false });
+                this.logger.log(`Deriv account ${auth.accountId} disconnected for user ${userId}`);
+            }
+            return { success: true, disconnected: targets.length };
         }
 
-        const client = this.clients.get(userId);
-        if (client) {
-            client.disconnect();
-            this.clients.delete(userId);
+        for (const [connKey] of Array.from(this.clients.entries())) {
+            if (connKey.startsWith(`${userId}:`)) {
+                const entityId = this.accountIds.get(connKey);
+                this.disconnectConnection(connKey);
+                if (entityId) {
+                    await this.accountRepo.update({ id: entityId }, { isConnected: false });
+                }
+            }
         }
-
-        const accountId = this.accountIds.get(userId);
-        if (accountId) {
-            await this.accountRepo.update({ id: accountId }, { isConnected: false });
-        }
-        this.accountIds.delete(userId);
 
         await this.derivAuthRepo.update({ userId }, { isActive: false });
-        this.logger.log(`Deriv account disconnected successfully for user ${userId}`);
+        this.logger.log(`All Deriv accounts disconnected successfully for user ${userId}`);
         return { success: true };
     }
 }

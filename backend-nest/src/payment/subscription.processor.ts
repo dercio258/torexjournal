@@ -1,6 +1,8 @@
 import { Process, Processor, InjectQueue } from '@nestjs/bull';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { Repository } from 'typeorm';
 import { Job, Queue } from 'bull';
 import { Subscription, SubscriptionStatus } from './subscription.entity';
@@ -8,8 +10,7 @@ import { SubscriptionService } from './subscription.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
 import { EmailProducerService } from '../email/email-producer.service';
-import { SmsService } from '../notifications/sms.service';
-import { SmsTemplates } from '../notifications/sms-templates';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 
 @Injectable()
 @Processor('subscription-queue')
@@ -22,7 +23,8 @@ export class SubscriptionProcessor {
         private readonly subscriptionService: SubscriptionService,
         private readonly alertsService: AlertsService,
         private readonly emailProducer: EmailProducerService,
-        private readonly smsService: SmsService,
+        private readonly redisSecurity: RedisSecurityService,
+        @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
         @InjectQueue('subscription-queue')
         private readonly subscriptionQueue: Queue,
     ) {}
@@ -83,7 +85,7 @@ export class SubscriptionProcessor {
         }
 
         try {
-            await this.subscriptionService.handleDebitoStatusUpdate(reference);
+            await this.subscriptionService.checkPaymentStatus(reference);
         } catch (err: any) {
             this.logger.error(
                 `Error in check-pending status update for reference ${reference}: ${err?.message || err}`,
@@ -110,6 +112,18 @@ export class SubscriptionProcessor {
         });
 
         if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
+            return;
+        }
+
+        const dedupAcquired = await this.redisSecurity.setIfAbsent(
+            `sub_exp_warn_5d:${sub.id}`,
+            '1',
+            6 * 24 * 60 * 60 * 1000,
+        );
+        if (!dedupAcquired) {
+            this.logger.log(
+                `Skipping duplicate 5-day expiration warning for subscription ${subscriptionId}`,
+            );
             return;
         }
 
@@ -141,79 +155,82 @@ export class SubscriptionProcessor {
                     { jobId: `sub-expiring-5d:${sub.id}` },
                 );
             }
-
-            if (sub.user.whatsapp) {
-                await this.smsService.sendSms(
-                    sub.user.id,
-                    sub.user.whatsapp,
-                    SmsTemplates.EXPIRATION_REMINDER(sub.user.name, 5),
-                    true,
-                );
-            }
         }
     }
 
     @Process('renewal-charge')
     async handleRenewalCharge(job: Job) {
         const { subscriptionId } = job.data;
+        const outcome = await this.subscriptionService.renewSubscriptionById(subscriptionId);
 
-        const sub = await this.subscriptionRepo.findOne({
-            where: { id: subscriptionId },
-            relations: ['user', 'planConfig'],
-        });
+        if (
+            outcome.action === 'noop' ||
+            outcome.action === 'rescheduled' ||
+            outcome.action === 'superseded' ||
+            outcome.action === 'renewal_initiated'
+        ) {
+            if (outcome.action === 'renewal_initiated') {
+                this.logger.log(
+                    `Automatic renewal push initiated for sub ${subscriptionId} (ref=${outcome.reference}).`,
+                );
+            }
+            return;
+        }
 
+        const sub = outcome.sub;
         if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
             return;
         }
 
-        try {
-            this.logger.log(
-                `Attempting automatic renewal charge for user ${sub.userId} subscription ${sub.id}`,
-            );
-            await this.subscriptionService.renewActiveSubscription(sub.userId);
+        // Guard against expiring manually extended plans
+        if (
+            sub.currentPeriodEnd &&
+            new Date(sub.currentPeriodEnd).getTime() > Date.now() + 5 * 60 * 1000
+        ) {
+            return;
+        }
 
-            sub.status = SubscriptionStatus.EXPIRED;
-            await this.subscriptionRepo.save(sub);
-        } catch (error: any) {
-            this.logger.warn(
-                `Automatic renewal failed for sub ${sub.id}: ${error?.message || error}. Expiring subscription.`,
-            );
+        this.logger.warn(
+            `Automatic renewal ended (${outcome.action}) for sub ${sub.id}: ${outcome.reason || 'unavailable'}. Expiring subscription.`,
+        );
 
-            sub.status = SubscriptionStatus.EXPIRED;
-            await this.subscriptionRepo.save(sub);
+        sub.status = SubscriptionStatus.EXPIRED;
+        await this.subscriptionRepo.save(sub);
+        await this.cacheManager.del(`user_plan_tier:${sub.userId}`).catch(() => {});
+        await this.cacheManager.del(`user_subscription_status:${sub.userId}`).catch(() => {});
+        await this.cacheManager.del('admin:financial_stats').catch(() => {});
 
-            if (sub.user) {
-                const planName = sub.planConfig?.tier || 'Profissional';
-                await this.alertsService.create(sub.userId, {
-                    type: AlertType.SYSTEM,
-                    severity: AlertSeverity.WARNING,
-                    title: 'Assinatura Expirada',
-                    description: `A vigência do plano ${planName} encerrou. Renove sua assinatura para recuperar o acesso completo.`,
-                    metadata: { subId: sub.id },
-                });
+        if (sub.user) {
+            const planName = sub.planConfig?.tier || 'Profissional';
+            await this.alertsService.create(sub.userId, {
+                type: AlertType.SYSTEM,
+                severity: AlertSeverity.WARNING,
+                title: 'Assinatura Expirada',
+                description: `A vigência do plano ${planName} encerrou. Renove sua assinatura para recuperar o acesso completo.`,
+                metadata: { subId: sub.id },
+            });
 
-                if (sub.user.email) {
-                    await this.emailProducer.enqueue(
-                        sub.user.email,
-                        'SUBSCRIPTION_EXPIRED',
-                        {
-                            userName: sub.user.name || undefined,
-                            plan: String(planName),
-                            expiredAt: new Date(sub.currentPeriodEnd || new Date()).toISOString(),
-                        },
-                        { jobId: `sub-expired:${sub.id}` },
-                    );
-                }
-
-                await this.subscriptionQueue.add(
-                    'remarketing-followup',
-                    { subscriptionId: sub.id },
+            if (sub.user.email) {
+                await this.emailProducer.enqueue(
+                    sub.user.email,
+                    'SUBSCRIPTION_EXPIRED',
                     {
-                        delay: 2 * 24 * 60 * 60 * 1000,
-                        jobId: `remarketing-trigger:${sub.id}`,
+                        userName: sub.user.name || undefined,
+                        plan: String(planName),
+                        expiredAt: new Date(sub.currentPeriodEnd || new Date()).toISOString(),
                     },
+                    { jobId: `sub-expired:${sub.id}` },
                 );
             }
+
+            await this.subscriptionQueue.add(
+                'remarketing-followup',
+                { subscriptionId: sub.id },
+                {
+                    delay: 2 * 24 * 60 * 60 * 1000,
+                    jobId: `remarketing-trigger:${sub.id}`,
+                },
+            );
         }
     }
 

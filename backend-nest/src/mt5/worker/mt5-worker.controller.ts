@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards, HttpCode, Logger } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, HttpCode, Logger, Req } from '@nestjs/common';
 import { WorkerAuthGuard } from './worker-auth.guard';
 import { Mt5WorkerService } from './mt5-worker.service';
 
@@ -22,8 +22,8 @@ export class Mt5WorkerController {
     }
 
     @Get('tasks')
-    async getTasks() {
-        const tasks = this.workerService.getPendingTasks();
+    async getTasks(@Req() req: any) {
+        const tasks = this.workerService.getPendingTasks(true, req?.workerId);
         return { tasks };
     }
 
@@ -45,8 +45,8 @@ export class Mt5WorkerController {
 
     @Post('sync/accounts')
     @HttpCode(200)
-    async syncAccounts(@Body() body: any) {
-        return this.workerService.syncAccountMetrics(body);
+    async syncAccounts(@Body() body: any, @Req() req: any) {
+        return this.workerService.syncAccountMetrics(body, req?.workerId);
     }
 
     @Post('sync/trades')

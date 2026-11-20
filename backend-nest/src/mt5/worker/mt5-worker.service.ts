@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, OnModuleInit, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy, Optional, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In } from 'typeorm';
@@ -7,7 +7,7 @@ import { Cache } from 'cache-manager';
 import { randomUUID } from 'crypto';
 import { AccountEntity, AccountType } from '../../account/account.entity';
 import { CryptoUtil } from '../../common/utils/crypto.util';
-import { getJwtSecret } from '../../common/security/security.config';
+import { getMt5CredentialSecret } from '../../common/security/security.config';
 import { UserEntity } from '../../users/user.entity';
 import { PositionEntity } from '../position.entity';
 import { TradeEntity } from '../trade.entity';
@@ -19,6 +19,7 @@ import { TradingViewService } from '../../tradingview/tradingview.service';
 import { EconomicCalendarService } from '../../economic-calendar/economic-calendar.service';
 import { EmailProducerService } from '../../email/email-producer.service';
 import { TelemetryService } from '../../common/observability/telemetry.service';
+import { Mt5ClusterBalancerService, humanizeClientSyncMessage } from './mt5-cluster-balancer.service';
 
 export enum WorkerTaskType {
     START_ACCOUNT = 'START_ACCOUNT',
@@ -42,6 +43,9 @@ export interface WorkerTask {
     type: WorkerTaskType;
     priority: number;
     accountId: number;
+    accountUuid?: string;
+    targetWorkerId?: string;
+    leaseEpoch?: number;
     login: string;
     server: string;
     credentialToken?: string;
@@ -57,6 +61,8 @@ export interface WorkerTask {
 }
 
 export interface TemporaryCredential {
+    taskId?: string;
+    accountId?: number;
     login: string;
     server: string;
     password: string;
@@ -73,8 +79,11 @@ export interface WorkerNodeState {
     memoryUsedMb?: number;
     memoryTotalMb?: number;
     memoryAvailableMb?: number;
+    diskFreeGb?: number;
     activeTerminals?: number;
     monitoredAccounts?: number[];
+    isDraining?: boolean;
+    registrationOrder?: number;
     isOnline: boolean;
 }
 
@@ -115,7 +124,7 @@ export interface WorkerEventRecord {
 }
 
 @Injectable()
-export class Mt5WorkerService implements OnModuleInit {
+export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(Mt5WorkerService.name);
     private readonly auditLogger = new Logger('MT5AuditTrail');
 
@@ -128,6 +137,8 @@ export class Mt5WorkerService implements OnModuleInit {
     private recentEvents: WorkerEventRecord[] = [];
     private initialFullSyncDispatched: Set<string> = new Set();
     private lastHeartbeatDbTouch: Map<string, number> = new Map();
+    private accountToWorkerCache: Map<string, string> = new Map();
+    private workerRegistrationCounter = 0;
     private calendarSyncTimer: NodeJS.Timeout | null = null;
     private sharedDemoFeedConfig: {
         login: string;
@@ -156,18 +167,12 @@ export class Mt5WorkerService implements OnModuleInit {
         @Optional() private readonly tradingViewService?: TradingViewService,
         @Optional() private readonly economicCalendarService?: EconomicCalendarService,
         @Optional() private readonly configService?: ConfigService,
+        @Optional() @Inject(forwardRef(() => Mt5ClusterBalancerService))
+        private readonly clusterBalancer?: Mt5ClusterBalancerService,
     ) { }
 
     private getCredentialEncryptionKey(): string {
-        const workerKey =
-            this.configService?.get<string>('WORKER_KEY') ||
-            this.configService?.get<string>('MT5_WORKER_KEY') ||
-            process.env.WORKER_KEY ||
-            process.env.MT5_WORKER_KEY;
-        if (workerKey && workerKey !== 'secret_worker_key_change_me') {
-            return workerKey;
-        }
-        return getJwtSecret(this.configService);
+        return getMt5CredentialSecret(this.configService);
     }
 
     async onModuleInit() {
@@ -191,11 +196,17 @@ export class Mt5WorkerService implements OnModuleInit {
             for (const acc of mt5Accounts) {
                 const cleanLogin = (acc.mt5Id || '').toString().trim();
                 if (!cleanLogin || !acc.userId) continue;
-                this.loginToUserMap.set(cleanLogin, {
-                    userId: acc.userId,
-                    accountUuid: acc.id,
-                    server: acc.broker || '',
-                });
+                const existing = this.loginToUserMap.get(cleanLogin);
+                if (!existing || acc.isConnected) {
+                    this.loginToUserMap.set(cleanLogin, {
+                        userId: acc.userId,
+                        accountUuid: acc.id,
+                        server: acc.broker || '',
+                    });
+                    if (acc.assignedWorkerId) {
+                        this.accountToWorkerCache.set(cleanLogin, acc.assignedWorkerId);
+                    }
+                }
                 if (!this.accountTelemetry.has(cleanLogin)) {
                     this.accountTelemetry.set(cleanLogin, {
                         login: cleanLogin,
@@ -205,34 +216,7 @@ export class Mt5WorkerService implements OnModuleInit {
                         lastSyncAt: acc.lastSeen ? new Date(acc.lastSeen).toISOString() : undefined,
                     });
                 }
-                // Auto-select a DEMO account (or connected MT5 account) as the initial Shared Market Feed Demo Account
-                if (
-                    !this.sharedDemoFeedConfig &&
-                    (acc.type === AccountType.DEMO ||
-                        (acc.broker || '').toLowerCase().includes('demo') ||
-                        (acc.name || '').toLowerCase().includes('demo'))
-                ) {
-                    this.sharedDemoFeedConfig = {
-                        login: cleanLogin,
-                        server: acc.broker || 'MetaQuotes-Demo',
-                        accountUuid: acc.id,
-                        userId: acc.userId,
-                        updatedAt: new Date().toISOString(),
-                    };
-                }
                 hydratedCount++;
-            }
-            if (!this.sharedDemoFeedConfig) {
-                const fallbackAcc = mt5Accounts.find((a) => !!a.mt5Id && a.isConnected) || mt5Accounts.find((a) => !!a.mt5Id);
-                if (fallbackAcc && fallbackAcc.mt5Id) {
-                    this.sharedDemoFeedConfig = {
-                        login: fallbackAcc.mt5Id.trim(),
-                        server: fallbackAcc.broker || 'MetaQuotes-Demo',
-                        accountUuid: fallbackAcc.id,
-                        userId: fallbackAcc.userId,
-                        updatedAt: new Date().toISOString(),
-                    };
-                }
             }
             this.logger.log(`Hydrated ${hydratedCount} MT5 account mappings from PostgreSQL on startup.`);
         } catch (err) {
@@ -242,20 +226,30 @@ export class Mt5WorkerService implements OnModuleInit {
         // Ciclo automático a cada 10 minutos (600.000 ms) para consultar e importar novas notícias do Calendário no MT5 usando a Conta Demo
         if (this.calendarSyncTimer) {
             clearInterval(this.calendarSyncTimer);
+            this.calendarSyncTimer = null;
         }
-        this.logger.log(
-            `[MT5-CALENDAR-SCHEDULER] Agendador automático de notícias do Calendário MT5 iniciado (ciclo: a cada 10 minutos via Conta Demo #${this.sharedDemoFeedConfig?.login || 'DEMO_FEED'}).`,
-        );
-        setTimeout(() => {
-            this.logger.log('[MT5-CALENDAR-SCHEDULER] Executando sincronização inicial de notícias do Calendário MT5 pós-startup...');
-            this.triggerMt5CalendarSync().catch(() => {});
-        }, 15_000);
-        this.calendarSyncTimer = setInterval(() => {
-            this.logger.log('[MT5-CALENDAR-SCHEDULER] Ciclo de 10 minutos atingido: consultando novas notícias no MT5 via Conta Demo...');
-            this.triggerMt5CalendarSync().catch((err) => {
-                this.logger.warn(`[MT5-CALENDAR-SCHEDULER] Falha ao agendar sync periódico de 10min do calendário MT5: ${err?.message || err}`);
-            });
-        }, 10 * 60 * 1000);
+        if (process.env.MT5_DEDICATED_SERVER !== 'true') {
+            this.logger.log(
+                `[MT5-CALENDAR-SCHEDULER] Agendador automático de notícias do Calendário MT5 iniciado (ciclo: a cada 10 minutos via Conta Demo #${this.sharedDemoFeedConfig?.login || 'DEMO_FEED'}).`,
+            );
+            setTimeout(() => {
+                this.logger.log('[MT5-CALENDAR-SCHEDULER] Executando sincronização inicial de notícias do Calendário MT5 pós-startup...');
+                this.triggerMt5CalendarSync().catch(() => {});
+            }, 15_000);
+            this.calendarSyncTimer = setInterval(() => {
+                this.logger.log('[MT5-CALENDAR-SCHEDULER] Ciclo de 10 minutos atingido: consultando novas notícias no MT5 via Conta Demo...');
+                this.triggerMt5CalendarSync().catch((err) => {
+                    this.logger.warn(`[MT5-CALENDAR-SCHEDULER] Falha ao agendar sync periódico de 10min do calendário MT5: ${err?.message || err}`);
+                });
+            }, 10 * 60 * 1000);
+        }
+    }
+
+    onModuleDestroy() {
+        if (this.calendarSyncTimer) {
+            clearInterval(this.calendarSyncTimer);
+            this.calendarSyncTimer = null;
+        }
     }
 
     public deriveNumericAccountId(login: string, fallback?: number): number {
@@ -325,12 +319,16 @@ export class Mt5WorkerService implements OnModuleInit {
     // 1. WORKER REGISTRATION & TELEMETRY
     // ==========================================
     registerWorker(workerId: string, capacity: number, systemInfo: Record<string, any>) {
-        this.logger.log(`Worker conectado e registrado: [${workerId}] (Capacidade: ${capacity} contas)`);
+        const prev = this.workers.get(workerId);
+        const regOrder = prev?.registrationOrder ?? ++this.workerRegistrationCounter;
+        this.logger.log(`Worker conectado e registrado: [${workerId}] (Capacidade: ${capacity} contas, ordem=#${regOrder})`);
         this.workers.set(workerId, {
             workerId,
             capacity,
             systemInfo: systemInfo || {},
             lastHeartbeat: new Date(),
+            isDraining: Boolean(this.clusterBalancer?.isWorkerDraining(workerId)),
+            registrationOrder: regOrder,
             isOnline: true
         });
         return { success: true, workerId, registeredAt: new Date().toISOString() };
@@ -343,6 +341,7 @@ export class Mt5WorkerService implements OnModuleInit {
         memoryUsedMb?: number;
         memoryTotalMb?: number;
         memoryAvailableMb?: number;
+        diskFreeGb?: number;
         activeTerminals: number;
         monitoredAccounts: number[];
         timestamp?: string;
@@ -350,6 +349,8 @@ export class Mt5WorkerService implements OnModuleInit {
         this.telemetry?.recordMt5Metric('workerHeartbeats', 1);
         const existing = this.workers.get(heartbeat.workerId);
         const monitoredList = heartbeat.monitoredAccounts || [];
+        const regOrder = existing?.registrationOrder ?? ++this.workerRegistrationCounter;
+        const isDraining = Boolean(this.clusterBalancer?.isWorkerDraining(heartbeat.workerId));
         this.workers.set(heartbeat.workerId, {
             workerId: heartbeat.workerId,
             capacity: existing?.capacity || 10,
@@ -360,8 +361,11 @@ export class Mt5WorkerService implements OnModuleInit {
             memoryUsedMb: heartbeat.memoryUsedMb,
             memoryTotalMb: heartbeat.memoryTotalMb,
             memoryAvailableMb: heartbeat.memoryAvailableMb,
+            diskFreeGb: heartbeat.diskFreeGb,
             activeTerminals: heartbeat.activeTerminals,
             monitoredAccounts: monitoredList,
+            isDraining,
+            registrationOrder: regOrder,
             isOnline: true
         });
 
@@ -398,7 +402,8 @@ export class Mt5WorkerService implements OnModuleInit {
             }
         }
 
-        return { success: true };
+        const evictLogins = this.clusterBalancer?.consumeEvictionsForWorker(heartbeat.workerId) || [];
+        return { success: true, evictLogins, isDraining };
     }
 
     getWorkerStatus(workerId?: string, includeSensitive = false) {
@@ -406,9 +411,11 @@ export class Mt5WorkerService implements OnModuleInit {
         const checkWorker = (w: WorkerNodeState) => {
             const lastHb = w.lastHeartbeat ? new Date(w.lastHeartbeat).getTime() : 0;
             const isOnline = lastHb > 0 && (now - lastHb < 45000);
+            const isDraining = Boolean(w.isDraining || this.clusterBalancer?.isWorkerDraining(w.workerId));
             if (includeSensitive) {
                 return {
                     ...w,
+                    isDraining,
                     isOnline,
                 };
             }
@@ -416,6 +423,7 @@ export class Mt5WorkerService implements OnModuleInit {
             return {
                 ...safeWorker,
                 monitoredAccountsCount: Array.isArray(monitoredAccounts) ? monitoredAccounts.length : 0,
+                isDraining,
                 isOnline,
             };
         };
@@ -474,6 +482,8 @@ export class Mt5WorkerService implements OnModuleInit {
         if (password) {
             credentialToken = `token_${randomUUID().replace(/-/g, '')}`;
             this.credentialsStore.set(credentialToken, {
+                taskId,
+                accountId: numericAccId,
                 login: cleanLogin,
                 server: cleanServer,
                 password: CryptoUtil.encrypt(password, this.getCredentialEncryptionKey()),
@@ -482,14 +492,25 @@ export class Mt5WorkerService implements OnModuleInit {
         }
 
         const initialMsg = type === WorkerTaskType.START_ACCOUNT
-            ? `Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.`
-            : `Tarefa ${type} enfileirada para ${cleanLogin}...`;
+            ? `Ligação solicitada! Estamos a conectar e sincronizar a sua conta.`
+            : `A atualizar os dados da sua conta...`;
+
+        const explicitTargetWorker = options?.targetWorkerId ? String(options.targetWorkerId).trim() : undefined;
+        const cachedWorker = cleanLogin ? this.accountToWorkerCache.get(cleanLogin) : undefined;
+        const targetWorkerId = explicitTargetWorker || cachedWorker || undefined;
+
+        if (targetWorkerId && cleanLogin && type !== WorkerTaskType.SYNC_CALENDAR) {
+            this.accountToWorkerCache.set(cleanLogin, targetWorkerId);
+        }
 
         const task: WorkerTask = {
             id: taskId,
             type,
             priority: options?.priority ?? this.getDefaultPriority(type),
             accountId: numericAccId,
+            accountUuid: options?.accountUuid,
+            targetWorkerId,
+            leaseEpoch: options?.leaseEpoch,
             login: cleanLogin,
             server: cleanServer,
             credentialToken,
@@ -503,12 +524,16 @@ export class Mt5WorkerService implements OnModuleInit {
 
         this.pendingTasks.set(taskId, task);
 
-        if (cleanLogin && options?.userId) {
-            this.loginToUserMap.set(cleanLogin, {
-                userId: options.userId,
-                accountUuid: options.accountUuid,
-                server: cleanServer,
-            });
+        if (cleanLogin && options?.userId && type !== WorkerTaskType.START_ACCOUNT) {
+            const existingOwner = this.loginToUserMap.get(cleanLogin);
+            // Para START_ACCOUNT o mapeamento é gravado apenas após WorkerTaskStatus.SUCCESS (autenticação verificada)
+            if (!existingOwner || existingOwner.userId === options.userId) {
+                this.loginToUserMap.set(cleanLogin, {
+                    userId: options.userId,
+                    accountUuid: options.accountUuid,
+                    server: cleanServer,
+                });
+            }
         }
 
         if (type === WorkerTaskType.START_ACCOUNT && cleanLogin) {
@@ -525,7 +550,7 @@ export class Mt5WorkerService implements OnModuleInit {
         // Record audit event for connection/sync request
         this.recentEvents.unshift({
             id: randomUUID(),
-            workerId: 'BACKEND-API',
+            workerId: targetWorkerId || 'BACKEND-API',
             accountId: numericAccId,
             login: cleanLogin,
             server: cleanServer,
@@ -538,15 +563,26 @@ export class Mt5WorkerService implements OnModuleInit {
         if (this.recentEvents.length > 100) this.recentEvents.length = 100;
 
         this.auditLogger.log(
-            `[AUDIT] Solicitação ${type} criada para conta MT5 ${cleanLogin}@${cleanServer} (TaskID: ${taskId}, Prioridade: P${task.priority})`
+            `[AUDIT] Solicitação ${type} criada para conta MT5 ${cleanLogin}@${cleanServer} (TaskID: ${taskId}, Target: ${targetWorkerId || 'ANY'}, Prioridade: P${task.priority})`
         );
         return task;
     }
 
-    getPendingTasks(claim: boolean = true): WorkerTask[] {
+    getPendingTasks(claim: boolean = true, workerId?: string): WorkerTask[] {
         const now = Date.now();
+        const requesterId = workerId ? String(workerId).trim() : undefined;
+        const requesterDraining = Boolean(requesterId && this.clusterBalancer?.isWorkerDraining(requesterId));
         const tasks: WorkerTask[] = [];
         for (const task of this.pendingTasks.values()) {
+            if (requesterId) {
+                if (task.targetWorkerId && task.targetWorkerId !== requesterId) {
+                    continue;
+                }
+                if (!task.targetWorkerId && requesterDraining) {
+                    continue;
+                }
+            }
+
             const refTime = task.dispatchedAt
                 ? new Date(task.dispatchedAt).getTime()
                 : (task.createdAt ? new Date(task.createdAt).getTime() : now);
@@ -559,11 +595,17 @@ export class Mt5WorkerService implements OnModuleInit {
                 if (claim) {
                     task.status = WorkerTaskStatus.IN_PROGRESS;
                     task.dispatchedAt = new Date();
-                    if (!task.message || task.message.startsWith('Aguardando') || task.message.startsWith('Solicitação de conexão enviada')) {
-                        task.message = `Worker Windows recebeu a tarefa e está iniciando a sincronização para ${task.login}...`;
+                    if (!task.targetWorkerId && requesterId) {
+                        task.targetWorkerId = requesterId;
+                        if (task.login && task.type !== WorkerTaskType.SYNC_CALENDAR) {
+                            this.accountToWorkerCache.set(task.login, requesterId);
+                        }
+                    }
+                    if (!task.message || task.message.startsWith('Aguardando') || task.message.startsWith('Solicitação') || task.message.startsWith('Ligação solicitada')) {
+                        task.message = `A conectar e sincronizar os dados da sua conta em segurança...`;
                     }
                     this.auditLogger.log(
-                        `[AUDIT] Worker Windows reivindicou tarefa [${task.id}] (${task.type}) para conta ${task.login}@${task.server}`
+                        `[AUDIT] Worker [${requesterId || 'GENERIC'}] reivindicou tarefa [${task.id}] (${task.type}) para conta ${task.login}@${task.server}`
                     );
                 }
                 tasks.push(task);
@@ -625,12 +667,26 @@ export class Mt5WorkerService implements OnModuleInit {
             if (status === WorkerTaskStatus.IN_PROGRESS) {
                 existingTel.connectionState = task.type === WorkerTaskType.START_ACCOUNT ? 'CONNECTING' : 'SYNCING';
                 existingTel.statusMessage = message || existingTel.statusMessage;
+                if (details?.step === 'SYNCING_DATA' && task.options?.userId) {
+                    this.loginToUserMap.set(cleanLogin, {
+                        userId: task.options.userId,
+                        accountUuid: task.options.accountUuid || task.accountUuid,
+                        server: task.server,
+                    });
+                }
             } else if (status === WorkerTaskStatus.SUCCESS) {
                 if (task.type === WorkerTaskType.STOP_ACCOUNT) {
                     existingTel.connected = false;
                     existingTel.connectionState = 'DISCONNECTED';
                     existingTel.statusMessage = message || 'Conta desconectada.';
                 } else {
+                    if (task.options?.userId) {
+                        this.loginToUserMap.set(cleanLogin, {
+                            userId: task.options.userId,
+                            accountUuid: task.options.accountUuid,
+                            server: task.server,
+                        });
+                    }
                     existingTel.connected = true;
                     existingTel.connectionState = 'CONNECTED';
                     existingTel.statusMessage = message || 'Conectado e sincronizado.';
@@ -753,7 +809,17 @@ export class Mt5WorkerService implements OnModuleInit {
             throw new NotFoundException('Credential token invalid or expired');
         }
 
-        // Single-use token: delete immediately from RAM after retrieval
+        if (
+            (cred.taskId && cred.taskId !== taskId) ||
+            (cred.accountId !== undefined && Number(cred.accountId) !== Number(accountId))
+        ) {
+            this.logger.warn(
+                `Tentativa de resgate de credencial com divergência de tarefa/conta (tokenTask=${cred.taskId}, reqTask=${taskId}, tokenAcc=${cred.accountId}, reqAcc=${accountId})`,
+            );
+            throw new NotFoundException('Credential token mismatch or invalid');
+        }
+
+        // Single-use token: delete immediately from RAM after validation
         this.credentialsStore.delete(credentialToken);
 
         const decryptedPassword = cred.password?.includes(':')
@@ -794,12 +860,19 @@ export class Mt5WorkerService implements OnModuleInit {
         pingMs?: number;
         terminalBuild?: number;
         connected?: boolean;
-    }) {
+    }, reqWorkerId?: string) {
         const cleanLogin = (accountInfo.login || accountInfo.accountId || '').toString().trim();
         const account = await this.findAccountByLoginOrId(cleanLogin, accountInfo.accountId, accountInfo.server);
         if (!account) {
             this.logger.warn(`Conta MT5 ${cleanLogin} não encontrada no banco de dados para sync de métricas.`);
             return { success: false, message: 'Account not found' };
+        }
+
+        if (reqWorkerId && account.assignedWorkerId && account.assignedWorkerId !== reqWorkerId) {
+            this.logger.warn(
+                `[FENCING] Sync rejeitado para conta ${cleanLogin}: worker=${reqWorkerId} obsoleto (dono atual=${account.assignedWorkerId}).`,
+            );
+            return { success: false, message: 'STALE_WORKER_LEASE', evict: true };
         }
 
         const balanceNum = Number(accountInfo.balance) || 0;
@@ -811,6 +884,24 @@ export class Mt5WorkerService implements OnModuleInit {
         account.marginFree = Number(accountInfo.freeMargin) || 0;
         account.marginLevel = Number(accountInfo.marginLevel) || 0;
         account.leverage = Number(accountInfo.leverage) || 1;
+        if (reqWorkerId && !account.assignedWorkerId) {
+            account.assignedWorkerId = reqWorkerId;
+            if (cleanLogin) this.accountToWorkerCache.set(cleanLogin, reqWorkerId);
+        }
+        if (balanceNum > 0 || equityNum > 0) {
+            account.zeroBalanceSince = null;
+            account.inactivityWarnedAt = null;
+            account.inactivityDisconnectAt = null;
+            if (!account.mt5SyncTier || account.mt5SyncTier === 'COLD') {
+                account.mt5SyncTier = 'HOT';
+            }
+        } else if (!account.zeroBalanceSince && account.type !== AccountType.CUSTOM) {
+            const openPos = await this.positionRepo.count({ where: { accountId: account.id } }).catch(() => 0);
+            if (openPos === 0) {
+                account.zeroBalanceSince = new Date();
+                account.mt5SyncTier = 'COLD';
+            }
+        }
         if (accountInfo.currency) account.currency = accountInfo.currency;
         if (Number(account.initialBalance) === 0 && balanceNum > 0) {
             const closedPnlRes = await this.tradeRepo
@@ -1540,50 +1631,26 @@ export class Mt5WorkerService implements OnModuleInit {
             };
         }
 
-        // If we still don't have a shared demo feed selected, look for any DEMO MT5 account in PostgreSQL
-        if (!this.sharedDemoFeedConfig) {
-            const allAccounts = await this.accountRepo.find({
-                where: { isArchived: false },
-                order: { updatedAt: 'DESC' },
-            });
-            const demoAcc =
-                allAccounts.find(
-                    (a) =>
-                        !!a.mt5Id &&
-                        (a.type === AccountType.DEMO ||
-                            (a.broker || '').toLowerCase().includes('demo') ||
-                            (a.name || '').toLowerCase().includes('demo')),
-                ) || allAccounts.find((a) => !!a.mt5Id);
-
-            if (demoAcc && demoAcc.mt5Id) {
-                this.sharedDemoFeedConfig = {
-                    login: demoAcc.mt5Id.trim(),
-                    server: demoAcc.broker || 'MetaQuotes-Demo',
-                    accountUuid: demoAcc.id,
-                    userId: demoAcc.userId,
-                    updatedAt: new Date().toISOString(),
-                };
-            }
-        }
-
         const login = this.sharedDemoFeedConfig?.login || '';
         const server = this.sharedDemoFeedConfig?.server || 'MetaQuotes-Demo';
+        const isOwner = Boolean(
+            userId && this.sharedDemoFeedConfig?.userId && this.sharedDemoFeedConfig.userId === userId,
+        );
         const tel = login ? this.accountTelemetry.get(login) : null;
         const workersList = this.getWorkerStatus() as WorkerNodeState[];
         const primaryWorker = Array.isArray(workersList) && workersList.length > 0 ? workersList[0] : null;
 
         return {
             configured: Boolean(login),
-            login,
-            server: tel?.server || server,
-            accountUuid: this.sharedDemoFeedConfig?.accountUuid || null,
+            ...(isOwner ? { login, accountUuid: this.sharedDemoFeedConfig?.accountUuid || null } : {}),
+            server: server ? (tel?.server || server) : 'MetaQuotes-Demo',
             connected: Boolean(tel?.connected),
             connectionState: tel?.connectionState || (login ? 'CONNECTED' : 'DISCONNECTED'),
             statusMessage:
                 tel?.statusMessage ||
                 (login
-                    ? `Conta Demo #${login} (${server}) salva e compartilhada para todas as sessões de Backtest`
-                    : 'Conta Demo padrão pronta para alimentar todas as sessões'),
+                    ? `Feed Demo compartilhado (${tel?.server || server}) ativo para sessões de Backtest`
+                    : 'Configure MT5_DEMO_FEED_LOGIN para ativar o feed Demo dedicado'),
             lastSyncAt: tel?.lastSyncAt || this.sharedDemoFeedConfig?.updatedAt || null,
             workerOnline: Boolean(primaryWorker?.isOnline),
         };
@@ -1611,7 +1678,7 @@ export class Mt5WorkerService implements OnModuleInit {
                 isPrimary: false,
                 isArchived: false,
                 archivedAt: null,
-                isConnected: true,
+                isConnected: false,
                 initialBalance: 100000,
                 balance: 100000,
                 equity: 100000,
@@ -1625,13 +1692,16 @@ export class Mt5WorkerService implements OnModuleInit {
             account = await this.accountRepo.save(account);
         }
 
-        this.sharedDemoFeedConfig = {
-            login: cleanLogin,
-            server: cleanServer,
-            accountUuid: account.id,
-            userId,
-            updatedAt: new Date().toISOString(),
-        };
+        const envDemoLogin = (process.env.MT5_DEMO_FEED_LOGIN || '').trim();
+        if (!envDemoLogin && (!this.sharedDemoFeedConfig || this.sharedDemoFeedConfig.userId === userId)) {
+            this.sharedDemoFeedConfig = {
+                login: cleanLogin,
+                server: cleanServer,
+                accountUuid: account.id,
+                userId,
+                updatedAt: new Date().toISOString(),
+            };
+        }
 
         const numId = this.deriveNumericAccountId(cleanLogin);
         const task = this.createAccountTask(
@@ -1650,7 +1720,7 @@ export class Mt5WorkerService implements OnModuleInit {
 
         return {
             success: true,
-            message: `Conta Demo MT5 #${cleanLogin} (${cleanServer}) salva como fonte compartilhada para todas as sessões!`,
+            message: `Conta Demo MT5 #${cleanLogin} (${cleanServer}) salva para a sua conta!`,
             demoAccount: await this.getSharedDemoFeedAccount(userId),
             taskId: task.id,
         };
@@ -1658,7 +1728,7 @@ export class Mt5WorkerService implements OnModuleInit {
 
     /**
      * Called when a user creates or opens a Backtest Session:
-     * Logs into the saved Shared MT5 Demo Account (if needed) and pulls 500-candle historical
+     * Logs into the saved Shared MT5 Demo Account (if configured) and pulls 500-candle historical
      * batches for the session's symbols, timeframe, and date window.
      */
     async prefetchSessionWithDemoAccount(
@@ -1674,17 +1744,12 @@ export class Mt5WorkerService implements OnModuleInit {
             demoServer?: string;
         },
     ) {
-        if (dto.demoLogin && dto.demoLogin.trim()) {
-            await this.saveSharedDemoFeedAccount(userId, {
-                login: dto.demoLogin.trim(),
-                pass: dto.demoPass,
-                server: dto.demoServer || 'MetaQuotes-Demo',
-            });
-        }
-
         const demoStatus = await this.getSharedDemoFeedAccount(userId);
+        const feedLogin = this.sharedDemoFeedConfig?.login || '';
+        const feedServer = this.sharedDemoFeedConfig?.server || 'MetaQuotes-Demo';
+        const feedUuid = this.sharedDemoFeedConfig?.accountUuid;
         const envDemoPass = (process.env.MT5_DEMO_FEED_PASSWORD || '').trim();
-        const effectivePass = dto.demoPass || this.sharedDemoFeedConfig?.password || envDemoPass || undefined;
+        const effectivePass = this.sharedDemoFeedConfig?.password || envDemoPass || undefined;
         const symbols = Array.from(
             new Set((dto.symbols || ['XAUUSD']).map((s) => s.trim().toUpperCase()).filter(Boolean)),
         ).slice(0, 8);
@@ -1696,35 +1761,35 @@ export class Mt5WorkerService implements OnModuleInit {
             : Date.now();
 
         let workerTaskId: string | null = null;
-        if (demoStatus.login) {
-            const numId = this.deriveNumericAccountId(demoStatus.login);
+        if (feedLogin) {
+            const numId = this.deriveNumericAccountId(feedLogin);
             this.logger.log(
-                `[MT5-DEMO-SESSION-PREFETCH] Sessão ${dto.sessionId || 'NOVA'}: Autenticando Conta Demo Global #${demoStatus.login} (${demoStatus.server}) e solicitando lotes para [${symbols.join(', ')}] nos timeframes [${multiTimeframes.join(', ')}]...`,
+                `[MT5-DEMO-SESSION-PREFETCH] Sessão ${dto.sessionId || 'NOVA'}: Solicitando lotes para [${symbols.join(', ')}] nos timeframes [${multiTimeframes.join(', ')}]...`,
             );
             // Ensure the global demo account is logged in on the MT5 Worker and pulls multi-timeframe batches
             if (effectivePass && demoStatus.connectionState !== 'CONNECTED') {
                 this.createAccountTask(
                     WorkerTaskType.START_ACCOUNT,
-                    demoStatus.login,
-                    demoStatus.server,
+                    feedLogin,
+                    feedServer,
                     effectivePass,
                     numId,
                     {
                         priority: 1,
-                        userId,
+                        accountUuid: feedUuid,
                         isSharedDemoFeed: true,
                     },
                 );
             }
             const task = this.createAccountTask(
                 WorkerTaskType.FETCH_MARKET_BATCHES,
-                demoStatus.login,
-                demoStatus.server,
+                feedLogin,
+                feedServer,
                 effectivePass,
                 numId,
                 {
                     priority: 1,
-                    userId,
+                    accountUuid: feedUuid,
                     sessionId: dto.sessionId,
                     isSharedDemoFeed: true,
                     symbols,
@@ -2027,8 +2092,12 @@ export class Mt5WorkerService implements OnModuleInit {
         const telemetry = mt5Login ? this.accountTelemetry.get(mt5Login) || null : null;
         const rawActiveTask = mt5Login ? this.getLatestTaskForLogin(mt5Login) : null;
         const activeTask = rawActiveTask ? (() => {
-            const { credentialToken, ...safeTask } = rawActiveTask;
-            return safeTask;
+            const { credentialToken, targetWorkerId: _w, leaseEpoch: _e, ...safeTask } = rawActiveTask;
+            return {
+                ...safeTask,
+                message: safeTask.message ? humanizeClientSyncMessage(safeTask.message) : safeTask.message,
+                errorMessage: safeTask.errorMessage ? humanizeClientSyncMessage(safeTask.errorMessage) : safeTask.errorMessage,
+            };
         })() : null;
 
         const [positions, totalTradesCount, recentTrades, auditLogs] = account
@@ -2048,9 +2117,13 @@ export class Mt5WorkerService implements OnModuleInit {
             ])
             : [[], 0, [], []];
 
-        const accountEvents = mt5Login
+        const rawAccountEvents = mt5Login
             ? this.recentEvents.filter(e => e.login === mt5Login || (e.accountId && e.accountId.toString() === mt5Login)).slice(0, 12)
             : this.recentEvents.slice(0, 6);
+        const accountEvents = rawAccountEvents.map((ev) => ({
+            ...ev,
+            message: humanizeClientSyncMessage(ev.message),
+        }));
 
         return {
             worker: {
@@ -2079,6 +2152,8 @@ export class Mt5WorkerService implements OnModuleInit {
                 leverage: account.leverage || 1,
                 isConnected: account.isConnected,
                 lastSeen: account.lastSeen,
+                zeroBalanceSince: account.zeroBalanceSince || null,
+                inactivityDisconnectAt: account.inactivityDisconnectAt || null,
                 // Live telemetry from MT5 Worker
                 server: telemetry?.server || account.broker,
                 company: telemetry?.company || null,
@@ -2088,8 +2163,8 @@ export class Mt5WorkerService implements OnModuleInit {
                 pingMs: telemetry?.pingMs ?? 0,
                 terminalBuild: telemetry?.terminalBuild ?? null,
                 connectionState: telemetry?.connectionState || (account.isConnected ? 'CONNECTED' : 'DISCONNECTED'),
-                statusMessage: telemetry?.statusMessage || null,
-                lastError: telemetry?.lastError || null,
+                statusMessage: telemetry?.statusMessage ? humanizeClientSyncMessage(telemetry.statusMessage) : null,
+                lastError: telemetry?.lastError ? humanizeClientSyncMessage(telemetry.lastError) : null,
                 lastSyncAt: telemetry?.lastSyncAt || (account.lastSeen ? account.lastSeen.toISOString() : null),
                 openPositionsCount: positions.length,
                 pendingOrdersCount: telemetry?.pendingOrdersCount ?? 0,
@@ -2134,6 +2209,9 @@ export class Mt5WorkerService implements OnModuleInit {
             account = await this.accountRepo.findOne({
                 where: { mt5Id: loginStr, userId: mappedOwner.userId }
             });
+            if (!account) {
+                return null;
+            }
         }
 
         // 3. Busca por (mt5Id, broker) quando o servidor da corretora foi informado

@@ -58,6 +58,7 @@ import {
 } from '../components/trades/BehaviorMlBadge';
 import { DocumentFormat, exportTradingDocument } from '../utils/documentExporter';
 import { formatTradeDateTime, getUserUtcOffsetLabel, parseTradeTimestamp } from '../utils/timezone';
+import { sanitizeRichHtml } from '../utils/sanitizeHtml';
 
 interface TradeDetail {
     trade: {
@@ -1306,7 +1307,7 @@ export const TradeDetails = () => {
                                             </span>
                                             <div
                                                 className="text-fg text-xs leading-relaxed space-y-2 [&_img]:block [&_img]:mx-auto [&_img]:my-2.5 [&_img]:max-h-[360px] [&_img]:object-contain [&_img]:rounded-lg [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
-                                                dangerouslySetInnerHTML={{ __html: tradeRichHtml }}
+                                                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(tradeRichHtml) }}
                                             />
                                         </div>
                                     )}
@@ -1336,7 +1337,7 @@ export const TradeDetails = () => {
                                             </span>
                                             <div
                                                 className="text-fg text-xs leading-relaxed space-y-2 [&_img]:block [&_img]:mx-auto [&_img]:my-2.5 [&_img]:max-h-[360px] [&_img]:object-contain [&_img]:rounded-lg [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
-                                                dangerouslySetInnerHTML={{ __html: dailyRichHtml }}
+                                                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(dailyRichHtml) }}
                                             />
                                         </div>
                                     )}

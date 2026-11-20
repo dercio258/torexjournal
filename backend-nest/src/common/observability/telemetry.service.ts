@@ -238,10 +238,17 @@ export class TelemetryService {
     }
 
     private ensureTemplateStat(template: string) {
-        if (!this.emailStats.byTemplate[template]) {
-            this.emailStats.byTemplate[template] = { enqueued: 0, sent: 0, failed: 0 };
+        const MAX_TEMPLATES = 64;
+        const normalized = String(template || 'unknown').slice(0, 64);
+        const key =
+            this.emailStats.byTemplate[normalized] ||
+            Object.keys(this.emailStats.byTemplate).length < MAX_TEMPLATES
+                ? normalized
+                : 'other_templates';
+        if (!this.emailStats.byTemplate[key]) {
+            this.emailStats.byTemplate[key] = { enqueued: 0, sent: 0, failed: 0 };
         }
-        return this.emailStats.byTemplate[template];
+        return this.emailStats.byTemplate[key];
     }
 
     private pushSample(arr: number[], value: number) {

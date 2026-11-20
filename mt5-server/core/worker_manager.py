@@ -234,6 +234,7 @@ class WorkerManager:
     def _handle_start_account(self, task: Task):
         existing_acc = self.account_manager.get_account(task.accountId)
         password = existing_acc.password if existing_acc else None
+        acc_uuid = task.accountUuid or (task.options or {}).get("accountUuid") or (existing_acc.account_uuid if existing_acc else None)
         normalized_server = self.sync_engine._normalize_broker_server(task.server)
         if task.credentialToken:
             self.api_client.ack_task(
@@ -254,17 +255,15 @@ class WorkerManager:
                     f"Credencial resgatada com sucesso para conta {task.accountId} "
                     f"(Login: {task.login} @ {normalized_server} | Senha: {pwd_diag})"
                 )
-                # Salva imediatamente no cofre local (accounts_pool.json) para nunca perder a senha de uso único
-                self.account_manager.add_or_update_account(
-                    account_id=task.accountId,
-                    login=task.login,
-                    server=normalized_server,
-                    password=password,
-                )
             else:
                 err_msg = "Falha na troca de credentialToken (token expirado ou inválido)"
                 self.api_client.ack_task(task.id, TaskStatus.FAILED, err_msg, details={"error": err_msg})
                 return
+
+        if not password:
+            err_msg = "Senha MT5 obrigatória para iniciar a conexão com a conta."
+            self.api_client.ack_task(task.id, TaskStatus.FAILED, err_msg, details={"error": err_msg})
+            return
 
         self.api_client.ack_task(
             task.id,
@@ -298,6 +297,7 @@ class WorkerManager:
             login=task.login,
             server=normalized_server,
             password=password,
+            account_uuid=acc_uuid,
         )
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
@@ -313,7 +313,8 @@ class WorkerManager:
                 account_id=task.accountId,
                 login=task.login,
                 server=normalized_server,
-                password=password
+                password=password,
+                account_uuid=acc_uuid,
             )
             self.api_client.ack_task(
                 task.id,
@@ -397,6 +398,7 @@ class WorkerManager:
             login=acc.login,
             server=acc.server,
             password=acc.password,
+            account_uuid=acc.account_uuid,
         )
         restarted = self.sync_engine.connect_account(
             account_id=acc.account_id,
@@ -677,6 +679,7 @@ class WorkerManager:
                 login=acc.login,
                 server=acc.server,
                 password=acc.password,
+                account_uuid=acc.account_uuid,
             )
             if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
@@ -748,6 +751,13 @@ class WorkerManager:
                 success = self.api_client.sync_account(acc_info)
                 if not success:
                     err_reason = getattr(self.api_client, "last_error_reason", None)
+                    if err_reason == "STALE_LEASE":
+                        logger.warning(
+                            f"[FENCING] Conta {acc.login} (ID: {account_id}) foi realocada pelo Load Balancer. "
+                            "Encerrando instância local obsoleta imediatamente."
+                        )
+                        self._evict_account_by_login(acc.login)
+                        return None
                     if err_reason == "ACCOUNT_NOT_FOUND":
                         logger.warning(
                             f"Conta {acc.login} (ID: {account_id}) não existe no Backend ('Account not found'). "
@@ -844,10 +854,22 @@ class WorkerManager:
             eq_val = float(summary.get("equity", 0.0) or 0.0)
             open_pos_cnt = int(summary.get("openPositionsCount", 0) or 0)
             synced_tr_cnt = int(summary.get("syncedTradesCount", 0) or 0)
-            self._account_idle_map[account_id] = (
-                bal_val <= 0.0 and eq_val <= 0.0 and open_pos_cnt == 0 and synced_tr_cnt == 0
-            )
+            is_idle_now = bal_val <= 0.0 and eq_val <= 0.0 and open_pos_cnt == 0 and synced_tr_cnt == 0
+            self._account_idle_map[account_id] = is_idle_now
             self._account_last_sync_ts[account_id] = time.time()
+
+            # Hibernação inteligente de memória para contas COLD/ociosas sob pressão de RAM ou alta densidade
+            if is_idle_now:
+                try:
+                    cur_metrics = self.health_monitor.get_resource_metrics()
+                    active_cnt = len(self.account_manager.get_active_account_ids())
+                    if cur_metrics.get("memory_percent", 0) >= 70.0 or active_cnt > 4:
+                        logger.info(
+                            f"[HIBERNATION-COLD] Pausando terminal ocioso da conta {acc.login} ($0 saldo / 0 posições) para economizar RAM."
+                        )
+                        self.process_manager.stop_terminal(account_id)
+                except Exception:
+                    pass
 
             return summary
 
@@ -865,6 +887,27 @@ class WorkerManager:
             logger.error(technical_msg)
             self.health_monitor.record_account_resource_failure(account_id, str(e), res_metrics)
 
+    def _evict_account_by_login(self, target_login: str):
+        """Remove uma conta realocada para outro nó pelo Load Balancer e encerra seu terminal local."""
+        clean_target = str(target_login or "").strip()
+        if not clean_target:
+            return
+        with self.account_manager._lock:
+            matching_ids = [
+                aid
+                for aid, sess in list(self.account_manager.accounts.items())
+                if str(sess.login).strip() == clean_target or str(aid) == clean_target
+            ]
+        for aid in matching_ids:
+            try:
+                self.process_manager.stop_terminal(aid)
+            except Exception:
+                pass
+            self.account_manager.remove_account(aid)
+            self._account_idle_map.pop(aid, None)
+            self._account_last_sync_ts.pop(aid, None)
+            logger.warning(f"[EVICTION] Conta {clean_target} (ID: {aid}) desacoplada deste worker com segurança.")
+
     # -------------------------------------------------------------
     # 3. HEARTBEAT E FLUSH DE BUFFER OFFLINE
     # -------------------------------------------------------------
@@ -872,7 +915,10 @@ class WorkerManager:
         try:
             monitored = self.account_manager.get_active_account_ids()
             heartbeat_data = self.health_monitor.collect_telemetry(monitored)
-            self.api_client.heartbeat(heartbeat_data)
+            resp = self.api_client.heartbeat(heartbeat_data)
+            if isinstance(resp, dict):
+                for evict_login in (resp.get("evictLogins") or []):
+                    self._evict_account_by_login(str(evict_login))
         except Exception as e:
             logger.warning(f"Erro no envio de heartbeat: {e}")
 

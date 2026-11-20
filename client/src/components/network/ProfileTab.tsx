@@ -140,8 +140,8 @@ export const ProfileTab = () => {
 
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                            <h2 className="text-base font-bold text-fg">{profile.name || profile.username}</h2>
-                            <p className="text-xs text-accent-fg font-mono">@{profile.username}</p>
+                            <h2 className="text-base font-bold text-fg font-mono">@{profile.username}</h2>
+                            <p className="text-xs text-fg-subtle">{isEn ? 'Community Member' : 'Membro da Comunidade'}</p>
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-fg-subtle">
                             <Calendar size={13} />

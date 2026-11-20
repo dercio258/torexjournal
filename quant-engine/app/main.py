@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import base64
+import hashlib
+import hmac
+import json
 import math
+import os
 import threading
+import time
 from typing import Literal, Optional
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .analytics_qs import (
     analyze_quant_session,
@@ -59,12 +66,102 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+
+def _resolve_cors_origins() -> list[str]:
+    raw = os.getenv(
+        "QUANT_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3010,http://127.0.0.1:3010",
+    )
+    origins = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    return origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def _b64url_decode(segment: str) -> bytes:
+    padded = segment + "=" * ((4 - len(segment) % 4) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _verify_hs256_jwt(token: str, secret: str) -> bool:
+    parts = token.split(".")
+    if len(parts) != 3 or not all(parts):
+        return False
+    header_b64, payload_b64, sig_b64 = parts
+    try:
+        header = json.loads(_b64url_decode(header_b64).decode("utf-8"))
+        if not isinstance(header, dict) or header.get("alg") != "HS256":
+            return False
+        signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+        expected_sig = hmac.new(
+            secret.encode("utf-8"),
+            signing_input,
+            hashlib.sha256,
+        ).digest()
+        actual_sig = _b64url_decode(sig_b64)
+        if not hmac.compare_digest(actual_sig, expected_sig):
+            return False
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+        if not isinstance(payload, dict):
+            return False
+        exp = payload.get("exp")
+        if exp is None or float(exp) <= time.time():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+@app.middleware("http")
+async def quant_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or path in ("/health", "/api/quant/health"):
+        return await call_next(request)
+
+    if path.startswith("/api/quant/") or path.startswith("/api/ml/"):
+        internal_key = (os.getenv("QUANT_INTERNAL_KEY") or "").strip()
+        jwt_secret = (os.getenv("JWT_SECRET") or "").strip()
+        enforce_flag = (os.getenv("QUANT_ENFORCE_AUTH") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        is_prod = (
+            os.getenv("NODE_ENV") or os.getenv("ENV") or ""
+        ).strip().lower() == "production"
+
+        if bool(internal_key) or enforce_flag or is_prod:
+            if not internal_key and not jwt_secret:
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Quant Engine authentication not configured"},
+                )
+
+            provided_internal = (request.headers.get("x-internal-key") or "").strip()
+            if (
+                internal_key
+                and provided_internal
+                and hmac.compare_digest(provided_internal, internal_key)
+            ):
+                return await call_next(request)
+
+            auth_header = (request.headers.get("authorization") or "").strip()
+            if (
+                jwt_secret
+                and auth_header.lower().startswith("bearer ")
+                and _verify_hs256_jwt(auth_header[7:].strip(), jwt_secret)
+            ):
+                return await call_next(request)
+
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_resolve_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Internal-Key"],
 )
 
 

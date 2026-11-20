@@ -20,6 +20,10 @@ export class SubscribeMobileDto {
     @IsOptional()
     @IsBoolean()
     savePreference?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    useReferralCredits?: boolean;
 }
 
 export class SubscribeCardDto {
@@ -31,15 +35,17 @@ export class SubscribeCardDto {
     @IsIn(['MONTHLY', 'YEARLY'])
     cycle: string;
 
+    @IsOptional()
     @IsString()
     @IsUrl({ require_tld: false })
     @MaxLength(500)
-    returnUrl: string;
+    returnUrl?: string;
 
+    @IsOptional()
     @IsString()
     @IsUrl({ require_tld: false })
     @MaxLength(500)
-    cancelUrl: string;
+    cancelUrl?: string;
 
     @IsOptional()
     @IsString()
@@ -48,6 +54,20 @@ export class SubscribeCardDto {
 
     @IsOptional()
     @IsString()
-    @IsIn(['card', 'payfast'])
-    paymentMethod?: 'card' | 'payfast';
+    @IsIn(['card'])
+    paymentMethod?: 'card';
+
+    @IsOptional()
+    @IsBoolean()
+    useReferralCredits?: boolean;
+}
+
+export class RedeemReferralCreditsDto {
+    @IsString()
+    @MaxLength(30)
+    tier: string;
+
+    @IsString()
+    @IsIn(['MONTHLY', 'YEARLY'])
+    cycle: string;
 }

@@ -16,6 +16,11 @@ export const AppDataSource = new DataSource({
     database: process.env.DB_NAME || 'trading_cossa',
     synchronize: false,
     logging: false,
+    extra: {
+        max: Number(process.env.DB_POOL_MAX || 25),
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
+    },
     entities: [__dirname + '/**/*.entity{.ts,.js}'],
     migrations: [__dirname + '/migrations/*{.ts,.js}'],
     subscribers: [],

@@ -80,21 +80,30 @@ export class AiService {
                 const configuredModel = (
                     this.configService.get<string>('GEMINI_MODEL') || ''
                 ).trim();
+                const safeConfiguredModel =
+                    configuredModel.toLowerCase().startsWith('gemini') &&
+                    configuredModel.toLowerCase() !== 'gemini-3.8-flash' &&
+                    configuredModel.toLowerCase() !== 'gemini-3.1-flash-lite'
+                        ? configuredModel
+                        : 'gemini-2.5-flash';
                 const candidates = [
-                    ...(configuredModel.toLowerCase().startsWith('gemini') ? [configuredModel] : []),
-                    'gemini-3.8-flash',
-                    'gemini-3.1-flash-lite',
+                    safeConfiguredModel,
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
                 ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
                 let response: any = null;
                 let lastErr: any = null;
                 for (let i = 0; i < candidates.length; i++) {
                     const candidateModel = candidates[i];
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${geminiToken}`;
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidateModel)}:generateContent`;
                     try {
                         this.logger.log(`Requesting insights from Gemini API (${candidateModel}) for account ${accountId}...`);
                         response = await firstValueFrom(this.httpService.post(url, body, {
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-goog-api-key': geminiToken,
+                            },
                             timeout: 45000 // 45s timeout
                         }));
                         break;

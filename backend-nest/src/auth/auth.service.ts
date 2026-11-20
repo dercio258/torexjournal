@@ -22,17 +22,26 @@ import { EmailProducerService } from '../email/email-producer.service';
 import { resolveFrontendUrl } from '../email/templates';
 import { PlanPermissionService } from '../payment/plan-permission.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { SmsService } from '../notifications/sms.service';
-import { SmsTemplates } from '../notifications/sms-templates';
 import { AuditLogService } from './audit-log.service';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import * as qrcode from 'qrcode';
 import { ConfigService } from '@nestjs/config';
 import { SessionEntity } from './session.entity';
 import { RedisSecurityService } from '../common/security/redis-security.service';
-import { getJwtSecret, timingSafeEqualStr } from '../common/security/security.config';
+import {
+    getJwtSecret,
+    getPasswordResetSecret,
+    getTwoFactorJwtSecret,
+    timingSafeEqualStr,
+} from '../common/security/security.config';
+import {
+    resolveCountryFromHeadersOrTimezone,
+    validateAndNormalizeContact,
+} from './phone-prefix.util';
 import { resolveAcquisitionFields, sanitizeAttributionPayload } from '../users/users.service';
+import { ReferralService } from '../users/referral.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { RegisterInitiateDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
@@ -46,12 +55,12 @@ export class AuthService {
         private emailProducer: EmailProducerService,
         @Inject(CACHE_MANAGER) private cacheManager: any,
         private planPermissionService: PlanPermissionService,
-        private smsService: SmsService,
         private notificationsService: NotificationsService,
         private auditLogService: AuditLogService,
         private configService: ConfigService,
         private redisSecurity: RedisSecurityService,
         @Optional() private analyticsService?: AnalyticsService,
+        @Optional() private referralService?: ReferralService,
     ) {}
 
     private sha256(value: string): string {
@@ -133,7 +142,7 @@ export class AuthService {
                         resetId,
                         timestamp: Date.now(),
                     });
-                    const secret = getJwtSecret(this.configService);
+                    const secret = getPasswordResetSecret(this.configService);
                     const token = CryptoUtil.encrypt(rawPayload, secret);
                     const sig = crypto.createHmac('sha256', secret).update(token).digest('hex');
 
@@ -215,105 +224,90 @@ export class AuthService {
             await this.usersService.update(user);
         }
 
-        const requestLimitKey = `2fa_code_request_limit:${user.id}`;
-
         // --- 2FA INTERCEPTION ---
-        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
-            await this.auditLogService.log(
-                user.id,
-                'LOGIN_2FA_REQUIRED',
-                { ip, userAgent },
-                ip,
-                userAgent,
-            );
-
-            const temporaryToken = this.jwtService.sign(
-                { id: user.id, email: user.email, isTwoFactorPending: true },
-                { expiresIn: '5m' },
-            );
-
-            const isLimitActive = await this.redisSecurity.getValue(requestLimitKey);
-            if (isLimitActive) {
-                return {
-                    success: true,
-                    twoFactorRequired: true,
-                    twoFactorType: 'TOTP',
-                    twoFactorToken: temporaryToken,
-                    hasWhatsAppBackup: true,
-                    message:
-                        'Um código de verificação já foi enviado recentemente. Use o código ativo ou aguarde 5 minutos.',
-                };
-            }
-
-            const otp = this.generateOtp();
-            await this.redisSecurity.setValue(`2FA:${user.id}`, otp, 300000); // 5 mins
-            await this.redisSecurity.setValue(requestLimitKey, '1', 300000);
-
-            await this.emailProducer.enqueue(user.email, 'OTP_CODE', {
-                otp,
-                userName: user.name || undefined,
-                expiresInMinutes: 5,
-                purpose: 'TWO_FACTOR',
-            });
-
-            await this.notificationsService.send2FA(user.id, otp).catch(() => {});
-
-            return {
-                success: true,
-                twoFactorRequired: true,
-                twoFactorType: 'TOTP',
-                twoFactorToken: temporaryToken,
-                hasWhatsAppBackup: true,
-            };
-        }
-
         if (user.twoFactorEnabled) {
-            const temporaryToken = this.jwtService.sign(
-                { id: user.id, email: user.email, isTwoFactorPending: true },
-                { expiresIn: '5m' },
-            );
-
-            const isLimitActive = await this.redisSecurity.getValue(requestLimitKey);
-            if (isLimitActive) {
-                return {
-                    success: true,
-                    twoFactorRequired: true,
-                    twoFactorType: 'EMAIL',
-                    twoFactorToken: temporaryToken,
-                    message:
-                        'Um código de verificação já foi enviado recentemente. Use o código ativo ou aguarde 5 minutos.',
-                };
-            }
-
-            const otp = this.generateOtp();
-            await this.redisSecurity.setValue(`2FA:${user.id}`, otp, 300000);
-            await this.redisSecurity.setValue(requestLimitKey, '1', 300000);
-
-            await this.emailProducer.enqueue(user.email, 'OTP_CODE', {
-                otp,
-                userName: user.name || undefined,
-                expiresInMinutes: 5,
-                purpose: 'TWO_FACTOR',
-            });
-
-            await this.notificationsService.send2FA(user.id, otp).catch(() => {});
-
-            await this.auditLogService.log(
-                user.id,
-                'LOGIN_2FA_REQUIRED_EMAIL',
-                { ip, userAgent },
-                ip,
-                userAgent,
-            );
-            return {
-                success: true,
-                twoFactorRequired: true,
-                twoFactorType: 'EMAIL',
-                twoFactorToken: temporaryToken,
-            };
+            return this.buildTwoFactorChallenge(user, ip, userAgent);
         }
 
         return this.generateAuthResponse(user, ip, userAgent, false);
+    }
+
+    private async buildTwoFactorChallenge(
+        user: any,
+        ip?: string,
+        userAgent?: string,
+    ): Promise<{
+        success: boolean;
+        twoFactorRequired: boolean;
+        twoFactorType: 'TOTP' | 'EMAIL';
+        twoFactorToken: string;
+        message?: string;
+    }> {
+        const isTotp = Boolean(user.isTwoFactorConfirmed);
+        const twoFactorType: 'TOTP' | 'EMAIL' = isTotp ? 'TOTP' : 'EMAIL';
+        const requestLimitKey = `2fa_code_request_limit:${user.id}`;
+
+        await this.auditLogService.log(
+            user.id,
+            isTotp ? 'LOGIN_2FA_REQUIRED' : 'LOGIN_2FA_REQUIRED_EMAIL',
+            { ip, userAgent },
+            ip,
+            userAgent,
+        );
+
+        const temporaryToken = this.jwtService.sign(
+            { id: user.id, email: user.email, isTwoFactorPending: true },
+            { secret: getTwoFactorJwtSecret(this.configService), expiresIn: '5m' },
+        );
+
+        const isLimitActive = await this.redisSecurity.getValue(requestLimitKey);
+        if (isLimitActive) {
+            return {
+                success: true,
+                twoFactorRequired: true,
+                twoFactorType,
+                twoFactorToken: temporaryToken,
+                message:
+                    'Um código de verificação já foi enviado recentemente. Use o código ativo ou aguarde 5 minutos.',
+            };
+        }
+
+        const otp = this.generateOtp();
+        await this.redisSecurity.setValue(`2FA:${user.id}`, otp, 300000); // 5 mins
+        await this.redisSecurity.setValue(requestLimitKey, '1', 300000);
+
+        if (user.email) {
+            await this.emailProducer.enqueue(user.email, 'OTP_CODE', {
+                otp,
+                userName: user.name || undefined,
+                expiresInMinutes: 5,
+                purpose: 'TWO_FACTOR',
+            });
+        }
+
+        return {
+            success: true,
+            twoFactorRequired: true,
+            twoFactorType,
+            twoFactorToken: temporaryToken,
+        };
+    }
+
+    private issueRefreshToken(ttlDays: number = 30): string {
+        const expiresAtMs = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
+        const entropy = crypto.randomBytes(24).toString('hex');
+        return `rt2.${expiresAtMs.toString(36)}.${entropy}`;
+    }
+
+    private isRefreshTokenExpired(refreshToken: string): boolean {
+        if (!refreshToken || !refreshToken.startsWith('rt2.')) {
+            return false;
+        }
+        const parts = refreshToken.split('.');
+        if (parts.length !== 3) return true;
+        const expiresAtMs = parseInt(parts[1], 36);
+        if (!Number.isFinite(expiresAtMs) || expiresAtMs <= 0) return true;
+        return Date.now() > expiresAtMs;
     }
 
     private async generateAuthResponse(
@@ -325,7 +319,7 @@ export class AuthService {
     ) {
         const payload = { email: user.email, id: user.id, isTwoFactorVerified };
         const accessToken = this.jwtService.sign(payload);
-        const refreshToken = crypto.randomUUID();
+        const refreshToken = this.issueRefreshToken(30);
 
         await this.usersService.updateRefreshToken(user.id, refreshToken);
 
@@ -400,13 +394,29 @@ export class AuthService {
         };
     }
 
-    async logout(token: string) {
-        if (!token) return;
-        await this.sessionRepository.update({ token }, { isActive: false });
-        await this.cacheManager.del(`user_session:${token}`).catch(() => {});
+    async logout(token: string, userId?: string) {
+        let resolvedUserId = userId;
+        if (token) {
+            if (!resolvedUserId) {
+                const session = await this.sessionRepository.findOne({
+                    where: { token },
+                    select: ['id', 'userId'],
+                });
+                resolvedUserId = session?.userId;
+            }
+            await this.sessionRepository.update({ token }, { isActive: false });
+            await this.cacheManager.del(`user_session:${token}`).catch(() => {});
+        }
+        if (resolvedUserId) {
+            await this.usersService.updateRefreshToken(resolvedUserId, null);
+        }
     }
 
     async refresh(refreshToken: string, ip?: string, userAgent?: string) {
+        if (this.isRefreshTokenExpired(refreshToken)) {
+            throw new UnauthorizedException('Token de atualização expirado. Faça login novamente.');
+        }
+
         const user = await this.usersService.findOneByRefreshToken(refreshToken);
         if (!user) {
             await this.auditLogService.log(
@@ -441,7 +451,7 @@ export class AuthService {
             user,
             ip,
             userAgent,
-            user.twoFactorEnabled && user.isTwoFactorConfirmed,
+            Boolean(user.twoFactorEnabled),
             { skipLoginAlert: true },
         );
     }
@@ -506,7 +516,7 @@ export class AuthService {
             resetId,
             timestamp: Date.now(),
         });
-        const secret = getJwtSecret(this.configService);
+        const secret = getPasswordResetSecret(this.configService);
         const token = CryptoUtil.encrypt(rawPayload, secret);
         const sig = crypto.createHmac('sha256', secret).update(token).digest('hex');
 
@@ -548,7 +558,7 @@ export class AuthService {
             );
         }
 
-        const secret = getJwtSecret(this.configService);
+        const secret = getPasswordResetSecret(this.configService);
         let verifiedResetId: string | null = null;
 
         if (token && sig) {
@@ -671,6 +681,322 @@ export class AuthService {
         };
     }
 
+    private maskEmailForVerification(email: string): string {
+        const [local = '', domain = ''] = String(email || '').split('@');
+        if (!domain) return email;
+        const prefix = local.slice(0, Math.min(2, local.length));
+        return `${prefix}${'*'.repeat(Math.max(2, local.length - prefix.length))}@${domain}`;
+    }
+
+    getGeoHint(headers: Record<string, any> | undefined, timezone?: string) {
+        return resolveCountryFromHeadersOrTimezone(headers, timezone);
+    }
+
+    async initiateRegistration(data: RegisterInitiateDto, ip?: string, userAgent?: string) {
+        const email = this.normalizeEmail(data?.email);
+        if (!email) {
+            throw new BadRequestException('Informe um e-mail válido.');
+        }
+
+        if (await this.usersService.findOneByEmail(email)) {
+            throw new ConflictException('Email already registered');
+        }
+
+        const contactValidation = validateAndNormalizeContact(data?.contact, data?.countryIso2);
+        if (!contactValidation.valid) {
+            throw new BadRequestException(
+                contactValidation.reason || 'Informe um contacto válido com prefixo internacional.',
+            );
+        }
+
+        const cooldownKey = `reg_init_cooldown:${email}`;
+        if (await this.redisSecurity.getValue(cooldownKey)) {
+            throw new HttpException(
+                'Aguarde alguns segundos antes de solicitar um novo código de verificação.',
+                HttpStatus.TOO_MANY_REQUESTS,
+            );
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(data.password, salt);
+        const otp = this.generateOtp();
+        const verificationId = crypto.randomUUID();
+        const preferredLocale = data.preferredLocale === 'en' ? 'en' : 'pt';
+        const timezone =
+            typeof data.timezone === 'string' && data.timezone.trim()
+                ? data.timezone.trim().slice(0, 64)
+                : undefined;
+
+        const pendingPayload = {
+            name: String(data.name || '').trim().slice(0, 120),
+            email,
+            passwordHash,
+            whatsapp: contactValidation.normalized,
+            countryIso2: contactValidation.countryIso2,
+            preferredLocale,
+            timezone,
+            visitorId: data.visitorId ? String(data.visitorId).slice(0, 120) : undefined,
+            attributionData: data.attributionData,
+            referralCode:
+                data.referralCode ||
+                (typeof (data.attributionData as any)?.referralCode === 'string'
+                    ? (data.attributionData as any).referralCode
+                    : typeof (data.attributionData as any)?.ref === 'string'
+                      ? (data.attributionData as any).ref
+                      : undefined),
+            codeHash: this.sha256(otp),
+            createdAt: Date.now(),
+        };
+
+        await this.redisSecurity.setValue(
+            `reg_pending:${verificationId}`,
+            JSON.stringify(pendingPayload),
+            15 * 60 * 1000,
+        );
+        await this.redisSecurity.setValue(cooldownKey, '1', 45 * 1000);
+        await this.redisSecurity.deleteKey(`reg_verify_fail:${verificationId}`);
+
+        await this.emailProducer.enqueue(email, 'OTP_CODE', {
+            otp,
+            userName: pendingPayload.name || undefined,
+            expiresInMinutes: 15,
+            purpose: 'REGISTRATION',
+        });
+
+        await this.auditLogService.log(
+            email,
+            'REGISTRATION_INITIATED',
+            { email, countryIso2: contactValidation.countryIso2, ip, userAgent },
+            ip,
+            userAgent,
+        );
+
+        const verificationToken = this.jwtService.sign(
+            { verificationId, email, purpose: 'reg_verify' },
+            { secret: getTwoFactorJwtSecret(this.configService), expiresIn: '15m' },
+        );
+
+        return {
+            success: true,
+            verificationToken,
+            emailMasked: this.maskEmailForVerification(email),
+            expiresInSeconds: 900,
+            message: 'Código de verificação enviado para o seu e-mail.',
+        };
+    }
+
+    async verifyRegistration(
+        verificationToken: string,
+        otp: string,
+        ip?: string,
+        userAgent?: string,
+    ) {
+        if (!verificationToken || !otp) {
+            throw new BadRequestException('Token e código de verificação são obrigatórios.');
+        }
+
+        let payload: any;
+        try {
+            payload = this.jwtService.verify(verificationToken, {
+                secret: getTwoFactorJwtSecret(this.configService),
+            });
+        } catch {
+            throw new UnauthorizedException('Sessão de verificação expirada ou inválida.');
+        }
+
+        if (!payload?.verificationId || payload.purpose !== 'reg_verify') {
+            throw new UnauthorizedException('Token de verificação de conta inválido.');
+        }
+
+        const verificationId = String(payload.verificationId);
+        const failKey = `reg_verify_fail:${verificationId}`;
+        const currentFails = Number((await this.redisSecurity.getValue(failKey)) || '0');
+        if (currentFails >= 5) {
+            await this.redisSecurity.deleteKey(`reg_pending:${verificationId}`);
+            throw new HttpException(
+                'Código invalidado por excesso de tentativas. Registe-se novamente.',
+                HttpStatus.TOO_MANY_REQUESTS,
+            );
+        }
+
+        const rawPending = await this.redisSecurity.getValue(`reg_pending:${verificationId}`);
+        if (!rawPending) {
+            throw new BadRequestException('Sessão de verificação expirada. Por favor, registe-se novamente.');
+        }
+
+        let pending: any;
+        try {
+            pending = JSON.parse(rawPending);
+        } catch {
+            throw new BadRequestException('Dados de verificação corrompidos. Registe-se novamente.');
+        }
+
+        const normalizedOtp = String(otp || '').trim();
+        if (!pending.codeHash || !timingSafeEqualStr(pending.codeHash, this.sha256(normalizedOtp))) {
+            const { count } = await this.redisSecurity.incrementWithWindow(failKey, 900_000);
+            if (count >= 5) {
+                await this.redisSecurity.deleteKey(`reg_pending:${verificationId}`);
+            }
+            throw new BadRequestException('Código de verificação inválido.');
+        }
+
+        const consumed = await this.redisSecurity.consumeOnce(`reg_pending:${verificationId}`);
+        if (!consumed) {
+            throw new BadRequestException('Código já utilizado ou sessão expirada.');
+        }
+        await this.redisSecurity.deleteKey(failKey);
+        await this.redisSecurity.deleteKey(`reg_resend_cooldown:${verificationId}`);
+
+        const normalizedEmail = this.normalizeEmail(pending.email);
+        if (await this.usersService.findOneByEmail(normalizedEmail)) {
+            throw new ConflictException('Email already registered');
+        }
+
+        const attributionData = sanitizeAttributionPayload(pending.attributionData);
+        const resolvedAcq = resolveAcquisitionFields(
+            attributionData || pending.attributionData,
+            pending.visitorId,
+        );
+
+        let newUser: any;
+        try {
+            newUser = await this.usersService.create({
+                name: pending.name,
+                email: normalizedEmail,
+                passwordHash: pending.passwordHash,
+                whatsapp: pending.whatsapp,
+                apiToken: crypto.randomUUID().toUpperCase(),
+                preferredLocale: pending.preferredLocale === 'en' ? 'en' : 'pt',
+                timezone: pending.timezone,
+                attributionData,
+                visitorId: resolvedAcq.visitorId,
+                acquisitionSource: resolvedAcq.acquisitionSource,
+                acquisitionMedium: resolvedAcq.acquisitionMedium,
+                acquisitionCampaign: resolvedAcq.acquisitionCampaign,
+                acquisitionContent: resolvedAcq.acquisitionContent,
+                acquisitionTerm: resolvedAcq.acquisitionTerm,
+                landingPath: resolvedAcq.landingPath,
+                referrer: resolvedAcq.referrer,
+                emailVerifiedAt: new Date(),
+                lastLoginAt: new Date(),
+                lastActiveAt: new Date(),
+                lastActionType: 'signup',
+                lastActionLabel: 'Criou e verificou conta (/verify-account)',
+                lastActionPath: '/verify-account',
+            });
+        } catch (err: any) {
+            if (err?.code === '23505') {
+                throw new ConflictException('Email already registered');
+            }
+            throw err;
+        }
+
+        if (resolvedAcq.visitorId) {
+            void this.analyticsService?.identifyVisitor(newUser.id, resolvedAcq.visitorId, attributionData);
+        }
+        void this.analyticsService?.recordAuthOrBillingConversion({
+            eventName: 'signup',
+            userId: newUser.id,
+            email: newUser.email,
+            visitorId: resolvedAcq.visitorId,
+            attributionData,
+            metadata: { method: 'email_otp_two_step' },
+        });
+
+        await this.auditLogService.log(newUser.id, 'USER_REGISTERED', { email: newUser.email });
+        await this.createDefaultAccount(newUser.id);
+
+        const refCode =
+            pending.referralCode ||
+            (typeof pending.attributionData?.referralCode === 'string'
+                ? pending.attributionData.referralCode
+                : typeof pending.attributionData?.ref === 'string'
+                  ? pending.attributionData.ref
+                  : undefined);
+        if (refCode) {
+            await this.referralService?.processVerifiedSignup(newUser.id, String(refCode)).catch(() => {});
+        }
+        await this.referralService?.ensureReferralCode(newUser.id).catch(() => {});
+
+        await this.emailProducer.enqueue(
+            newUser.email,
+            'WELCOME_EMAIL',
+            { userName: newUser.name || undefined },
+            { jobId: `welcome:${newUser.id}` },
+        );
+
+        const authResponse = await this.generateAuthResponse(newUser, ip, userAgent, false, {
+            skipLoginAlert: true,
+        });
+        return {
+            ...authResponse,
+            message: 'Conta verificada e criada com sucesso',
+        };
+    }
+
+    async resendRegistrationOtp(verificationToken: string) {
+        if (!verificationToken) {
+            throw new BadRequestException('Sessão de verificação inválida.');
+        }
+
+        let payload: any;
+        try {
+            payload = this.jwtService.verify(verificationToken, {
+                secret: getTwoFactorJwtSecret(this.configService),
+            });
+        } catch {
+            throw new UnauthorizedException('Sessão de verificação expirada. Registe-se novamente.');
+        }
+
+        if (!payload?.verificationId || payload.purpose !== 'reg_verify') {
+            throw new UnauthorizedException('Token de verificação inválido.');
+        }
+
+        const verificationId = String(payload.verificationId);
+        const cooldownKey = `reg_resend_cooldown:${verificationId}`;
+        if (await this.redisSecurity.getValue(cooldownKey)) {
+            throw new HttpException(
+                'Aguarde 60 segundos antes de reenviar o código.',
+                HttpStatus.TOO_MANY_REQUESTS,
+            );
+        }
+
+        const rawPending = await this.redisSecurity.getValue(`reg_pending:${verificationId}`);
+        if (!rawPending) {
+            throw new BadRequestException('Sessão de verificação expirada. Registe-se novamente.');
+        }
+
+        let pending: any;
+        try {
+            pending = JSON.parse(rawPending);
+        } catch {
+            throw new BadRequestException('Dados de verificação corrompidos.');
+        }
+
+        const newOtp = this.generateOtp();
+        pending.codeHash = this.sha256(newOtp);
+
+        await this.redisSecurity.setValue(
+            `reg_pending:${verificationId}`,
+            JSON.stringify(pending),
+            15 * 60 * 1000,
+        );
+        await this.redisSecurity.setValue(cooldownKey, '1', 55 * 1000);
+        await this.redisSecurity.deleteKey(`reg_verify_fail:${verificationId}`);
+
+        await this.emailProducer.enqueue(pending.email, 'OTP_CODE', {
+            otp: newOtp,
+            userName: pending.name || undefined,
+            expiresInMinutes: 15,
+            purpose: 'REGISTRATION',
+        });
+
+        return {
+            success: true,
+            message: 'Novo código de verificação enviado para o seu e-mail.',
+        };
+    }
+
     async register(data: any, ip?: string, userAgent?: string) {
         const email = this.normalizeEmail(data?.email);
         const otp = typeof data?.otp === 'string' ? data.otp.trim() : '';
@@ -719,13 +1045,23 @@ export class AuthService {
         const attributionData = sanitizeAttributionPayload(data.attributionData);
         const resolvedAcq = resolveAcquisitionFields(attributionData || data.attributionData, data.visitorId);
 
+        const rawContact = data.contact || data.whatsapp;
+        let normalizedContact = rawContact;
+        if (rawContact) {
+            const contactRes = validateAndNormalizeContact(rawContact, data.countryIso2);
+            if (!contactRes.valid) {
+                throw new BadRequestException(contactRes.reason || 'Contacto inválido.');
+            }
+            normalizedContact = contactRes.normalized;
+        }
+
         let newUser: any;
         try {
             newUser = await this.usersService.create({
                 name: data.name,
                 email,
                 passwordHash: passwordHash,
-                whatsapp: data.contact || data.whatsapp,
+                whatsapp: normalizedContact,
                 apiToken: crypto.randomUUID().toUpperCase(),
                 preferredLocale,
                 timezone,
@@ -768,21 +1104,24 @@ export class AuthService {
 
         await this.createDefaultAccount(newUser.id);
 
+        const legacyRefCode =
+            (data as any).referralCode ||
+            (typeof (data.attributionData as any)?.referralCode === 'string'
+                ? (data.attributionData as any).referralCode
+                : typeof (data.attributionData as any)?.ref === 'string'
+                  ? (data.attributionData as any).ref
+                  : undefined);
+        if (legacyRefCode) {
+            await this.referralService?.processVerifiedSignup(newUser.id, String(legacyRefCode)).catch(() => {});
+        }
+        await this.referralService?.ensureReferralCode(newUser.id).catch(() => {});
+
         await this.emailProducer.enqueue(
             newUser.email,
             'WELCOME_EMAIL',
             { userName: newUser.name || undefined },
             { jobId: `welcome:${newUser.id}` },
         );
-
-        if (newUser.whatsapp) {
-            await this.smsService.sendSms(
-                newUser.id,
-                newUser.whatsapp,
-                SmsTemplates.WELCOME(newUser.name),
-                true,
-            );
-        }
 
         const authResponse = await this.generateAuthResponse(newUser, ip, userAgent, false, {
             skipLoginAlert: true,
@@ -819,6 +1158,7 @@ export class AuthService {
     async createOAuthExchangeCode(payload: {
         token?: string | null;
         twoFactorRequired?: boolean;
+        twoFactorType?: string | null;
         twoFactorToken?: string | null;
         requiresContact?: boolean;
     }): Promise<string> {
@@ -899,15 +1239,10 @@ export class AuthService {
             );
         }
 
-        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
-            const temporaryToken = this.jwtService.sign(
-                { id: user.id, email: user.email, isTwoFactorPending: true },
-                { expiresIn: '5m' },
-            );
+        if (user.twoFactorEnabled) {
+            const challenge = await this.buildTwoFactorChallenge(user, ip, userAgent);
             return {
-                success: true,
-                twoFactorRequired: true,
-                twoFactorToken: temporaryToken,
+                ...challenge,
                 token: null,
                 user: null,
                 requiresContact: false,
@@ -983,15 +1318,10 @@ export class AuthService {
             );
         }
 
-        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
-            const temporaryToken = this.jwtService.sign(
-                { id: user.id, email: user.email, isTwoFactorPending: true },
-                { expiresIn: '5m' },
-            );
+        if (user.twoFactorEnabled) {
+            const challenge = await this.buildTwoFactorChallenge(user, ip, userAgent);
             return {
-                success: true,
-                twoFactorRequired: true,
-                twoFactorToken: temporaryToken,
+                ...challenge,
                 token: null,
                 user: null,
                 requiresContact: false,
@@ -1112,7 +1442,9 @@ export class AuthService {
 
         let payload: any;
         try {
-            payload = this.jwtService.verify(twoFactorToken);
+            payload = this.jwtService.verify(twoFactorToken, {
+                secret: getTwoFactorJwtSecret(this.configService),
+            });
         } catch (e) {
             throw new UnauthorizedException('Token de verificação 2FA expirado ou inválido');
         }
@@ -1223,7 +1555,9 @@ export class AuthService {
 
         let payload: any;
         try {
-            payload = this.jwtService.verify(twoFactorToken);
+            payload = this.jwtService.verify(twoFactorToken, {
+                secret: getTwoFactorJwtSecret(this.configService),
+            });
         } catch (e) {
             throw new UnauthorizedException('Token de verificação 2FA expirado ou inválido');
         }
@@ -1270,8 +1604,6 @@ export class AuthService {
             purpose: 'TWO_FACTOR',
         });
 
-        await this.notificationsService.send2FA(user.id, otp).catch(() => {});
-
         await this.auditLogService.log(
             user.id,
             '2FA_RESEND_REQUESTED',
@@ -1301,12 +1633,73 @@ export class AuthService {
         return { success: true, onboardingCompleted: true };
     }
 
-    async setTwoFactor(userId: string, enabled: boolean) {
+    async setTwoFactor(
+        userId: string,
+        enabled: boolean,
+        verification?: { code?: string; password?: string },
+    ) {
         const user = await this.usersService.findOneById(userId);
         if (!user) throw new NotFoundException('Usuário não encontrado');
 
+        if (!enabled && user.twoFactorEnabled) {
+            const disableAttemptsKey = `2fa_disable_attempts:${userId}`;
+            const rateCheck = await this.redisSecurity.incrementWithWindow(
+                disableAttemptsKey,
+                900,
+            );
+            if (rateCheck.count > 5) {
+                throw new HttpException(
+                    'Muitas tentativas de desativar 2FA. Aguarde 15 minutos antes de tentar novamente.',
+                    HttpStatus.TOO_MANY_REQUESTS,
+                );
+            }
+
+            const cleanCode = String(verification?.code || '').trim();
+            const rawPassword = typeof verification?.password === 'string' ? verification.password : '';
+
+            let codeValid = false;
+            if (cleanCode) {
+                if (user.twoFactorSecret) {
+                    const decryptedSecret = this.decryptTwoFactorSecret(user.twoFactorSecret);
+                    codeValid = verifySync({
+                        token: cleanCode,
+                        secret: decryptedSecret,
+                    }).valid;
+                }
+                if (!codeValid) {
+                    const storedOtp = await this.redisSecurity.getValue(`2FA:${userId}`);
+                    if (storedOtp && timingSafeEqualStr(storedOtp, cleanCode)) {
+                        const consumed = await this.redisSecurity.consumeOnce(`2FA:${userId}`);
+                        codeValid = Boolean(consumed && timingSafeEqualStr(consumed, cleanCode));
+                    }
+                }
+            }
+
+            const requiresPassword = Boolean(user.passwordHash);
+            const passwordValid = requiresPassword
+                ? Boolean(rawPassword && (await bcrypt.compare(rawPassword, user.passwordHash)))
+                : true;
+
+            if (!codeValid || !passwordValid) {
+                throw new BadRequestException(
+                    requiresPassword
+                        ? 'Para desativar o 2FA, informe o código TOTP/OTP válido E a sua senha atual.'
+                        : 'Para desativar o 2FA, informe um código TOTP/OTP válido.',
+                );
+            }
+
+            user.twoFactorEnabled = false;
+            user.isTwoFactorConfirmed = false;
+            user.twoFactorSecret = null;
+            await this.usersService.update(user);
+            await this.usersService.invalidateAuthGuardCache(userId);
+            await this.auditLogService.log(userId, '2FA_DISABLED', {});
+            return { success: true, enabled: false };
+        }
+
         user.twoFactorEnabled = enabled;
         await this.usersService.update(user);
+        await this.usersService.invalidateAuthGuardCache(userId);
 
         return { success: true, enabled: user.twoFactorEnabled };
     }

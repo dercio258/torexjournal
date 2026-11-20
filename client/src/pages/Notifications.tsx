@@ -11,9 +11,6 @@ import {
     CheckCircle2,
     Clock,
     ArrowRight,
-    MessageCircle,
-    Copy,
-    Settings,
 } from 'lucide-react';
 import api from '../api';
 import {
@@ -23,7 +20,6 @@ import {
     resolveAlertOfflineAware,
 } from '../services/offlineMutations';
 import { useLocale } from '../context/LocaleContext';
-import { Modal } from '../components/ui/Modal';
 import { Skeleton } from '../components/ui/Skeleton';
 
 const Badge = ({ count, active = false }: { count?: number; active?: boolean }) => {
@@ -313,190 +309,6 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
     );
 };
 
-const TelegramSettingsModal = ({ isOpen, onClose }: any) => {
-    const { locale } = useLocale();
-    const isEn = locale === 'en';
-    const [step, setStep] = useState<'initial' | 'otp' | 'connected'>('initial');
-    const [otp, setOtp] = useState('');
-    const [botUsername, setBotUsername] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [preferences, setPreferences] = useState({
-        trade_success: true,
-        risk_alert: true,
-        mental_insight: true,
-        system: true,
-    });
-
-    useEffect(() => {
-        if (isOpen) {
-            checkStatus();
-        }
-    }, [isOpen]);
-
-    const checkStatus = async () => {
-        try {
-            const { data } = await api.get('/notifications/telegram/status');
-            setStep(data.connected ? 'connected' : 'initial');
-        } catch (error) {
-            console.error('Failed to check Telegram status', error);
-        }
-    };
-
-    const handleConnect = async () => {
-        setLoading(true);
-        try {
-            const { data } = await api.post('/notifications/telegram/setup');
-            setOtp(data.otp);
-            setBotUsername(data.botUsername);
-            setStep('otp');
-        } catch (error) {
-            console.error('Failed to setup Telegram', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDisconnect = async () => {
-        setLoading(true);
-        try {
-            await api.post('/notifications/telegram/disconnect');
-            setStep('initial');
-            setOtp('');
-        } catch (error) {
-            console.error('Failed to disconnect Telegram', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleCopyOtp = () => {
-        navigator.clipboard.writeText(otp);
-    };
-
-    const handlePreferenceChange = (key: string) => {
-        setPreferences((prev) => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
-        api.post('/notifications/settings', {
-            notificationPreferences: {
-                ...preferences,
-                [key]: !preferences[key as keyof typeof preferences],
-            },
-        });
-    };
-
-    return (
-        <Modal isOpen={isOpen} onClose={onClose} title={isEn ? 'Notification Settings' : 'Configurações de Notificação'}>
-            <div className="space-y-4">
-                <div className="bg-canvas-subtle p-4 rounded-xl border border-line space-y-3">
-                    <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-data-1/10 border border-data-1/25 rounded-lg">
-                            <MessageCircle className="text-data-1" size={16} />
-                        </div>
-                        <div>
-                            <h4 className="text-xs sm:text-sm font-bold text-fg">Telegram Bot</h4>
-                            <p className="text-[11px] text-fg-muted">
-                                {isEn ? 'Receive real-time execution & risk alerts on Telegram.' : 'Receba alertas em tempo real no seu Telegram.'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {step === 'initial' && (
-                        <button
-                            type="button"
-                            onClick={handleConnect}
-                            disabled={loading}
-                            className="w-full h-9 bg-accent hover:opacity-95 text-accent-on text-xs font-semibold rounded-lg transition-opacity flex items-center justify-center"
-                        >
-                            {loading ? (isEn ? 'Loading...' : 'Carregando...') : (isEn ? 'Connect Telegram' : 'Conectar Telegram')}
-                        </button>
-                    )}
-
-                    {step === 'otp' && (
-                        <div className="space-y-3">
-                            <div className="text-center space-y-1.5">
-                                <p className="text-xs text-fg-muted">{isEn ? 'Send this code to the bot:' : 'Envie este código para o bot:'}</p>
-                                <div className="flex items-center justify-center gap-2">
-                                    <code className="text-xl font-mono font-bold text-accent-fg bg-surface px-4 py-1.5 rounded-lg border border-line tracking-widest">
-                                        {otp}
-                                    </code>
-                                    <button
-                                        type="button"
-                                        onClick={handleCopyOtp}
-                                        className="p-2 hover:bg-surface-2 rounded-lg text-fg-muted hover:text-fg border border-line-subtle transition-colors"
-                                    >
-                                        <Copy size={15} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="text-center">
-                                <a
-                                    href={`https://t.me/${botUsername}?start=${otp}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-block text-accent-fg hover:underline text-xs font-medium"
-                                >
-                                    {isEn ? 'Open' : 'Abrir'} @{botUsername || 'Bot'}
-                                </a>
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={checkStatus}
-                                className="w-full h-9 bg-surface-2 hover:bg-surface-3 border border-line text-fg font-semibold rounded-lg transition-colors text-xs"
-                            >
-                                {isEn ? "I've sent the code" : 'Já enviei o código'}
-                            </button>
-                        </div>
-                    )}
-
-                    {step === 'connected' && (
-                        <div className="flex items-center justify-between bg-accent/10 border border-accent/25 p-3 rounded-lg">
-                            <span className="text-accent-fg text-xs font-bold flex items-center gap-1.5">
-                                <CheckCircle2 size={14} /> {isEn ? 'Connected' : 'Conectado'}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={handleDisconnect}
-                                disabled={loading}
-                                className="text-xs text-danger-fg hover:underline font-medium"
-                            >
-                                {isEn ? 'Disconnect' : 'Desconectar'}
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-fg-subtle mb-2">
-                        {isEn ? 'Preferences' : 'Preferências'}
-                    </h4>
-                    <div className="space-y-1.5">
-                        {[
-                            { id: 'trade_success', label: isEn ? 'Trades & Profit' : 'Trades e Profit' },
-                            { id: 'risk_alert', label: isEn ? 'Risk Alerts' : 'Alertas de Risco' },
-                            { id: 'mental_insight', label: isEn ? 'Psychology Insights' : 'Insights Mentais' },
-                            { id: 'system', label: isEn ? 'System' : 'Sistema' },
-                        ].map((pref) => (
-                            <label
-                                key={pref.id}
-                                className="flex items-center justify-between px-3 py-2.5 bg-canvas-subtle border border-line-subtle rounded-lg cursor-pointer hover:bg-surface-2 transition-colors"
-                            >
-                                <span className="text-xs sm:text-sm text-fg">{pref.label}</span>
-                                <input
-                                    type="checkbox"
-                                    checked={preferences[pref.id as keyof typeof preferences]}
-                                    onChange={() => handlePreferenceChange(pref.id)}
-                                    className="w-4 h-4 rounded border-line bg-surface text-accent focus:ring-accent/40"
-                                />
-                            </label>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </Modal>
-    );
-};
-
 export const Notifications = () => {
     const navigate = useNavigate();
     const { locale } = useLocale();
@@ -509,7 +321,6 @@ export const Notifications = () => {
     });
     const [filter, setFilter] = useState('all');
     const [searchQuery, setSearchQuery] = useState('');
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -610,11 +421,6 @@ export const Notifications = () => {
 
     return (
         <div className="w-full space-y-3 pb-10">
-            <TelegramSettingsModal
-                isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
-            />
-
             {/* Health Score Widget */}
             {scoreData && (
                 <TraderHealthScore
@@ -684,15 +490,6 @@ export const Notifications = () => {
                         >
                             <CheckCircle2 size={13} className="text-accent-fg" />
                             <span>{isEn ? 'Mark all read' : 'Marcar lidas'}</span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => setIsSettingsOpen(true)}
-                            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg transition-colors"
-                        >
-                            <Settings size={13} className="text-fg-muted" />
-                            <span>Telegram</span>
                         </button>
                     </div>
                 </div>

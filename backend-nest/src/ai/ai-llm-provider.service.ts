@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
+import { cavemanCompressHistory } from './ai-caveman-compressor';
 
 export type LlmProviderKind = 'none' | 'gemini' | 'openai_compatible' | 'qwen';
 
@@ -60,9 +61,14 @@ function extractGeminiText(data: any): string {
 @Injectable()
 export class AiLlmProviderService {
     private static readonly GEMINI_FALLBACK_MODELS = [
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+    ] as const;
+
+    private static readonly LEGACY_INVALID_GEMINI_MODELS = new Set([
         'gemini-3.8-flash',
         'gemini-3.1-flash-lite',
-    ] as const;
+    ]);
 
     private readonly logger = new Logger(AiLlmProviderService.name);
     private invalidGeminiKeyHash: string | null = null;
@@ -157,9 +163,13 @@ export class AiLlmProviderService {
             ''
         ).trim();
 
-        let model = configuredModel.toLowerCase().startsWith('gemini')
-            ? configuredModel
-            : defaultModel;
+        const isDeprecatedOrUnknown =
+            AiLlmProviderService.LEGACY_INVALID_GEMINI_MODELS.has(configuredModel.toLowerCase());
+
+        let model =
+            configuredModel.toLowerCase().startsWith('gemini') && !isDeprecatedOrUnknown
+                ? configuredModel
+                : defaultModel;
 
         if (this.retiredGeminiModels.has(model)) {
             model =
@@ -473,14 +483,20 @@ export class AiLlmProviderService {
                 arr.indexOf(m) === idx &&
                 !this.retiredGeminiModels.has(m)
         );
-        const queue = candidates.length > 0 ? candidates : ['gemini-3.1-flash-lite'];
+        const queue = candidates.length > 0 ? candidates : ['gemini-2.5-flash-lite'];
 
         for (let i = 0; i < queue.length; i++) {
             const candidateModel = queue[i];
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${gemini.key}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(candidateModel)}:generateContent`;
             try {
                 const res = await firstValueFrom(
-                    this.httpService.post(url, payload, { timeout: timeoutMs })
+                    this.httpService.post(url, payload, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': gemini.key,
+                        },
+                        timeout: timeoutMs,
+                    })
                 );
                 return { data: res.data, modelUsed: candidateModel };
             } catch (err: any) {
@@ -574,13 +590,15 @@ export class AiLlmProviderService {
         history: LlmChatMessageInput[],
         maxItems = 6
     ): LlmChatMessageInput[] {
-        return (history || [])
+        const sanitized = (history || [])
             .slice(-maxItems)
             .map((m) => ({
                 role: m.role,
                 content: this.sanitizeHistoryContent(m.content),
             }))
             .filter((m) => m.content.length > 0);
+
+        return cavemanCompressHistory(sanitized, maxItems, 420);
     }
 
     private buildOpenAiMessages(

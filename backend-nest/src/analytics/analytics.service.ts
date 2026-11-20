@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { In, Repository } from 'typeorm';
@@ -7,8 +7,12 @@ import { TrackingEventEntity } from './entities/tracking-event.entity';
 import { EmailTrackingLogEntity } from './entities/email-tracking-log.entity';
 import { TrackingConfigEntity } from './entities/tracking-config.entity';
 import { UserEntity } from '../users/user.entity';
+import { ReferralEntity } from '../users/referral.entity';
+import { PushSubscriptionEntity } from '../notifications/push/push-subscription.entity';
+import { PushDeliveryLogEntity } from '../notifications/push/push-delivery-log.entity';
 import { resolveAcquisitionFields, sanitizeAttributionPayload } from '../users/users.service';
-import { getJwtSecret } from '../common/security/security.config';
+import { getAnalyticsHmacSecret } from '../common/security/security.config';
+import { CryptoUtil } from '../common/utils/crypto.util';
 import { resolveFrontendUrl } from '../email/templates/utils';
 import { RecordUserActivityDto, TrackEventDto, UpdatePixelConfigDto } from './dto/analytics.dto';
 
@@ -17,6 +21,13 @@ export const TRANSPARENT_1X1_GIF = Buffer.from(
     'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
     'base64',
 );
+
+const SECURITY_TEMPLATES_NO_TRACKING = new Set([
+    'OTP_CODE',
+    'PASSWORD_RECOVERY',
+    'ACCOUNT_LOCKED',
+    'LOGIN_ALERT',
+]);
 
 export interface DecorateEmailTrackingInput {
     to: string;
@@ -44,15 +55,46 @@ export class AnalyticsService {
         @InjectRepository(UserEntity)
         private readonly usersRepo: Repository<UserEntity>,
         private readonly configService: ConfigService,
+        @Optional()
+        @InjectRepository(PushDeliveryLogEntity)
+        private readonly pushLogsRepo?: Repository<PushDeliveryLogEntity>,
+        @Optional()
+        @InjectRepository(PushSubscriptionEntity)
+        private readonly pushSubsRepo?: Repository<PushSubscriptionEntity>,
+        @Optional()
+        @InjectRepository(ReferralEntity)
+        private readonly referralsRepo?: Repository<ReferralEntity>,
     ) {}
+
+    private encryptMetaCapiToken(plainToken?: string | null): string | null {
+        const trimmed = (plainToken || '').trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith('enc:v1:')) return trimmed;
+        const secret = getAnalyticsHmacSecret(this.configService);
+        return `enc:v1:${CryptoUtil.encrypt(trimmed, secret)}`;
+    }
+
+    private decryptMetaCapiToken(storedToken?: string | null): string | null {
+        const trimmed = (storedToken || '').trim();
+        if (!trimmed) return null;
+        if (!trimmed.startsWith('enc:v1:')) return trimmed;
+        try {
+            const secret = getAnalyticsHmacSecret(this.configService);
+            return CryptoUtil.decrypt(trimmed.slice('enc:v1:'.length), secret);
+        } catch (err: any) {
+            this.logger.warn(`Failed to decrypt metaCapiAccessToken: ${err?.message || err}`);
+            return null;
+        }
+    }
 
     private async ensureConfigRow(): Promise<TrackingConfigEntity> {
         let cfg = await this.configRepo.findOne({ where: { key: 'default' } });
         if (!cfg) {
+            const rawToken = this.configService.get<string>('META_CAPI_ACCESS_TOKEN') || null;
             cfg = this.configRepo.create({
                 key: 'default',
                 metaPixelId: this.configService.get<string>('META_PIXEL_ID') || null,
-                metaCapiAccessToken: this.configService.get<string>('META_CAPI_ACCESS_TOKEN') || null,
+                metaCapiAccessToken: this.encryptMetaCapiToken(rawToken),
                 ga4MeasurementId: this.configService.get<string>('GA4_MEASUREMENT_ID') || null,
                 gtmContainerId: this.configService.get<string>('GTM_CONTAINER_ID') || null,
                 tiktokPixelId: this.configService.get<string>('TIKTOK_PIXEL_ID') || null,
@@ -62,6 +104,9 @@ export class AnalyticsService {
                 enableCtaAutoTracking: true,
                 customHeadScript: null,
             });
+            cfg = await this.configRepo.save(cfg);
+        } else if (cfg.metaCapiAccessToken && !cfg.metaCapiAccessToken.startsWith('enc:v1:')) {
+            cfg.metaCapiAccessToken = this.encryptMetaCapiToken(cfg.metaCapiAccessToken);
             cfg = await this.configRepo.save(cfg);
         }
         return cfg;
@@ -84,11 +129,12 @@ export class AnalyticsService {
 
     async getAdminPixelConfig() {
         const cfg = await this.ensureConfigRow();
+        const plainToken = this.decryptMetaCapiToken(cfg.metaCapiAccessToken);
         return {
             metaPixelId: cfg.metaPixelId || '',
-            hasMetaCapiAccessToken: Boolean(cfg.metaCapiAccessToken || this.configService.get<string>('META_CAPI_ACCESS_TOKEN')),
-            metaCapiAccessTokenPreview: cfg.metaCapiAccessToken
-                ? `${cfg.metaCapiAccessToken.slice(0, 6)}...${cfg.metaCapiAccessToken.slice(-4)}`
+            hasMetaCapiAccessToken: Boolean(plainToken || this.configService.get<string>('META_CAPI_ACCESS_TOKEN')),
+            metaCapiAccessTokenPreview: plainToken
+                ? `${plainToken.slice(0, 6)}...${plainToken.slice(-4)}`
                 : '',
             ga4MeasurementId: cfg.ga4MeasurementId || '',
             gtmContainerId: cfg.gtmContainerId || '',
@@ -117,7 +163,7 @@ export class AnalyticsService {
             if (!trimmed) {
                 cfg.metaCapiAccessToken = null;
             } else if (!trimmed.includes('...')) {
-                cfg.metaCapiAccessToken = trimmed.slice(0, 512);
+                cfg.metaCapiAccessToken = this.encryptMetaCapiToken(trimmed.slice(0, 512));
             }
         }
         if (dto.enableFirstPartyTracking !== undefined) cfg.enableFirstPartyTracking = dto.enableFirstPartyTracking;
@@ -133,8 +179,49 @@ export class AnalyticsService {
 
     private hashIp(ip?: string): string | null {
         if (!ip) return null;
-        const salt = getJwtSecret(this.configService);
+        const salt = getAnalyticsHmacSecret(this.configService);
         return createHash('sha256').update(`${ip}|${salt}`).digest('hex').slice(0, 32);
+    }
+
+    private redactSensitiveUrlParams(rawUrl: string | null | undefined, maxLen = 1024): string | null {
+        if (!rawUrl || typeof rawUrl !== 'string') return null;
+        const trimmed = rawUrl.trim();
+        if (!trimmed) return null;
+        try {
+            const isRelative = trimmed.startsWith('/');
+            const parsed = new URL(isRelative ? `https://torex.invalid${trimmed}` : trimmed);
+            const sensitiveKeys = new Set([
+                'token',
+                'sig',
+                'signature',
+                'code',
+                'otp',
+                'twofactortoken',
+                'secret',
+                'key',
+                'apikey',
+                'password',
+                'resetid',
+            ]);
+            let changed = false;
+            parsed.searchParams.forEach((_, paramKey) => {
+                if (sensitiveKeys.has(paramKey.toLowerCase())) {
+                    parsed.searchParams.set(paramKey, '[REDACTED]');
+                    changed = true;
+                }
+            });
+            const serialized = isRelative
+                ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+                : parsed.toString();
+            return (changed ? serialized : trimmed).slice(0, maxLen);
+        } catch {
+            return trimmed
+                .replace(
+                    /([?&](?:token|sig|signature|code|otp|twoFactorToken|secret|key|apiKey|password)=)[^&#]*/gi,
+                    '$1[REDACTED]',
+                )
+                .slice(0, maxLen);
+        }
     }
 
     private cleanStr(value: unknown, maxLen: number): string | null {
@@ -177,8 +264,8 @@ export class AnalyticsService {
             elementLabel: this.cleanStr(dto.elementLabel, 256),
             ctaTag: this.cleanStr(dto.ctaTag, 120) || this.cleanStr(dto.utmContent, 120),
             intent: this.cleanStr(dto.intent, 120) || this.cleanStr(dto.utmTerm, 120),
-            targetUrl: this.cleanStr(dto.targetUrl, 1024),
-            referrer: this.cleanStr(dto.referrer, 1024),
+            targetUrl: this.redactSensitiveUrlParams(dto.targetUrl, 1024),
+            referrer: this.redactSensitiveUrlParams(dto.referrer, 1024),
             utmSource: this.cleanStr(dto.utmSource, 160),
             utmMedium: this.cleanStr(dto.utmMedium, 160),
             utmCampaign: this.cleanStr(dto.utmCampaign, 200),
@@ -380,7 +467,7 @@ export class AnalyticsService {
                 );
             }
 
-            if (row.eventType === 'conversion') {
+            if (row.eventType === 'conversion' && context?.userId) {
                 void this.forwardMetaConversionApi(saved, cfg, context?.email, context?.ip, context?.userAgent);
             }
         } catch (err: any) {
@@ -451,9 +538,11 @@ export class AnalyticsService {
                 );
             }
 
-            for (const ev of saved) {
-                if (ev.eventType === 'conversion') {
-                    void this.forwardMetaConversionApi(ev, cfg, undefined, context?.ip, context?.userAgent);
+            if (context?.userId) {
+                for (const ev of saved) {
+                    if (ev.eventType === 'conversion' && ev.userId) {
+                        void this.forwardMetaConversionApi(ev, cfg, undefined, context?.ip, context?.userAgent);
+                    }
                 }
             }
             return { accepted: saved.length };
@@ -471,7 +560,9 @@ export class AnalyticsService {
         userAgent?: string,
     ): Promise<void> {
         const pixelId = cfg.metaPixelId || this.configService.get<string>('META_PIXEL_ID');
-        const accessToken = cfg.metaCapiAccessToken || this.configService.get<string>('META_CAPI_ACCESS_TOKEN');
+        const accessToken =
+            this.decryptMetaCapiToken(cfg.metaCapiAccessToken) ||
+            this.configService.get<string>('META_CAPI_ACCESS_TOKEN');
         if (!pixelId || !accessToken) return;
 
         try {
@@ -622,7 +713,7 @@ export class AnalyticsService {
     }
 
     private signEmailRedirect(token: string, destUrl: string): string {
-        const secret = getJwtSecret(this.configService);
+        const secret = getAnalyticsHmacSecret(this.configService);
         return createHmac('sha256', secret)
             .update(`${token}|${destUrl}`)
             .digest('hex')
@@ -669,6 +760,9 @@ export class AnalyticsService {
         input: DecorateEmailTrackingInput,
     ): Promise<{ html: string; token: string | null }> {
         try {
+            if (SECURITY_TEMPLATES_NO_TRACKING.has(String(input.template || '').toUpperCase())) {
+                return { html: input.html, token: null };
+            }
             const cfg = await this.ensureConfigRow();
             if (!cfg.enableEmailTracking || !input.html) {
                 return { html: input.html, token: null };
@@ -693,6 +787,13 @@ export class AnalyticsService {
             );
 
             const baseUrl = resolveFrontendUrl();
+            const trackingBaseUrl = (
+                this.configService.get<string>('BASE_URL') ||
+                process.env.BASE_URL ||
+                baseUrl
+            )
+                .trim()
+                .replace(/\/$/, '');
             let frontendHost = '';
             try {
                 frontendHost = new URL(baseUrl).hostname.toLowerCase();
@@ -733,12 +834,12 @@ export class AnalyticsService {
                     }
 
                     const sig = this.signEmailRedirect(token, finalDestUrl);
-                    const trackedHref = `${baseUrl}/api/track/email/click?t=${encodeURIComponent(token)}&cta=${encodeURIComponent(ctaTag)}&u=${encodeURIComponent(finalDestUrl)}&sig=${encodeURIComponent(sig)}`;
+                    const trackedHref = `${trackingBaseUrl}/api/track/email/click?t=${encodeURIComponent(token)}&cta=${encodeURIComponent(ctaTag)}&u=${encodeURIComponent(finalDestUrl)}&sig=${encodeURIComponent(sig)}`;
                     return `<a${beforeAttr} href=${quote}${trackedHref}${quote}${afterAttr}>${innerHtml}</a>`;
                 },
             );
 
-            const pixelImg = `<img src="${baseUrl}/api/track/email/open/${token}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;opacity:0;overflow:hidden;" />`;
+            const pixelImg = `<img src="${trackingBaseUrl}/api/track/email/open/${token}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;opacity:0;overflow:hidden;" />`;
             const withPixel = /<\/body>/i.test(rewrittenHtml)
                 ? rewrittenHtml.replace(/<\/body>/i, `${pixelImg}</body>`)
                 : `${rewrittenHtml}${pixelImg}`;
@@ -812,6 +913,8 @@ export class AnalyticsService {
 
         const safeCta = this.cleanStr(cta, 160) || 'email_cta';
 
+        const sanitizedClickedUrl = this.redactSensitiveUrlParams(destUrl, 1024) || destUrl.slice(0, 1024);
+
         try {
             await this.emailLogsRepo
                 .createQueryBuilder()
@@ -820,7 +923,7 @@ export class AnalyticsService {
                     openedAt: () => 'COALESCE("opened_at", NOW())',
                     firstClickedAt: () => 'COALESCE("first_clicked_at", NOW())',
                     clickCount: () => '"click_count" + 1',
-                    lastClickedUrl: destUrl.slice(0, 1024),
+                    lastClickedUrl: sanitizedClickedUrl,
                     lastCtaTag: safeCta,
                 })
                 .where('token = :token', { token: cleanToken })
@@ -835,7 +938,7 @@ export class AnalyticsService {
                     pagePath: `/email/${log?.template || 'unknown'}`,
                     elementLabel: safeCta,
                     ctaTag: safeCta,
-                    targetUrl: destUrl.slice(0, 1024),
+                    targetUrl: sanitizedClickedUrl,
                     utmSource: 'email',
                     utmMedium: log?.utmMedium || 'transactional',
                     utmCampaign: log?.utmCampaign || log?.template || undefined,
@@ -1374,6 +1477,219 @@ export class AnalyticsService {
                 usersCount: Number(r.users_count || 0),
             })),
             users: usersSampleRows,
+        };
+    }
+
+    private async safeAnalyticsQuery<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+        try {
+            return await this.usersRepo.query(sql, params);
+        } catch (err: any) {
+            this.logger.warn(`Analytics fallback query warning: ${err?.message || err}`);
+            return [];
+        }
+    }
+
+    async getPushAnalytics(days?: number) {
+        const { days: windowDays, since } = this.resolveDateWindow(days);
+
+        const [
+            subSummaryRows,
+            deliverySummaryRows,
+            byCategoryRows,
+            moderationUsersRows,
+            timelineRows,
+        ] = await Promise.all([
+            this.safeAnalyticsQuery(
+                `SELECT
+                    COUNT(*) FILTER (WHERE is_active = true)::int AS active_subscriptions,
+                    COUNT(DISTINCT user_id) FILTER (WHERE is_active = true)::int AS active_subscribers,
+                    COUNT(*) FILTER (WHERE is_active = true AND is_standalone_app = true)::int AS standalone_devices
+                 FROM push_subscriptions`,
+            ),
+            this.safeAnalyticsQuery(
+                `SELECT
+                    COUNT(*)::int AS sent,
+                    COUNT(*) FILTER (WHERE status = 'CLICKED')::int AS clicked,
+                    COUNT(*) FILTER (WHERE status = 'DISMISSED')::int AS dismissed,
+                    COUNT(*) FILTER (WHERE status = 'SENT')::int AS ignored,
+                    COUNT(*) FILTER (WHERE moderation_mode = 'ENGAGED')::int AS engaged_dispatches,
+                    COUNT(*) FILTER (WHERE moderation_mode = 'MODERATED')::int AS moderated_dispatches,
+                    COUNT(*) FILTER (WHERE moderation_mode = 'FATIGUE_PAUSED')::int AS fatigue_paused_dispatches
+                 FROM push_delivery_logs
+                 WHERE sent_at >= $1`,
+                [since],
+            ),
+            this.safeAnalyticsQuery(
+                `SELECT
+                    COALESCE(category, 'general') AS category,
+                    COUNT(*)::int AS sent,
+                    COUNT(*) FILTER (WHERE status = 'CLICKED')::int AS clicked,
+                    COUNT(*) FILTER (WHERE status = 'DISMISSED')::int AS dismissed,
+                    COUNT(*) FILTER (WHERE status = 'SENT')::int AS ignored
+                 FROM push_delivery_logs
+                 WHERE sent_at >= $1
+                 GROUP BY 1
+                 ORDER BY sent DESC`,
+                [since],
+            ),
+            this.safeAnalyticsQuery(
+                `WITH latest_per_user AS (
+                    SELECT DISTINCT ON (user_id) user_id, moderation_mode
+                    FROM push_delivery_logs
+                    ORDER BY user_id, sent_at DESC
+                )
+                SELECT
+                    COUNT(*) FILTER (WHERE moderation_mode = 'ENGAGED')::int AS engaged_users,
+                    COUNT(*) FILTER (WHERE moderation_mode = 'MODERATED')::int AS moderated_users,
+                    COUNT(*) FILTER (WHERE moderation_mode = 'FATIGUE_PAUSED')::int AS fatigue_paused_users
+                FROM latest_per_user`,
+            ),
+            this.safeAnalyticsQuery(
+                `SELECT
+                    TO_CHAR(DATE_TRUNC('day', sent_at), 'YYYY-MM-DD') AS day,
+                    COUNT(*)::int AS sent,
+                    COUNT(*) FILTER (WHERE status = 'CLICKED')::int AS clicked,
+                    COUNT(*) FILTER (WHERE status = 'DISMISSED')::int AS dismissed
+                 FROM push_delivery_logs
+                 WHERE sent_at >= $1
+                 GROUP BY 1
+                 ORDER BY 1 ASC`,
+                [since],
+            ),
+        ]);
+
+        const subRow = subSummaryRows[0] || {};
+        const delRow = deliverySummaryRows[0] || {};
+        const modRow = moderationUsersRows[0] || {};
+
+        const sent = Number(delRow.sent || 0);
+        const clicked = Number(delRow.clicked || 0);
+        const dismissed = Number(delRow.dismissed || 0);
+        const ignored = Number(delRow.ignored || 0);
+
+        return {
+            windowDays,
+            summary: {
+                activeSubscriptions: Number(subRow.active_subscriptions || 0),
+                activeSubscribers: Number(subRow.active_subscribers || 0),
+                standaloneDevices: Number(subRow.standalone_devices || 0),
+                sent,
+                clicked,
+                dismissed,
+                ignored,
+                ctrPct: sent > 0 ? Number(((clicked / sent) * 100).toFixed(2)) : 0,
+                dismissRatePct: sent > 0 ? Number(((dismissed / sent) * 100).toFixed(2)) : 0,
+                engagedDispatches: Number(delRow.engaged_dispatches || 0),
+                moderatedDispatches: Number(delRow.moderated_dispatches || 0),
+                fatiguePausedDispatches: Number(delRow.fatigue_paused_dispatches || 0),
+            },
+            moderationUsers: {
+                engaged: Number(modRow.engaged_users || 0),
+                moderated: Number(modRow.moderated_users || 0),
+                fatiguePaused: Number(modRow.fatigue_paused_users || 0),
+            },
+            byCategory: byCategoryRows.map((r: any) => {
+                const catSent = Number(r.sent || 0);
+                const catClicked = Number(r.clicked || 0);
+                return {
+                    category: r.category,
+                    sent: catSent,
+                    clicked: catClicked,
+                    dismissed: Number(r.dismissed || 0),
+                    ignored: Number(r.ignored || 0),
+                    ctrPct: catSent > 0 ? Number(((catClicked / catSent) * 100).toFixed(2)) : 0,
+                };
+            }),
+            timeline: timelineRows.map((r: any) => ({
+                day: r.day,
+                sent: Number(r.sent || 0),
+                clicked: Number(r.clicked || 0),
+                dismissed: Number(r.dismissed || 0),
+            })),
+        };
+    }
+
+    async getReferralAnalytics(days?: number) {
+        const { days: windowDays, since } = this.resolveDateWindow(days);
+
+        const [summaryRows, topAffiliatesRows, recentRows] = await Promise.all([
+            this.safeAnalyticsQuery(
+                `SELECT
+                    COUNT(*)::int AS total_referrals,
+                    COUNT(*) FILTER (WHERE status IN ('VERIFIED', 'PAID'))::int AS verified_referrals,
+                    COUNT(*) FILTER (WHERE status = 'PAID')::int AS paid_referrals,
+                    COALESCE(SUM(reward_credits_usd), 0)::float8 AS total_credits_issued_usd,
+                    COUNT(*) FILTER (WHERE tier_boost_awarded = true)::int AS tier_boosts_unlocked
+                 FROM referrals
+                 WHERE created_at >= $1`,
+                [since],
+            ),
+            this.safeAnalyticsQuery(
+                `SELECT
+                    u.id AS user_id,
+                    COALESCE(u.username, 'trader') AS username,
+                    u.referral_code,
+                    COALESCE(u.referral_credits_usd, 0)::float8 AS credits_usd,
+                    COALESCE(u.referral_tier_boost, false) AS tier_boost_unlocked,
+                    COUNT(r.id)::int AS total_invited,
+                    COUNT(r.id) FILTER (WHERE r.status IN ('VERIFIED', 'PAID'))::int AS verified_count,
+                    COUNT(r.id) FILTER (WHERE r.status = 'PAID')::int AS paid_count
+                 FROM referrals r
+                 INNER JOIN users u ON u.id::text = r.referrer_user_id::text
+                 GROUP BY u.id, u.username, u.referral_code, u.referral_credits_usd, u.referral_tier_boost
+                 ORDER BY paid_count DESC, verified_count DESC, credits_usd DESC
+                 LIMIT 25`,
+            ),
+            this.safeAnalyticsQuery(
+                `SELECT
+                    r.id,
+                    COALESCE(refU.username, 'trader') AS referrer_username,
+                    COALESCE(edU.username, 'trader') AS referred_username,
+                    r.status,
+                    COALESCE(r.reward_credits_usd, 0)::float8 AS reward_credits_usd,
+                    COALESCE(r.tier_boost_awarded, false) AS tier_boost_awarded,
+                    r.created_at
+                 FROM referrals r
+                 LEFT JOIN users refU ON refU.id::text = r.referrer_user_id::text
+                 LEFT JOIN users edU ON edU.id::text = r.referred_user_id::text
+                 ORDER BY r.created_at DESC
+                 LIMIT 40`,
+            ),
+        ]);
+
+        const sum = summaryRows[0] || {};
+        const verified = Number(sum.verified_referrals || 0);
+        const paid = Number(sum.paid_referrals || 0);
+
+        return {
+            windowDays,
+            summary: {
+                totalReferrals: Number(sum.total_referrals || 0),
+                verifiedReferrals: verified,
+                paidReferrals: paid,
+                conversionToPaidPct: verified > 0 ? Number(((paid / verified) * 100).toFixed(2)) : 0,
+                totalCreditsIssuedUsd: Number(Number(sum.total_credits_issued_usd || 0).toFixed(2)),
+                tierBoostsUnlocked: Number(sum.tier_boosts_unlocked || 0),
+            },
+            topAffiliates: topAffiliatesRows.map((r: any) => ({
+                userId: r.user_id,
+                username: r.username,
+                referralCode: r.referral_code,
+                creditsUsd: Number(r.credits_usd || 0),
+                tierBoostUnlocked: Boolean(r.tier_boost_unlocked),
+                totalInvited: Number(r.total_invited || 0),
+                verifiedCount: Number(r.verified_count || 0),
+                paidCount: Number(r.paid_count || 0),
+            })),
+            recentReferrals: recentRows.map((r: any) => ({
+                id: r.id,
+                referrerUsername: r.referrer_username,
+                referredUsername: r.referred_username,
+                status: r.status,
+                rewardCreditsUsd: Number(r.reward_credits_usd || 0),
+                tierBoostAwarded: Boolean(r.tier_boost_awarded),
+                createdAt: r.created_at,
+            })),
         };
     }
 }

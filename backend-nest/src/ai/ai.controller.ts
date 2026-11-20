@@ -199,9 +199,28 @@ export class AiController {
     }
 
     @Get('chat/jobs/:jobId')
-    async getChatJobStatus(@Req() req: any, @Param('jobId') jobId: string) {
+    async getChatJobStatus(
+        @Req() req: any,
+        @Param('jobId') jobId: string,
+        @Query('visible') visible?: string,
+    ) {
         const userId = req.user.id || req.user.userId;
-        return this.torexAiChatService.getJobStatus(userId, jobId);
+        const clientVisible = visible !== '0' && visible !== 'false';
+        return this.torexAiChatService.getJobStatus(userId, jobId, clientVisible);
+    }
+
+    @Post('chat/jobs/:jobId/presence')
+    async markChatJobPresence(
+        @Req() req: any,
+        @Param('jobId') jobId: string,
+        @Body() body?: { away?: boolean },
+    ) {
+        const userId = req.user.id || req.user.userId;
+        return this.torexAiChatService.markJobPresence(
+            userId,
+            jobId,
+            body?.away !== undefined ? Boolean(body.away) : true,
+        );
     }
 
     @Post('chat/message')

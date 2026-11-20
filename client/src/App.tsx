@@ -1,7 +1,10 @@
-import { lazy, Suspense, useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
 import { initOfflineSyncEngine } from './services/syncEngine';
+import { initPwaManager, hasSeenStandaloneWelcome, isStandaloneMode } from './lib/pwaManager';
+import { WebsitePwaPrompt } from './components/pwa/WebsitePwaPrompt';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LocaleRouter } from './context/LocaleContext';
@@ -19,25 +22,7 @@ import { LandingEn } from './pages/LandingEn';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 
-const queryClient = new QueryClient({
-    defaultOptions: {
-        queries: {
-            staleTime: 60_000, // 1 min smart cache across navigations
-            gcTime: 24 * 60 * 60_000, // 24h retention for offline-first hydration
-            refetchOnWindowFocus: false,
-            refetchOnReconnect: true,
-            networkMode: 'offlineFirst',
-            retry: (failureCount, error: any) => {
-                if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
-                if (!error?.response) return false;
-                return failureCount < 1;
-            },
-        },
-        mutations: {
-            networkMode: 'offlineFirst',
-        },
-    },
-});
+// Shared QueryClient imported from ./lib/queryClient so AuthContext can clear it on logout/switch.
 
 const ReactQueryDevtoolsLazy = import.meta.env.DEV
     ? lazy(() =>
@@ -48,9 +33,11 @@ const ReactQueryDevtoolsLazy = import.meta.env.DEV
     : null;
 
 // Lazy Secondary Public & Auth Pages
+const VerifyAccount = lazy(() => import('./pages/VerifyAccount').then(m => ({ default: m.VerifyAccount })));
 const TwoFactorVerify = lazy(() => import('./pages/TwoFactorVerify').then(m => ({ default: m.TwoFactorVerify })));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword').then(m => ({ default: m.ForgotPassword })));
 const AuthCallback = lazy(() => import('./pages/AuthCallback').then(m => ({ default: m.AuthCallback })));
+const PwaStandaloneWelcome = lazy(() => import('./components/pwa/PwaStandaloneWelcome'));
 
 // Lazy Legal Pages
 const LegalHub = lazy(() => import('./pages/legal/LegalHub').then(m => ({ default: m.LegalHub })));
@@ -145,6 +132,7 @@ const LegacyReplayRedirect = () => {
 function App() {
     useEffect(() => {
         initOfflineSyncEngine(queryClient);
+        initPwaManager();
     }, []);
 
     return (
@@ -226,6 +214,16 @@ function App() {
                                 }
                             />
                             <Route
+                                path="/verify-account"
+                                element={
+                                    <GuestRoute>
+                                        <Suspense fallback={<StandalonePageSkeleton />}>
+                                            <VerifyAccount />
+                                        </Suspense>
+                                    </GuestRoute>
+                                }
+                            />
+                            <Route
                                 path="/forgot-password"
                                 element={
                                     <GuestRoute>
@@ -250,6 +248,14 @@ function App() {
                                 element={
                                     <Suspense fallback={<StandalonePageSkeleton />}>
                                         <AuthCallback />
+                                    </Suspense>
+                                }
+                            />
+                            <Route
+                                path="/app-welcome"
+                                element={
+                                    <Suspense fallback={<StandalonePageSkeleton />}>
+                                        <PwaStandaloneWelcome />
                                     </Suspense>
                                 }
                             />
@@ -390,11 +396,46 @@ function App() {
                             {/* Fallback */}
                             <Route path="*" element={<Navigate to="/dashboard" replace />} />
                         </Routes>
+                        <PwaRuntimeBridge />
                         <DevtoolsMount />
                     </LocaleRouter>
                 </AuthProvider>
             </ThemeProvider>
         </QueryClientProvider>
+    );
+}
+
+function PwaRuntimeBridge() {
+    const navigate = useNavigate();
+    const { pathname } = useLocation();
+    const [showStandaloneWelcome, setShowStandaloneWelcome] = useState<boolean>(
+        () => isStandaloneMode() && !hasSeenStandaloneWelcome(),
+    );
+
+    useEffect(() => {
+        if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+        const onMessage = (event: MessageEvent) => {
+            if (event.data?.type === 'TOREX_PUSH_NAVIGATE' && typeof event.data.url === 'string') {
+                const targetUrl = event.data.url.startsWith('/') ? event.data.url : '/dashboard';
+                navigate(targetUrl);
+            }
+        };
+        navigator.serviceWorker.addEventListener('message', onMessage);
+        return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+    }, [navigate]);
+
+    const lower = pathname.toLowerCase();
+    const isExcluded = lower.startsWith('/admin') || lower === '/app-welcome' || lower === '/verify-account';
+
+    return (
+        <>
+            {!isExcluded && showStandaloneWelcome && (
+                <Suspense fallback={null}>
+                    <PwaStandaloneWelcome onContinue={() => setShowStandaloneWelcome(false)} />
+                </Suspense>
+            )}
+            <WebsitePwaPrompt />
+        </>
     );
 }
 

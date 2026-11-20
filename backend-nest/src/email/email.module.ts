@@ -23,7 +23,11 @@ import { AnalyticsModule } from '../analytics/analytics.module';
         ConfigModule,
         AnalyticsModule,
     ],
-    providers: [EmailService, EmailProducerService, EmailProcessor],
+    providers: [
+        EmailService,
+        EmailProducerService,
+        ...(process.env.MT5_DEDICATED_SERVER === 'true' ? [] : [EmailProcessor]),
+    ],
     exports: [EmailService, EmailProducerService, BullModule],
 })
 export class EmailModule {}

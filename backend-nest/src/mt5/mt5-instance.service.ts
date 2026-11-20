@@ -107,6 +107,20 @@ export class Mt5InstanceService implements OnModuleInit {
 
         child.unref();
 
+        // Scrub plaintext Password= from startup.ini shortly after terminal boot
+        const scrubTimer = setTimeout(() => {
+            try {
+                if (fs.existsSync(configPath)) {
+                    const current = fs.readFileSync(configPath, 'utf8');
+                    const sanitized = current.replace(/^Password=.*\r?\n?/gm, '');
+                    fs.writeFileSync(configPath, sanitized);
+                }
+            } catch {
+                // Ignore best-effort cleanup failures
+            }
+        }, 15_000);
+        scrubTimer.unref();
+
         // 5. Update DB
         if (!dbInstance) {
             dbInstance = this.instanceRepo.create({
@@ -145,12 +159,17 @@ export class Mt5InstanceService implements OnModuleInit {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
+        const sanitizeIni = (val: string) => String(val || '').replace(/[\r\n\0]/g, '').trim();
+        const safeLogin = sanitizeIni(login);
+        const safePass = sanitizeIni(pass);
+        const safeServer = sanitizeIni(server);
+
         const content = `
 ; Auto-Generated Startup Config
 [Common]
-Login=${login}
-Password=${pass}
-Server=${server}
+Login=${safeLogin}
+Password=${safePass}
+Server=${safeServer}
 AutoConfiguration=true
 EnableNews=false
 NewsLanguages=
@@ -163,7 +182,7 @@ PrintColor=true
 SaveDeleted=false
 
 [Experts]
-AllowDllImport=true
+AllowDllImport=false
 Enabled=true
 Account=true
 Profile=true

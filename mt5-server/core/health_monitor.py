@@ -36,15 +36,21 @@ class HealthMonitor:
         available_mb = round(mem.available / (1024 * 1024), 1)
         mem_percent = round(mem.percent, 1)
 
-        # Telemetria do processo atual (Worker Python)
+        # Telemetria do processo atual (Worker Python) e espaço livre em disco
         proc_used_mb = 0.0
         proc_cpu = 0.0
+        disk_free_gb = None
         try:
             current_proc = psutil.Process()
             proc_used_mb = round(current_proc.memory_info().rss / (1024 * 1024), 1)
             proc_cpu = round(current_proc.cpu_percent(interval=None), 1)
         except Exception as e:
             logger.debug(f"Não foi possível obter métricas do processo atual: {e}")
+        try:
+            disk = psutil.disk_usage(settings.instances_dir)
+            disk_free_gb = round(disk.free / (1024 * 1024 * 1024), 2)
+        except Exception:
+            pass
 
         # Avaliação técnica de limites críticos (apenas se a guarda de recursos estiver habilitada)
         critical_reasons = []
@@ -70,6 +76,7 @@ class HealthMonitor:
             "memory_used_mb": used_mb,
             "memory_total_mb": total_mb,
             "memory_available_mb": available_mb,
+            "disk_free_gb": disk_free_gb,
             "process_memory_mb": proc_used_mb,
             "process_cpu_percent": proc_cpu,
             "is_critical": is_critical,
@@ -212,6 +219,7 @@ class HealthMonitor:
             memoryUsedMb=metrics["memory_used_mb"],
             memoryTotalMb=metrics["memory_total_mb"],
             memoryAvailableMb=metrics["memory_available_mb"],
+            diskFreeGb=metrics.get("disk_free_gb"),
             activeTerminals=active_terminals_count,
             monitoredAccounts=monitored_accounts,
             timestamp=datetime.now(timezone.utc),

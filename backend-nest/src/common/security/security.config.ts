@@ -1,40 +1,152 @@
 import { ConfigService } from '@nestjs/config';
-import { createHash, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 
 const WEAK_SECRET_PLACEHOLDERS = new Set([
     'dev_secret',
     'default_secret_key',
     'secret',
     'changeme',
+    'secret_worker_key_change_me',
     'cossa-trading-deriv-default-secret-key-32b',
+    'CHANGE_ME',
+    'CHANGE_ME_MIN_32_CHARS',
 ]);
 
 let warnedMissingJwtSecret = false;
+let warnedMissingAdminJwtSecret = false;
+
+function readEnv(configService: ConfigService | undefined, key: string): string {
+    return (configService?.get<string>(key) ?? process.env[key] ?? '').trim();
+}
+
+function isProdEnv(configService?: ConfigService): boolean {
+    return (readEnv(configService, 'NODE_ENV') || 'development') === 'production';
+}
+
+function deriveDomainSecret(domain: string, baseSecret: string): string {
+    return createHmac('sha256', baseSecret).update(`torex-domain:${domain}`).digest('hex');
+}
 
 /**
- * Resolves JWT signing/verification secret consistently across all modules.
- * Fails closed in production if missing or using a known weak placeholder.
+ * Resolves regular user JWT signing/verification secret consistently across user modules.
+ * Supports USER_JWT_SECRET (preferred) or JWT_SECRET. Fails closed in production.
  */
 export function getJwtSecret(configService?: ConfigService): string {
-    const raw = (configService?.get<string>('JWT_SECRET') ?? process.env.JWT_SECRET ?? '').trim();
-    const isProd = (configService?.get<string>('NODE_ENV') ?? process.env.NODE_ENV) === 'production';
+    const raw = readEnv(configService, 'USER_JWT_SECRET') || readEnv(configService, 'JWT_SECRET');
+    const isProd = isProdEnv(configService);
 
     if (!raw || WEAK_SECRET_PLACEHOLDERS.has(raw)) {
         if (isProd) {
             throw new Error(
-                'CRITICAL SECURITY ERROR: JWT_SECRET não está configurado ou usa um valor padrão inseguro em produção.',
+                'CRITICAL SECURITY ERROR: JWT_SECRET (ou USER_JWT_SECRET) não está configurado ou usa um valor padrão inseguro em produção.',
             );
         }
         if (!warnedMissingJwtSecret) {
             warnedMissingJwtSecret = true;
             console.warn(
-                '[SecurityConfig] JWT_SECRET ausente em desenvolvimento — usando chave local temporária de dev.',
+                '[SecurityConfig] JWT_SECRET/USER_JWT_SECRET ausente em desenvolvimento — usando chave local temporária de dev.',
             );
         }
         return 'torex_dev_only_jwt_secret_do_not_use_in_prod';
     }
 
     return raw;
+}
+
+export const getUserJwtSecret = getJwtSecret;
+
+/**
+ * Resolves dedicated Backoffice Admin JWT secret (ADMIN_JWT_SECRET).
+ * Strictly isolated from regular user JWTs; required and distinct in production.
+ */
+export function getAdminJwtSecret(configService?: ConfigService): string {
+    const userSecret = getJwtSecret(configService);
+    const raw = readEnv(configService, 'ADMIN_JWT_SECRET');
+    const isProd = isProdEnv(configService);
+
+    if (!raw || WEAK_SECRET_PLACEHOLDERS.has(raw)) {
+        if (isProd) {
+            throw new Error(
+                'CRITICAL SECURITY ERROR: ADMIN_JWT_SECRET é obrigatório e deve ser forte em produção.',
+            );
+        }
+        if (!warnedMissingAdminJwtSecret) {
+            warnedMissingAdminJwtSecret = true;
+            console.warn(
+                '[SecurityConfig] ADMIN_JWT_SECRET ausente em dev — derivando segredo isolado de admin.',
+            );
+        }
+        return deriveDomainSecret('admin-jwt', userSecret);
+    }
+
+    if (timingSafeEqualStr(raw, userSecret)) {
+        if (isProd) {
+            throw new Error(
+                'CRITICAL SECURITY ERROR: ADMIN_JWT_SECRET deve ser diferente de JWT_SECRET/USER_JWT_SECRET.',
+            );
+        }
+        return deriveDomainSecret('admin-jwt', `${raw}:dev-isolated`);
+    }
+
+    return raw;
+}
+
+function getDomainSecret(
+    configService: ConfigService | undefined,
+    envKeys: string[],
+    domainTag: string,
+): string {
+    for (const key of envKeys) {
+        const val = readEnv(configService, key);
+        if (val && !WEAK_SECRET_PLACEHOLDERS.has(val)) {
+            return val;
+        }
+    }
+    return deriveDomainSecret(domainTag, getJwtSecret(configService));
+}
+
+export function getTwoFactorJwtSecret(configService?: ConfigService): string {
+    return getDomainSecret(configService, ['TWO_FACTOR_JWT_SECRET'], 'two-factor-jwt');
+}
+
+export function getPasswordResetSecret(configService?: ConfigService): string {
+    return getDomainSecret(configService, ['PASSWORD_RESET_SECRET'], 'password-reset');
+}
+
+export function getOAuthStateSecret(configService?: ConfigService): string {
+    return getDomainSecret(configService, ['OAUTH_STATE_SECRET'], 'oauth-state');
+}
+
+export function getAnalyticsHmacSecret(configService?: ConfigService): string {
+    return getDomainSecret(configService, ['ANALYTICS_HMAC_SECRET'], 'analytics-hmac');
+}
+
+export function getMt5CredentialSecret(configService?: ConfigService): string {
+    return getDomainSecret(
+        configService,
+        ['MT5_CREDENTIAL_SECRET', 'WORKER_KEY', 'MT5_WORKER_KEY'],
+        'mt5-credential',
+    );
+}
+
+export function getDerivEncryptionSecret(configService?: ConfigService): string {
+    const raw = readEnv(configService, 'DERIV_ENCRYPTION_KEY');
+    if (raw && !WEAK_SECRET_PLACEHOLDERS.has(raw)) {
+        return raw;
+    }
+    return deriveDomainSecret('deriv-encryption', getJwtSecret(configService));
+}
+
+export function getAiQuorumHmacSalt(configService?: ConfigService): string {
+    return getDomainSecret(configService, ['AI_QUORUM_HMAC_SALT'], 'ai-quorum-salt');
+}
+
+/**
+ * Boot-time check for segregated domain secrets.
+ */
+export function validateDomainSecretsOnBoot(configService?: ConfigService): void {
+    getJwtSecret(configService);
+    getAdminJwtSecret(configService);
 }
 
 /**
@@ -178,16 +290,21 @@ export function isRequestHttps(req: any): boolean {
     return xfProto === 'https';
 }
 
+export function getQuantInternalHeaders(
+    extra: Record<string, string> = {},
+): Record<string, string> {
+    const headers: Record<string, string> = { ...extra };
+    const key = process.env.QUANT_INTERNAL_KEY?.trim();
+    if (key) {
+        headers['X-Internal-Key'] = key;
+    }
+    return headers;
+}
+
 /**
  * Checks if request targets a loopback interface (used to allow local healthchecks/workers).
  */
 export function isLoopbackRequest(req: any): boolean {
     const ip = extractTrustedClientIp(req);
-    const host = String(req?.headers?.host || '').split(':')[0].toLowerCase();
-    return (
-        ip === '127.0.0.1' ||
-        ip === '::1' ||
-        host === 'localhost' ||
-        host === '127.0.0.1'
-    );
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }

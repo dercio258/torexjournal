@@ -50,6 +50,7 @@ import {
     TradePsychCheck,
 } from './types';
 import { useLocale } from '../../context/LocaleContext';
+import { sanitizeRichHtml } from '../../utils/sanitizeHtml';
 
 type UploadTargetMode =
     | { kind: 'pair' }
@@ -270,7 +271,7 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
         );
 
         if (editorRef.current) {
-            editorRef.current.innerHTML = initialContent || '';
+            editorRef.current.innerHTML = sanitizeRichHtml(initialContent || '');
         }
         const stripped = (initialContent || '').replace(/<[^>]+>/g, '').trim();
         setIsEmpty(!stripped);
@@ -309,7 +310,7 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
         overrideImages?: string[],
         partial?: Partial<EditorSavePayload>
     ): EditorSavePayload => {
-        const html = editorRef.current?.innerHTML || '';
+        const html = sanitizeRichHtml(editorRef.current?.innerHTML || '');
         const parsedMfe =
             mfeInput.trim() === '' ? null : Number(mfeInput.replace(',', '.'));
         const parsedMae =
@@ -407,8 +408,8 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
 
     const applyTemplate = (tpl: NoteTemplateItem) => {
         if (!editorRef.current) return;
-        const tplBody = isEn ? tpl.contentEn || tpl.content : tpl.content;
-        const current = editorRef.current.innerHTML.trim();
+        const tplBody = sanitizeRichHtml(isEn ? tpl.contentEn || tpl.content : tpl.content);
+        const current = sanitizeRichHtml(editorRef.current.innerHTML.trim());
         editorRef.current.innerHTML = current
             ? `${current}<hr/>${tplBody}`
             : tplBody;
@@ -602,6 +603,12 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
         if (pastedFiles.length > 0) {
             e.preventDefault();
             void handleFilesUpload(pastedFiles, { kind: 'editor-paste-drop' });
+            return;
+        }
+        const pastedHtml = e.clipboardData?.getData('text/html');
+        if (pastedHtml) {
+            e.preventDefault();
+            document.execCommand('insertHTML', false, sanitizeRichHtml(pastedHtml));
         }
     };
 
@@ -622,7 +629,8 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
     };
 
     const handleConfirmSaveTemplate = async () => {
-        const html = editorRef.current?.innerHTML?.trim() || '';
+        const rawHtml = editorRef.current?.innerHTML?.trim() || '';
+        const html = sanitizeRichHtml(rawHtml).trim();
         if (!html || !newTemplateName.trim()) return;
         setSavingTemplate(true);
         try {

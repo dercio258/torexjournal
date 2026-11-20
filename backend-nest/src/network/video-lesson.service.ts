@@ -230,12 +230,47 @@ export class NetworkAcademyService implements OnModuleInit {
             };
         }
 
-        // 7. Qualquer outro player embed (PandaVideo, Bunny Stream, Wistia, Vturb, etc.)
+        // 7. Player embed permitido pela allowlist (PandaVideo, Bunny Stream, Wistia, Vturb, etc.)
+        if (!this.isAllowedEmbedUrl(extractedUrl)) {
+            throw new BadRequestException(
+                'Domínio ou protocolo de embed não permitido. Utilize HTTPS de um provedor suportado.',
+            );
+        }
+
         return {
             embedUrl: extractedUrl,
             embedType: 'iframe',
             autoThumbnailUrl: null,
         };
+    }
+
+    private isAllowedEmbedUrl(rawUrl: string): boolean {
+        const allowedDomains = [
+            'youtube.com',
+            'youtube-nocookie.com',
+            'youtu.be',
+            'vimeo.com',
+            'loom.com',
+            'drive.google.com',
+            'pandavideo.com.br',
+            'mediadelivery.net',
+            'b-cdn.net',
+            'bunnycdn.com',
+            'wistia.net',
+            'wistia.com',
+            'vturb.com.br',
+            'converteai.net',
+        ];
+        try {
+            const parsed = new URL(rawUrl);
+            if (parsed.protocol !== 'https:') return false;
+            const host = parsed.hostname.toLowerCase();
+            return allowedDomains.some(
+                (domain) => host === domain || host.endsWith(`.${domain}`),
+            );
+        } catch {
+            return false;
+        }
     }
 
     // =========================================================================
@@ -465,13 +500,15 @@ export class NetworkAcademyService implements OnModuleInit {
             commenterIds.length > 0
                 ? await this.userRepo.find({
                       where: { id: In(commenterIds) },
-                      select: ['id', 'username', 'name', 'avatarUrl'],
+                      select: ['id', 'username', 'avatarUrl'],
                   })
                 : [];
         const userMap = new Map(commenters.map((u) => [u.id, u]));
 
         const comments = rawComments.map((c) => {
             const u = userMap.get(c.userId);
+            const rawHandle = typeof u?.username === 'string' ? u.username.trim() : '';
+            const safeHandle = rawHandle && !rawHandle.includes('@') ? rawHandle : 'trader';
             return {
                 id: c.id,
                 lessonId: c.lessonId,
@@ -479,8 +516,7 @@ export class NetworkAcademyService implements OnModuleInit {
                 createdAt: c.createdAt,
                 user: {
                     id: c.userId,
-                    username: u?.username || u?.name || 'trader',
-                    name: u?.name || u?.username || 'Trader',
+                    username: safeHandle,
                     avatarUrl: u?.avatarUrl || null,
                 },
             };
@@ -599,7 +635,7 @@ export class NetworkAcademyService implements OnModuleInit {
             this.lessonRepo.findOne({ where: { id: lessonId } }),
             this.userRepo.findOne({
                 where: { id: userId },
-                select: ['id', 'username', 'name', 'avatarUrl'],
+                select: ['id', 'username', 'avatarUrl'],
             }),
         ]);
 
@@ -621,6 +657,9 @@ export class NetworkAcademyService implements OnModuleInit {
         lesson.commentsCount = totalComments;
         await this.lessonRepo.save(lesson);
 
+        const rawAuthorHandle = typeof user?.username === 'string' ? user.username.trim() : '';
+        const safeAuthorHandle =
+            rawAuthorHandle && !rawAuthorHandle.includes('@') ? rawAuthorHandle : 'trader';
         const formattedComment = {
             id: saved.id,
             lessonId: saved.lessonId,
@@ -628,8 +667,7 @@ export class NetworkAcademyService implements OnModuleInit {
             createdAt: saved.createdAt,
             user: {
                 id: userId,
-                username: user?.username || user?.name || 'trader',
-                name: user?.name || user?.username || 'Trader',
+                username: safeAuthorHandle,
                 avatarUrl: user?.avatarUrl || null,
             },
         };

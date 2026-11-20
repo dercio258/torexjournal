@@ -7,15 +7,27 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 async function run() {
-    const email = 'derciomatsope9@gmail.com';
+    const email = (process.argv[2] || process.env.TARGET_USER_EMAIL || '').trim().toLowerCase();
+    if (!email) {
+        console.error('Usage: npx ts-node check-trades.ts <user-email>');
+        process.exit(1);
+    }
+
+    const dbUser = process.env.DB_USER;
+    const dbPass = process.env.DB_PASS;
+    const dbName = process.env.DB_NAME;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('Missing required DB_USER, DB_PASS, or DB_NAME environment variables.');
+        process.exit(1);
+    }
 
     // 1. PostgreSQL Connection
     const pgClient = new Client({
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432'),
-        user: process.env.DB_USER || 'cossa_trading_user',
-        password: process.env.DB_PASS || 'C0ssa@2026_db!',
-        database: process.env.DB_NAME || 'cossa_trading',
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     });
 
     await pgClient.connect();

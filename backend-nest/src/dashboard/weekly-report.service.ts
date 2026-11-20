@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,6 +7,7 @@ import { EmailProducerService } from '../email/email-producer.service';
 import { EmailTemplatePayloadMap } from '../email/templates';
 import { UserEntity } from '../users/user.entity';
 import { DashboardService } from './dashboard.service';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 
 @Injectable()
 export class WeeklyReportService {
@@ -19,14 +20,17 @@ export class WeeklyReportService {
         private readonly accountRepo: Repository<AccountEntity>,
         private readonly dashboardService: DashboardService,
         private readonly emailProducer: EmailProducerService,
+        @Optional()
+        private readonly redisSecurity?: RedisSecurityService,
     ) {}
 
     @Cron('0 9 * * 0') // Sunday at 09:00 AM
     async handleWeeklyReport() {
         if (process.env.MT5_DEDICATED_SERVER === 'true') return;
-        this.logger.log('Preparing weekly performance reports for Redis dispatch...');
+        const exec = async () => {
+            this.logger.log('Preparing weekly performance reports for Redis dispatch...');
 
-        const users = await this.userRepo.find();
+            const users = await this.userRepo.find();
         const weekKey = new Date().toISOString().slice(0, 10);
         const batch: Array<{
             to: string;
@@ -78,6 +82,13 @@ export class WeeklyReportService {
             this.logger.log(`Enqueued ${queued} weekly performance reports in Redis.`);
         } else {
             this.logger.log('Weekly report run finished: 0 eligible users with trades this week.');
+        }
+        };
+
+        if (this.redisSecurity) {
+            await this.redisSecurity.withLock('cron:weekly_report', 30 * 60_000, exec);
+        } else {
+            await exec();
         }
     }
 }

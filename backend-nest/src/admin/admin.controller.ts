@@ -21,6 +21,7 @@ import { SubscriptionService } from '../payment/subscription.service';
 import { AdminIntelligenceService } from './admin-intelligence.service';
 import { NetworkAcademyService } from '../network/video-lesson.service';
 import { Mt5WorkerService } from '../mt5/worker/mt5-worker.service';
+import { Mt5ClusterBalancerService } from '../mt5/worker/mt5-cluster-balancer.service';
 import { EconomicCalendarService } from '../economic-calendar/economic-calendar.service';
 import {
     AiTrainingReportService,
@@ -38,7 +39,7 @@ import { TelemetryService } from '../common/observability/telemetry.service';
 import { Throttle } from '@nestjs/throttler';
 import { randomInt } from 'crypto';
 import { RedisSecurityService } from '../common/security/redis-security.service';
-import { getJwtSecret, timingSafeEqualStr } from '../common/security/security.config';
+import { getAdminJwtSecret, timingSafeEqualStr } from '../common/security/security.config';
 import {
     AdminLoginDto,
     AdminVerifyOtpDto,
@@ -66,6 +67,7 @@ export class AdminController {
         @InjectQueue('behavioral-analysis') private behavioralQueue: Queue,
         @InjectQueue('trade-import') private tradeImportQueue: Queue,
         @Optional() private mt5WorkerService?: Mt5WorkerService,
+        @Optional() private mt5ClusterBalancer?: Mt5ClusterBalancerService,
         @Optional() private economicCalendarService?: EconomicCalendarService,
         @Optional() private aiTrainingReportService?: AiTrainingReportService,
         @Optional() private aiSemanticMemoryService?: AiSemanticMemoryService,
@@ -149,7 +151,7 @@ export class AdminController {
         }
         await this.redisSecurity.deleteKey(otpFailKey);
 
-        const secret = getJwtSecret(this.configService);
+        const secret = getAdminJwtSecret(this.configService);
         const token = this.jwtService.sign(
             { email: adminEmail, role: 'admin', isAdmin: true },
             { secret, expiresIn: '12h' },
@@ -580,5 +582,39 @@ export class AdminController {
             throw new BadRequestException('Rejected reply not found');
         }
         return { ok: true };
+    }
+
+    // --- MT5 Load Balancer & Continuous Fleet Monitoring ---
+    @UseGuards(AdminAuthGuard)
+    @Get('mt5-cluster/overview')
+    async getMt5ClusterOverview() {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        return this.mt5ClusterBalancer.getClusterOverview();
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Post('mt5-cluster/workers/:workerId/drain')
+    async drainMt5Worker(
+        @Param('workerId') workerId: string,
+        @Body() body: { drain?: boolean },
+    ) {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        return this.mt5ClusterBalancer.setWorkerDrain(
+            String(workerId || '').trim(),
+            body?.drain !== false,
+        );
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Post('mt5-cluster/rebalance')
+    async rebalanceMt5Cluster() {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        return this.mt5ClusterBalancer.rebalanceCluster();
     }
 }

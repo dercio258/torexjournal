@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import logging
 from pathlib import Path
 import threading
 from typing import Any, Literal, Optional
@@ -206,7 +209,7 @@ class BehaviorMlEngine:
                 return
             self._ensemble = None
             if self.checkpoint_path.exists():
-                payload = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
+                payload = torch.load(self.checkpoint_path, map_location="cpu", weights_only=True)
                 cfg = payload.get("modelConfig") or {}
                 model = TorexBehaviorNet(**cfg)
                 model.load_state_dict(payload["stateDict"])
@@ -223,12 +226,30 @@ class BehaviorMlEngine:
                 self._ae_quantiles = dict(payload.get("aeQuantiles") or DEFAULT_AE_QUANTILES)
 
                 if self.ensemble_path.exists():
-                    try:
-                        loaded_ens = joblib.load(self.ensemble_path)
-                        if isinstance(loaded_ens, dict) and "estimators" in loaded_ens:
-                            self._ensemble = loaded_ens
-                    except Exception:
+                    digest_path = Path(f"{self.ensemble_path}.sha256")
+                    verified = False
+                    if digest_path.exists():
+                        try:
+                            expected_raw = digest_path.read_text(encoding="utf-8").strip().lower()
+                            expected = expected_raw.split()[0] if expected_raw else ""
+                            if len(expected) == 64 and all(c in "0123456789abcdef" for c in expected):
+                                actual = hashlib.sha256(self.ensemble_path.read_bytes()).hexdigest().lower()
+                                verified = hmac.compare_digest(actual, expected)
+                        except Exception:
+                            verified = False
+                    if not verified:
+                        logging.getLogger(__name__).warning(
+                            "Refusing to load ensemble without valid .sha256 sidecar: %s",
+                            self.ensemble_path,
+                        )
                         self._ensemble = None
+                    else:
+                        try:
+                            loaded_ens = joblib.load(self.ensemble_path)
+                            if isinstance(loaded_ens, dict) and "estimators" in loaded_ens:
+                                self._ensemble = loaded_ens
+                        except Exception:
+                            self._ensemble = None
             else:
                 torch.manual_seed(42)
                 model = TorexBehaviorNet(

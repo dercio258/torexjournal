@@ -1,7 +1,6 @@
 
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
-import { TelegramService } from './telegram.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('notifications')
@@ -9,7 +8,6 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class NotificationsController {
     constructor(
         private readonly notificationsService: NotificationsService,
-        private readonly telegramService: TelegramService
     ) { }
 
     @Get()
@@ -44,34 +42,6 @@ export class NotificationsController {
     @Post('settings')
     async updateSettings(@Req() req, @Body() body: any) {
         return this.notificationsService.updateSettings(req.user.id, body);
-    }
-
-    @Post('telegram/setup')
-    async setupTelegram(@Req() req) {
-        const otp = await this.telegramService.generateOtp(req.user.id);
-        return { otp, botUsername: process.env.TELEGRAM_BOT_USERNAME };
-    }
-
-    @Post('telegram/disconnect')
-    async disconnectTelegram(@Req() req) {
-        await this.telegramService.disconnectUser(req.user.id);
-        return { message: 'Telegram disconnected successfully' };
-    }
-
-    @Get('telegram/status')
-    async getTelegramStatus(@Req() req) {
-        const connected = await this.telegramService.isUserConnected(req.user.id);
-        return { connected };
-    }
-
-    @Get('whatsapp/status')
-    async getWhatsAppStatus(@Req() req) {
-        return this.notificationsService.getWhatsAppStatus(req.user.id);
-    }
-
-    @Post('whatsapp/code')
-    async generateWhatsAppCode(@Req() req) {
-        return this.notificationsService.generateWhatsAppCode(req.user.id);
     }
 
     @Post('test')

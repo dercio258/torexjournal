@@ -30,6 +30,7 @@ import {
     DocumentFormat,
     exportTradingDocument,
 } from '../utils/documentExporter';
+import { escapeHtml } from '../utils/sanitizeHtml';
 import { parseTradeTimestamp, toLocalDateKey } from '../utils/timezone';
 import { DailyBlockCard } from '../components/journal/DailyBlockCard';
 import { extractTradeBehaviorFlags } from '../components/trades/BehaviorMlBadge';
@@ -235,7 +236,7 @@ export const Journal: React.FC = () => {
                         ? {
                               id: null,
                               tradeId: id,
-                              content: `<p>${t.lesson}</p>`,
+                              content: `<p>${escapeHtml(t.lesson)}</p>`,
                               screenshotUrl: null,
                               screenshots: [],
                               setup: t.setup || null,

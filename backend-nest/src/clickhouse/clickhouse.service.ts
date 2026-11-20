@@ -141,7 +141,11 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
 
     async saveTick(tick: any) {
         try {
+            const MAX_TICK_BUFFER = 5000;
             const formattedTime = new Date(tick.timestamp).toISOString().replace('T', ' ').replace('Z', '');
+            if (this.tickBuffer.length >= MAX_TICK_BUFFER) {
+                this.tickBuffer.splice(0, this.tickBuffer.length - MAX_TICK_BUFFER + 1);
+            }
             this.tickBuffer.push({
                 timestamp: formattedTime,
                 symbol: tick.symbol,
@@ -175,34 +179,29 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
 
     async updateTradeMetadata(tradeId: string, metadata: any) {
         try {
-            const updates: string[] = [];
-            const params: Record<string, any> = { id: tradeId };
-            if (metadata.session !== undefined) {
-                updates.push('session = {session:Nullable(String)}');
-                params.session = metadata.session;
+            const existing = await this.query(
+                `SELECT * FROM trades FINAL WHERE id = {id:String} LIMIT 1`,
+                { id: tradeId },
+            );
+            const current = Array.isArray(existing) ? existing[0] : null;
+            if (!current) {
+                return;
             }
-            if (metadata.mood !== undefined) {
-                updates.push('mood = {mood:Nullable(String)}');
-                params.mood = metadata.mood;
-            }
-            if (metadata.setup !== undefined) {
-                updates.push('setup = {setup:Nullable(String)}');
-                params.setup = metadata.setup;
-            }
-            if (metadata.lesson !== undefined) {
-                updates.push('lesson = {lesson:Nullable(String)}');
-                params.lesson = metadata.lesson;
-            }
-            if (metadata.rating !== undefined) {
-                updates.push('rating = {rating:Nullable(UInt8)}');
-                params.rating = metadata.rating;
-            }
-            if (updates.length > 0) {
-                await this.client.command({
-                    query: `ALTER TABLE trades UPDATE ${updates.join(', ')} WHERE id = {id:String}`,
-                    query_params: params
-                });
-            }
+            const nextRow = {
+                ...current,
+                ...(metadata.session !== undefined ? { session: metadata.session } : {}),
+                ...(metadata.mood !== undefined ? { mood: metadata.mood } : {}),
+                ...(metadata.setup !== undefined ? { setup: metadata.setup } : {}),
+                ...(metadata.lesson !== undefined ? { lesson: metadata.lesson } : {}),
+                ...(metadata.rating !== undefined ? { rating: metadata.rating } : {}),
+                updatedAt: new Date().toISOString().replace('T', ' ').replace('Z', '').split('.')[0],
+            };
+            // ReplacingMergeTree(updatedAt) deduplica por (accountId, ticket, id) sem ALTER TABLE UPDATE pesado
+            await this.client.insert({
+                table: 'trades',
+                values: [nextRow],
+                format: 'JSONEachRow',
+            });
         } catch (e) {
             this.logger.warn(`ClickHouse updateTradeMetadata error: ${e.message}`);
         }

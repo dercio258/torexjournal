@@ -54,7 +54,7 @@ export const Privacy = () => {
                                 <h2 className="text-xl font-bold text-fg mb-3">3.4 Data Sharing</h2>
                                 <p className="mb-2">We never sell user data. Limited sharing occurs only with:</p>
                                 <ul className="list-disc pl-5 space-y-1">
-                                    <li>Payment processors (Debito.co.mz / PayFast) for subscription billing.</li>
+                                    <li>Certified payment processors (M-Pesa, e-Mola, and Card) for subscription billing.</li>
                                     <li>Cloud infrastructure providers (AWS / Google Cloud).</li>
                                     <li>Legal authorities solely when compelled by valid court order.</li>
                                 </ul>
@@ -118,7 +118,7 @@ export const Privacy = () => {
                         <h2 className="text-xl font-bold text-fg mb-3">3.4 Compartilhamento de Dados</h2>
                         <p className="mb-2">Não vendemos dados de usuários. O compartilhamento ocorre apenas com:</p>
                         <ul className="list-disc pl-5 space-y-1">
-                            <li>Processadores de pagamento (Debito.co.mz) para faturamento.</li>
+                            <li>Processadores de pagamento certificados (M-Pesa, e-Mola e Cartão) para faturamento.</li>
                             <li>Serviços de infraestrutura em nuvem (AWS/Google Cloud).</li>
                             <li>Autoridades legais, quando exigido por ordem judicial.</li>
                         </ul>

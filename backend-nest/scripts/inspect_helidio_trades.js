@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Script de Auditoria Detalhada de Lucro (Profit vs NetPnL) e Fuso Horário (Datas/Horas)
- * Alvo padrão: helidiobusiness@gmail.com / Conta MT5 #419096791 (GoatFunded-Server2)
- * Uso: node backend-nest/scripts/inspect_helidio_trades.js [email_ou_mt5_id]
+ * Uso: node backend-nest/scripts/inspect_helidio_trades.js <email> [mt5_id]
  */
 
 const path = require('path');
@@ -12,8 +11,8 @@ const { Client } = require('pg');
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-const targetEmail = (process.argv[2] || 'helidiobusiness@gmail.com').trim().toLowerCase();
-const targetMt5Id = (process.argv[3] || '419096791').trim();
+const targetEmail = (process.argv[2] || process.env.TARGET_USER_EMAIL || '').trim().toLowerCase();
+const targetMt5Id = (process.argv[3] || process.env.TARGET_MT5_ID || '').trim();
 
 async function getTableColumns(client, tableName) {
     const res = await client.query(
@@ -24,12 +23,25 @@ async function getTableColumns(client, tableName) {
 }
 
 async function main() {
+    if (!targetEmail && !targetMt5Id) {
+        console.error('❌ Uso: node backend-nest/scripts/inspect_helidio_trades.js <email> [mt5_id]');
+        process.exit(1);
+    }
+
+    const dbUser = process.env.DB_USERNAME || process.env.DB_USER;
+    const dbPass = process.env.DB_PASSWORD || process.env.DB_PASS;
+    const dbName = process.env.DB_DATABASE || process.env.DB_NAME;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias.');
+        process.exit(1);
+    }
+
     const client = new Client({
-        host: process.env.DB_HOST || 'localhost',
+        host: process.env.DB_HOST || '127.0.0.1',
         port: Number(process.env.DB_PORT || 5432),
-        user: process.env.DB_USERNAME || process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || process.env.DB_PASS || '',
-        database: process.env.DB_DATABASE || process.env.DB_NAME || 'cossa_trading',
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     });
 
     await client.connect();

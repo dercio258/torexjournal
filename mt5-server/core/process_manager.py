@@ -17,8 +17,17 @@ class MT5ProcessManager:
         self.processes: Dict[int, subprocess.Popen] = {}
         self.pids: Dict[int, int] = {}
 
-    def get_account_instance_dir(self, account_id: int) -> Path:
-        instance_dir = (self.instances_dir / f"acc_{account_id}").resolve()
+    @staticmethod
+    def _sanitize_ini_value(value: Optional[str]) -> str:
+        if value is None:
+            return ""
+        return str(value).replace("\r", "").replace("\n", "").replace("\x00", "").strip()
+
+    def get_account_instance_dir(self, account_id: int, account_uuid: Optional[str] = None) -> Path:
+        raw_scope = (account_uuid or "").strip() if account_uuid else ""
+        safe_scope = "".join(c for c in raw_scope if c.isalnum() or c in ("-", "_"))[:48] if raw_scope else ""
+        dir_name = f"acc_{safe_scope}" if safe_scope else f"acc_{account_id}"
+        instance_dir = (self.instances_dir / dir_name).resolve()
         instance_dir.mkdir(parents=True, exist_ok=True)
         return instance_dir
 
@@ -28,17 +37,17 @@ class MT5ProcessManager:
         login: Optional[str] = None,
         server: Optional[str] = None,
         password: Optional[str] = None,
+        account_uuid: Optional[str] = None,
     ) -> str:
         """
-        Prepara um diretório portátil exclusivo para a conta (instances/acc_<account_id>/terminal64.exe)
-        copiando o executável base (cópia real, sem hardlink os.link) e todos os arquivos de configuração
-        de corretoras (servers.dat, accounts.dat, common.ini) do AppData principal.
-        Assim cada conta roda em sua própria janela terminal64.exe sem deslogar outras contas!
+        Prepara um diretório portátil exclusivo para a conta (instances/acc_<account_uuid|account_id>/terminal64.exe)
+        copiando o executável base (cópia real, sem hardlink os.link) e apenas servers.dat / layouts seguros.
+        Assim cada tenant/conta roda em sua própria janela terminal64.exe sem compartilhar accounts.dat!
         """
         if not self.terminal_path or not os.path.exists(self.terminal_path):
             return self.terminal_path
 
-        instance_dir = self.get_account_instance_dir(account_id)
+        instance_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
         isolated_exe = (instance_dir / "terminal64.exe").resolve()
         base_exe = Path(self.terminal_path).resolve()
         base_dir = base_exe.parent
@@ -79,7 +88,8 @@ class MT5ProcessManager:
             for s_dir in source_data_dirs:
                 src_cfg = s_dir / "config" if (s_dir / "config").exists() else (s_dir / "Config")
                 if src_cfg.exists():
-                    for fname in ("servers.dat", "accounts.dat", "common.ini", "terminal.ini", "charts.ini"):
+                    # Copia apenas servidores/layout; nunca copia accounts.dat ou common.ini de outros perfis
+                    for fname in ("servers.dat", "terminal.ini", "charts.ini"):
                         src_file = src_cfg / fname
                         if src_file.exists():
                             dst_lower = isolated_cfg_dir / fname
@@ -107,23 +117,19 @@ class MT5ProcessManager:
             # Implanta EA headless TorexCalendarSync.ex5 em MQL5/Experts/ da instância isolada
             self._deploy_calendar_ea(instance_dir)
 
-            # Prepara startup.ini / common.ini com Login, Password e Server da conta
+            # Prepara startup.ini / common.ini com Login e Server (nunca grava Password em texto puro em common.ini)
             if login and server:
-                self.create_startup_config(account_id, login, server, password)
+                self.create_startup_config(account_id, login, server, password, account_uuid=account_uuid)
                 common_lines = [
                     "[Common]",
-                    f"Login={str(login).strip()}",
-                ]
-                if password:
-                    common_lines.append(f"Password={str(password).strip()}")
-                common_lines.extend([
-                    f"Server={str(server).strip()}",
+                    f"Login={self._sanitize_ini_value(login)}",
+                    f"Server={self._sanitize_ini_value(server)}",
                     "NewsEnable=1",
                     "CertInstall=0",
                     "ProxyEnable=0",
                     "KeepPrivate=1",
                     "MCPServer=0",
-                ])
+                ]
                 common_content = "\r\n".join(common_lines) + "\r\n"
                 for cfg_target in (isolated_cfg_dir / "common.ini", isolated_cfg_upper / "common.ini"):
                     try:
@@ -160,24 +166,26 @@ class MT5ProcessManager:
         except Exception as e:
             logger.warning(f"[CALENDAR-EA] Falha ao implantar TorexCalendarSync.ex5: {e}")
 
-    def create_startup_config(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> Path:
+    def create_startup_config(
+        self,
+        account_id: int,
+        login: str,
+        server: str,
+        password: Optional[str] = None,
+        account_uuid: Optional[str] = None,
+    ) -> Path:
         """Gera arquivo de inicialização .ini para o terminal com formatação compatível com Windows/MT5"""
-        instance_dir = self.get_account_instance_dir(account_id)
+        instance_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
         self._deploy_calendar_ea(instance_dir)
         config_path = (instance_dir / "startup.ini").resolve()
         
-        login_str = str(login).strip()
-        server_str = str(server).strip()
-        pass_str = str(password).strip() if password else ""
+        login_str = self._sanitize_ini_value(login)
+        server_str = self._sanitize_ini_value(server)
 
         content = [
             "; TorexJournal MT5 Auto-Generated Config",
             "[Common]",
             f"Login={login_str}",
-        ]
-        if pass_str:
-            content.append(f"Password={pass_str}")
-        content.extend([
             f"Server={server_str}",
             "NewsEnable=1",
             "CertInstall=0",
@@ -192,7 +200,7 @@ class MT5ProcessManager:
             "Expert=TorexCalendarSync",
             "Symbol=EURUSD",
             "Period=H1",
-        ])
+        ]
         
         # Windows INI requer quebras de linha CRLF (\r\n) e UTF-8 com BOM para o parser do MT5
         with open(config_path, "w", encoding="utf-8-sig", newline="\r\n") as f:
@@ -200,9 +208,9 @@ class MT5ProcessManager:
             
         return config_path
 
-    def start_terminal(self, account_id: int, login: str, server: str, password: Optional[str] = None) -> bool:
+    def start_terminal(self, account_id: int, login: str, server: str, password: Optional[str] = None, account_uuid: Optional[str] = None) -> bool:
         """Inicia uma instância portátil do MT5 verificando antes recursos disponíveis."""
-        if self.is_running(account_id):
+        if self.is_running(account_id, account_uuid=account_uuid):
             logger.info(f"Terminal MT5 já está em execução (PID: {self.pids.get(account_id)})")
             return True
 
@@ -228,9 +236,9 @@ class MT5ProcessManager:
                 )
                 return False
 
-        instance_dir = self.get_account_instance_dir(account_id)
-        isolated_exe = self.get_or_prepare_isolated_terminal_exe(account_id)
-        config_path = self.create_startup_config(account_id, login, server, password)
+        instance_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
+        isolated_exe = self.get_or_prepare_isolated_terminal_exe(account_id, account_uuid=account_uuid)
+        config_path = self.create_startup_config(account_id, login, server, password, account_uuid=account_uuid)
 
         cmd = [
             isolated_exe,
@@ -254,15 +262,28 @@ class MT5ProcessManager:
             logger.error(f"Falha ao iniciar terminal para conta {account_id}: {e}")
             return False
 
-    def is_running(self, account_id: Optional[int] = None) -> bool:
-        """Verifica se o processo terminal64.exe principal está ativo."""
-        for proc in psutil.process_iter(['pid', 'name', 'status']):
+    def is_running(self, account_id: Optional[int] = None, account_uuid: Optional[str] = None) -> bool:
+        """Verifica se o processo terminal64.exe específico da conta está ativo."""
+        target_exe = None
+        if account_id is not None:
+            inst_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
+            target_exe = os.path.normcase(
+                os.path.abspath(str((inst_dir / "terminal64.exe").resolve()))
+            )
+
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'status']):
             try:
-                name = proc.info.get('name') or ''
-                if 'terminal64' in name.lower() and proc.info.get('status') != psutil.STATUS_ZOMBIE:
-                    if account_id is not None:
+                if proc.info.get('status') == psutil.STATUS_ZOMBIE:
+                    continue
+                if target_exe is not None:
+                    p_exe = proc.info.get('exe')
+                    if p_exe and os.path.normcase(os.path.abspath(p_exe)) == target_exe:
                         self.pids[account_id] = proc.info['pid']
-                    return True
+                        return True
+                else:
+                    name = proc.info.get('name') or ''
+                    if 'terminal64' in name.lower():
+                        return True
             except Exception:
                 pass
         return False

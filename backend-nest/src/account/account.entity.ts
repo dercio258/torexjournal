@@ -107,6 +107,28 @@ export class AccountEntity {
     @Column({ name: 'telegram_enabled', default: false })
     telegramEnabled: boolean;
 
+    @Index()
+    @Column({ type: 'varchar', length: 80, nullable: true, name: 'assigned_worker_id' })
+    assignedWorkerId: string | null;
+
+    @Column({ type: 'int', default: 1, name: 'mt5_lease_epoch' })
+    mt5LeaseEpoch: number;
+
+    @Column({ type: 'varchar', length: 24, default: 'HOT', name: 'mt5_sync_tier' })
+    mt5SyncTier: string;
+
+    @Column({ type: 'text', nullable: true, select: false, name: 'mt5_encrypted_pass' })
+    mt5EncryptedPass?: string | null;
+
+    @Column({ type: 'timestamp', nullable: true, name: 'zero_balance_since' })
+    zeroBalanceSince: Date | null;
+
+    @Column({ type: 'timestamp', nullable: true, name: 'inactivity_warned_at' })
+    inactivityWarnedAt: Date | null;
+
+    @Column({ type: 'timestamp', nullable: true, name: 'inactivity_disconnect_at' })
+    inactivityDisconnectAt: Date | null;
+
     @OneToMany(() => PositionEntity, (position) => position.account)
     positions: PositionEntity[];
 

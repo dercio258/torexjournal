@@ -5,6 +5,8 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { promisify } from 'util';
 import { DataSource } from 'typeorm';
+import { getQuantInternalHeaders } from '../common/security/security.config';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,6 +18,8 @@ export class BehaviorRetrainScheduler {
     constructor(
         @Optional()
         private readonly dataSource?: DataSource,
+        @Optional()
+        private readonly redisSecurity?: RedisSecurityService,
     ) {}
 
     private getBehaviorMlBaseUrl(): string {
@@ -53,6 +57,12 @@ export class BehaviorRetrainScheduler {
     @Cron('0 3 * * 0') // Sundays at 03:00 UTC
     async handleWeeklyRetrain() {
         if (process.env.MT5_DEDICATED_SERVER === 'true') return;
+        if (this.redisSecurity) {
+            await this.redisSecurity.withLock('cron:mt5_behavior_retrain', 30 * 60_000, async () => {
+                await this.runScheduledRetrainCheck(false);
+            });
+            return;
+        }
         await this.runScheduledRetrainCheck(false);
     }
 
@@ -90,6 +100,7 @@ export class BehaviorRetrainScheduler {
         let trainedAtUtc: string | null = null;
         try {
             const statusRes = await fetch(`${baseUrl}/api/ml/behavior/status`, {
+                headers: getQuantInternalHeaders(),
                 signal: AbortSignal.timeout(3000),
             });
             if (statusRes.ok) {
@@ -116,6 +127,22 @@ export class BehaviorRetrainScheduler {
 
         const paths = this.resolveQuantPaths();
         if (!paths) {
+            this.isRetraining = true;
+            try {
+                const remoteRes = await fetch(`${baseUrl}/api/ml/behavior/retrain`, {
+                    method: 'POST',
+                    headers: getQuantInternalHeaders(),
+                    signal: AbortSignal.timeout(30_000),
+                });
+                if (remoteRes.ok) {
+                    this.logger.log('Behavioral ML remote retrain triggered successfully on Quant Engine.');
+                    return { triggered: true, reloaded: true, reason: 'retrained_remote', feedbackCount };
+                }
+            } catch {
+                // Fall through if quant-engine remote retrain endpoint is unavailable
+            } finally {
+                this.isRetraining = false;
+            }
             this.logger.warn('Quant-engine training script not found on disk; skipping scheduled retrain.');
             return { triggered: false, reason: 'script_not_found', feedbackCount };
         }
@@ -130,6 +157,7 @@ export class BehaviorRetrainScheduler {
                 [paths.scriptPath, '--epochs', '28', '--backfill-db'],
                 {
                     timeout: 10 * 60 * 1000,
+                    maxBuffer: 16 * 1024 * 1024,
                     windowsHide: true,
                 },
             );
@@ -138,6 +166,7 @@ export class BehaviorRetrainScheduler {
             try {
                 const reloadRes = await fetch(`${baseUrl}/api/ml/behavior/reload`, {
                     method: 'POST',
+                    headers: getQuantInternalHeaders(),
                     signal: AbortSignal.timeout(5000),
                 });
                 reloaded = reloadRes.ok;

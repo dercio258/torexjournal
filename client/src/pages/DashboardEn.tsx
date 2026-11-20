@@ -29,8 +29,10 @@ import { useDashboardFilters } from '../context/DashboardFilterContext';
 import { PropFirmProgressCard } from '../components/dashboard/PropFirmProgressCard';
 import { ConsolidatedDashboardView } from '../components/dashboard/ConsolidatedDashboardView';
 import { PlanModal } from '../components/dashboard/PlanModal';
+import { IdleAccountWarningBanner } from '../components/dashboard/IdleAccountWarningBanner';
 import { TrialCelebrationModal } from '../components/subscription/TrialCelebrationModal';
 import { DashboardSkeleton } from '../components/ui/Skeleton';
+import { DashboardAppInstallCard } from '../components/pwa/DashboardAppInstallCard';
 import api from '../api';
 
 /**
@@ -79,8 +81,6 @@ export const DashboardEn = () => {
     useEffect(() => {
         const seen = localStorage.getItem('torex_trial_modal_seen');
         if (user?.trialJustGranted && !seen) {
-            setShowTrialModal(true);
-        } else if (user?.hasUsedTrial && !seen && (user?.tier === 'PREMIUM' || user?.tier === 'PRO')) {
             setShowTrialModal(true);
         }
     }, [user]);
@@ -165,6 +165,8 @@ export const DashboardEn = () => {
                 </div>
             )}
 
+            <IdleAccountWarningBanner isEn={true} />
+
             {/* SUB-HEADER BAR: Greeting + '+ TRADE' & Sync */}
             <div className="flex flex-wrap items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -208,6 +210,8 @@ export const DashboardEn = () => {
                     </button>
                 </div>
             </div>
+
+            <DashboardAppInstallCard locale="en" />
 
             {isConsolidated ? (
                 <ConsolidatedDashboardView stats={currentStats} locale="en" />

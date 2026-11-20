@@ -14,7 +14,12 @@ async function run() {
     });
 
     console.log('Connecting to Redis...');
-    const userId = '12e2028e-221b-48e7-8be7-a2c1cab4e51b';
+    const userId = (process.argv[2] || process.env.TARGET_USER_ID || '').trim();
+    if (!userId) {
+        console.error('Usage: npx ts-node clear-redis.ts <user-id>');
+        await redis.quit();
+        process.exit(1);
+    }
     
     // Find all keys with the user id
     const keys = await redis.keys(`*${userId}*`);

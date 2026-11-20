@@ -24,6 +24,7 @@ import {
     writeLocalReplaySnapshot,
     YAxisSessionState,
 } from './backtestSessionSnapshot';
+import { getCurrentUserScope } from './offlineDb';
 
 export interface BacktestStrategyRule {
     id: string;
@@ -134,6 +135,45 @@ const STRATEGIES_STORAGE_KEY = 'torex_backtest_strategies_v1';
 const SESSIONS_STORAGE_KEY = 'torex_backtest_sessions_v1';
 const CLOUD_KNOWN_IDS_KEY = 'torex_backtest_cloud_known_ids_v1';
 
+function getScopedStorageKey(baseKey: string): string {
+    const scope = getCurrentUserScope();
+    return `${baseKey}:${scope || 'anon'}`;
+}
+
+function readScopedStorageItem(baseKey: string): string | null {
+    const scopedKey = getScopedStorageKey(baseKey);
+    const existing = localStorage.getItem(scopedKey);
+    if (existing !== null) {
+        return existing;
+    }
+    const scope = getCurrentUserScope();
+    if (scope && scope !== 'anon') {
+        const legacy = localStorage.getItem(baseKey);
+        if (legacy !== null) {
+            localStorage.setItem(scopedKey, legacy);
+            localStorage.removeItem(baseKey);
+            return legacy;
+        }
+    }
+    return null;
+}
+
+function writeScopedStorageItem(baseKey: string, value: string): void {
+    localStorage.setItem(getScopedStorageKey(baseKey), value);
+}
+
+export function clearBacktestTransientClientState(): void {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.removeItem(STRATEGIES_STORAGE_KEY);
+        localStorage.removeItem(SESSIONS_STORAGE_KEY);
+        localStorage.removeItem(CLOUD_KNOWN_IDS_KEY);
+        localStorage.removeItem(`${STRATEGIES_STORAGE_KEY}:anon`);
+        localStorage.removeItem(`${SESSIONS_STORAGE_KEY}:anon`);
+        localStorage.removeItem(`${CLOUD_KNOWN_IDS_KEY}:anon`);
+    } catch (_) {}
+}
+
 const SEED_STRATEGY_IDS = new Set(['f898c190-c127-43c8-9faf-ae317b063631']);
 const SEED_SESSION_IDS = new Set([
     '79d78fe0-71ab-4441-9aec-73ee8c00c5bc',
@@ -147,7 +187,7 @@ interface CloudKnownIdsState {
 
 function loadCloudKnownIds(): CloudKnownIdsState {
     try {
-        const raw = localStorage.getItem(CLOUD_KNOWN_IDS_KEY);
+        const raw = readScopedStorageItem(CLOUD_KNOWN_IDS_KEY);
         if (!raw) return { strategies: new Set(), sessions: new Set() };
         const parsed = JSON.parse(raw);
         return {
@@ -161,7 +201,7 @@ function loadCloudKnownIds(): CloudKnownIdsState {
 
 function saveCloudKnownIds(state: CloudKnownIdsState): void {
     try {
-        localStorage.setItem(
+        writeScopedStorageItem(
             CLOUD_KNOWN_IDS_KEY,
             JSON.stringify({
                 strategies: Array.from(state.strategies).slice(-300),
@@ -180,7 +220,7 @@ export function markSessionCloudSynced(sessionId?: string): void {
 
 function hasAuthToken(): boolean {
     try {
-        return Boolean(localStorage.getItem('token') || localStorage.getItem('adminToken'));
+        return Boolean(localStorage.getItem('token'));
     } catch (_) {
         return false;
     }
@@ -360,9 +400,9 @@ const DEFAULT_STRATEGIES: BacktestStrategy[] = [
 
 export function loadBacktestStrategies(): BacktestStrategy[] {
     try {
-        const raw = localStorage.getItem(STRATEGIES_STORAGE_KEY);
+        const raw = readScopedStorageItem(STRATEGIES_STORAGE_KEY);
         if (!raw) {
-            localStorage.setItem(STRATEGIES_STORAGE_KEY, JSON.stringify(DEFAULT_STRATEGIES));
+            writeScopedStorageItem(STRATEGIES_STORAGE_KEY, JSON.stringify(DEFAULT_STRATEGIES));
             return DEFAULT_STRATEGIES;
         }
         const parsed = JSON.parse(raw);
@@ -373,7 +413,7 @@ export function loadBacktestStrategies(): BacktestStrategy[] {
 
 export function saveBacktestStrategies(strategies: BacktestStrategy[]): void {
     try {
-        localStorage.setItem(STRATEGIES_STORAGE_KEY, JSON.stringify(strategies));
+        writeScopedStorageItem(STRATEGIES_STORAGE_KEY, JSON.stringify(strategies));
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('torex:backtest-workspace-updated'));
         }
@@ -448,7 +488,7 @@ export function deleteBacktestStrategy(id: string): BacktestStrategy[] {
 
 export function loadBacktestSessions(): BacktestReplaySession[] {
     try {
-        const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
+        const raw = readScopedStorageItem(SESSIONS_STORAGE_KEY);
         if (!raw) {
             const strategies = loadBacktestStrategies();
             const defaultStrat = strategies[0];
@@ -542,7 +582,7 @@ export function loadBacktestSessions(): BacktestReplaySession[] {
                     updatedAt: new Date().toISOString(),
                 },
             ];
-            localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(seed));
+            writeScopedStorageItem(SESSIONS_STORAGE_KEY, JSON.stringify(seed));
             return seed;
         }
         const parsed = JSON.parse(raw);
@@ -553,7 +593,7 @@ export function loadBacktestSessions(): BacktestReplaySession[] {
 
 export function saveBacktestSessions(sessions: BacktestReplaySession[]): void {
     try {
-        localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+        writeScopedStorageItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('torex:backtest-workspace-updated'));
         }

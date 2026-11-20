@@ -1,9 +1,8 @@
 /**
  * Script de Auditoria Profunda (PostgreSQL + ClickHouse)
- * Foco: derciomatsope9@gmail.com e helidiobusiness@gmail.com (+ contas MT5 associadas)
  *
  * Uso no servidor Linux:
- *   cd /var/www/torexjournal.com && git pull origin main && node backend-nest/scripts/audit_two_users.js
+ *   node backend-nest/scripts/audit_two_users.js <email1> [email2...]
  */
 
 const path = require('path');
@@ -14,12 +13,28 @@ const { createClient } = require('@clickhouse/client');
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const TARGET_EMAILS = [
-    'derciomatsope9@gmail.com',
-    'helidiobusiness@gmail.com',
-];
+const TARGET_EMAILS = (
+    process.argv.slice(2).length > 0
+        ? process.argv.slice(2)
+        : (process.env.TARGET_USER_EMAILS || '').split(',')
+)
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
 
 async function runAudit() {
+    if (TARGET_EMAILS.length === 0) {
+        console.error('❌ Uso: node backend-nest/scripts/audit_two_users.js <email1> [email2...]');
+        process.exit(1);
+    }
+
+    const dbUser = process.env.DB_USER;
+    const dbPass = process.env.DB_PASS;
+    const dbName = process.env.DB_NAME;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias.');
+        process.exit(1);
+    }
+
     console.log('================================================================================');
     console.log(' AUDITORIA DE DADOS E METRICAS (POSTGRESQL + CLICKHOUSE)');
     console.log(' Timestamp:', new Date().toISOString());
@@ -28,13 +43,13 @@ async function runAudit() {
     const pgClient = new Client({
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '5432', 10),
-        user: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASS || 'postgres',
-        database: process.env.DB_NAME || 'trading_cossa',
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     });
 
     await pgClient.connect();
-    console.log('[OK] Conectado ao PostgreSQL:', `${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || '5432'}/${process.env.DB_NAME || 'trading_cossa'}`);
+    console.log('[OK] Conectado ao PostgreSQL:', `${process.env.DB_HOST || '127.0.0.1'}:${process.env.DB_PORT || '5432'}/${dbName}`);
 
     let chClient = null;
     try {
@@ -291,8 +306,6 @@ async function runAudit() {
                  LEFT JOIN accounts a ON a.id::text = l.account_id::text
                  WHERE l."userId"::text = ANY($1::text[])
                     OR l.account_id::text = ANY($2::text[])
-                    OR l.details LIKE '%408953138%'
-                    OR l.details LIKE '%202658742%'
                  ORDER BY l."createdAt" DESC
                  LIMIT 30`,
                 [

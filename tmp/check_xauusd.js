@@ -4,7 +4,7 @@ const client = new Client({
   user: 'cossa_trading_user',
   host: 'localhost',
   database: 'cossa_trading',
-  password: 'C0ssa@2026_db!',
+  password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
   port: 5432,
 });
 

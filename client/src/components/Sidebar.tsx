@@ -212,8 +212,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <>
             <aside
                 className={cn(
-                    'bg-canvas-subtle/90 border-r border-line-subtle flex flex-col z-20 h-screen select-none overflow-hidden transition-[width,background-color,border-color] duration-200 shadow-xl md:shadow-none shrink-0',
-                    collapsed ? 'w-[58px]' : 'w-[198px]'
+                    'bg-surface/95 backdrop-blur-xl md:bg-canvas-subtle/90 border-r border-line-subtle flex flex-col z-20 h-screen select-none overflow-hidden transition-[width,background-color,border-color] duration-200 shadow-2xl md:shadow-none shrink-0',
+                    collapsed ? 'w-[248px] md:w-[58px]' : 'w-[248px] md:w-[198px]'
                 )}
             >
                 {/* Topo da Sidebar sincronizado em h-12 (48px) com o Header Principal */}

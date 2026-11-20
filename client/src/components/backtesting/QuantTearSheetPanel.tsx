@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, AlertTriangle, BarChart3, ShieldAlert } from 'lucide-react';
 import { Badge, EmptyState, fmtMoney, fmtNum, KpiCard, Panel, pnlTone } from './primitives';
 import { cn } from '../../lib/cn';
+import { getQuantAuthHeaders } from '../../lib/quantAuth';
 
 export interface TearSheetSummary {
     totalTrades: number;
@@ -179,7 +180,7 @@ export const QuantTearSheetPanel = ({
 
         fetch('/api/quant/tearsheet', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getQuantAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 orders: closedOrders,
                 initialBalance,

@@ -43,4 +43,14 @@ export class AdminAnalyticsController {
     async updatePixels(@Body() dto: UpdatePixelConfigDto) {
         return this.analyticsService.updateAdminPixelConfig(dto);
     }
+
+    @Get('push-insights')
+    async getPushInsights(@Query('days') days?: string) {
+        return this.analyticsService.getPushAnalytics(days ? Number(days) : 30);
+    }
+
+    @Get('referrals')
+    async getReferralInsights(@Query('days') days?: string) {
+        return this.analyticsService.getReferralAnalytics(days ? Number(days) : 30);
+    }
 }

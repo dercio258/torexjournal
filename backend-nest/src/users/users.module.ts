@@ -2,19 +2,20 @@ import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
 import { UserEntity } from './user.entity';
-import { WhatsAppLink } from './whatsapp-link.entity';
-import { WhatsAppVerificationCode } from './whatsapp-verification-code.entity';
+import { ReferralEntity } from './referral.entity';
+import { ReferralService } from './referral.service';
+import { ReferralController } from './referral.controller';
 
 @Global()
 @Module({
     imports: [
         TypeOrmModule.forFeature([
             UserEntity,
-            WhatsAppLink,
-            WhatsAppVerificationCode,
+            ReferralEntity,
         ]),
     ],
-    providers: [UsersService],
-    exports: [UsersService, TypeOrmModule],
+    controllers: [ReferralController],
+    providers: [UsersService, ReferralService],
+    exports: [UsersService, ReferralService, TypeOrmModule],
 })
 export class UsersModule { }

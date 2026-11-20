@@ -4,13 +4,7 @@ import { Repository } from 'typeorm';
 import { NotificationEntity, NotificationType } from './notification.entity';
 import { AccountEntity } from '../account/account.entity';
 import { UserEntity } from '../users/user.entity';
-import { TelegramService } from './telegram.service';
 import { EmailProducerService } from '../email/email-producer.service';
-import { WhatsAppLink } from '../users/whatsapp-link.entity';
-import { WhatsAppVerificationCode } from '../users/whatsapp-verification-code.entity';
-import { randomInt } from 'crypto';
-import { BaileysService } from './baileys.service';
-import { WhatsAppTemplates } from './whatsapp-templates';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
@@ -24,13 +18,7 @@ export class NotificationsService {
         private accountRepo: Repository<AccountEntity>,
         @InjectRepository(UserEntity)
         private userRepo: Repository<UserEntity>,
-        @InjectRepository(WhatsAppLink)
-        private readonly linkRepo: Repository<WhatsAppLink>,
-        @InjectRepository(WhatsAppVerificationCode)
-        private readonly codeRepo: Repository<WhatsAppVerificationCode>,
-        private telegramService: TelegramService,
         private emailProducer: EmailProducerService,
-        private baileysService: BaileysService,
         private readonly eventEmitter: EventEmitter2,
     ) {}
 
@@ -108,20 +96,6 @@ export class NotificationsService {
                     prefs[saved.type] !== false && account.notificationsEnabled !== false;
 
                 if (isAlertEnabled) {
-                    // Telegram Dispatch
-                    if (user.telegramChatId) {
-                        await this.telegramService
-                            .sendNotification(
-                                userId,
-                                `[${saved.type}] ${saved.title}\n${saved.message}`,
-                            )
-                            .catch((err) =>
-                                this.logger.warn(
-                                    `Telegram dispatch failed for ${userId}: ${err?.message || err}`,
-                                ),
-                            );
-                    }
-
                     // Redis Queue Email Dispatch (100% non-blocking)
                     if (user.email && !options.skipEmail) {
                         await this.emailProducer.enqueue(
@@ -137,26 +111,6 @@ export class NotificationsService {
                             },
                             { jobId: `notif-alert:${saved.id}` },
                         );
-                    }
-
-                    // WhatsApp Dispatch
-                    const waLink = await this.linkRepo.findOne({
-                        where: { user: { id: userId }, isActive: true },
-                    });
-
-                    if (waLink) {
-                        const waMessage = WhatsAppTemplates.SYSTEM_ALERT({
-                            title: saved.title,
-                            message: saved.message,
-                            type: saved.type,
-                        });
-                        await this.baileysService
-                            .sendMessage(waLink.whatsappNumber, waMessage)
-                            .catch((err) =>
-                                this.logger.warn(
-                                    `WhatsApp dispatch failed for ${waLink.whatsappNumber}: ${err?.message || err}`,
-                                ),
-                            );
                     }
                 }
             }
@@ -194,9 +148,7 @@ export class NotificationsService {
     async updateSettings(
         userId: string,
         settings: {
-            telegramChatId?: string;
             notificationsEnabled?: boolean;
-            telegramEnabled?: boolean;
             notificationPreferences?: any;
         },
     ) {
@@ -224,52 +176,6 @@ export class NotificationsService {
             notificationsEnabled: account.notificationsEnabled,
             notificationPreferences: user?.notificationPreferences || {},
         };
-    }
-
-    async getWhatsAppStatus(userId: string) {
-        const link = await this.linkRepo.findOne({
-            where: { user: { id: userId } },
-        });
-
-        return {
-            connected: !!link?.isActive,
-            whatsappNumber: link?.whatsappNumber || null,
-            lastInteraction: link?.lastInteractionAt || null,
-        };
-    }
-
-    async generateWhatsAppCode(userId: string) {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user) throw new NotFoundException('User not found');
-
-        await this.codeRepo.update({ user: { id: userId }, used: false }, { used: true });
-
-        const code = randomInt(100000, 999999).toString();
-        const expiresAt = new Date();
-        expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-
-        const verification = this.codeRepo.create({
-            user,
-            code,
-            expiresAt,
-            used: false,
-        });
-
-        await this.codeRepo.save(verification);
-
-        return { code, expiresAt };
-    }
-
-    async send2FA(userId: string, code: string) {
-        const waLink = await this.linkRepo.findOne({
-            where: { user: { id: userId }, isActive: true },
-        });
-
-        if (waLink) {
-            const message = WhatsAppTemplates.AUTH_2FA({ code });
-            return this.baileysService.sendMessage(waLink.whatsappNumber, message);
-        }
-        return false;
     }
 
     private async getAccount(userId: string) {

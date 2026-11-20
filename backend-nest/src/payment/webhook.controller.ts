@@ -14,12 +14,12 @@ export class WebhookController {
     ) { }
 
     private verifySignature(req: any, signature: string) {
-        const secret = this.configService.get<string>('DEBITO_WEBHOOK_SECRET') || this.configService.get<string>('WEBHOOK_SECRET', '');
+        const secret = this.configService.get<string>('WEBHOOK_SECRET', '');
         const isProd = this.configService.get<string>('NODE_ENV') === 'production';
 
         if (!secret) {
             if (isProd) {
-                this.logger.error('CRITICAL: DEBITO_WEBHOOK_SECRET / WEBHOOK_SECRET is not configured in production.');
+                this.logger.error('CRITICAL: WEBHOOK_SECRET is not configured in production.');
                 throw new UnauthorizedException('Webhook signature verification not configured');
             }
             this.logger.warn('Webhook secret is not configured in non-production. Skipping signature verification.');
@@ -47,30 +47,12 @@ export class WebhookController {
     }
 
     @Post()
-    @Post('debito')
-    @Post('c2b/emola')
-    @Post('c2b/bank')
     async handleWebhook(@Req() req: any, @Body() body: any, @Headers('x-webhook-signature') signature: string) {
-        this.logger.log(`Received unified webhook.`);
+        this.logger.log('Received payment webhook.');
 
         // Verify HMAC-SHA256 signature BEFORE trusting or processing payload
         this.verifySignature(req, signature);
-
-        // Extract reference/payment_id to poll and audit-confirm the status
-        let reference = body?.reference_description || body?.reference;
-        if (body?.event && body?.data) {
-            reference = body.data.reference || body.data.payment_id;
-        }
-
-        if (reference) {
-            this.logger.log(`[Audit Log] Confirming status via polling check for reference: ${reference}`);
-            // Always verify payment status directly via gateway API; do NOT fall back to trusting unverified body on polling error
-            await this.subscriptionService.handleDebitoStatusUpdate(reference);
-            this.logger.log(`[Audit Log] Polling verification check completed successfully for reference: ${reference}`);
-        } else {
-            this.logger.warn('[Audit Log] No transaction reference found in verified webhook payload. Processing payload.');
-            await this.subscriptionService.processDebitoWebhook(body);
-        }
+        await this.subscriptionService.processPaymentWebhook(body);
 
         return { success: true };
     }

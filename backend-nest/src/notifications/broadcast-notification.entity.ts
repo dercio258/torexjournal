@@ -40,7 +40,7 @@ export class BroadcastNotificationEntity {
     category: BroadcastCategory;
 
     @Column('simple-json', { nullable: true })
-    channels: string[]; // ['email', 'telegram', 'in_app']
+    channels: string[]; // ['email', 'push', 'in_app']
 
     @Column({
         type: 'enum',

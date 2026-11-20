@@ -22,7 +22,6 @@ interface SuggestedUser {
     id: string;
     username: string;
     avatarUrl?: string;
-    name?: string;
 }
 
 interface FeedTabProps {
@@ -336,11 +335,11 @@ export const FeedTab: React.FC<FeedTabProps> = ({
                                             )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <h4 className="font-bold text-xs text-fg truncate">
-                                                {s.name || s.username}
-                                            </h4>
-                                            <p className="text-[11px] text-accent-fg truncate font-mono">
+                                            <h4 className="font-bold text-xs text-fg truncate font-mono">
                                                 @{s.username}
+                                            </h4>
+                                            <p className="text-[11px] text-fg-subtle truncate">
+                                                {isEn ? 'Community Trader' : 'Trader da Comunidade'}
                                             </p>
                                         </div>
                                         {onMessageUser && (
@@ -350,11 +349,10 @@ export const FeedTab: React.FC<FeedTabProps> = ({
                                                     onMessageUser({
                                                         id: s.id,
                                                         username: s.username,
-                                                        name: s.name,
                                                         avatarUrl: s.avatarUrl,
                                                     })
                                                 }
-                                                className="h-7 px-3 rounded-lg text-xs font-semibold bg-accent/10 text-accent-fg hover:bg-accent/20 border border-accent/25 cursor-pointer"
+                                                className="h-7 px-3 rounded-lg text-xs font-semibold bg-accent/10 text-accent-fg hover:bg-accent/20 border border-accent/25 cursor-pointer shrink-0"
                                             >
                                                 {isEn ? 'Message' : 'Conversar'}
                                             </button>

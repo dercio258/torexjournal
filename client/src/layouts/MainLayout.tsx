@@ -1,7 +1,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
-import { WhatsAppSupportWidget } from '../components/support/WhatsAppSupportWidget';
+import { MobileBottomDock } from '../components/MobileBottomDock';
 import { useAuth } from '../context/AuthContext';
 import { DashboardFilterProvider } from '../context/DashboardFilterContext';
 import { PlanRequiredOverlay } from '../components/subscription/PlanRequiredOverlay';
@@ -40,11 +40,10 @@ export const MainLayout = () => {
         });
     };
 
-    // Auto-collapse sidebar whenever entering /backtest and reset fullscreen when leaving
+    // Auto-collapse drawer on route navigation (mobile UX) and reset fullscreen outside replay
     useEffect(() => {
-        if (isBacktestPage) {
-            setIsSidebarOpen(false);
-        } else {
+        setIsSidebarOpen(false);
+        if (!isBacktestPage) {
             setIsBacktestFullscreen(false);
         }
     }, [isBacktestPage, location.pathname]);
@@ -77,7 +76,7 @@ export const MainLayout = () => {
                 {/* Backdrop for drawer (mobile or when collapsed on /backtest) */}
                 {!isBacktestFullscreen && isSidebarOpen && (
                     <div
-                        className={`${isBacktestPage ? '' : 'md:hidden '}fixed inset-0 bg-canvas/75 backdrop-blur-sm z-40`}
+                        className={`${isBacktestPage ? '' : 'md:hidden '}fixed inset-0 bg-canvas/75 backdrop-blur-sm z-[70]`}
                         onClick={() => setIsSidebarOpen(false)}
                     />
                 )}
@@ -87,8 +86,8 @@ export const MainLayout = () => {
                     <div
                         className={
                             isBacktestPage
-                                ? `fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out z-50 h-full shrink-0`
-                                : `fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:transform-none transition-transform duration-300 ease-in-out z-50 h-full shrink-0`
+                                ? `fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out z-[75] h-full shrink-0`
+                                : `fixed inset-y-0 left-0 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:transform-none transition-transform duration-300 ease-in-out z-[75] h-full shrink-0`
                         }
                     >
                         <Sidebar
@@ -100,19 +99,21 @@ export const MainLayout = () => {
                 )}
 
                 <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-                    {/* Header hidden completely on /backtesting/replay or when Backtest is maximized */}
-                    {!isBacktestFullscreen && !isBacktestPage && (
-                        <Header
-                            onOpenSidebar={() => setIsSidebarOpen(prev => !prev)}
-                            isSidebarCollapsed={isBacktestPage}
-                        />
+                    {/* Desktop: Header hidden on /backtesting/replay; Mobile: keep Header accessible */}
+                    {!isBacktestFullscreen && (
+                        <div className={isBacktestPage ? 'md:hidden' : ''}>
+                            <Header
+                                onOpenSidebar={() => setIsSidebarOpen(prev => !prev)}
+                                isSidebarCollapsed={isBacktestPage}
+                            />
+                        </div>
                     )}
 
                     <div
                         className={`flex-1 scroll-smooth ${
                             isBacktestFullscreen || isBacktestPage || isTorexAiPage
                                 ? 'p-0 overflow-hidden'
-                                : 'p-3 sm:p-4 lg:px-5 lg:py-4 overflow-y-auto'
+                                : 'p-3 sm:p-4 lg:px-5 lg:py-4 pb-24 md:pb-4 overflow-y-auto'
                         }`}
                     >
                         <div
@@ -132,8 +133,7 @@ export const MainLayout = () => {
                         </div>
                     </div>
 
-                    {/* Floating WhatsApp Support Button (hidden on /backtesting/replay, /torex-ai or when Backtest is maximized) */}
-                    {!isBacktestFullscreen && !isBacktestPage && !isTorexAiPage && <WhatsAppSupportWidget />}
+                    {!isBacktestFullscreen && <MobileBottomDock />}
                 </main>
             </div>
         </DashboardFilterProvider>

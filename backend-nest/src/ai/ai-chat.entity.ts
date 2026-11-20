@@ -76,6 +76,7 @@ export interface AiMessageMetadata {
     backtestingIncluded?: boolean;
     routerLatencyMs?: number;
     analystLatencyMs?: number;
+    cavemanTokensSaved?: number;
 }
 
 @Entity('ai_chat_sessions')

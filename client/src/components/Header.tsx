@@ -245,10 +245,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
             {/* LADO ESQUERDO: Hamburger Mobile + Título Limpo da Página */}
             <div className="flex items-center gap-2.5 min-w-0">
                 <button
+                    type="button"
                     onClick={onOpenSidebar}
+                    aria-label={isEn ? 'Open navigation menu' : 'Abrir menu de navegação'}
                     className={`${
                         isSidebarCollapsed ? '' : 'md:hidden '
-                    }p-1.5 text-fg-muted hover:text-fg bg-surface border border-line rounded-lg transition-colors focus:outline-none cursor-pointer`}
+                    }shrink-0 p-1.5 text-fg-muted hover:text-fg bg-surface border border-line rounded-lg transition-colors focus:outline-none cursor-pointer`}
                     title={isEn ? 'Open sidebar' : 'Abrir menu lateral'}
                 >
                     <Menu size={15} />
@@ -290,7 +292,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                         </button>
 
                         {openPopover === 'filters' && (
-                            <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
+                            <div className="fixed inset-x-3 top-14 sm:inset-auto sm:absolute sm:right-0 sm:top-auto sm:mt-2 sm:w-80 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
                                 <div className="px-3.5 py-2.5 border-b border-line bg-canvas-subtle flex items-center justify-between">
                                     <span className="text-xs font-semibold text-fg">
                                         {isEn ? 'Execution Filters' : 'Filtros Operacionais'}
@@ -503,7 +505,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                         </button>
 
                         {openPopover === 'date' && (
-                            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
+                            <div className="fixed inset-x-3 top-14 sm:inset-auto sm:absolute sm:right-0 sm:top-auto sm:mt-2 sm:w-72 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
                                 <div className="px-3.5 py-2.5 border-b border-line bg-canvas-subtle flex items-center justify-between">
                                     <span className="text-xs font-semibold text-fg">
                                         {isEn ? 'Timeframe' : 'Período Operacional'}
@@ -624,7 +626,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                     </button>
 
                     {openPopover === 'account' && (
-                        <div className="absolute right-0 mt-2 w-72 sm:w-80 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
+                        <div className="fixed inset-x-3 top-14 sm:inset-auto sm:absolute sm:right-0 sm:top-auto sm:mt-2 sm:w-80 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
                             <div className="px-3.5 py-2.5 border-b border-line flex items-center justify-between bg-canvas-subtle">
                                 <span className="text-xs font-semibold text-fg">
                                     {isEn ? 'Trading Accounts' : 'Contas de Trading'}

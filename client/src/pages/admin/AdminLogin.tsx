@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { ShieldCheck, Calendar, Key, ArrowLeft, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../api';
+import { isValidAdminToken } from '../../lib/adminAuth';
 
 export const AdminLogin = () => {
     const navigate = useNavigate();
@@ -19,19 +20,7 @@ export const AdminLogin = () => {
     const [successMessage, setSuccessMessage] = useState('');
 
     useEffect(() => {
-        const token = localStorage.getItem('adminToken');
-        if (!token) return;
-        try {
-            const parts = token.split('.');
-            if (parts.length === 3) {
-                const payload = JSON.parse(atob(parts[1]));
-                if (payload?.exp && payload.exp * 1000 < Date.now()) {
-                    localStorage.removeItem('adminToken');
-                    return;
-                }
-            }
-            navigate('/admin/dashboard', { replace: true });
-        } catch {
+        if (isValidAdminToken()) {
             navigate('/admin/dashboard', { replace: true });
         }
     }, [navigate]);

@@ -8,6 +8,7 @@ import {
     mergeAndDeduplicateCandles,
     saveCandleBatchToIDB,
 } from './historicalBatchCache';
+import { getQuantAuthHeaders } from '../lib/quantAuth';
 
 /**
  * Each mode is ONE source. There is no silent cross-source fallback: if the
@@ -817,7 +818,10 @@ export class CustomKLineDatafeed implements Datafeed {
             try {
                 const res = await fetch(
                     `/api/quant/ohlcv?symbol=${encodeURIComponent(symbol.ticker)}&timeframe=${encodeURIComponent(tf)}&to=${to}&limit=${batchSize}`,
-                    { signal: AbortSignal.timeout(2500) }
+                    {
+                        headers: getQuantAuthHeaders(),
+                        signal: AbortSignal.timeout(2500),
+                    }
                 );
                 if (res.ok) {
                     const data = await res.json();
@@ -965,7 +969,10 @@ export class CustomKLineDatafeed implements Datafeed {
         try {
             const qRes = await fetch(
                 `/api/quant/ohlcv?symbol=${encodeURIComponent(this.resolveBackendSymbol(symbol))}&timeframe=${encodeURIComponent(tf)}&to=${to}&limit=${batchSize}&source=real`,
-                { signal: AbortSignal.timeout(6000) }
+                {
+                    headers: getQuantAuthHeaders(),
+                    signal: AbortSignal.timeout(6000),
+                }
             );
             if (qRes.ok) {
                 const qData = await qRes.json();
@@ -1240,9 +1247,25 @@ export class CustomKLineDatafeed implements Datafeed {
         this.stopLiveStream();
     }
 
+    public dispose(): void {
+        this.prefetchAbortGeneration += 1;
+        this.stopLiveStream();
+        this.activeCallback = null;
+        this.onCandleUpdateListener = undefined;
+        this.onBatchProgressListener = undefined;
+        this.historyCache.clear();
+        this.fullHistory = [];
+    }
+
     private stopLiveStream() {
         if (this.ws) {
-            try { this.ws.close(); } catch (_) {}
+            try {
+                this.ws.onopen = null;
+                this.ws.onmessage = null;
+                this.ws.onerror = null;
+                this.ws.onclose = null;
+                this.ws.close();
+            } catch (_) {}
             this.ws = null;
         }
     }

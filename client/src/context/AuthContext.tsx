@@ -8,6 +8,22 @@ import {
     saveUserProfileInIDB,
 } from '../services/offlineDb';
 import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
+import { queryClient } from '../lib/queryClient';
+import { clearBacktestTransientClientState } from '../services/backtestWorkspaceStore';
+
+function decodeJwtSubject(jwtToken: string): string | null {
+    try {
+        const parts = jwtToken.split('.');
+        if (parts.length !== 3 || !parts[1]) return null;
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+        const payload = JSON.parse(atob(padded));
+        const sub = payload?.sub || payload?.id || payload?.userId;
+        return sub ? String(sub) : null;
+    } catch {
+        return null;
+    }
+}
 
 export interface AuthUser {
     id: string;
@@ -173,9 +189,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, [token, fetchProfile]);
 
     const logout = useCallback(() => {
+        if (localStorage.getItem('token')) {
+            void api.post('/auth/logout').catch(() => {});
+        }
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
+        localStorage.removeItem('torex_selected_account_id');
+        localStorage.removeItem('torex_last_user_scope');
+        localStorage.removeItem('torex_accounts_cache');
         writeCachedUser(null);
+        queryClient.clear();
+        clearBacktestTransientClientState();
+        useOfflineSyncStore.setState({
+            isSyncing: false,
+            syncStatus:
+                typeof navigator !== 'undefined' && !navigator.onLine
+                    ? 'offline'
+                    : 'idle',
+            pendingMutationsCount: 0,
+            pendingMediaCount: 0,
+            backtestPendingCount: 0,
+            failedMutations: [],
+            lastSyncedAt: null,
+            justSyncedBannerUntil: null,
+        });
+        if (typeof caches !== 'undefined' && typeof caches.delete === 'function') {
+            void caches.delete('torex-uploads-media-v1').catch(() => {});
+        }
         inFlightProfileRef.current = null;
         identifiedSessionRef.current = null;
         setTokenObj(null);
@@ -204,6 +244,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const login = useCallback((newToken: string, email?: string) => {
         const previousToken = localStorage.getItem('token');
+        const previousCachedUser = readCachedUser();
+        const nextSubject = decodeJwtSubject(newToken);
+        const previousSubject =
+            (previousToken ? decodeJwtSubject(previousToken) : null) ||
+            (previousCachedUser?.id ? String(previousCachedUser.id) : null) ||
+            (getCurrentUserScope() !== 'anon' ? getCurrentUserScope() : null);
+
+        if (nextSubject && previousSubject && nextSubject !== previousSubject) {
+            queryClient.clear();
+            clearBacktestTransientClientState();
+            localStorage.removeItem('torex_selected_account_id');
+            localStorage.removeItem('torex_accounts_cache');
+            writeCachedUser(null);
+        }
+
+        if (nextSubject) {
+            rememberUserScope(nextSubject);
+        }
+
         localStorage.setItem('token', newToken);
         if (email) {
             localStorage.setItem('userEmail', email);

@@ -489,6 +489,8 @@ export const NetworkLessonPlayer: React.FC = () => {
                                         key={lesson.embedUrl}
                                         src={lesson.embedUrl}
                                         title={lesson.title}
+                                        sandbox="allow-scripts allow-same-origin allow-presentation"
+                                        referrerPolicy="strict-origin-when-cross-origin"
                                         onLoad={() => setIframeLoaded(true)}
                                         className="w-full h-full border-0"
                                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
@@ -887,11 +889,7 @@ export const NetworkLessonPlayer: React.FC = () => {
                                                 <div className="flex items-center justify-between gap-2">
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <span className="text-xs font-bold text-fg truncate">
-                                                            {c.user?.name ||
-                                                                c.user?.username}
-                                                        </span>
-                                                        <span className="text-[11px] font-mono text-accent-fg truncate">
-                                                            @{c.user?.username}
+                                                            @{c.user?.username || 'trader'}
                                                         </span>
                                                         <span className="text-[10px] text-fg-subtle tabular-nums">
                                                             {new Date(

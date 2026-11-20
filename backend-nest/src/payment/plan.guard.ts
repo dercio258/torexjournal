@@ -13,8 +13,15 @@ export class PlanGuard implements CanActivate {
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const requiredTier = this.reflector.get<PlanTier>(REQUIRE_PLAN_KEY, context.getHandler()) || 
-                             this.reflector.get<PlanTier>(REQUIRE_PLAN_KEY, context.getClass());
+        const requiredTier =
+            this.reflector.getAllAndOverride<PlanTier>(REQUIRE_PLAN_KEY, [
+                context.getHandler(),
+                context.getClass(),
+            ]) ??
+            this.reflector.getAllAndOverride<PlanTier>('requiredPlan', [
+                context.getHandler(),
+                context.getClass(),
+            ]);
 
         if (!requiredTier) {
             // If no plan tier is explicitly required, allow access
@@ -23,11 +30,10 @@ export class PlanGuard implements CanActivate {
 
         const request = context.switchToHttp().getRequest();
         const user = request.user;
-        if (!user) {
+        const userId = user?.id || user?.userId;
+        if (!userId) {
             return false;
         }
-
-        const userId = user.id || user.userId;
         const hasPermission = await this.planPermissionService.checkPermission(userId, requiredTier);
 
         if (!hasPermission) {

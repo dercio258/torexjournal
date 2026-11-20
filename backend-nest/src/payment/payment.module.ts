@@ -17,7 +17,6 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { UserEntity } from '../users/user.entity';
 
 import { PlanPermissionService } from './plan-permission.service';
-import { DebitoService } from './debito.service';
 import { SubscriptionProcessor } from './subscription.processor';
 import { WebhookController } from './webhook.controller';
 import { EmailModule } from '../email/email.module';
@@ -28,8 +27,14 @@ import { PlanGuard } from './plan.guard';
     imports: [
         TypeOrmModule.forFeature([PaymentEntity, AccountEntity, Subscription, SubscriptionPlanConfig, UserEntity]),
         BullModule.registerQueue(
-            { name: 'subscription-queue' },
-            { name: 'email-queue' }
+            {
+                name: 'subscription-queue',
+                defaultJobOptions: {
+                    removeOnComplete: 200,
+                    removeOnFail: 500,
+                },
+            },
+            { name: 'email-queue' },
         ),
         UsersModule,
         ConfigModule,
@@ -38,8 +43,14 @@ import { PlanGuard } from './plan.guard';
         EmailModule,
         AnalyticsModule
     ],
-    providers: [PaymentService, SubscriptionService, PlanPermissionService, DebitoService, SubscriptionProcessor, PlanGuard],
+    providers: [
+        PaymentService,
+        SubscriptionService,
+        PlanPermissionService,
+        ...(process.env.MT5_DEDICATED_SERVER === 'true' ? [] : [SubscriptionProcessor]),
+        PlanGuard,
+    ],
     controllers: [PaymentController, SubscriptionController, PaymentsController, WebhookController],
-    exports: [SubscriptionService, PlanPermissionService, DebitoService, PlanGuard],
+    exports: [SubscriptionService, PlanPermissionService, PlanGuard],
 })
 export class PaymentModule { }

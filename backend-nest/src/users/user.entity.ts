@@ -152,4 +152,22 @@ export class UserEntity {
 
     @Column({ name: 'email_verified_at', type: 'timestamp', nullable: true })
     emailVerifiedAt: Date | null;
+
+    @Column({ name: 'referral_code', type: 'varchar', length: 32, unique: true, nullable: true })
+    referralCode: string | null;
+
+    @Column({ name: 'referred_by_user_id', type: 'varchar', length: 64, nullable: true })
+    referredByUserId: string | null;
+
+    @Column({ name: 'referral_credits_usd', type: 'numeric', precision: 10, scale: 2, default: 0 })
+    referralCreditsUsd: number;
+
+    @Column({ name: 'referral_pending_credits_usd', type: 'numeric', precision: 10, scale: 2, default: 0 })
+    referralPendingCreditsUsd: number;
+
+    @Column({ name: 'referral_ai_bonus_until', type: 'timestamp', nullable: true })
+    referralAiBonusUntil: Date | null;
+
+    @Column({ name: 'referral_tier_boost', type: 'boolean', default: false })
+    referralTierBoost: boolean;
 }

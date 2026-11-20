@@ -218,6 +218,17 @@ export const SessionsPage = () => {
 
     return (
         <div className="space-y-4">
+            <div className="md:hidden rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-[11px] leading-relaxed text-fg-muted">
+                {isEn ? (
+                    <>
+                        <strong className="text-amber-400">Desktop Replay:</strong> create, edit, and analyze backtest sessions here; the candlestick replay chart opens exclusively on Desktop.
+                    </>
+                ) : (
+                    <>
+                        <strong className="text-amber-400">Replay no Desktop:</strong> crie, edite e analise as suas sessões de backteste aqui; os gráficos de replay abrem exclusivamente no computador.
+                    </>
+                )}
+            </div>
             {recentActive && recentStats && (
                 <section className="rounded-2xl border border-accent/30 bg-surface p-4 sm:px-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0 space-y-1">

@@ -439,9 +439,13 @@ export function renderInstitutionalLayout(options: InstitutionalLayoutOptions): 
                                             </tr>
                                         </table>
                                     </td>
-                                    <td align="right" style="vertical-align: middle; font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase; color: #64748B;">
+                                    ${
+                                        options.category && options.category.trim().length > 0
+                                            ? `<td align="right" style="vertical-align: middle; font-size: 11px; font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase; color: #64748B;">
                                         ${escapeHtml(options.category)}
-                                    </td>
+                                    </td>`
+                                            : ''
+                                    }
                                 </tr>
                             </table>
                         </td>

@@ -24,6 +24,8 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
     private readonly prefixedStreams: string[];
     private readonly fullToLogicalStream = new Map<string, LogicalStreamName>();
     private isRunning = true;
+    private processedSinceTrim = 0;
+    private readonly STREAM_TRIM_MAXLEN = 50_000;
     private readonly CONSUMER_GROUP = 'nest_backend_group';
     private readonly CONSUMER_NAME = `consumer_${Math.random().toString(36).substring(2, 8)}`;
 
@@ -78,11 +80,62 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
 
     async onModuleInit() {
         await this.ensureAllGroups();
+        await this.reclaimPendingMessagesOnStartup();
 
         this.logger.log(
             `MT5 Redis Streams consumer iniciado (${this.CONSUMER_NAME} | group=${this.CONSUMER_GROUP} | prefix="${this.redisPrefix}" | redis=${this.redisEndpoint})`,
         );
         void this.consumeStreams();
+    }
+
+    private async reclaimPendingMessagesOnStartup(): Promise<void> {
+        for (const fullStreamKey of this.prefixedStreams) {
+            try {
+                const res = (await (this.redis as any).xautoclaim(
+                    fullStreamKey,
+                    this.CONSUMER_GROUP,
+                    this.CONSUMER_NAME,
+                    60_000,
+                    '0-0',
+                    'COUNT',
+                    50,
+                )) as any;
+                const entries = Array.isArray(res?.[1]) ? res[1] : [];
+                const logicalStream = this.fullToLogicalStream.get(fullStreamKey);
+                if (!logicalStream || entries.length === 0) continue;
+
+                for (const message of entries) {
+                    const id = String(message[0]);
+                    const fields = message[1];
+                    const parsedFields: Record<string, string> = {};
+                    for (let i = 0; i < fields.length; i += 2) {
+                        parsedFields[fields[i]] = fields[i + 1];
+                    }
+                    const dataStr = parsedFields.data ?? fields[1];
+                    try {
+                        await this.processMessage(logicalStream, id, dataStr, parsedFields);
+                        await this.redis.xack(fullStreamKey, this.CONSUMER_GROUP, id);
+                    } catch (err: any) {
+                        this.logger.warn(
+                            `Pending stream message recovery deferred (${fullStreamKey} id=${id}): ${err?.message || err}`,
+                        );
+                    }
+                }
+            } catch {
+                // XAUTOCLAIM may not exist on older Redis versions; degrade gracefully
+            }
+        }
+    }
+
+    private async maybeTrimStream(fullStreamKey: string): Promise<void> {
+        this.processedSinceTrim += 1;
+        if (this.processedSinceTrim < 200) return;
+        this.processedSinceTrim = 0;
+        try {
+            await (this.redis as any).xtrim(fullStreamKey, 'MAXLEN', '~', this.STREAM_TRIM_MAXLEN);
+        } catch {
+            // Non-fatal
+        }
     }
 
     private async ensureAllGroups(): Promise<void> {
@@ -163,9 +216,15 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
                             }
 
                             const dataStr = parsedFields.data ?? fields[1];
-                            await this.processMessage(logicalStream, id, dataStr, parsedFields);
-
-                            await this.redis.xack(ackKey, this.CONSUMER_GROUP, id);
+                            try {
+                                await this.processMessage(logicalStream, id, dataStr, parsedFields);
+                                await this.redis.xack(ackKey, this.CONSUMER_GROUP, id);
+                                await this.maybeTrimStream(ackKey);
+                            } catch (msgErr: any) {
+                                this.logger.error(
+                                    `Falha ao enfileirar mensagem da stream "${logicalStream}" (id=${id}) no Bull — XACK adiado: ${formatErrorDetails(msgErr)}`,
+                                );
+                            }
                         }
                     }
                 }
@@ -230,66 +289,70 @@ export class Mt5RedisSubscriber implements OnModuleInit, OnModuleDestroy {
                 : String(message);
 
         if (stream === 'stream:mt5_market_data') {
+            let data: any;
             try {
-                const data = JSON.parse(message);
-                if (!data.token) {
-                    return;
-                }
+                data = JSON.parse(message);
+            } catch (e: any) {
+                this.logger.error(
+                    `JSON inválido na stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
+                );
+                return;
+            }
+            if (!data?.token) {
+                return;
+            }
+            await this.mt5Queue.add(
+                'sync-data',
+                {
+                    positions: [],
+                    ...data,
+                },
+                { removeOnComplete: true, attempts: 3 },
+            );
+        } else if (stream === 'stream:mt5_history_sync') {
+            let data: any;
+            try {
+                data = JSON.parse(message);
+            } catch (e: any) {
+                this.logger.error(
+                    `JSON inválido no histórico da stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
+                );
+                return;
+            }
+            await this.mt5Queue.add('save-history-deal', data, {
+                removeOnComplete: true,
+                attempts: 3,
+            });
+        } else if (stream === 'stream:mt5_ticks') {
+            let data: any;
+            try {
+                data = JSON.parse(message);
+            } catch (e: any) {
+                this.logger.error(
+                    `JSON inválido no tick da stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
+                );
+                return;
+            }
+            await this.mt5Queue.add('save-tick', data, { removeOnComplete: true, attempts: 1 });
+        } else if (stream === 'stream:mt5_trade_data') {
+            let trades: any;
+            try {
+                trades = JSON.parse(message);
+            } catch (e: any) {
+                this.logger.error(
+                    `JSON inválido nos trades da stream "${stream}" (id=${messageId}, accountId=${parsedFields.accountId || 'n/a'}): ${formatErrorDetails(e)} | payload=${preview}`,
+                );
+                return;
+            }
+            if (Array.isArray(trades)) {
                 await this.mt5Queue.add(
-                    'sync-data',
+                    'save-history',
                     {
-                        positions: [],
-                        ...data,
+                        trades,
+                        userId: parsedFields.userId || undefined,
+                        accountId: parsedFields.accountId || undefined,
                     },
                     { removeOnComplete: true, attempts: 3 },
-                );
-            } catch (e: any) {
-                this.logger.error(
-                    `Falha ao processar mensagem da stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
-                    e instanceof Error ? e.stack : undefined,
-                );
-            }
-        } else if (stream === 'stream:mt5_history_sync') {
-            try {
-                const data = JSON.parse(message);
-                await this.mt5Queue.add('save-history-deal', data, {
-                    removeOnComplete: true,
-                    attempts: 3,
-                });
-            } catch (e: any) {
-                this.logger.error(
-                    `Falha ao processar histórico na stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
-                    e instanceof Error ? e.stack : undefined,
-                );
-            }
-        } else if (stream === 'stream:mt5_ticks') {
-            try {
-                const data = JSON.parse(message);
-                await this.mt5Queue.add('save-tick', data, { removeOnComplete: true, attempts: 1 });
-            } catch (e: any) {
-                this.logger.error(
-                    `Falha ao processar tick na stream "${stream}" (id=${messageId}): ${formatErrorDetails(e)} | payload=${preview}`,
-                    e instanceof Error ? e.stack : undefined,
-                );
-            }
-        } else if (stream === 'stream:mt5_trade_data') {
-            try {
-                const trades = JSON.parse(message);
-                if (Array.isArray(trades)) {
-                    await this.mt5Queue.add(
-                        'save-history',
-                        {
-                            trades,
-                            userId: parsedFields.userId || undefined,
-                            accountId: parsedFields.accountId || undefined,
-                        },
-                        { removeOnComplete: true, attempts: 3 },
-                    );
-                }
-            } catch (e: any) {
-                this.logger.error(
-                    `Falha ao processar trades na stream "${stream}" (id=${messageId}, accountId=${parsedFields.accountId || 'n/a'}): ${formatErrorDetails(e)} | payload=${preview}`,
-                    e instanceof Error ? e.stack : undefined,
                 );
             }
         }

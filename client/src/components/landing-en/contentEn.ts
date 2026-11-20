@@ -296,7 +296,7 @@ export const EN_TOREX_ADVANTAGE = {
             iconKey: 'trader-concierge',
             title: 'Responsive Trader Support',
             description:
-                'Fast technical onboarding, WhatsApp alerts, and direct access to our support team.',
+                'Fast technical onboarding, real-time email & web push insights, and direct access to our support team.',
         },
     ],
 } as const;
@@ -367,11 +367,6 @@ export const EN_FOOTER = {
             id: 'footer-support',
             title: 'Support',
             links: [
-                {
-                    label: 'WhatsApp Desk',
-                    href: 'https://wa.me/258858923752?text=Hello%2C%20I%20need%20support%20with%20Torex%20Journal.',
-                    external: true,
-                },
                 {
                     label: 'Email Support',
                     href: 'mailto:info@torexjournal.com',

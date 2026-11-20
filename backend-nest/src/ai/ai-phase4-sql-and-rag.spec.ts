@@ -770,7 +770,7 @@ describe('Phase 4: Deterministic SQL Analytics Tools + Strictly Scoped RAG + Bac
             '<contexto_rag_qualitativo>'
         );
         expect(compiledDefault.systemPrompt).toContain(
-            '"sourceType": "PLAYBOOK"'
+            '"sourceType":"PLAYBOOK"'
         );
         expect(compiledDefault.systemPrompt).toContain(
             'Entrar apenas após rompimento M15. fake'
@@ -811,7 +811,7 @@ describe('Phase 4: Deterministic SQL Analytics Tools + Strictly Scoped RAG + Bac
             '"sql_backtesting_summary"'
         );
         expect(compiledWithBt.systemPrompt).toContain(
-            '"totalSimulatedNetPnl": 1450.25'
+            '"totalSimulatedNetPnl":1450.25'
         );
 
         const leaked =

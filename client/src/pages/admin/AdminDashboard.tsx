@@ -15,7 +15,6 @@ import {
     Flame,
     LifeBuoy,
     Mail,
-    MessageCircle,
     Radio,
     RefreshCw,
     RotateCcw,
@@ -230,10 +229,6 @@ function formatRelativeShort(iso?: string | null): string {
     return `Há ${days}d`;
 }
 
-function sanitizeWaDigits(raw?: string | null): string {
-    return (raw || '').replace(/[^\d]/g, '');
-}
-
 export const AdminDashboard = () => {
     const [overview, setOverview] = useState<SystemOverview | null>(null);
     const [loading, setLoading] = useState(true);
@@ -348,7 +343,6 @@ export const AdminDashboard = () => {
         intelSummary?.overallConversionRatePct ??
         Number(totalUsers > 0 ? ((activeSubs / totalUsers) * 100).toFixed(1) : '0');
     const revMzn = Number(overview?.finance?.estimatedMonthlyRevenueMZN || 0);
-    const revZar = Number(overview?.finance?.estimatedMonthlyRevenueZAR || 0);
     const trialEnabled = Boolean(overview?.plans?.trialCampaign?.enabled);
     const p95Ms = Number(overview?.telemetry?.http?.latency?.p95Ms || 0);
     const recentErrCount = overview?.telemetry?.recentErrors?.length ?? 0;
@@ -522,7 +516,7 @@ export const AdminDashboard = () => {
                 <AdminStatCard
                     label="MRR Estimado & Receita Total"
                     value={`${revMzn.toLocaleString('pt-MZ')} MT`}
-                    hint={`Histórico: ${(intelSummary?.totalRevenueAllTime ?? 0).toLocaleString('pt-MZ')} MT · PayFast ${revZar.toFixed(0)} ZAR`}
+                    hint={`Histórico: ${(intelSummary?.totalRevenueAllTime ?? 0).toLocaleString('pt-MZ')} MT`}
                     icon={<DollarSign className="h-4 w-4" />}
                     tone="accent"
                 />
@@ -644,10 +638,6 @@ export const AdminDashboard = () => {
                 ) : (
                     <div className="divide-y divide-line">
                         {currentQueueItems.map((item) => {
-                            const waDigits = sanitizeWaDigits(item.whatsapp);
-                            const waMessage = encodeURIComponent(
-                                `Olá ${item.name}, aqui é da equipa Torex Journal! Notei que ${item.reason.toLowerCase()}. Posso ajudar em algo?`,
-                            );
                             return (
                                 <div
                                     key={item.id}
@@ -679,17 +669,6 @@ export const AdminDashboard = () => {
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                        {waDigits && (
-                                            <a
-                                                href={`https://wa.me/${waDigits}?text=${waMessage}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-accent-fg hover:bg-emerald-500/20"
-                                            >
-                                                <MessageCircle className="h-3.5 w-3.5" />
-                                                WhatsApp
-                                            </a>
-                                        )}
                                         <a
                                             href={`mailto:${item.email}?subject=${encodeURIComponent('Torex Journal · Acompanhamento da sua conta')}`}
                                             className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-2"

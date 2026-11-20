@@ -330,8 +330,8 @@ class SyncEngine:
                     exe_path = proc.info.get('exe') or ''
                     norm_exe = os.path.normcase(os.path.abspath(exe_path)) if exe_path else ''
                     if norm_target and norm_exe:
-                        # Mata apenas o terminal da conta alvo (ou o terminal padrão global em Program Files se estiver aberto)
-                        if norm_exe != norm_target and "program files" not in norm_exe:
+                        # Encerra estritamente o processo terminal64.exe da instância isolada alvo
+                        if norm_exe != norm_target:
                             continue
                     logger.warning(f"Encerrando processo terminal64 (PID: {proc.info['pid']}, Path: {exe_path}) para reinicialização limpa...")
                     proc.kill()
@@ -505,12 +505,13 @@ class SyncEngine:
             self._dismiss_mt5_dialogs()
             login_clean = int(str(login).strip()) if str(login).strip().isdigit() else 0
             server_clean = self._normalize_broker_server(server)
+            pass_clean = str(password).strip() if password else ""
 
             same_terminal = True
             if path and self.active_terminal_path:
                 same_terminal = os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(self.active_terminal_path))
 
-            if same_terminal:
+            if same_terminal and not pass_clean:
                 try:
                     info = mt5.account_info()
                     if self._is_account_authenticated(info, login_clean, server_clean):
@@ -576,16 +577,19 @@ class SyncEngine:
 
             def _init_with_or_without_creds(timeout_ms: int = 25000) -> bool:
                 if login_clean and pass_clean and server_clean and term_path:
-                    ok = mt5.initialize(
-                        path=term_path,
-                        login=login_clean,
-                        password=pass_clean,
-                        server=server_clean,
-                        portable=use_portable,
-                        timeout=timeout_ms,
+                    return bool(
+                        mt5.initialize(
+                            path=term_path,
+                            login=login_clean,
+                            password=pass_clean,
+                            server=server_clean,
+                            portable=use_portable,
+                            timeout=timeout_ms,
+                        )
                     )
-                    if ok:
-                        return True
+                if login_clean and not pass_clean:
+                    self.last_connect_error = "Senha MT5 obrigatória para autenticar a conta com segurança."
+                    return False
                 if term_path:
                     return bool(mt5.initialize(path=term_path, portable=use_portable, timeout=timeout_ms))
                 return bool(mt5.initialize(timeout=timeout_ms))
@@ -661,7 +665,7 @@ class SyncEngine:
                 main_titles = [w["title"] for w in ui_before.get("main_windows", [])]
                 modal_titles = [f"{m['title']} ({', '.join(m['controls'])})" for m in ui_before.get("modals", [])]
 
-                if self._is_account_authenticated(info, login_clean, server_clean):
+                if pass_clean and self._is_account_authenticated(info, login_clean, server_clean):
                     if not (curr_name or curr_bal > 0):
                         # Aguarda até 6s caso o MT5 tenha acabado de abrir na conta padrão e ainda esteja sincronizando
                         self._wait_for_broker_sync(login_clean, timeout_sec=6.0)
@@ -696,7 +700,7 @@ class SyncEngine:
                     for attempt in range(1, max_attempts + 1):
                         self._dismiss_mt5_dialogs()
                         info = mt5.account_info()
-                        if self._is_account_authenticated(info, login_clean, server_clean):
+                        if pass_clean and self._is_account_authenticated(info, login_clean, server_clean):
                             if (getattr(info, "name", "") or "").strip() or float(getattr(info, "balance", 0.0) or 0.0) > 0:
                                 logger.success(f"Conta {login_clean} ({server_clean}) ativa e autenticada no MT5!")
                                 break
@@ -720,14 +724,10 @@ class SyncEngine:
                                 initial_delay=3.0,
                             )
                         else:
-                            login_ok = self._run_with_dialog_watchdog(
-                                lambda: mt5.login(
-                                    login=login_clean,
-                                    server=server_clean,
-                                    timeout=20000,
-                                ),
-                                initial_delay=3.0,
-                            )
+                            self.last_error_code = -6
+                            self.last_connect_error = f"Senha MT5 ausente ao tentar autenticar conta {login_clean}@{server_clean}."
+                            logger.error(self.last_connect_error)
+                            return False
 
                         if login_ok:
                             logger.success(f"Login efetuado com sucesso na conta {login_clean} ({server_clean})!")
@@ -745,30 +745,8 @@ class SyncEngine:
                             f"Janela MT5={after_titles or ['(background)']} | Modais={after_modals or ['nenhum']}"
                         )
 
-                        # Se o erro for -6 (Terminal: Authorization failed), o canal IPC está saudável!
-                        # Antes de abortar, se enviamos pass_clean e falhou, tentamos um fallback sem senha
-                        # para aproveitar o 'Save password' (Quick Login) nativo do MT5 caso o usuário tenha salvo no terminal.
+                        # Se o erro for -6 (Terminal: Authorization failed) e senha foi informada, falha imediatamente sem fallback sem senha
                         if err_code == -6:
-                            if pass_clean:
-                                logger.info(
-                                    f"Tentando fallback via 'Save Password' (Quick Login interno do MT5) "
-                                    f"para {login_clean}@{server_clean}..."
-                                )
-                                quick_ok = self._run_with_dialog_watchdog(
-                                    lambda: mt5.login(
-                                        login=login_clean,
-                                        server=server_clean,
-                                        timeout=15000,
-                                    ),
-                                    initial_delay=2.5,
-                                )
-                                if quick_ok:
-                                    logger.success(
-                                        f"Login efetuado via Quick Login ('Save password' do MT5) "
-                                        f"na conta {login_clean} ({server_clean})!"
-                                    )
-                                    break
-
                             self.last_connect_error = (
                                 f"Falha de autorização (-6) no MT5 para a conta {login_clean} no servidor '{server_clean}' "
                                 f"(Senha enviada: {pwd_diag}). Verifique se o número da conta e a senha pertencem a '{server_clean}' "

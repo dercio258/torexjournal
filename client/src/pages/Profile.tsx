@@ -20,6 +20,7 @@ import {
     X,
     Shield,
 } from 'lucide-react';
+import { ReferralProgramCard } from '../components/profile/ReferralProgramCard';
 
 export const Profile: React.FC = () => {
     const { user, updateUser } = useAuth();
@@ -744,6 +745,9 @@ export const Profile: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {/* PROGRAMA DE AFILIADOS & CRÉDITOS */}
+            <ReferralProgramCard />
 
             {/* MODAL: CRIAR / EDITAR CONTA DE TRADING */}
             {isAccountModalOpen && (editingAccount || canCreateAccount) && (

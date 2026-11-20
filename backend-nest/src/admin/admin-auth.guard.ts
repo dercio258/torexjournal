@@ -1,7 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { getJwtSecret } from '../common/security/security.config';
+import { getAdminJwtSecret } from '../common/security/security.config';
 
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
@@ -19,7 +19,7 @@ export class AdminAuthGuard implements CanActivate {
         }
 
         const token = authHeader.split(' ')[1];
-        const secret = getJwtSecret(this.configService);
+        const secret = getAdminJwtSecret(this.configService);
 
         try {
             const payload = await this.jwtService.verifyAsync(token, { secret });

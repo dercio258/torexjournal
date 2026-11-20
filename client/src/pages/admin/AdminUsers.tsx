@@ -20,7 +20,6 @@ import {
     KeyRound,
     Layers,
     Mail,
-    MessageCircle,
     MousePointerClick,
     RefreshCw,
     Search,
@@ -152,7 +151,8 @@ interface AdminUserRow {
         journalEntriesCount: number;
         backtestSessionsCount: number;
         aiSessionsCount: number;
-        whatsappLinked: boolean;
+        pushSubscribed?: boolean;
+        whatsappLinked?: boolean;
         emailSentCount: number;
         emailOpenCount: number;
         emailClickCount: number;
@@ -301,11 +301,6 @@ const formatRelative = (iso?: string | null) => {
     return `Há ${diffMonths} mês(es)`;
 };
 
-const sanitizePhoneForWa = (raw?: string | null) => {
-    if (!raw) return '';
-    return raw.replace(/[^\d]/g, '');
-};
-
 const originPillClass = (channelKey: string) => {
     switch (channelKey) {
         case 'instagram':
@@ -321,8 +316,8 @@ const originPillClass = (channelKey: string) => {
         case 'google_ads':
         case 'google_organic':
             return 'bg-amber-500/10 text-amber-500 border-amber-500/25';
-        case 'whatsapp':
-        case 'telegram':
+        case 'referral':
+        case 'push':
             return 'bg-emerald-500/10 text-accent-fg border-emerald-500/25';
         default:
             return 'bg-surface-2 text-fg-muted border-line-strong';
@@ -629,7 +624,7 @@ export const AdminUsers = () => {
         const headers = [
             'Nome',
             'Email',
-            'WhatsApp',
+            'Contacto',
             'Plano_Status',
             'Plano_Tier',
             'Expira_Em',
@@ -864,7 +859,7 @@ export const AdminUsers = () => {
                             type="text"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="Buscar por nome, e-mail, WhatsApp, campanha ou última ação..."
+                            placeholder="Buscar por nome, e-mail, contacto, campanha ou última ação..."
                             className="w-full rounded-xl border border-line bg-surface pl-9 pr-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent"
                         />
                     </div>
@@ -964,7 +959,6 @@ export const AdminUsers = () => {
                             </thead>
                             <tbody className="divide-y divide-line text-sm">
                                 {users.map((u) => {
-                                    const waDigits = sanitizePhoneForWa(u.whatsapp);
                                     const displayName = u.name || u.username || u.email.split('@')[0];
                                     const initials = displayName.slice(0, 2).toUpperCase();
 
@@ -1008,20 +1002,13 @@ export const AdminUsers = () => {
                                                             {u.email}
                                                         </div>
                                                         <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                                                            {waDigits ? (
-                                                                <a
-                                                                    href={`https://wa.me/${waDigits}`}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-accent-fg hover:bg-emerald-500/20"
-                                                                >
-                                                                    <MessageCircle className="h-3 w-3" />
+                                                            {u.whatsapp ? (
+                                                                <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-fg-muted">
                                                                     {u.whatsapp}
-                                                                </a>
+                                                                </span>
                                                             ) : (
                                                                 <span className="text-[11px] text-fg-subtle">
-                                                                    Sem WhatsApp
+                                                                    Sem contacto
                                                                 </span>
                                                             )}
                                                             <span className="text-[10px] uppercase text-fg-subtle font-mono">
@@ -1333,16 +1320,10 @@ export const AdminUsers = () => {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                {sanitizePhoneForWa(intelData.user.whatsapp) && (
-                                    <a
-                                        href={`https://wa.me/${sanitizePhoneForWa(intelData.user.whatsapp)}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-accent-fg hover:bg-emerald-500/20"
-                                    >
-                                        <MessageCircle className="h-3.5 w-3.5" />
-                                        WhatsApp ({intelData.user.whatsapp})
-                                    </a>
+                                {intelData.user.whatsapp && (
+                                    <span className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-fg-muted">
+                                        {intelData.user.whatsapp}
+                                    </span>
                                 )}
                                 <a
                                     href={`mailto:${intelData.user.email}`}

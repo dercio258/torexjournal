@@ -731,6 +731,22 @@ export async function enqueueSyncMutation(input: EnqueueMutationInput): Promise<
     const userScope = input.userScope || getCurrentUserScope();
     const now = Date.now();
     const clientUpdatedAt = input.clientUpdatedAt || new Date(now).toISOString();
+    const effectiveAccountHeader =
+        input.accountHeader ??
+        (input.params?.accountId && input.params.accountId !== 'all'
+            ? String(input.params.accountId)
+            : undefined) ??
+        (() => {
+            try {
+                const sel =
+                    typeof localStorage !== 'undefined'
+                        ? localStorage.getItem('torex_selected_account_id')
+                        : null;
+                return sel && sel !== 'all' ? sel : undefined;
+            } catch {
+                return undefined;
+            }
+        })();
     const existingQueue = await listSyncOutbox(userScope);
 
     // 1. Handle DELETE of an unsynced tempEntityId created offline
@@ -751,7 +767,7 @@ export async function enqueueSyncMutation(input: EnqueueMutationInput): Promise<
                 url: input.url,
                 params: input.params,
                 body: input.body,
-                accountHeader: input.accountHeader,
+                accountHeader: effectiveAccountHeader,
                 clientUpdatedAt,
                 createdAt: now,
                 attempts: 0,
@@ -808,7 +824,7 @@ export async function enqueueSyncMutation(input: EnqueueMutationInput): Promise<
                 url: input.url,
                 params: input.params ?? existingPending.params,
                 body: nextBody,
-                accountHeader: input.accountHeader ?? existingPending.accountHeader,
+                accountHeader: effectiveAccountHeader ?? existingPending.accountHeader,
                 clientUpdatedAt,
                 lastError: undefined,
             };
@@ -829,7 +845,7 @@ export async function enqueueSyncMutation(input: EnqueueMutationInput): Promise<
         url: input.url,
         params: input.params,
         body: input.body,
-        accountHeader: input.accountHeader,
+        accountHeader: effectiveAccountHeader,
         clientUpdatedAt,
         createdAt: now,
         attempts: 0,

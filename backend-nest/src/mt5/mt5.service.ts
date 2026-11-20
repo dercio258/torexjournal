@@ -24,6 +24,7 @@ import { DashboardService } from '../dashboard/dashboard.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EmailProducerService } from '../email/email-producer.service';
 import { TelemetryService } from '../common/observability/telemetry.service';
+import { getQuantInternalHeaders } from '../common/security/security.config';
 
 @Injectable()
 export class Mt5Service implements OnModuleInit, OnModuleDestroy {
@@ -46,14 +47,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         private mt5Gateway: Mt5Gateway,
         private notificationsService: NotificationsService,
         private alertsService: AlertsService,
-        private aiService: AiService,
-        private emailProducer: EmailProducerService,
-        @Inject(CACHE_MANAGER) private cacheManager: Cache,
-        @InjectQueue('behavioral-analysis') private behavioralQueue: Queue,
-        @InjectQueue('trade-import') private tradeImportQueue: Queue,
-        private normalizationService: NormalizationService,
-        private dashboardService: DashboardService,
-        private eventEmitter: EventEmitter2,
+        @Optional() private aiService?: AiService,
+        private emailProducer?: EmailProducerService,
+        @Inject(CACHE_MANAGER) private cacheManager?: Cache,
+        @InjectQueue('behavioral-analysis') private behavioralQueue?: Queue,
+        @InjectQueue('trade-import') private tradeImportQueue?: Queue,
+        private normalizationService?: NormalizationService,
+        private dashboardService?: DashboardService,
+        private eventEmitter?: EventEmitter2,
         @Optional() private telemetry?: TelemetryService,
     ) { }
 
@@ -351,6 +352,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                             {
                                 delay: 1000,
                                 removeOnComplete: true,
+                                removeOnFail: true,
                                 jobId: `behavior-open:${account.id}:${ticketStr}`,
                             },
                         )
@@ -875,6 +877,12 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                                 this.logger.warn(`Professional alerts warning: ${e.message}`),
                             );
 
+                            this.eventEmitter.emit('trades.imported', {
+                                userId: targetUserId,
+                                accountId,
+                                trades: tradesToSave,
+                            });
+
                             this.behavioralQueue
                                 .add(
                                     'analyze-user-behavior',
@@ -882,6 +890,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                                     {
                                         delay: 2000,
                                         removeOnComplete: true,
+                                        removeOnFail: true,
                                         jobId: `behavior:${accountId}`,
                                     },
                                 )
@@ -906,7 +915,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
                             symbolsTraded: [...new Set(tradesToSave.map(t => t.symbol))]
                         };
 
-                        this.aiService.generateInsights(accountId, targetUserId, metricsSummary, finalLogId)
+                        this.aiService?.generateInsights(accountId, targetUserId, metricsSummary, finalLogId)
                             .catch(e => this.logger.warn(`AI generation trigger failed: ${e.message}`));
                     } catch (e) {
                         this.logger.error(`AI metric aggregation failed: ${e.message}`);
@@ -1091,6 +1100,7 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
         let engineStatus: any = { status: 'offline' };
         try {
             const res = await fetch(`${baseUrl}/api/ml/behavior/status`, {
+                headers: getQuantInternalHeaders(),
                 signal: AbortSignal.timeout(3000),
             });
             if (res.ok) {
@@ -1307,6 +1317,14 @@ export class Mt5Service implements OnModuleInit, OnModuleDestroy {
 
         // Invalidate Dashboard Cache
         await this.dashboardService.invalidateUserCache(userId);
+
+        this.eventEmitter.emit('trades.imported', {
+            userId,
+            accountId: saved.accountId,
+            count: 1,
+            symbols: saved.symbol ? [saved.symbol] : [],
+            netPnl: Number(saved.profit) || 0,
+        });
 
         // Broadcast manual trade as history update (scoped to userId)
         this.mt5Gateway.broadcastHistoryUpdate({

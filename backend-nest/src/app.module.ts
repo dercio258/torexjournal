@@ -41,7 +41,6 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { DerivModule } from './deriv/deriv.module';
 import { NetworkModule } from './network/network.module';
 import { TradingViewModule } from './tradingview/tradingview.module';
-import { FinnhubModule } from './finnhub/finnhub.module';
 import { EconomicCalendarModule } from './economic-calendar/economic-calendar.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
 
@@ -102,17 +101,29 @@ const appImports: any[] = [
   }),
   TypeOrmModule.forRootAsync({
     imports: [ConfigModule],
-    useFactory: (configService: ConfigService) => ({
-      type: 'postgres',
-      host: configService.get<string>('DB_HOST', '127.0.0.1'),
-      port: configService.get<number>('DB_PORT', 5432),
-      username: configService.get<string>('DB_USER', 'postgres'),
-      password: configService.get<string>('DB_PASS', 'postgres'),
-      database: configService.get<string>('DB_NAME', 'trading_cossa'),
-      autoLoadEntities: true,
-      synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
-      logging: false,
-    }),
+    useFactory: (configService: ConfigService) => {
+      const isProd = (configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV) === 'production';
+      const dbPass = configService.get<string>('DB_PASS');
+      if (isProd && (!dbPass || dbPass === 'postgres')) {
+        throw new Error('CRITICAL SECURITY ERROR: DB_PASS ausente ou inseguro em produção.');
+      }
+      return {
+        type: 'postgres',
+        host: configService.get<string>('DB_HOST', '127.0.0.1'),
+        port: configService.get<number>('DB_PORT', 5432),
+        username: configService.get<string>('DB_USER', 'postgres'),
+        password: dbPass ?? 'postgres',
+        database: configService.get<string>('DB_NAME', 'trading_cossa'),
+        autoLoadEntities: true,
+        synchronize: !isProd && configService.get<string>('DB_SYNCHRONIZE') === 'true',
+        logging: false,
+        extra: {
+          max: Number(configService.get<number>('DB_POOL_MAX') ?? process.env.DB_POOL_MAX ?? 25),
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 5000,
+        },
+      };
+    },
     inject: [ConfigService],
   }),
   BullModule.forRootAsync({
@@ -134,19 +145,18 @@ const appImports: any[] = [
   AccountModule,
   DashboardModule,
   NotificationsModule,
-  AdminModule,
   MarketDataModule,
-  AiModule,
   AlertsModule,
   AnalyticsModule,
   // Carrega módulos web completos apenas no servidor principal
   ...(isMt5Dedicated
     ? []
     : [
+      AdminModule,
+      AiModule,
       DerivModule,
       NetworkModule,
       TradingViewModule,
-      FinnhubModule,
       EconomicCalendarModule,
       LeaderboardModule,
     ]),

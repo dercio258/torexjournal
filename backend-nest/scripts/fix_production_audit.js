@@ -36,12 +36,20 @@ async function runAuditFixes() {
     console.log(' Timestamp:', new Date().toISOString());
     console.log('================================================================================\n');
 
+    const dbUser = process.env.DB_USER || process.env.DB_USERNAME;
+    const dbPass = process.env.DB_PASS || process.env.DB_PASSWORD;
+    const dbName = process.env.DB_NAME || process.env.DB_DATABASE;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias.');
+        process.exit(1);
+    }
+
     const pgConfig = {
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '5432', 10),
-        user: process.env.DB_USER || process.env.DB_USERNAME || 'postgres',
-        password: process.env.DB_PASS || process.env.DB_PASSWORD || 'postgres',
-        database: process.env.DB_NAME || process.env.DB_DATABASE || 'trading_cossa',
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     };
 
     const pg = new Client(pgConfig);
@@ -123,7 +131,7 @@ async function runAuditFixes() {
         );
         console.log(`[5/8] Registros de import_logs realinhados ao dono real da conta: ${fixImportLogsOwner.rowCount}`, fixImportLogsOwner.rows);
 
-        // 6. A4: Ajustar initial_balance onde initial_balance = 0 e ha saldo positivo (ex: GoatFunded 419096791)
+        // 6. A4: Ajustar initial_balance onde initial_balance = 0 e ha saldo positivo
         const fixInitialBal = await pg.query(
             `WITH pnl_summary AS (
                 SELECT

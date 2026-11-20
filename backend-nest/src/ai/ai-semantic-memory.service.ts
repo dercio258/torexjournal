@@ -441,6 +441,14 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
         return this.platformDocVersion;
     }
 
+    normalizeAccountScope(accountId?: string | null): string | null {
+        const raw = String(accountId ?? '').trim();
+        if (!raw || raw === 'all' || raw === 'undefined' || raw === 'null') {
+            return null;
+        }
+        return raw;
+    }
+
     getStatus() {
         return {
             enabled: true,
@@ -772,9 +780,11 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
             }
         }
 
+        const queryAccountScope = this.normalizeAccountScope(params.accountId);
         const rows = await this.fetchActiveMemoryCandidates({
             locale: params.locale,
             userId: params.userId || null,
+            accountId: queryAccountScope,
             expandedQuery: expansion.expandedQuery,
             queryEmbedding,
         });
@@ -821,7 +831,9 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
 
             if (
                 row.scopeLevel === 'USER_PRIVATE' &&
-                (!params.userId || row.ownerScope !== params.userId)
+                (!params.userId ||
+                    row.ownerScope !== params.userId ||
+                    this.normalizeAccountScope(row.accountId) !== queryAccountScope)
             ) {
                 continue;
             }
@@ -938,6 +950,7 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
             bestRecord.cachedReply &&
             params.userId &&
             bestRecord.ownerScope === params.userId &&
+            this.normalizeAccountScope(bestRecord.accountId) === queryAccountScope &&
             this.passesReuseGuard(params.trimmedQuestion, bestRecord, 'PRIVATE')
         ) {
             void this.recordMemoryHit(bestRecord.id, 450);
@@ -1386,6 +1399,102 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
         return row ? this.mapDbRow(row) : null;
     }
 
+    /**
+     * Persiste uma memória privada escopada estritamente ao par (userId, accountId),
+     * impedindo vazamento semântico entre contas diferentes do mesmo utilizador.
+     */
+    async upsertUserPrivateMemory(params: {
+        userId: string;
+        accountId?: string | null;
+        locale: 'pt' | 'en';
+        domainCategory: AiDomainCategory;
+        subIntent?: string | null;
+        intentKey: string;
+        question: string;
+        normalizedQuestion?: string;
+        reply: string;
+        actions?: AiActionLink[];
+        suggestions?: string[];
+        status?: SemanticMemoryStatus;
+    }): Promise<SemanticMemoryRecord | null> {
+        const cleanNorm = this.normalizeText(
+            params.normalizedQuestion || params.question
+        );
+        if (!params.userId || !cleanNorm || !params.reply) return null;
+
+        const scopedAcc = this.normalizeAccountScope(params.accountId);
+        let embedding: number[] = [];
+        let embeddingModel = DEFAULT_GEMINI_EMBEDDING_MODEL;
+        if (this.embeddingService?.getStatus()?.enabled) {
+            try {
+                const emb = await this.embeddingService.embedText(params.question, {
+                    taskType: 'RETRIEVAL_DOCUMENT',
+                });
+                if (emb?.values?.length) {
+                    embedding = emb.values;
+                    embeddingModel = emb.model;
+                }
+            } catch {
+                embedding = [];
+            }
+        }
+
+        const contentHash = this.computeContentHash(
+            cleanNorm,
+            `USER_PRIVATE:${scopedAcc || '__ALL__'}:${params.domainCategory}`
+        );
+        const status: SemanticMemoryStatus = params.status || 'ACTIVE';
+        const inserted = await this.dataSource.query(
+            `
+            INSERT INTO ai_semantic_memory (
+                scope_level, owner_scope, user_id, account_id, locale, domain_category,
+                sub_intent, intent_key, canonical_question, normalized_question, content_hash,
+                variant_phrases, embedding_model, dimensions, embedding_f64,
+                cached_reply, handoff_template, actions, suggestions,
+                status, positive_count, negative_count, distinct_positive_users, positive_user_hashes,
+                trust_score, platform_doc_version
+            )
+            VALUES (
+                'USER_PRIVATE', $1, $1, $2, $3, $4,
+                $5, $6, $7, $8, $9,
+                '[]'::jsonb, $10, $11, $12::double precision[],
+                $13, NULL, $14::jsonb, $15::jsonb,
+                $16, 1, 0, 1, '[]'::jsonb,
+                0.85, NULL
+            )
+            ON CONFLICT (owner_scope, scope_level, locale, content_hash) DO UPDATE
+            SET cached_reply = EXCLUDED.cached_reply,
+                actions = EXCLUDED.actions,
+                suggestions = EXCLUDED.suggestions,
+                account_id = EXCLUDED.account_id,
+                status = EXCLUDED.status,
+                updated_at = now()
+            RETURNING *
+            `,
+            [
+                params.userId,
+                scopedAcc,
+                params.locale,
+                params.domainCategory,
+                params.subIntent || null,
+                params.intentKey || 'user_private_memory',
+                params.question.slice(0, 400),
+                cleanNorm,
+                contentHash,
+                embeddingModel,
+                embedding.length || AI_EMBEDDING_DIMENSIONS,
+                embedding.length ? embedding : [],
+                params.reply,
+                JSON.stringify(params.actions || []),
+                JSON.stringify(params.suggestions || []),
+                status,
+            ]
+        );
+
+        const row = this.extractRows(inserted)[0];
+        return row ? this.mapDbRow(row) : null;
+    }
+
     async recordPositiveHitVote(
         memoryId: string,
         userHash: string
@@ -1499,9 +1608,10 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
                     newNeg,
                     rec.distinctPositiveUsers
                 );
-                // A reply flagged as inaccurate or unsafe is pulled at once; other complaints accumulate.
+                // GLOBAL_SAFE requires quorum (>=2 negative reports or trust drop) before platform-wide quarantine
                 const shouldQuarantine =
-                    Boolean(options?.forceQuarantine) ||
+                    (Boolean(options?.forceQuarantine) &&
+                        (rec.scopeLevel !== 'GLOBAL_SAFE' || newNeg >= 2)) ||
                     newTrust < 0.45 ||
                     (newNeg >= 2 && newNeg >= rec.positiveCount);
                 const nextStatus: SemanticMemoryStatus = shouldQuarantine
@@ -1790,6 +1900,7 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
     private async fetchActiveMemoryCandidates(params: {
         locale: 'pt' | 'en';
         userId: string | null;
+        accountId: string | null;
         expandedQuery: string;
         queryEmbedding: number[] | null;
     }): Promise<SemanticMemoryRecord[]> {
@@ -1797,6 +1908,7 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
             const ownerScopes = params.userId
                 ? [GLOBAL_MEMORY_OWNER_SCOPE, params.userId]
                 : [GLOBAL_MEMORY_OWNER_SCOPE];
+            const accountFilterValue = params.accountId || '__ALL__';
 
             if (
                 this.pgvectorEnabled &&
@@ -1811,12 +1923,13 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
                     WHERE status = 'ACTIVE'
                       AND locale = $1
                       AND owner_scope = ANY($2::varchar[])
+                      AND (scope_level <> 'USER_PRIVATE' OR COALESCE(account_id, '__ALL__') = $4)
                     ORDER BY
                         CASE WHEN embedding_vector IS NOT NULL THEN embedding_vector <=> $3::vector ELSE 1 END ASC,
                         hit_count DESC
                     LIMIT 60
                     `,
-                    [params.locale, ownerScopes, vecLiteral]
+                    [params.locale, ownerScopes, vecLiteral, accountFilterValue]
                 );
                 return this.extractRows(res).map((r: any) => this.mapDbRow(r));
             }
@@ -1835,12 +1948,13 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
                     WHERE status = 'ACTIVE'
                       AND locale = $1
                       AND owner_scope = ANY($2::varchar[])
+                      AND (scope_level <> 'USER_PRIVATE' OR COALESCE(account_id, '__ALL__') = $4)
                     ORDER BY
                         ai_cosine_similarity_f64(embedding_f64, $3::float8[]) DESC,
                         hit_count DESC
                     LIMIT 60
                     `,
-                    [params.locale, ownerScopes, params.queryEmbedding]
+                    [params.locale, ownerScopes, params.queryEmbedding, accountFilterValue]
                 );
                 return this.extractRows(res).map((r: any) => this.mapDbRow(r));
             }
@@ -1852,10 +1966,11 @@ export class AiSemanticMemoryService implements OnApplicationBootstrap {
                 WHERE status = 'ACTIVE'
                   AND locale = $1
                   AND owner_scope = ANY($2::varchar[])
+                  AND (scope_level <> 'USER_PRIVATE' OR COALESCE(account_id, '__ALL__') = $3)
                 ORDER BY hit_count DESC, trust_score DESC, updated_at DESC
                 LIMIT 80
                 `,
-                [params.locale, ownerScopes]
+                [params.locale, ownerScopes, accountFilterValue]
             );
             return this.extractRows(res).map((r: any) => this.mapDbRow(r));
         } catch {

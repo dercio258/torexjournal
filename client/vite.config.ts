@@ -12,24 +12,11 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+        importScripts: ['/push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/download\//, /^\/socket\.io\//],
         runtimeCaching: [
-          {
-            urlPattern: /^\/uploads\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'torex-uploads-media-v1',
-              expiration: {
-                maxEntries: 250,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
           {
             urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
             handler: 'CacheFirst',
@@ -46,7 +33,7 @@ export default defineConfig({
           },
         ],
       },
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg', 'push-sw.js'],
       manifest: {
         name: 'TOREX JOURNAL',
         short_name: 'TOREX JOURNAL',
@@ -97,9 +84,6 @@ export default defineConfig({
           if (norm.includes('@tinymce')) {
             return 'vendor-tinymce';
           }
-          if (norm.includes('@paypal')) {
-            return 'vendor-paypal';
-          }
           if (norm.includes('socket.io-client') || norm.includes('engine.io-client') || norm.includes('protobufjs')) {
             return 'vendor-realtime';
           }
@@ -130,7 +114,7 @@ export default defineConfig({
     }
   },
   server: {
-    allowedHosts: true,
+    allowedHosts: ['localhost', '127.0.0.1'],
     proxy: {
       '/api/quant': {
         target: 'http://127.0.0.1:8090',
@@ -141,6 +125,10 @@ export default defineConfig({
         changeOrigin: true
       },
       '/uploads': {
+        target: 'http://localhost:3010',
+        changeOrigin: true
+      },
+      '/download': {
         target: 'http://localhost:3010',
         changeOrigin: true
       },

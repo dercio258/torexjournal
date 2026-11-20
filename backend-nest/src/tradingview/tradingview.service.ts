@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import * as TradingViewPkg from '@mathieuc/tradingview';
+import { getQuantInternalHeaders } from '../common/security/security.config';
 
 const TradingView: any = (TradingViewPkg as any)?.Client
     ? TradingViewPkg
@@ -107,6 +108,37 @@ export class TradingViewService {
 
     constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) { }
 
+    private setLastParquetMirrorAt(throttleKey: string, now: number): void {
+        const MAX_THROTTLE_KEYS = 200;
+        for (const [k, ts] of this.lastParquetMirrorAt.entries()) {
+            if (now - ts > 120_000) {
+                this.lastParquetMirrorAt.delete(k);
+            }
+        }
+        if (this.lastParquetMirrorAt.has(throttleKey)) {
+            this.lastParquetMirrorAt.delete(throttleKey);
+        }
+        while (this.lastParquetMirrorAt.size >= MAX_THROTTLE_KEYS) {
+            const oldest = this.lastParquetMirrorAt.keys().next().value;
+            if (oldest === undefined) break;
+            this.lastParquetMirrorAt.delete(oldest);
+        }
+        this.lastParquetMirrorAt.set(throttleKey, now);
+    }
+
+    private setMt5MemoryCandles(storeKey: string, candles: any[]): void {
+        const MAX_MEM_SERIES = 24;
+        if (this.mt5MemoryStore.has(storeKey)) {
+            this.mt5MemoryStore.delete(storeKey);
+        }
+        while (this.mt5MemoryStore.size >= MAX_MEM_SERIES) {
+            const oldest = this.mt5MemoryStore.keys().next().value;
+            if (oldest === undefined) break;
+            this.mt5MemoryStore.delete(oldest);
+        }
+        this.mt5MemoryStore.set(storeKey, candles);
+    }
+
     private mirrorCandlesToQuantParquet(symbol: string, timeframe: string, candles: any[]): void {
         if (!Array.isArray(candles) || candles.length < 20) return;
         const baseSym = this.normalizeBaseSymbol(symbol);
@@ -114,9 +146,9 @@ export class TradingViewService {
         const throttleKey = `${baseSym}:${tfKey}`;
         const now = Date.now();
         if (now - (this.lastParquetMirrorAt.get(throttleKey) || 0) < 45_000) return;
-        this.lastParquetMirrorAt.set(throttleKey, now);
+        this.setLastParquetMirrorAt(throttleKey, now);
 
-        const quantUrl = process.env.QUANT_ENGINE_URL || 'http://127.0.0.1:8090';
+        const quantUrl = (process.env.QUANT_ENGINE_URL || 'http://127.0.0.1:8001').trim().replace(/\/$/, '');
         const payload = {
             symbol: baseSym,
             timeframe: tfKey,
@@ -136,7 +168,7 @@ export class TradingViewService {
 
         void fetch(`${quantUrl}/api/quant/market-data/sync`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getQuantInternalHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload),
             signal: AbortSignal.timeout(5000),
         }).catch(() => {});
@@ -223,7 +255,7 @@ export class TradingViewService {
             .sort((a, b) => a.timestamp - b.timestamp)
             .slice(-15000);
 
-        this.mt5MemoryStore.set(storeKey, merged);
+        this.setMt5MemoryCandles(storeKey, merged);
         await this.cacheManager.set(storeKey, merged, 86_400_000); // 24h in Redis
 
         this.logger.log(`[MT5-FEED] Lote OHLCV armazenado: ${baseSym} (${tvTimeframe}) -> +${incoming.length} velas (Total em cache: ${merged.length})`);
@@ -238,7 +270,7 @@ export class TradingViewService {
         if (mem && mem.length > 0) return mem;
         const redis = await this.cacheManager.get<any[]>(storeKey);
         if (Array.isArray(redis) && redis.length > 0) {
-            this.mt5MemoryStore.set(storeKey, redis);
+            this.setMt5MemoryCandles(storeKey, redis);
             return redis;
         }
         return [];

@@ -200,6 +200,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     const datafeedRef = useRef<CustomKLineDatafeed | null>(null);
     const legendOverlayRef = useRef<ChartLegendOverlayRef | null>(null);
     const rafCrosshairRef = useRef<number | null>(null);
+    const screenshotCloseTimerRef = useRef<number | null>(null);
     const lastCrosshairPriceRef = useRef<number | null>(null);
     const isRestoringSnapshotRef = useRef<boolean>(false);
     const isHydratingCanvasRef = useRef<boolean>(true);
@@ -1716,14 +1717,32 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                 }
             });
 
+        let resizeRaf: number | null = null;
         const resizeObserver = new ResizeObserver(() => {
-            requestAnimationFrame(() => chart.resize());
+            if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+            resizeRaf = requestAnimationFrame(() => {
+                resizeRaf = null;
+                chart.resize();
+            });
         });
         resizeObserver.observe(el);
         const unbindYAxis = bindPrecisionYAxisEvents(el, chart);
 
         return () => {
-            if (rafCrosshairRef.current) cancelAnimationFrame(rafCrosshairRef.current);
+            if (rafCrosshairRef.current) {
+                cancelAnimationFrame(rafCrosshairRef.current);
+                rafCrosshairRef.current = null;
+            }
+            if (resizeRaf !== null) {
+                cancelAnimationFrame(resizeRaf);
+                resizeRaf = null;
+            }
+            if (screenshotCloseTimerRef.current !== null) {
+                window.clearTimeout(screenshotCloseTimerRef.current);
+                screenshotCloseTimerRef.current = null;
+            }
+            datafeedRef.current?.dispose();
+            datafeedRef.current = null;
             unbindYAxis();
             setOverlayChartDataGetter(null);
             resizeObserver.disconnect();
@@ -1837,7 +1856,11 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         setJournalNotes((prev) => (prev ? `${prev}${noteEntry}` : noteEntry.trim()));
         setScreenshotFeedback(isEn ? 'Snapshot saved to Session Journal!' : 'Captura salva no Journal da Sessão!');
         setRightDrawer('journal');
-        setTimeout(() => {
+        if (screenshotCloseTimerRef.current !== null) {
+            window.clearTimeout(screenshotCloseTimerRef.current);
+        }
+        screenshotCloseTimerRef.current = window.setTimeout(() => {
+            screenshotCloseTimerRef.current = null;
             setScreenshotModalOpen(false);
         }, 700);
     }, [

@@ -170,11 +170,11 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                         )}
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="text-xs font-semibold text-fg truncate">
-                                            {s.name || s.username}
-                                        </p>
-                                        <p className="text-[10px] font-mono text-fg-subtle truncate">
+                                        <p className="text-xs font-semibold text-fg truncate font-mono">
                                             @{s.username}
+                                        </p>
+                                        <p className="text-[10px] text-fg-subtle truncate">
+                                            {isEn ? 'Community Trader' : 'Trader'}
                                         </p>
                                     </div>
                                 </div>
@@ -186,7 +186,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                             onMessageUser({
                                                 id: s.id,
                                                 username: s.username,
-                                                name: s.name,
                                                 avatarUrl: s.avatarUrl,
                                             })
                                         }

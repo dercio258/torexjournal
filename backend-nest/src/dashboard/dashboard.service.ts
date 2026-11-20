@@ -7,7 +7,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { TradeEntity } from '../mt5/trade.entity';
 import { PositionEntity } from '../mt5/position.entity';
-import { AccountEntity } from '../account/account.entity';
+import { AccountEntity, AccountType } from '../account/account.entity';
 import { MentalLog } from './mental-log.entity';
 import { TechnicalJournal } from './technical-journal.entity';
 import { BacktestSession } from './backtest-session.entity';
@@ -18,6 +18,7 @@ import {
 } from './backtest-normalized.entity';
 import { DailyNoteEntity, TradeNoteEntity } from './journal-notes.entity';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
+import { getQuantInternalHeaders } from '../common/security/security.config';
 
 @Injectable()
 export class DashboardService {
@@ -370,11 +371,24 @@ export class DashboardService {
         }
     }
 
+    private setUserCacheVersion(userId: string, version: number) {
+        const MAX_CACHE_VERSION_KEYS = 2000;
+        if (this.userCacheVersions.has(userId)) {
+            this.userCacheVersions.delete(userId);
+        }
+        while (this.userCacheVersions.size >= MAX_CACHE_VERSION_KEYS) {
+            const oldestKey = this.userCacheVersions.keys().next().value;
+            if (oldestKey === undefined) break;
+            this.userCacheVersions.delete(oldestKey);
+        }
+        this.userCacheVersions.set(userId, version);
+    }
+
     private async getUserCacheVersion(userId: string): Promise<number> {
         try {
             const cachedVer = await this.cacheManager.get<number>(`dashboard:ver:${userId}`);
             if (typeof cachedVer === 'number' && cachedVer > 0) {
-                this.userCacheVersions.set(userId, cachedVer);
+                this.setUserCacheVersion(userId, cachedVer);
                 return cachedVer;
             }
         } catch { }
@@ -392,6 +406,15 @@ export class DashboardService {
             });
         }
         return account;
+    }
+
+    private getUsdConversionFactor(currency?: string | null): number {
+        const code = String(currency || 'USD').trim().toUpperCase();
+        if (code === 'USC' || code === 'CENT') return 0.01;
+        if (code === 'MZN') return 1 / 65;
+        if (code === 'EUR') return 1.08;
+        if (code === 'GBP') return 1.27;
+        return 1;
     }
 
     /**
@@ -413,9 +436,11 @@ export class DashboardService {
             };
         }
 
-        const accounts = await this.accountRepo.find({
+        const allAccounts = await this.accountRepo.find({
             where: { userId, isArchived: false }
         });
+        const nonDemoAccounts = allAccounts.filter(a => a.type !== AccountType.DEMO);
+        const accounts = nonDemoAccounts.length > 0 ? nonDemoAccounts : allAccounts;
         return {
             isConsolidated: true,
             accounts,
@@ -1259,11 +1284,21 @@ export class DashboardService {
             const todayStr = this.formatDateKeyInTz(new Date(), effectiveTz);
             let todayPnL = 0;
 
+            const accCurrencyById = new Map(accounts.map(a => [a.id, a.currency || 'USD']));
+            const normalizeMultiCurrencyPnl =
+                isConsolidated &&
+                new Set(accounts.map(a => String(a.currency || 'USD').trim().toUpperCase())).size > 1;
+
             for (const t of trades) {
                 const profit = Number(t.profit) || 0;
                 const commission = Number(t.commission) || 0;
                 const swap = Number(t.swap) || 0;
-                const pnl = profit + commission + swap;
+                const rawPnl = profit + commission + swap;
+                const tAccId = String(t.accountId || (t as any).account_id || '');
+                const fxFactor = normalizeMultiCurrencyPnl
+                    ? this.getUsdConversionFactor(accCurrencyById.get(tAccId))
+                    : 1;
+                const pnl = rawPnl * fxFactor;
 
                 totalPnL += pnl;
 
@@ -2730,7 +2765,7 @@ export class DashboardService {
         try {
             const currentVer = await this.getUserCacheVersion(userId);
             const nextVer = currentVer + 1;
-            this.userCacheVersions.set(userId, nextVer);
+            this.setUserCacheVersion(userId, nextVer);
             await this.cacheManager.set(`dashboard:ver:${userId}`, nextVer, 86400000);
         } catch (e) {
             console.warn(`[DashboardService] Cache invalidation warning for user ${userId}:`, e.message);
@@ -2903,11 +2938,21 @@ export class DashboardService {
         }
 
         const accMap = new Map(accounts.map(a => [a.id, a]));
-        const totalTradesPnl = rawTrades.reduce((sum, t) => sum + (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0), 0);
+        const normalizeAdvMultiCurrency =
+            isConsolidated &&
+            new Set(accounts.map(a => String(a.currency || 'USD').trim().toUpperCase())).size > 1;
+        const totalTradesPnl = rawTrades.reduce((sum, t) => {
+            const rawPnl = (Number(t.profit) || 0) + (Number(t.commission) || 0) + (Number(t.swap) || 0);
+            const tAccId = String(t.accountId || (t as any).account_id || '');
+            const fx = normalizeAdvMultiCurrency ? this.getUsdConversionFactor(accMap.get(tAccId)?.currency) : 1;
+            return sum + rawPnl * fx;
+        }, 0);
         const rawStartBalance = isConsolidated 
             ? accounts.reduce((sum, a) => {
                 const initBal = Number(a.initialBalance) || 0;
-                return sum + (initBal > 0 ? initBal : Math.max(0, Number(a.balance || 0)));
+                const base = initBal > 0 ? initBal : Math.max(0, Number(a.balance || 0));
+                const fx = normalizeAdvMultiCurrency ? this.getUsdConversionFactor(a.currency) : 1;
+                return sum + base * fx;
             }, 0)
             : (Number(targetAccount?.initialBalance) > 0
                 ? Number(targetAccount?.initialBalance)
@@ -2919,9 +2964,11 @@ export class DashboardService {
         currentEquity = startBalance;
 
         for (const t of rawTrades) {
-            const profit = Number(t.profit) || 0;
-            const comm = Number(t.commission) || 0;
-            const swap = Number(t.swap) || 0;
+            const tAccId = String(t.accountId || (t as any).account_id || '');
+            const fx = normalizeAdvMultiCurrency ? this.getUsdConversionFactor(accMap.get(tAccId)?.currency) : 1;
+            const profit = (Number(t.profit) || 0) * fx;
+            const comm = (Number(t.commission) || 0) * fx;
+            const swap = (Number(t.swap) || 0) * fx;
             const vol = Number(t.volume) || 0;
             const netPnl = profit + comm + swap;
 
@@ -3165,7 +3212,7 @@ export class DashboardService {
                 try {
                     const pyRes = await fetch(`${quantUrl.replace(/\/$/, '')}/api/quant/simulate/what-if`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: getQuantInternalHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify({
                             trades: rawTrades.map((t: any) => ({
                                 id: t.id ? String(t.id) : undefined,
@@ -3975,7 +4022,7 @@ export class DashboardService {
                 try {
                     const pyRes = await fetch(`${quantUrl.replace(/\/$/, '')}/api/quant/reconcile-session`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: getQuantInternalHeaders({ 'Content-Type': 'application/json' }),
                         body: JSON.stringify({
                             orders: mergedConfig.orders,
                             initialBalance: initCap,

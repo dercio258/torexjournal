@@ -15,10 +15,18 @@ import {
     renderStatusEyebrow,
 } from './email-templates';
 
+const NO_TRACK_SECURITY_TEMPLATES = new Set([
+    'OTP_CODE',
+    'PASSWORD_RECOVERY',
+    'ACCOUNT_LOCKED',
+    'LOGIN_ALERT',
+]);
+
 @Injectable()
 export class EmailService implements OnModuleDestroy {
     private transporter: nodemailer.Transporter;
     private readonly logger = new Logger(EmailService.name);
+    private lastResetAt = 0;
 
     constructor(
         private readonly configService: ConfigService,
@@ -87,12 +95,24 @@ export class EmailService implements OnModuleDestroy {
     }
 
     private resetTransporter(): void {
-        try {
-            this.transporter?.close?.();
-        } catch {
-            // Ignore close failure
+        const now = Date.now();
+        if (now - this.lastResetAt < 15_000) {
+            return;
         }
+        this.lastResetAt = now;
+        const previous = this.transporter;
         this.transporter = this.createTransporter();
+        if (previous) {
+            // Delay closing previous pooled socket so concurrent workers in-flight can finish safely
+            const timer = setTimeout(() => {
+                try {
+                    previous.close?.();
+                } catch {
+                    // Ignore close failure
+                }
+            }, 10_000);
+            timer.unref?.();
+        }
     }
 
     async sendEmail(
@@ -121,18 +141,20 @@ export class EmailService implements OnModuleDestroy {
         const baseHtml = html || this.wrapProfessionalTemplate(subject, text);
         const resolvedText = text && text.trim().length > 0 ? text : htmlToPlainText(baseHtml);
 
-        const decorated = this.analyticsService
-            ? await this.analyticsService.createEmailTrackingTokenAndDecorateHtml({
-                  to,
-                  template: templateLabel,
-                  subject,
-                  html: baseHtml,
-                  userId: options.userId || null,
-                  broadcastId: options.broadcastId || null,
-                  utmCampaign: options.utmCampaign || null,
-                  utmMedium: options.utmMedium || null,
-              })
-            : { html: baseHtml, token: null };
+        const skipTracking = NO_TRACK_SECURITY_TEMPLATES.has(String(templateLabel).toUpperCase());
+        const decorated =
+            this.analyticsService && !skipTracking
+                ? await this.analyticsService.createEmailTrackingTokenAndDecorateHtml({
+                      to,
+                      template: templateLabel,
+                      subject,
+                      html: baseHtml,
+                      userId: options.userId || null,
+                      broadcastId: options.broadcastId || null,
+                      utmCampaign: options.utmCampaign || null,
+                      utmMedium: options.utmMedium || null,
+                  })
+                : { html: baseHtml, token: null };
         const resolvedHtml = decorated.html;
 
         if (!user || !pass) {

@@ -16,11 +16,13 @@ import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import {
     Activity,
     BarChart3,
+    Bell,
     CheckCircle2,
     Database,
     Download,
     Eye,
     Filter,
+    Gift,
     Globe,
     Mail,
     MousePointerClick,
@@ -63,8 +65,78 @@ type TabKey =
     | 'pages'
     | 'buttons'
     | 'emails'
+    | 'push_ctr'
+    | 'referrals'
     | 'pixels'
     | 'torex_ai';
+
+interface PushInsightsResponse {
+    windowDays: number;
+    summary: {
+        activeSubscriptions: number;
+        activeSubscribers: number;
+        standaloneDevices: number;
+        sent: number;
+        clicked: number;
+        dismissed: number;
+        ignored: number;
+        ctrPct: number;
+        dismissRatePct: number;
+        engagedDispatches: number;
+        moderatedDispatches: number;
+        fatiguePausedDispatches: number;
+    };
+    moderationUsers: {
+        engaged: number;
+        moderated: number;
+        fatiguePaused: number;
+    };
+    byCategory: Array<{
+        category: string;
+        sent: number;
+        clicked: number;
+        dismissed: number;
+        ignored: number;
+        ctrPct: number;
+    }>;
+    timeline: Array<{
+        day: string;
+        sent: number;
+        clicked: number;
+        dismissed: number;
+    }>;
+}
+
+interface ReferralAnalyticsResponse {
+    windowDays: number;
+    summary: {
+        totalReferrals: number;
+        verifiedReferrals: number;
+        paidReferrals: number;
+        conversionToPaidPct: number;
+        totalCreditsIssuedUsd: number;
+        tierBoostsUnlocked: number;
+    };
+    topAffiliates: Array<{
+        userId: string;
+        username: string;
+        referralCode: string | null;
+        creditsUsd: number;
+        tierBoostUnlocked: boolean;
+        totalInvited: number;
+        verifiedCount: number;
+        paidCount: number;
+    }>;
+    recentReferrals: Array<{
+        id: string;
+        referrerUsername: string;
+        referredUsername: string;
+        status: string;
+        rewardCreditsUsd: number;
+        tierBoostAwarded: boolean;
+        createdAt: string;
+    }>;
+}
 
 interface AiTrainingReportResponse {
     executiveSummary: {
@@ -322,6 +394,8 @@ const TABS: Array<{ key: TabKey; label: string; icon: any }> = [
     { key: 'pages', label: 'Páginas Totais', icon: Eye },
     { key: 'buttons', label: 'Botões & Intenções', icon: MousePointerClick },
     { key: 'emails', label: 'E-mails & CTR', icon: Mail },
+    { key: 'push_ctr', label: 'Push & Moderação CTR', icon: Bell },
+    { key: 'referrals', label: 'Afiliados & Crescimento', icon: Gift },
     { key: 'pixels', label: 'Pixels & Eventos ao Vivo', icon: Radio },
     { key: 'torex_ai', label: 'Torex AI — Treino & Memória', icon: Sparkles },
 ];
@@ -347,6 +421,9 @@ export const AdminAnalytics = () => {
     const [aiLoading, setAiLoading] = useState<boolean>(false);
     const [exportingFormat, setExportingFormat] = useState<string | null>(null);
     const [reviewingMemId, setReviewingMemId] = useState<string | null>(null);
+    const [pushInsights, setPushInsights] = useState<PushInsightsResponse | null>(null);
+    const [referralInsights, setReferralInsights] = useState<ReferralAnalyticsResponse | null>(null);
+    const [growthLoading, setGrowthLoading] = useState<boolean>(false);
 
     const fetchAll = useCallback(async () => {
         setLoading(true);
@@ -407,6 +484,28 @@ export const AdminAnalytics = () => {
             void fetchAiTrainingData();
         }
     }, [activeTab, fetchAiTrainingData]);
+
+    const fetchPushAndReferrals = useCallback(async () => {
+        setGrowthLoading(true);
+        try {
+            const [pushRes, refRes] = await Promise.all([
+                api.get<PushInsightsResponse>('/admin/analytics/push-insights', { params: { days } }),
+                api.get<ReferralAnalyticsResponse>('/admin/analytics/referrals', { params: { days } }),
+            ]);
+            setPushInsights(pushRes.data);
+            setReferralInsights(refRes.data);
+        } catch (err) {
+            console.error('Failed to load push/referral insights:', err);
+        } finally {
+            setGrowthLoading(false);
+        }
+    }, [days]);
+
+    useEffect(() => {
+        if (activeTab === 'push_ctr' || activeTab === 'referrals') {
+            void fetchPushAndReferrals();
+        }
+    }, [activeTab, fetchPushAndReferrals]);
 
     const handleDownloadAiArtifact = async (
         format: 'markdown' | 'json' | 'sft_jsonl' | 'rag_qa_jsonl' | 'dpo_jsonl' | 'eval_jsonl',
@@ -1744,6 +1843,236 @@ export const AdminAnalytics = () => {
 
                     {/* Fila de revisão: respostas rejeitadas pelos utilizadores */}
                     <AiRejectedRepliesCard />
+                </div>
+            )}
+
+            {/* TAB PUSH & MODERAÇÃO CTR */}
+            {activeTab === 'push_ctr' && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-base font-bold text-fg">Telemetria Web Push &amp; Moderação Comportamental</h3>
+                            <p className="text-xs text-fg-muted">
+                                Taxa de cliques (CTR), descartes e redução automática de frequência para evitar fadiga de utilizadores.
+                            </p>
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={fetchPushAndReferrals}
+                            isLoading={growthLoading}
+                            icon={<RefreshCw className="w-3.5 h-3.5" />}
+                        >
+                            Recarregar Push
+                        </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-6 gap-3">
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Subscrições Ativas</div>
+                            <div className="text-xl font-bold text-fg mt-1">{pushInsights?.summary.activeSubscribers ?? 0}</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">{pushInsights?.summary.standaloneDevices ?? 0} apps PWA</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Push Enviados</div>
+                            <div className="text-xl font-bold text-fg mt-1">{pushInsights?.summary.sent ?? 0}</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">Últimos {days} dias</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Cliques (CTR)</div>
+                            <div className="text-xl font-bold text-emerald-400 mt-1">{pushInsights?.summary.ctrPct ?? 0}%</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">{pushInsights?.summary.clicked ?? 0} cliques</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Dispensados / Ignorados</div>
+                            <div className="text-xl font-bold text-amber-400 mt-1">{pushInsights?.summary.dismissRatePct ?? 0}%</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">
+                                {pushInsights?.summary.dismissed ?? 0} fechados · {pushInsights?.summary.ignored ?? 0} sem clique
+                            </div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Modo Moderado (24h)</div>
+                            <div className="text-xl font-bold text-indigo-400 mt-1">{pushInsights?.moderationUsers.moderated ?? 0}</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">Traders com &ge;3 ignoradas</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Fadiga Pausada (72h)</div>
+                            <div className="text-xl font-bold text-rose-400 mt-1">{pushInsights?.moderationUsers.fatiguePaused ?? 0}</div>
+                            <div className="text-[11px] text-fg-muted mt-0.5">Traders com &ge;6 ignoradas</div>
+                        </Card>
+                    </div>
+
+                    <Card className="p-6 border-line bg-surface/50 overflow-hidden">
+                        <h4 className="text-sm font-bold text-fg mb-4">Desempenho por Categoria de Push</h4>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs text-fg-muted">
+                                <thead className="border-b border-line text-fg uppercase">
+                                    <tr>
+                                        <th className="py-2 pr-3">Categoria</th>
+                                        <th className="py-2 pr-3">Enviados</th>
+                                        <th className="py-2 pr-3">Cliques</th>
+                                        <th className="py-2 pr-3">Fechados</th>
+                                        <th className="py-2 pr-3">Ignorados</th>
+                                        <th className="py-2">CTR</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-line">
+                                    {(pushInsights?.byCategory || []).length === 0 ? (
+                                        <tr>
+                                            <td colSpan={6} className="py-6 text-center text-fg-subtle">
+                                                Nenhum envio Push registado nesta janela.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        (pushInsights?.byCategory || []).map((cat) => (
+                                            <tr key={cat.category}>
+                                                <td className="py-2 pr-3 font-mono font-semibold text-fg">{cat.category}</td>
+                                                <td className="py-2 pr-3">{cat.sent}</td>
+                                                <td className="py-2 pr-3 text-emerald-400 font-semibold">{cat.clicked}</td>
+                                                <td className="py-2 pr-3 text-amber-400">{cat.dismissed}</td>
+                                                <td className="py-2 pr-3">{cat.ignored}</td>
+                                                <td className="py-2 font-mono font-bold text-accent-fg">{cat.ctrPct}%</td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </Card>
+                </div>
+            )}
+
+            {/* TAB AFILIADOS & CRESCIMENTO */}
+            {activeTab === 'referrals' && (
+                <div className="space-y-6">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-base font-bold text-fg">Programa de Afiliados, Créditos &amp; Upgrade de Nível</h3>
+                            <p className="text-xs text-fg-muted">
+                                Recompensas híbridas: crédito por verificação + crédito por conversão paga + upgrade automático de tier.
+                            </p>
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={fetchPushAndReferrals}
+                            isLoading={growthLoading}
+                            icon={<RefreshCw className="w-3.5 h-3.5" />}
+                        >
+                            Recarregar Afiliados
+                        </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Total Convites</div>
+                            <div className="text-xl font-bold text-fg mt-1">{referralInsights?.summary.totalReferrals ?? 0}</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Contas Verificadas</div>
+                            <div className="text-xl font-bold text-accent-fg mt-1">{referralInsights?.summary.verifiedReferrals ?? 0}</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Conversões Pagas</div>
+                            <div className="text-xl font-bold text-emerald-400 mt-1">{referralInsights?.summary.paidReferrals ?? 0}</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Taxa Verif. → Pago</div>
+                            <div className="text-xl font-bold text-cyan-400 mt-1">{referralInsights?.summary.conversionToPaidPct ?? 0}%</div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Créditos Emitidos</div>
+                            <div className="text-xl font-bold text-emerald-300 mt-1">
+                                ${(referralInsights?.summary.totalCreditsIssuedUsd ?? 0).toFixed(2)}
+                            </div>
+                        </Card>
+                        <Card className="p-4 border-line bg-surface/60">
+                            <div className="text-[11px] text-fg-subtle">Tier Boosts Ativos</div>
+                            <div className="text-xl font-bold text-amber-400 mt-1">{referralInsights?.summary.tierBoostsUnlocked ?? 0}</div>
+                        </Card>
+                    </div>
+
+                    <div className="grid lg:grid-cols-12 gap-6">
+                        <Card className="lg:col-span-6 p-6 border-line bg-surface/50 overflow-hidden">
+                            <h4 className="text-sm font-bold text-fg mb-4">Top Afiliados</h4>
+                            <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+                                <table className="w-full text-left text-xs text-fg-muted">
+                                    <thead className="border-b border-line text-fg uppercase sticky top-0 bg-surface">
+                                        <tr>
+                                            <th className="py-2 pr-3">Trader</th>
+                                            <th className="py-2 pr-3">Código</th>
+                                            <th className="py-2 pr-3">Verif / Pagos</th>
+                                            <th className="py-2 pr-3">Créditos</th>
+                                            <th className="py-2">Boost</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-line">
+                                        {(referralInsights?.topAffiliates || []).length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} className="py-6 text-center text-fg-subtle">
+                                                    Nenhum afiliado registou indicações ainda.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            (referralInsights?.topAffiliates || []).map((aff) => (
+                                                <tr key={aff.userId}>
+                                                    <td className="py-2 pr-3 font-semibold text-fg">@{aff.username}</td>
+                                                    <td className="py-2 pr-3 font-mono text-[11px]">{aff.referralCode || '—'}</td>
+                                                    <td className="py-2 pr-3">{aff.verifiedCount} / <span className="text-emerald-400 font-semibold">{aff.paidCount}</span></td>
+                                                    <td className="py-2 pr-3 font-mono text-emerald-400">${aff.creditsUsd.toFixed(2)}</td>
+                                                    <td className="py-2">
+                                                        {aff.tierBoostUnlocked ? (
+                                                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold">Desbloqueado</span>
+                                                        ) : (
+                                                            <span className="text-[11px] text-fg-subtle">—</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </Card>
+
+                        <Card className="lg:col-span-6 p-6 border-line bg-surface/50 overflow-hidden">
+                            <h4 className="text-sm font-bold text-fg mb-4">Indicações Recentes</h4>
+                            <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+                                <table className="w-full text-left text-xs text-fg-muted">
+                                    <thead className="border-b border-line text-fg uppercase sticky top-0 bg-surface">
+                                        <tr>
+                                            <th className="py-2 pr-3">Embaixador</th>
+                                            <th className="py-2 pr-3">Convidado</th>
+                                            <th className="py-2 pr-3">Status</th>
+                                            <th className="py-2">Recompensa</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-line">
+                                        {(referralInsights?.recentReferrals || []).length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="py-6 text-center text-fg-subtle">
+                                                    Sem indicações recentes.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            (referralInsights?.recentReferrals || []).map((rec) => (
+                                                <tr key={rec.id}>
+                                                    <td className="py-2 pr-3 text-fg">@{rec.referrerUsername}</td>
+                                                    <td className="py-2 pr-3">@{rec.referredUsername}</td>
+                                                    <td className="py-2 pr-3">
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${rec.status === 'PAID' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-accent/15 text-accent-fg'}`}>
+                                                            {rec.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2 font-mono text-emerald-400">+${rec.rewardCreditsUsd.toFixed(2)}</td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </Card>
+                    </div>
                 </div>
             )}
         </div>

@@ -27,12 +27,32 @@ import {
 
 const MAX_PERSISTED_QUERY_AGE_MS = 7 * 24 * 60 * 60_000;
 const SKIP_QUERY_PERSIST_PREFIXES = new Set(['health', 'admin', 'ai-job']);
+export const MAX_SYNC_RETRY_ATTEMPTS = 8;
 
 let initialized = false;
 let registeredQueryClient: QueryClient | null = null;
 let flushPromise: Promise<void> | null = null;
 let retryTimer: number | null = null;
 let bannerTimer: number | null = null;
+
+async function runWithNavigatorSyncLock(task: () => Promise<void>): Promise<void> {
+    if (
+        typeof navigator !== 'undefined' &&
+        navigator.locks &&
+        typeof navigator.locks.request === 'function'
+    ) {
+        await navigator.locks.request(
+            'torex_offline_sync_lock',
+            { ifAvailable: true },
+            async (lock) => {
+                if (!lock) return;
+                await task();
+            },
+        );
+        return;
+    }
+    await task();
+}
 
 export function isNetworkError(error: any): boolean {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -118,7 +138,7 @@ function extractReadableError(err: any): string {
 export async function flushAllOfflineQueues(): Promise<void> {
     if (flushPromise) return flushPromise;
 
-    flushPromise = (async () => {
+    flushPromise = runWithNavigatorSyncLock(async () => {
         const store = useOfflineSyncStore.getState();
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
         if (!token) {
@@ -141,9 +161,10 @@ export async function flushAllOfflineQueues(): Promise<void> {
 
         try {
             // 1. Upload pending media blobs first so mutation payloads can reference final /uploads/... URLs
-            const [pendingMedia, allMedia] = await Promise.all([
+            const [pendingMedia, allMedia, initialIdMap] = await Promise.all([
                 listPendingMediaOutbox(userScope),
                 listAllMediaOutbox(userScope),
+                getAllIdMappings(),
             ]);
 
             const mediaMap = new Map<string, string>();
@@ -153,6 +174,7 @@ export async function flushAllOfflineQueues(): Promise<void> {
                 }
             }
 
+            let mediaNetworkRetries = 0;
             for (const media of pendingMedia) {
                 try {
                     const formData = new FormData();
@@ -165,8 +187,24 @@ export async function flushAllOfflineQueues(): Promise<void> {
                     }
                     formData.append('file', media.blob, media.fileName || 'screenshot.png');
 
+                    const rawMediaAcc = media.extraFields?.accountId;
+                    const resolvedMediaAcc =
+                        rawMediaAcc &&
+                        rawMediaAcc !== 'all' &&
+                        rawMediaAcc !== 'undefined' &&
+                        rawMediaAcc !== 'null'
+                            ? initialIdMap[rawMediaAcc] || rawMediaAcc
+                            : undefined;
+
+                    const mediaHeaders: Record<string, string> = {
+                        'Content-Type': 'multipart/form-data',
+                    };
+                    if (resolvedMediaAcc) {
+                        mediaHeaders['x-account-id'] = resolvedMediaAcc;
+                    }
+
                     const uploadRes = await api.post(media.targetEndpoint, formData, {
-                        headers: { 'Content-Type': 'multipart/form-data' },
+                        headers: mediaHeaders,
                         _isSyncEngineRequest: true,
                     } as any);
 
@@ -183,12 +221,13 @@ export async function flushAllOfflineQueues(): Promise<void> {
                         break;
                     }
                     if (isNetworkError(err)) {
+                        mediaNetworkRetries += 1;
                         networkBlocked = true;
                         store.setOnlineStatus(false);
-                        scheduleRetry(1);
+                        scheduleRetry(Math.min(MAX_SYNC_RETRY_ATTEMPTS, mediaNetworkRetries));
                         break;
                     }
-                    // Permanent 4xx media rejection: remove broken upload to avoid blocking other items
+                    // Permanent 4xx/5xx media rejection: remove broken upload to avoid blocking other items
                     await deleteMediaOutboxItem(media.mediaId);
                 }
             }
@@ -208,9 +247,22 @@ export async function flushAllOfflineQueues(): Promise<void> {
                         item.body !== undefined
                             ? replaceDeepTokens(item.body, idMap, mediaMap)
                             : undefined;
-                    const resolvedAccountHeader = item.accountHeader
-                        ? idMap[item.accountHeader] || item.accountHeader
+                    const rawAccountCandidate =
+                        item.accountHeader ||
+                        resolvedParams?.accountId ||
+                        (resolvedBody && typeof resolvedBody === 'object'
+                            ? resolvedBody.accountId
+                            : undefined);
+                    const mappedAcc = rawAccountCandidate
+                        ? idMap[String(rawAccountCandidate)] || String(rawAccountCandidate)
                         : undefined;
+                    const resolvedAccountHeader =
+                        mappedAcc &&
+                        mappedAcc !== 'all' &&
+                        mappedAcc !== 'undefined' &&
+                        mappedAcc !== 'null'
+                            ? mappedAcc
+                            : undefined;
 
                     try {
                         const headers: Record<string, string> = {
@@ -285,7 +337,13 @@ export async function flushAllOfflineQueues(): Promise<void> {
 
                         if (
                             status &&
-                            (status === 400 || status === 403 || status === 404 || status === 422)
+                            (status === 400 ||
+                                status === 402 ||
+                                status === 403 ||
+                                status === 404 ||
+                                status === 409 ||
+                                status === 413 ||
+                                status === 422)
                         ) {
                             await updateSyncOutboxItem({
                                 ...item,
@@ -296,8 +354,18 @@ export async function flushAllOfflineQueues(): Promise<void> {
                             continue;
                         }
 
-                        // Network failure, 429, or 5xx -> retry with exponential backoff keeping FIFO order
+                        // Network failure, 429, or 5xx -> retry with bounded ceiling (MAX_SYNC_RETRY_ATTEMPTS)
                         const nextAttempts = item.attempts + 1;
+                        if (!isNetworkError(err) && nextAttempts >= MAX_SYNC_RETRY_ATTEMPTS) {
+                            await updateSyncOutboxItem({
+                                ...item,
+                                status: 'failed_permanent',
+                                attempts: nextAttempts,
+                                lastError: `Limite de ${MAX_SYNC_RETRY_ATTEMPTS} tentativas excedido: ${extractReadableError(err)}`,
+                            });
+                            continue;
+                        }
+
                         await updateSyncOutboxItem({
                             ...item,
                             status: 'pending',
@@ -394,7 +462,7 @@ export async function flushAllOfflineQueues(): Promise<void> {
             void pruneStaleHttpCache(userScope);
             flushPromise = null;
         }
-    })();
+    });
 
     return flushPromise;
 }

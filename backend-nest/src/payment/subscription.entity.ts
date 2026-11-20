@@ -28,7 +28,7 @@ export enum SubscriptionCycle {
 @Entity('subscriptions')
 @Index(['userId', 'status', 'currentPeriodEnd'])
 @Index(['paymentReference'])
-@Index(['debitoTransactionId'])
+@Index(['externalTransactionId'])
 export class Subscription {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -50,8 +50,8 @@ export class Subscription {
     @Column({ nullable: true })
     paymentReference: string;
 
-    @Column({ nullable: true })
-    debitoTransactionId: string;
+    @Column({ name: 'debitoTransactionId', type: 'varchar', nullable: true })
+    externalTransactionId: string | null;
 
     @Column({
         type: 'enum',

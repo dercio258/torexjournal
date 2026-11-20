@@ -43,6 +43,8 @@ export interface TradingAccount {
     leverage: number;
     isConnected: boolean;
     lastSeen: string | null;
+    zeroBalanceSince?: string | null;
+    inactivityDisconnectAt?: string | null;
     appToken: string;
     userId: string;
     isPrimary: boolean;
@@ -233,11 +235,16 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
 
         const task = (async () => {
+            const requestToken = localStorage.getItem('token');
             try {
                 if (accounts.length === 0) {
                     setIsLoading(true);
                 }
                 const accRes = await api.get('/accounts?includeArchived=true');
+                const currentToken = localStorage.getItem('token');
+                if (!requestToken || currentToken !== requestToken) {
+                    return;
+                }
                 const list: TradingAccount[] = Array.isArray(accRes.data) ? accRes.data : [];
                 setAccounts(list);
                 writeCachedAccounts(list);

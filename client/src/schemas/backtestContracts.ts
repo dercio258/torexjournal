@@ -44,11 +44,11 @@ export const ReplayOrderSchema = z
         pnl: z.number().finite().catch(0),
         rMultiple: z.number().finite().optional(),
         mfe: z.preprocess(
-            (v) => (v === null || v === undefined ? 0 : Math.abs(Number(v)) || 0),
+            (v) => (v === null ? null : v === undefined ? undefined : Math.abs(Number(v)) || 0),
             z.number().finite().nonnegative().nullable().optional()
         ),
         mae: z.preprocess(
-            (v) => (v === null || v === undefined ? 0 : Math.abs(Number(v)) || 0),
+            (v) => (v === null ? null : v === undefined ? undefined : Math.abs(Number(v)) || 0),
             z.number().finite().nonnegative().nullable().optional()
         ),
         openedAt: z.number().finite(),

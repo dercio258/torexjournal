@@ -57,14 +57,73 @@ const DEFAULT_QUICK_PROMPTS_EN = [
 ];
 
 const PROCESSING_STAGES_PT = [
-    'Analisando a questão...',
-    'Escrevendo...',
+    'Transcrevendo e interpretando a questão...',
+    'Auditando métricas reais da conta...',
+    'Cruzando padrões de risco e diário...',
+    'Estruturando diagnóstico executivo...',
 ];
 
 const PROCESSING_STAGES_EN = [
-    'Analyzing telemetry...',
-    'Drafting insights...',
+    'Transcribing and parsing your question...',
+    'Auditing verified account metrics...',
+    'Cross-checking risk & journal patterns...',
+    'Structuring executive diagnosis...',
 ];
+
+function extractTranscriberSignals(
+    question: string,
+    isEn: boolean,
+): { symbol: string | null; period: string; focus: string } {
+    const raw = String(question || '').trim();
+    const lower = raw
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+    const symbolMatchers: Array<[RegExp, string]> = [
+        [/\b(xauusd|xau|ouro|gold)\b/, 'XAUUSD'],
+        [/\b(xagusd|xag|prata|silver)\b/, 'XAGUSD'],
+        [/\b(eurusd|euro)\b/, 'EURUSD'],
+        [/\b(gbpusd|libra|cable)\b/, 'GBPUSD'],
+        [/\b(usdjpy|iene)\b/, 'USDJPY'],
+        [/\b(btcusd|btc|bitcoin)\b/, 'BTCUSD'],
+        [/\b(ethusd|eth|ethereum)\b/, 'ETHUSD'],
+        [/\b(nas100|us100|nasdaq|ustec)\b/, 'US100'],
+        [/\b(us30|dj30|dow)\b/, 'US30'],
+        [/\b(v75|volatility 75)\b/, 'V75'],
+    ];
+    let detectedSymbol: string | null = null;
+    for (const [rx, label] of symbolMatchers) {
+        if (rx.test(lower)) {
+            detectedSymbol = label;
+            break;
+        }
+    }
+    if (!detectedSymbol) {
+        const pairMatch = raw.toUpperCase().match(/\b([A-Z]{6})\b/);
+        if (pairMatch) detectedSymbol = pairMatch[1];
+    }
+
+    let period = isEn ? 'Full history' : 'Histórico completo';
+    if (/\b(hoje|today)\b/.test(lower)) period = isEn ? 'Today' : 'Hoje';
+    else if (/\b(7\s*dias|ultima semana|7d|last week|past 7 days)\b/.test(lower))
+        period = isEn ? 'Last 7d' : 'Últimos 7d';
+    else if (/\b(14\s*dias|2\s*semanas|14d)\b/.test(lower))
+        period = isEn ? 'Last 14d' : 'Últimos 14d';
+    else if (/\b(30\s*dias|mes|30d|month)\b/.test(lower))
+        period = isEn ? 'Last 30d' : 'Últimos 30d';
+
+    let focus = isEn ? 'Performance & Risk' : 'Performance & Risco';
+    if (/(diario|journal|emocion|psicolog|plano|disciplin|playbook)/.test(lower)) {
+        focus = isEn ? 'Discipline & Journal' : 'Disciplina & Diário';
+    } else if (/(perdend|perco|loss|drawdown|erro|errando)/.test(lower)) {
+        focus = isEn ? 'Loss Diagnosis' : 'Diagnóstico de Perdas';
+    } else if (/(edge|vantag|melhor|profit factor|expectancy)/.test(lower)) {
+        focus = isEn ? 'Statistical Edge' : 'Vantagem Estatística';
+    }
+
+    return { symbol: detectedSymbol, period, focus };
+}
 
 /**
  * Limite duro do polling no cliente. Deve ficar acima do guarda de timeout do servidor
@@ -84,6 +143,7 @@ interface PendingSessionJob {
     startedAt: number;
     minSpinnerMs: number;
     fastGreeting: boolean;
+    questionText?: string;
 }
 
 interface TypingSessionState {
@@ -565,6 +625,7 @@ export const TorexAi: React.FC = () => {
     const [draftStageInfo, setDraftStageInfo] = useState<{
         stages: string[];
         stageIndex: number;
+        questionText?: string;
     } | null>(null);
     const [isLoadingSession, setIsLoadingSession] = useState<boolean>(() =>
         Boolean(isValidSessionUuid(normalizedRouteSessionId))
@@ -606,8 +667,11 @@ export const TorexAi: React.FC = () => {
     const inFlightCreationIdsRef = useRef<Set<string>>(new Set());
     const localUnsyncedIdsRef = useRef<Set<string>>(new Set());
     const messagesBySessionRef = useRef<Record<string, ClientAiMessage[]>>({});
+    const pendingJobsRef = useRef<Record<string, PendingSessionJob>>({});
+    const tokenRef = useRef<string | null>(token);
     const typingIntervalsRef = useRef<Record<string, number>>({});
     const isMountedRef = useRef<boolean>(true);
+    const [transcriberWordIdx, setTranscriberWordIdx] = useState<number>(1);
 
     useEffect(() => {
         activeSessionIdRef.current = activeSessionId;
@@ -616,6 +680,14 @@ export const TorexAi: React.FC = () => {
     useEffect(() => {
         messagesBySessionRef.current = messagesBySession;
     }, [messagesBySession]);
+
+    useEffect(() => {
+        pendingJobsRef.current = pendingJobsBySession;
+    }, [pendingJobsBySession]);
+
+    useEffect(() => {
+        tokenRef.current = token;
+    }, [token]);
 
     const persistLastActiveSessionId = useCallback(
         (id: string | null) => {
@@ -649,10 +721,41 @@ export const TorexAi: React.FC = () => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            try {
+                recognitionRef.current?.abort?.();
+                recognitionRef.current = null;
+            } catch {
+                // ignore speech cleanup errors
+            }
             Object.values(typingIntervalsRef.current).forEach((id) =>
                 window.clearInterval(id)
             );
             typingIntervalsRef.current = {};
+
+            // Utilizador saiu da tela de chat enquanto há respostas sendo processadas -> sinaliza backend para Web Push
+            const activeJobs = Object.values(pendingJobsRef.current);
+            const authToken = tokenRef.current;
+            if (activeJobs.length > 0 && authToken && typeof fetch === 'function') {
+                const baseUrl = (api.defaults.baseURL || '/api').replace(/\/$/, '');
+                for (const job of activeJobs) {
+                    try {
+                        void fetch(
+                            `${baseUrl}/ai/chat/jobs/${encodeURIComponent(job.jobId)}/presence`,
+                            {
+                                method: 'POST',
+                                keepalive: true,
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${authToken}`,
+                                },
+                                body: JSON.stringify({ away: true }),
+                            },
+                        ).catch(() => undefined);
+                    } catch {
+                        // ignore keepalive failure on teardown
+                    }
+                }
+            }
         };
     }, []);
 
@@ -795,6 +898,7 @@ export const TorexAi: React.FC = () => {
             jobId: string;
             sessionId: string;
             fastGreeting?: boolean;
+            questionText?: string;
         }) => {
             setPendingJobsBySession((prev) => {
                 if (prev[job.sessionId]?.jobId === job.jobId) {
@@ -811,6 +915,7 @@ export const TorexAi: React.FC = () => {
                         startedAt: Date.now(),
                         minSpinnerMs: fast ? 520 : 850,
                         fastGreeting: fast,
+                        questionText: job.questionText,
                     },
                 };
             });
@@ -940,9 +1045,13 @@ export const TorexAi: React.FC = () => {
                 }));
 
                 if (res.data?.activeJob?.jobId) {
+                    const lastUserMsg = [...fetchedMsgs]
+                        .reverse()
+                        .find((m) => m.role === 'user');
                     registerPendingJob({
                         jobId: res.data.activeJob.jobId,
                         sessionId: normalizedRouteSessionId,
+                        questionText: lastUserMsg?.content,
                     });
                 }
             } catch (err: any) {
@@ -989,8 +1098,26 @@ export const TorexAi: React.FC = () => {
         navigate,
     ]);
 
-    // Motor assíncrono de avanço de etapas + polling resiliente por jobId/sessionId
+    // Motor assíncrono de avanço de etapas + polling resiliente por jobId/sessionId + detecção de presença
     const hasPendingJobs = Object.keys(pendingJobsBySession).length > 0;
+
+    useEffect(() => {
+        if (!hasPendingJobs || typeof document === 'undefined') return;
+
+        const handleVisibilityChange = () => {
+            const away = document.visibilityState === 'hidden';
+            for (const job of Object.values(pendingJobsRef.current)) {
+                void api
+                    .post(`/ai/chat/jobs/${job.jobId}/presence`, { away })
+                    .catch(() => undefined);
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [hasPendingJobs]);
 
     useEffect(() => {
         if (!hasPendingJobs) return;
@@ -1010,7 +1137,7 @@ export const TorexAi: React.FC = () => {
                 }
                 return changed ? next : prev;
             });
-        }, 420);
+        }, 1100);
 
         const pollOnce = async () => {
             const entries = Object.values(pendingJobsBySession);
@@ -1020,7 +1147,12 @@ export const TorexAi: React.FC = () => {
 
                 void (async () => {
                     try {
-                        const res = await api.get(`/ai/chat/jobs/${job.jobId}`);
+                        const isVisible =
+                            typeof document === 'undefined' ||
+                            document.visibilityState === 'visible';
+                        const res = await api.get(`/ai/chat/jobs/${job.jobId}`, {
+                            params: { visible: isVisible ? '1' : '0' },
+                        });
                         if (!isMountedRef.current) return;
 
                         if (res.data?.status === 'PROCESSING') {
@@ -1495,7 +1627,7 @@ export const TorexAi: React.FC = () => {
             ],
         }));
 
-        setDraftStageInfo({ stages: processingStages, stageIndex: 0 });
+        setDraftStageInfo({ stages: processingStages, stageIndex: 0, questionText: text });
 
         try {
             if (!token) {
@@ -1586,6 +1718,7 @@ export const TorexAi: React.FC = () => {
                     jobId: res.data.jobId,
                     sessionId: targetSessionId,
                     fastGreeting,
+                    questionText: text,
                 });
             } else if (res.data?.assistantMessage) {
                 const immediateAssistant: ClientAiMessage =
@@ -1729,8 +1862,43 @@ export const TorexAi: React.FC = () => {
         ? {
               stages: activePendingJob.stages,
               stageIndex: activePendingJob.stageIndex,
+              questionText: activePendingJob.questionText,
           }
         : draftStageInfo;
+
+    const activeTranscribingQuestion = useMemo(() => {
+        if (visibleSpinnerInfo?.questionText) {
+            return visibleSpinnerInfo.questionText;
+        }
+        const lastUserMsg = [...activeMessages]
+            .reverse()
+            .find((m) => m.role === 'user');
+        return lastUserMsg?.content || '';
+    }, [visibleSpinnerInfo?.questionText, activeMessages]);
+
+    const transcriberWords = useMemo(
+        () => activeTranscribingQuestion.split(/\s+/).filter(Boolean),
+        [activeTranscribingQuestion]
+    );
+
+    const transcriberSignals = useMemo(
+        () => extractTranscriberSignals(activeTranscribingQuestion, isEn),
+        [activeTranscribingQuestion, isEn]
+    );
+
+    useEffect(() => {
+        if (!visibleSpinnerInfo || transcriberWords.length === 0) {
+            setTranscriberWordIdx(0);
+            return;
+        }
+        setTranscriberWordIdx(1);
+        const timer = window.setInterval(() => {
+            setTranscriberWordIdx((prev) =>
+                prev >= transcriberWords.length ? transcriberWords.length : prev + 1
+            );
+        }, 125);
+        return () => window.clearInterval(timer);
+    }, [Boolean(visibleSpinnerInfo), activeTranscribingQuestion, transcriberWords.length]);
 
     const isEmptyChat =
         activeMessages.length === 0 && !isLoadingSession && !visibleSpinnerInfo;
@@ -2001,6 +2169,40 @@ export const TorexAi: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {(!credits || credits.dailyLimit === 0 || credits.creditsRemaining <= 20) && (
+                <div className="px-3 pb-3 border-t border-line-subtle pt-2.5">
+                    <div className="rounded-xl bg-accent/10 border border-accent/25 p-3 space-y-2">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-accent-fg">
+                            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                                {isEn
+                                    ? '+50 AI Credits/day (30d)'
+                                    : '+50 Créditos IA/dia (30d)'}
+                            </span>
+                        </div>
+                        <p className="text-[11px] text-fg-muted leading-relaxed">
+                            {isEn
+                                ? 'Invite 1 verified friend to unlock +50 daily AI credits for 1 month (3 friends = $10 plan credit).'
+                                : 'Convide 1 amigo verificado para desbloquear +50 créditos IA/dia por 1 mês (3 amigos = $10 em planos).'}
+                        </p>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                            <Link
+                                to="/profile"
+                                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-accent text-accent-on text-[11px] font-semibold hover:opacity-90 transition-opacity"
+                            >
+                                {isEn ? 'Invite Friend' : 'Convidar Amigo'}
+                            </Link>
+                            <Link
+                                to="/pricing"
+                                className="py-1.5 px-2.5 rounded-lg bg-surface border border-line text-fg text-[11px] font-semibold hover:bg-surface-2 transition-colors"
+                            >
+                                {isEn ? 'Plans' : 'Planos'}
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 
@@ -2193,8 +2395,15 @@ export const TorexAi: React.FC = () => {
                                         : 'Torex AI · Auditoria & Performance'}
                                 </span>
                                 {visibleSpinnerInfo && (
-                                    <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/12 border border-accent/30 text-[10px] font-medium text-accent-fg shrink-0">
-                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent/12 border border-accent/30 text-[10px] font-medium text-accent-fg shrink-0">
+                                        <span className="relative w-3.5 h-3.5 flex items-center justify-center shrink-0">
+                                            <span className="absolute inset-0 rounded-full border border-accent/30 border-t-accent animate-spin" />
+                                            <img
+                                                src={TOREX_LOGO_URL}
+                                                alt="Torex AI"
+                                                className="w-2.5 h-2.5 rounded-full object-contain"
+                                            />
+                                        </span>
                                         <span>
                                             {visibleSpinnerInfo.stages[
                                                 visibleSpinnerInfo.stageIndex
@@ -2990,52 +3199,103 @@ export const TorexAi: React.FC = () => {
                                     })
                                 )}
 
-                                {/* Spinner Interativo em Etapas */}
+                                {/* Spinner Orbital na Logo Torex + Transcritor Inteligente da Questão */}
                                 {visibleSpinnerInfo && (
                                     <div className="flex items-start gap-3 animate-fade-in-up">
-                                        <div className="w-8 h-8 rounded-xl border border-accent/45 bg-surface flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                                            <Loader2 className="w-4 h-4 animate-spin text-accent" />
+                                        {/* Logo da Torex com Anel Orbital Giratório */}
+                                        <div className="relative w-10 h-10 flex items-center justify-center shrink-0 mt-0.5">
+                                            <span className="absolute inset-0 rounded-full bg-accent/15 blur-sm animate-pulse" />
+                                            <span className="absolute inset-0 rounded-full border-2 border-accent/20 border-t-accent border-r-accent/70 animate-spin" />
+                                            <span
+                                                className="absolute inset-1 rounded-full border border-accent/25 border-b-accent animate-spin"
+                                                style={{ animationDirection: 'reverse', animationDuration: '2.2s' }}
+                                            />
+                                            <div className="relative w-7 h-7 rounded-full bg-surface border border-line flex items-center justify-center overflow-hidden shadow-sm">
+                                                <img
+                                                    src={TOREX_LOGO_URL}
+                                                    alt="Torex AI"
+                                                    className="w-5 h-5 rounded-full object-contain"
+                                                />
+                                            </div>
                                         </div>
 
-                                        <div className="bg-surface border border-line rounded-2xl rounded-tl-sm px-4 py-3.5 space-y-2.5 min-w-[260px] max-w-md shadow-sm">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <span className="text-xs font-medium text-fg">
-                                                    {visibleSpinnerInfo.stages[
-                                                        visibleSpinnerInfo
-                                                            .stageIndex
-                                                    ] ||
-                                                        visibleSpinnerInfo
-                                                            .stages[0]}
-                                                </span>
-                                                <span className="text-[10px] font-mono tabular-nums text-fg-subtle">
+                                        <div className="bg-surface border border-line rounded-2xl rounded-tl-sm px-4 py-3.5 space-y-2.5 flex-1 max-w-lg shadow-sm">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-accent/12 border border-accent/30 text-[9px] font-mono font-bold uppercase tracking-wider text-accent-fg shrink-0">
+                                                        {isEn ? 'TRANSCRIBER' : 'TRANSCRITOR'}
+                                                    </span>
+                                                    <span className="text-xs font-semibold text-fg truncate">
+                                                        {visibleSpinnerInfo.stages[
+                                                            visibleSpinnerInfo.stageIndex
+                                                        ] || visibleSpinnerInfo.stages[0]}
+                                                    </span>
+                                                </div>
+                                                <span className="text-[10px] font-mono tabular-nums text-fg-subtle shrink-0">
                                                     {Math.min(
-                                                        visibleSpinnerInfo.stageIndex +
-                                                            1,
-                                                        visibleSpinnerInfo
-                                                            .stages.length
+                                                        visibleSpinnerInfo.stageIndex + 1,
+                                                        visibleSpinnerInfo.stages.length
                                                     )}
-                                                    /
-                                                    {
-                                                        visibleSpinnerInfo.stages
-                                                            .length
-                                                    }
+                                                    /{visibleSpinnerInfo.stages.length}
+                                                </span>
+                                            </div>
+
+                                            {/* Leitura progressiva palavra a palavra da pergunta */}
+                                            {transcriberWords.length > 0 && (
+                                                <div className="rounded-xl bg-canvas-subtle border border-line-subtle px-3 py-2 text-[11.5px] leading-relaxed text-fg-muted">
+                                                    <span className="text-fg-subtle mr-1.5 select-none">“</span>
+                                                    {transcriberWords.map((word, wIdx) => {
+                                                        const isRead = wIdx < transcriberWordIdx;
+                                                        const isCurrent = wIdx === transcriberWordIdx - 1;
+                                                        return (
+                                                            <span
+                                                                key={`tw-${wIdx}`}
+                                                                className={`transition-colors duration-150 ${
+                                                                    isCurrent
+                                                                        ? 'text-accent-fg font-semibold bg-accent/12 rounded px-0.5'
+                                                                        : isRead
+                                                                        ? 'text-fg'
+                                                                        : 'text-fg-subtle/45'
+                                                                }`}
+                                                            >
+                                                                {word}{' '}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                    <span className="inline-block w-1.5 h-3 ml-0.5 align-middle rounded-sm bg-accent animate-pulse" />
+                                                    <span className="text-fg-subtle ml-0.5 select-none">”</span>
+                                                </div>
+                                            )}
+
+                                            {/* Chips extraídos pelo transcritor (Conta, Ativo, Janela, Foco) */}
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                <span className="px-2 py-0.5 rounded-md bg-surface-2 border border-line text-[10px] text-fg-muted font-medium">
+                                                    {currentAccountLabel}
+                                                </span>
+                                                {transcriberSignals.symbol && (
+                                                    <span className="px-2 py-0.5 rounded-md bg-accent/10 border border-accent/30 text-[10px] font-mono font-semibold text-accent-fg">
+                                                        {transcriberSignals.symbol}
+                                                    </span>
+                                                )}
+                                                <span className="px-2 py-0.5 rounded-md bg-surface-2 border border-line text-[10px] text-fg-muted">
+                                                    {transcriberSignals.period}
+                                                </span>
+                                                <span className="px-2 py-0.5 rounded-md bg-surface-2 border border-line text-[10px] text-fg-subtle">
+                                                    {transcriberSignals.focus}
                                                 </span>
                                             </div>
 
                                             <div className="flex items-center gap-1.5">
-                                                {visibleSpinnerInfo.stages.map(
-                                                    (_, sIdx) => (
-                                                        <span
-                                                            key={`stage-dot-${sIdx}`}
-                                                            className={`h-1.5 rounded-full transition-all duration-300 ${
-                                                                sIdx <=
-                                                                visibleSpinnerInfo.stageIndex
-                                                                    ? 'flex-1 bg-accent'
-                                                                    : 'w-4 bg-surface-3'
-                                                            }`}
-                                                        />
-                                                    )
-                                                )}
+                                                {visibleSpinnerInfo.stages.map((_, sIdx) => (
+                                                    <span
+                                                        key={`stage-dot-${sIdx}`}
+                                                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                                                            sIdx <= visibleSpinnerInfo.stageIndex
+                                                                ? 'flex-1 bg-accent'
+                                                                : 'w-4 bg-surface-3'
+                                                        }`}
+                                                    />
+                                                ))}
                                             </div>
                                         </div>
                                     </div>
@@ -3063,7 +3323,7 @@ export const TorexAi: React.FC = () => {
                         </div>
 
                         {/* Composer Fixo Inferior */}
-                        <div className="px-4 sm:px-6 pb-3.5 pt-2.5 border-t border-line-subtle bg-canvas/95 backdrop-blur-md shrink-0">
+                        <div className="px-4 sm:px-6 pb-[4.85rem] md:pb-3.5 pt-2.5 border-t border-line-subtle bg-canvas/95 backdrop-blur-md shrink-0">
                             <div className="max-w-3xl mx-auto">
                                 {renderComposer('dock')}
                                 <div className="mt-1.5 text-center text-[10px] text-fg-subtle">

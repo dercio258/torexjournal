@@ -6,6 +6,9 @@ import { TrackingEventEntity } from './entities/tracking-event.entity';
 import { EmailTrackingLogEntity } from './entities/email-tracking-log.entity';
 import { TrackingConfigEntity } from './entities/tracking-config.entity';
 import { UserEntity } from '../users/user.entity';
+import { ReferralEntity } from '../users/referral.entity';
+import { PushSubscriptionEntity } from '../notifications/push/push-subscription.entity';
+import { PushDeliveryLogEntity } from '../notifications/push/push-delivery-log.entity';
 import { getJwtSecret } from '../common/security/security.config';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsController } from './analytics.controller';
@@ -18,6 +21,9 @@ import { AdminAnalyticsController } from './admin-analytics.controller';
             EmailTrackingLogEntity,
             TrackingConfigEntity,
             UserEntity,
+            ReferralEntity,
+            PushSubscriptionEntity,
+            PushDeliveryLogEntity,
         ]),
         ConfigModule,
         JwtModule.registerAsync({

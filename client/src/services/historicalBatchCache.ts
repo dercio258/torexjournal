@@ -42,6 +42,7 @@ export interface PendingSyncOutboxRecord {
     sessionId: string;
     payload: SessionVaultData & { encryptedDigest?: string };
     accountId?: string;
+    ownerUserId?: string;
     queuedAt: number;
     attempts: number;
 }
@@ -226,17 +227,22 @@ function base64ToBytes(b64: string): Uint8Array {
     return bytes;
 }
 
+function getScopedVaultSessionKey(sessionId: string): string {
+    const scope = getCurrentUserScope() || 'anon';
+    return `${scope}::${sessionId}`;
+}
+
 /**
- * Derives a unique AES-256-GCM CryptoKey scoped to a specific `sessionId`
+ * Derives a unique AES-256-GCM CryptoKey scoped to a specific `vaultKey` (`${userScope}::${sessionId}`)
  * using PBKDF2-SHA256 + device seed, coalescing concurrent calls via LRU Promise cache.
  */
-async function deriveSessionCryptoKey(sessionId: string): Promise<CryptoKey | null> {
+async function deriveSessionCryptoKey(vaultKey: string): Promise<CryptoKey | null> {
     if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
-    const cached = sessionKeyCache.get(sessionId);
+    const cached = sessionKeyCache.get(vaultKey);
     if (cached) {
         // Refresh LRU recency
-        sessionKeyCache.delete(sessionId);
-        sessionKeyCache.set(sessionId, cached);
+        sessionKeyCache.delete(vaultKey);
+        sessionKeyCache.set(vaultKey, cached);
         return cached;
     }
 
@@ -253,7 +259,7 @@ async function deriveSessionCryptoKey(sessionId: string): Promise<CryptoKey | nu
             const seed = getOrCreateDeviceVaultSeed();
             const baseKey = await window.crypto.subtle.importKey(
                 'raw',
-                enc.encode(`${seed}::session::${sessionId}`),
+                enc.encode(`${seed}::session::${vaultKey}`),
                 { name: 'PBKDF2' },
                 false,
                 ['deriveKey']
@@ -261,7 +267,7 @@ async function deriveSessionCryptoKey(sessionId: string): Promise<CryptoKey | nu
             return await window.crypto.subtle.deriveKey(
                 {
                     name: 'PBKDF2',
-                    salt: enc.encode(`torex_salt_v1_${sessionId}`),
+                    salt: enc.encode(`torex_salt_v1_${vaultKey}`),
                     iterations: 50000,
                     hash: 'SHA-256',
                 },
@@ -275,25 +281,26 @@ async function deriveSessionCryptoKey(sessionId: string): Promise<CryptoKey | nu
         }
     })();
 
-    sessionKeyCache.set(sessionId, keyPromise);
+    sessionKeyCache.set(vaultKey, keyPromise);
     const derived = await keyPromise;
-    if (!derived && sessionKeyCache.get(sessionId) === keyPromise) {
-        sessionKeyCache.delete(sessionId);
+    if (!derived && sessionKeyCache.get(vaultKey) === keyPromise) {
+        sessionKeyCache.delete(vaultKey);
     }
     return derived;
 }
 
 /**
  * Encrypts and saves the session state in IndexedDB (`encrypted_session_vault`)
- * with a unique per-session AES-256-GCM key and SHA-256 integrity digest.
+ * with a unique per-user+session AES-256-GCM key and SHA-256 integrity digest.
  */
 export async function saveEncryptedSessionToIDB(
     sessionId: string,
     payload: SessionVaultData
 ): Promise<{ ok: boolean; digestHex: string }> {
     if (!sessionId) return { ok: false, digestHex: '' };
+    const vaultKey = getScopedVaultSessionKey(sessionId);
     const db = await openBatchDatabase();
-    const key = await deriveSessionCryptoKey(sessionId);
+    const key = await deriveSessionCryptoKey(vaultKey);
     if (!db || !key || !window.crypto?.subtle) {
         return { ok: false, digestHex: '' };
     }
@@ -313,7 +320,7 @@ export async function saveEncryptedSessionToIDB(
             .join('');
 
         const record: EncryptedSessionRecord = {
-            sessionId,
+            sessionId: vaultKey,
             ivBase64: bytesToBase64(iv),
             ciphertextBase64: bytesToBase64(new Uint8Array(cipherBuffer)),
             digestHex,
@@ -339,30 +346,41 @@ export async function saveEncryptedSessionToIDB(
 }
 
 /**
- * Loads and decrypts the per-session AES-256-GCM vault from IndexedDB.
+ * Loads and decrypts the per-user+session AES-256-GCM vault from IndexedDB.
  */
 export async function loadEncryptedSessionFromIDB(
     sessionId: string
 ): Promise<{ data: SessionVaultData | null; digestHex: string; updatedAt: number | null }> {
     if (!sessionId) return { data: null, digestHex: '', updatedAt: null };
     const db = await openBatchDatabase();
-    const key = await deriveSessionCryptoKey(sessionId);
-    if (!db || !key || !window.crypto?.subtle) {
+    if (!db || !window.crypto?.subtle) {
         return { data: null, digestHex: '', updatedAt: null };
     }
 
-    const record = await new Promise<EncryptedSessionRecord | null>((resolve) => {
-        try {
-            const tx = db.transaction(STORE_ENCRYPTED_SESSIONS, 'readonly');
-            const req = tx.objectStore(STORE_ENCRYPTED_SESSIONS).get(sessionId);
-            req.onsuccess = () => resolve(req.result || null);
-            req.onerror = () => resolve(null);
-        } catch (_) {
-            resolve(null);
-        }
-    });
+    const scope = getCurrentUserScope() || 'anon';
+    const scopedKey = getScopedVaultSessionKey(sessionId);
 
-    if (!record || !record.ciphertextBase64 || !record.ivBase64) {
+    const getRecord = (lookupKey: string) =>
+        new Promise<EncryptedSessionRecord | null>((resolve) => {
+            try {
+                const tx = db.transaction(STORE_ENCRYPTED_SESSIONS, 'readonly');
+                const req = tx.objectStore(STORE_ENCRYPTED_SESSIONS).get(lookupKey);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => resolve(null);
+            } catch (_) {
+                resolve(null);
+            }
+        });
+
+    let activeKey = scopedKey;
+    let record = await getRecord(scopedKey);
+    if (!record && scope === 'anon') {
+        record = await getRecord(sessionId);
+        activeKey = sessionId;
+    }
+
+    const key = await deriveSessionCryptoKey(activeKey);
+    if (!key || !record || !record.ciphertextBase64 || !record.ivBase64) {
         return { data: null, digestHex: '', updatedAt: null };
     }
 
@@ -391,6 +409,8 @@ export async function loadEncryptedSessionFromIDB(
  */
 export async function deleteEncryptedSessionFromIDB(sessionId: string): Promise<void> {
     if (!sessionId) return;
+    const scopedKey = getScopedVaultSessionKey(sessionId);
+    sessionKeyCache.delete(scopedKey);
     sessionKeyCache.delete(sessionId);
     const db = await openBatchDatabase();
     if (!db) return;
@@ -398,7 +418,11 @@ export async function deleteEncryptedSessionFromIDB(sessionId: string): Promise<
     await new Promise<void>((resolve) => {
         try {
             const tx = db.transaction(STORE_ENCRYPTED_SESSIONS, 'readwrite');
-            tx.objectStore(STORE_ENCRYPTED_SESSIONS).delete(sessionId);
+            const store = tx.objectStore(STORE_ENCRYPTED_SESSIONS);
+            store.delete(scopedKey);
+            if ((getCurrentUserScope() || 'anon') === 'anon') {
+                store.delete(sessionId);
+            }
             tx.oncomplete = () => resolve();
             tx.onerror = () => resolve();
         } catch (_) {
@@ -473,6 +497,7 @@ async function enqueuePendingSessionSync(
                 sessionId: payload.sessionId,
                 payload,
                 accountId,
+                ownerUserId: getCurrentUserScope(),
                 queuedAt: Date.now(),
                 attempts: 1,
             };
@@ -509,55 +534,129 @@ async function removePendingSessionSync(sessionId: string): Promise<number> {
 }
 
 let isFlushingOutbox = false;
+const MAX_SESSION_SYNC_ATTEMPTS = 8;
+
 export async function flushPendingSessionSyncQueue(): Promise<number> {
     if (isFlushingOutbox) return getPendingSyncOutboxCount();
+    if (typeof localStorage !== 'undefined' && !localStorage.getItem('token')) {
+        return 0;
+    }
+    const currentScope = getCurrentUserScope();
+    if (!currentScope || currentScope === 'anon') {
+        return 0;
+    }
     const db = await openBatchDatabase();
     if (!db || !db.objectStoreNames.contains(STORE_SYNC_OUTBOX)) return 0;
 
-    isFlushingOutbox = true;
-    try {
-        const queued = await new Promise<PendingSyncOutboxRecord[]>((resolve) => {
-            try {
-                const tx = db.transaction(STORE_SYNC_OUTBOX, 'readonly');
-                const req = tx.objectStore(STORE_SYNC_OUTBOX).getAll();
-                req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
-                req.onerror = () => resolve([]);
-            } catch (_) {
-                resolve([]);
-            }
-        });
+    const executeFlush = async (): Promise<number> => {
+        isFlushingOutbox = true;
+        try {
+            const queued = await new Promise<PendingSyncOutboxRecord[]>((resolve) => {
+                try {
+                    const tx = db.transaction(STORE_SYNC_OUTBOX, 'readonly');
+                    const req = tx.objectStore(STORE_SYNC_OUTBOX).getAll();
+                    req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+                    req.onerror = () => resolve([]);
+                } catch (_) {
+                    resolve([]);
+                }
+            });
 
-        for (const item of queued) {
-            try {
-                const res = await api.post(
-                    '/dashboard/backtest/session-sync',
-                    {
-                        ...item.payload,
-                        config: buildV2BackendConfigEnvelope(item.payload),
-                        sessionId: item.sessionId,
-                        mode: 'REPLAY_SESSION',
-                    },
-                    {
-                        params: {
-                            accountId: item.accountId && item.accountId !== 'all' ? item.accountId : undefined,
+            for (const item of queued) {
+                if (
+                    item.ownerUserId &&
+                    item.ownerUserId !== 'anon' &&
+                    item.ownerUserId !== currentScope
+                ) {
+                    continue;
+                }
+                const cleanAccountId =
+                    item.accountId &&
+                    item.accountId !== 'all' &&
+                    item.accountId !== 'undefined' &&
+                    item.accountId !== 'null'
+                        ? item.accountId
+                        : undefined;
+                try {
+                    const res = await api.post(
+                        '/dashboard/backtest/session-sync',
+                        {
+                            ...item.payload,
+                            config: buildV2BackendConfigEnvelope(item.payload),
+                            sessionId: item.sessionId,
+                            mode: 'REPLAY_SESSION',
                         },
+                        {
+                            params: {
+                                accountId: cleanAccountId,
+                            },
+                            headers: cleanAccountId ? { 'x-account-id': cleanAccountId } : undefined,
+                            _isSyncEngineRequest: true,
+                        } as any
+                    );
+                    markSessionCloudSynced(item.sessionId);
+                    await removePendingSessionSync(item.sessionId);
+                    const layer = res.data?.cacheLayer === 'REDIS' ? 'REDIS' : 'POSTGRES';
+                    const rem = await getPendingSyncOutboxCount();
+                    emitStorageTelemetryEvent({ cacheLayer: layer, offlineOutboxCount: rem });
+                } catch (err: any) {
+                    const status = Number(err?.response?.status);
+                    const nextAttempts = (item.attempts || 0) + 1;
+                    const isPermanentClientError =
+                        status === 400 ||
+                        status === 402 ||
+                        status === 403 ||
+                        status === 404 ||
+                        status === 409 ||
+                        status === 413 ||
+                        status === 422;
+                    if (isPermanentClientError || (err?.response && nextAttempts >= MAX_SESSION_SYNC_ATTEMPTS)) {
+                        await removePendingSessionSync(item.sessionId);
+                        continue;
                     }
-                );
-                markSessionCloudSynced(item.sessionId);
-                await removePendingSessionSync(item.sessionId);
-                const layer = res.data?.cacheLayer === 'REDIS' ? 'REDIS' : 'POSTGRES';
-                const rem = await getPendingSyncOutboxCount();
-                emitStorageTelemetryEvent({ cacheLayer: layer, offlineOutboxCount: rem });
-            } catch (_) {
-                // Keep remaining items in outbox until connectivity resumes
-                break;
+                    if (err?.response) {
+                        await new Promise<void>((resolve) => {
+                            try {
+                                const tx = db.transaction(STORE_SYNC_OUTBOX, 'readwrite');
+                                tx.objectStore(STORE_SYNC_OUTBOX).put({
+                                    ...item,
+                                    attempts: nextAttempts,
+                                });
+                                tx.oncomplete = () => resolve();
+                                tx.onerror = () => resolve();
+                            } catch {
+                                resolve();
+                            }
+                        });
+                    }
+                    // Keep remaining items in outbox until connectivity resumes
+                    break;
+                }
             }
+        } finally {
+            isFlushingOutbox = false;
         }
-    } finally {
-        isFlushingOutbox = false;
+
+        return getPendingSyncOutboxCount();
+    };
+
+    const webLocks = typeof navigator !== 'undefined' ? (navigator as any).locks : undefined;
+    if (webLocks && typeof webLocks.request === 'function') {
+        try {
+            return await webLocks.request(
+                'torex_backtest_outbox_flush',
+                { ifAvailable: true },
+                async (lock: any) => {
+                    if (!lock) return getPendingSyncOutboxCount();
+                    return executeFlush();
+                }
+            );
+        } catch {
+            // fallback when Web Locks throws in restricted contexts
+        }
     }
 
-    return getPendingSyncOutboxCount();
+    return executeFlush();
 }
 
 if (typeof window !== 'undefined') {
@@ -748,6 +847,11 @@ export async function syncSessionToBackendRedisPostgres(
         return true;
     }
 
+    const cleanAccountId =
+        accountId && accountId !== 'all' && accountId !== 'undefined' && accountId !== 'null'
+            ? accountId
+            : undefined;
+
     try {
         const res = await api.post(
             '/dashboard/backtest/session-sync',
@@ -758,8 +862,10 @@ export async function syncSessionToBackendRedisPostgres(
                 mode: 'REPLAY_SESSION',
             },
             {
-                params: { accountId: accountId && accountId !== 'all' ? accountId : undefined },
-            }
+                params: { accountId: cleanAccountId },
+                headers: cleanAccountId ? { 'x-account-id': cleanAccountId } : undefined,
+                _isSyncEngineRequest: true,
+            } as any
         );
         if (syncSig) {
             lastSyncedSignatureBySession.set(payload.sessionId, syncSig);
@@ -1259,7 +1365,7 @@ export async function pullAccountHistoryInBatchesAndBuildUnifiedSession(options:
         }
     }
 
-    // 2. Pull historical trades from `/journal/trades` and process them in sequential batches of 25 trades
+    // 2. Pull historical trades from `/dashboard/trades` (paginado/cache-safe) and process in sequential batches of 25 trades
     emit({
         phase: 'TRADE_BATCHES',
         loadedTradeBatches: 0,
@@ -1271,12 +1377,33 @@ export async function pullAccountHistoryInBatchesAndBuildUnifiedSession(options:
         message: 'Puxando histórico de operações da conta em lotes...',
     });
 
+    const cleanTargetAccountId =
+        options.accountId &&
+        options.accountId !== 'all' &&
+        options.accountId !== 'undefined' &&
+        options.accountId !== 'null'
+            ? options.accountId
+            : undefined;
+
     let rawTrades: any[] = [];
     try {
-        const res = await api.get('/journal/trades', {
-            params: options.accountId ? { accountId: options.accountId } : undefined,
+        const res = await api.get('/dashboard/trades', {
+            params: {
+                ...(cleanTargetAccountId ? { accountId: cleanTargetAccountId } : {}),
+                limit: 1000,
+            },
+            headers: cleanTargetAccountId ? { 'x-account-id': cleanTargetAccountId } : undefined,
         });
-        rawTrades = Array.isArray(res.data) ? res.data : [];
+        const payload = res?.data;
+        rawTrades = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload?.items)
+              ? payload.items
+              : Array.isArray(payload?.data)
+                ? payload.data
+                : Array.isArray(payload?.trades)
+                  ? payload.trades
+                  : [];
     } catch (_) {
         rawTrades = [];
     }

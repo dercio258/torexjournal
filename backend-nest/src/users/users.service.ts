@@ -1,9 +1,9 @@
-import { Injectable, BadRequestException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UserEntity } from './user.entity';
@@ -316,13 +316,111 @@ export function hashRefreshToken(token: string): string {
 }
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit {
+    private readonly logger = new Logger(UsersService.name);
+
     constructor(
         @InjectRepository(UserEntity)
         private usersRepository: Repository<UserEntity>,
         @Inject(CACHE_MANAGER)
         private cacheManager: Cache,
     ) {}
+
+    async onModuleInit(): Promise<void> {
+        if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+            return;
+        }
+        await this.ensureAllUsersHaveSafeUsernames().catch((err) => {
+            this.logger.warn(`Username backfill skipped: ${err?.message || err}`);
+        });
+    }
+
+    extractFirstNameSlug(nameOrEmail?: string | null): string {
+        const raw = String(nameOrEmail || '').trim();
+        if (!raw) return 'trader';
+        const firstToken = raw.includes('@')
+            ? raw.split('@')[0].split(/[._+\-\s]+/)[0]
+            : raw.split(/\s+/)[0];
+        const cleaned = firstToken
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .slice(0, 18);
+        return cleaned.length >= 2 ? cleaned : 'trader';
+    }
+
+    isSafePublicHandle(handle?: string | null): boolean {
+        if (!handle || typeof handle !== 'string') return false;
+        const trimmed = handle.trim();
+        if (trimmed.includes('@') || /\s/.test(trimmed)) return false;
+        return /^[a-z0-9_]{2,32}$/.test(trimmed);
+    }
+
+    async isUsernameAvailable(candidate: string, excludeUserId?: string): Promise<boolean> {
+        const clean = String(candidate || '').trim().toLowerCase();
+        if (!clean) return false;
+        const qb = this.usersRepository
+            .createQueryBuilder('u')
+            .select(['u.id'])
+            .where('LOWER(u.username) = :candidate', { candidate: clean });
+        if (excludeUserId) {
+            qb.andWhere('u.id != :excludeUserId', { excludeUserId });
+        }
+        const existing = await qb.getOne();
+        return !existing;
+    }
+
+    async generateUniqueUsername(
+        preferredSeed?: string | null,
+        excludeUserId?: string,
+    ): Promise<string> {
+        const base = this.extractFirstNameSlug(preferredSeed);
+        if (await this.isUsernameAvailable(base, excludeUserId)) {
+            return base;
+        }
+
+        for (let attempt = 0; attempt < 16; attempt++) {
+            const suffix =
+                attempt < 10 ? String(randomInt(1000, 9999)) : String(randomInt(10000, 999999));
+            const candidate = `${base.slice(0, 24)}${suffix}`;
+            if (await this.isUsernameAvailable(candidate, excludeUserId)) {
+                return candidate;
+            }
+        }
+
+        return `${base.slice(0, 18)}${Date.now().toString(36)}${randomInt(10, 99)}`;
+    }
+
+    async ensureAllUsersHaveSafeUsernames(): Promise<number> {
+        const allUsers = await this.usersRepository.find({
+            select: ['id', 'name', 'email', 'username', 'createdAt'],
+            order: { createdAt: 'ASC' },
+        });
+        const usedHandles = new Set<string>();
+        let updatedCount = 0;
+
+        for (const u of allUsers) {
+            const current = (u.username || '').trim();
+            if (this.isSafePublicHandle(current) && !usedHandles.has(current.toLowerCase())) {
+                usedHandles.add(current.toLowerCase());
+                continue;
+            }
+            const base = this.extractFirstNameSlug(u.name || u.email);
+            let candidate = base;
+            while (usedHandles.has(candidate.toLowerCase())) {
+                candidate = `${base.slice(0, 22)}${randomInt(1000, 99999)}`;
+            }
+            usedHandles.add(candidate.toLowerCase());
+            await this.usersRepository.update(u.id, { username: candidate });
+            updatedCount++;
+        }
+
+        if (updatedCount > 0) {
+            this.logger.log(`[Privacy] Normalized/generated unique @username for ${updatedCount} legacy user(s).`);
+        }
+        return updatedCount;
+    }
 
     private getAuthGuardCacheKey(userId: string): string {
         return `auth:guard:user:${userId}`;
@@ -453,9 +551,17 @@ export class UsersService {
     }
 
     async create(userData: Partial<UserEntity>): Promise<UserEntity> {
+        const normalizedEmail = userData.email ? userData.email.trim().toLowerCase() : userData.email;
+        const safeSeed =
+            userData.username && this.isSafePublicHandle(userData.username.trim().toLowerCase())
+                ? userData.username.trim().toLowerCase()
+                : userData.name || normalizedEmail;
+        const resolvedUsername = await this.generateUniqueUsername(safeSeed);
+
         const user = this.usersRepository.create({
             ...userData,
-            email: userData.email ? userData.email.trim().toLowerCase() : userData.email,
+            email: normalizedEmail,
+            username: resolvedUsername,
         });
         return this.usersRepository.save(user);
     }
@@ -517,7 +623,23 @@ export class UsersService {
     ) {
         const payload: Record<string, any> = {};
         if (data.name !== undefined) payload.name = data.name;
-        if (data.username !== undefined) payload.username = data.username;
+        if (data.username !== undefined) {
+            const cleanUsername = String(data.username || '')
+                .trim()
+                .replace(/^@+/, '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, '');
+            if (cleanUsername.length < 2 || cleanUsername.length > 32) {
+                throw new BadRequestException('O @username deve ter entre 2 e 32 caracteres alfanuméricos.');
+            }
+            const available = await this.isUsernameAvailable(cleanUsername, userId);
+            if (!available) {
+                throw new BadRequestException('Este @username já está em uso. Escolha outro identificador.');
+            }
+            payload.username = cleanUsername;
+        }
         if (data.dailyLossLimit !== undefined) payload.dailyLossLimit = data.dailyLossLimit;
         if (data.avatarUrl !== undefined) {
             const currentUser = await this.findOneById(userId);

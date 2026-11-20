@@ -24,7 +24,6 @@ interface PostComment {
     user: {
         id?: string;
         username: string;
-        name?: string;
         avatarUrl?: string | null;
     };
 }
@@ -39,7 +38,6 @@ interface Post {
     user: {
         id: string;
         username: string;
-        name?: string;
         avatarUrl?: string | null;
     };
     type?: string;
@@ -163,7 +161,6 @@ export const PostCard: React.FC<PostCardProps> = ({
                                     onMessageUser({
                                         id: post.user.id,
                                         username: post.user.username,
-                                        name: post.user.name,
                                         avatarUrl: post.user.avatarUrl,
                                     })
                                 }
@@ -189,14 +186,14 @@ export const PostCard: React.FC<PostCardProps> = ({
             </div>
 
             {post.content && (
-                <div className="text-fg text-xs mb-3 whitespace-pre-wrap leading-relaxed pl-[2.875rem] break-words">
+                <div className="text-fg text-xs mb-3 whitespace-pre-wrap leading-relaxed pl-0 sm:pl-[2.875rem] break-words">
                     {post.content}
                 </div>
             )}
 
             {/* Imagem Genérica */}
             {post.type === 'image' && post.imageUrl && !post.tradeData?.imageUrl && (
-                <div className="mb-3 pl-[2.875rem]">
+                <div className="mb-3 pl-0 sm:pl-[2.875rem]">
                     <div className="relative rounded-xl overflow-hidden border border-line bg-canvas-subtle">
                         <img
                             src={resolveMediaUrl(post.imageUrl)}
@@ -213,7 +210,7 @@ export const PostCard: React.FC<PostCardProps> = ({
 
             {/* Vídeo no Feed */}
             {post.type === 'video' && post.imageUrl && (
-                <div className="mb-3 pl-[2.875rem]">
+                <div className="mb-3 pl-0 sm:pl-[2.875rem]">
                     <div className="relative rounded-xl overflow-hidden border border-line bg-canvas-subtle">
                         <video
                             src={resolveMediaUrl(post.imageUrl)}
@@ -275,7 +272,7 @@ export const PostCard: React.FC<PostCardProps> = ({
             )}
 
             {/* Barra de Interações */}
-            <div className="flex items-center gap-5 pt-2.5 border-t border-line-subtle ml-[2.875rem]">
+            <div className="flex items-center gap-5 pt-2.5 border-t border-line-subtle ml-0 sm:ml-[2.875rem]">
                 <button
                     type="button"
                     onClick={() => !isRestricted && onLike(post.id)}
@@ -315,7 +312,7 @@ export const PostCard: React.FC<PostCardProps> = ({
 
             {/* Comentários Expansíveis da Publicação */}
             {showComments && (
-                <div className="mt-3 pt-3 border-t border-line-subtle ml-[2.875rem] space-y-2.5">
+                <div className="mt-3 pt-3 border-t border-line-subtle ml-0 sm:ml-[2.875rem] space-y-2.5">
                     {commentsList.length > 0 && (
                         <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
                             {commentsList.map((c) => (

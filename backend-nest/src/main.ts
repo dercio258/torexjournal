@@ -8,19 +8,19 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IoAdapter } from '@nestjs/platform-socket.io';
+import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { Transport, MicroserviceOptions } from '@nestjs/microservices';
 import { GenericExceptionFilter } from './common/filters/generic-exception.filter';
 import { PinoLoggerService } from './common/observability/pino-logger.service';
 import { TelemetryService } from './common/observability/telemetry.service';
 import { correlationStorage } from './common/observability/correlation.context';
 import {
-  getJwtSecret,
   getTrustProxySetting,
   isCorsOriginAllowed,
   isHttpsEnforced,
   isLoopbackRequest,
   isRequestHttps,
+  validateDomainSecretsOnBoot,
 } from './common/security/security.config';
 import { randomUUID } from 'crypto';
 import multipart from '@fastify/multipart';
@@ -60,8 +60,8 @@ async function bootstrap() {
   );
 
   const configService = app.get(ConfigService);
-  // Fail fast in production if JWT_SECRET is missing or uses a known weak default
-  getJwtSecret(configService);
+  // Fail fast in production if user/admin JWT secrets are missing, weak, or collide
+  validateDomainSecretsOnBoot(configService);
 
   const logger = app.get(PinoLoggerService);
   const telemetry = app.get(TelemetryService);
@@ -265,7 +265,7 @@ async function bootstrap() {
       transport: Transport.RMQ,
       options: {
         urls: [process.env.RABBITMQ_URL || 'amqp://rabbitmq:5672'],
-        queue: 'whatsapp_notifications',
+        queue: process.env.RABBITMQ_QUEUE || 'platform_notifications',
         queueOptions: {
           durable: false,
         },
@@ -276,8 +276,10 @@ async function bootstrap() {
     logger.log('RabbitMQ microservice disabled via configuration', 'Bootstrap');
   }
 
-  // Use Socket.IO Adapter (supports namespaces)
-  app.useWebSocketAdapter(new (IoAdapter as any)(app) as any);
+  // Use Socket.IO Redis Adapter (supports multi-instance pub/sub + fallback em memória)
+  const redisIoAdapter = new RedisIoAdapter(app);
+  await redisIoAdapter.connectToRedis(configService).catch(() => false);
+  app.useWebSocketAdapter(redisIoAdapter as any);
 
   // Global Validation Pipe
   app.useGlobalPipes(

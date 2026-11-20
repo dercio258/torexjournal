@@ -2,9 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Shield,
     User,
-    Smartphone,
     CheckCircle2,
-    Clock,
     Camera,
     Upload,
     RefreshCw,
@@ -60,13 +58,14 @@ export const Configuration = () => {
             : null
     );
     const [isLoading, setIsLoading] = useState(() => !authUser);
-    const [waStatus, setWaStatus] = useState<any>(null);
-    const [waCode, setWaCode] = useState<string | null>(null);
-    const [waExpiresAt, setWaExpiresAt] = useState<string | null>(null);
 
     const [show2FASetup, setShow2FASetup] = useState(false);
     const [qrCode, setQrCode] = useState('');
     const [otpCode, setOtpCode] = useState('');
+    const [show2FADisable, setShow2FADisable] = useState(false);
+    const [disable2faCode, setDisable2faCode] = useState('');
+    const [disable2faPassword, setDisable2faPassword] = useState('');
+    const [isDisabling2fa, setIsDisabling2fa] = useState(false);
 
     // Avatar upload / replace / delete states
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -103,17 +102,7 @@ export const Configuration = () => {
 
     useEffect(() => {
         fetchUser();
-        fetchWhatsAppStatus();
     }, []);
-
-    const fetchWhatsAppStatus = async () => {
-        try {
-            const { data } = await api.get('/notifications/whatsapp/status');
-            setWaStatus(data);
-        } catch (err) {
-            console.error('Error fetching WA status:', err);
-        }
-    };
 
     const fetchUser = async () => {
         try {
@@ -242,10 +231,10 @@ export const Configuration = () => {
             await updateUserContactOfflineAware({ whatsapp: whatsappInput.trim() });
             setUser((prev) => (prev ? { ...prev, whatsapp: whatsappInput.trim() } : prev));
             setIsEditingWhatsapp(false);
-            notifySuccess(isEn ? 'WhatsApp number updated successfully!' : 'Número de WhatsApp atualizado com sucesso!');
+            notifySuccess(isEn ? 'Mobile contact updated successfully!' : 'Contacto móvel atualizado com sucesso!');
         } catch (err: any) {
-            console.error('Error updating WhatsApp:', err);
-            notifyError(err.response?.data?.message || (isEn ? 'Error updating WhatsApp.' : 'Erro ao atualizar WhatsApp.'));
+            console.error('Error updating mobile contact:', err);
+            notifyError(err.response?.data?.message || (isEn ? 'Error updating contact.' : 'Erro ao atualizar contacto.'));
         } finally {
             setIsSavingWhatsapp(false);
         }
@@ -255,6 +244,7 @@ export const Configuration = () => {
         if (!user) return;
 
         if (!user.twoFactorEnabled) {
+            setShow2FADisable(false);
             try {
                 const res = await api.post('/auth/2fa/setup');
                 setQrCode(res.data.qrCodeDataUrl);
@@ -264,15 +254,43 @@ export const Configuration = () => {
                 notifyError(isEn ? 'Error starting 2FA setup.' : 'Erro ao iniciar configuração de 2FA.');
             }
         } else {
-            try {
-                const newStatus = false;
-                await api.put('/auth/2fa', { enabled: newStatus });
-                setUser({ ...user, twoFactorEnabled: newStatus });
-                notifySuccess(isEn ? 'Two-factor authentication disabled.' : 'Autenticação de dois fatores desativada.');
-            } catch (err) {
-                console.error('Error toggling 2FA:', err);
-                notifyError(isEn ? 'Error updating two-factor authentication.' : 'Erro ao atualizar autenticação de dois fatores.');
-            }
+            setShow2FASetup(false);
+            setShow2FADisable((prev) => !prev);
+        }
+    };
+
+    const handleConfirmDisable2FA = async () => {
+        if (!user) return;
+        const cleanCode = disable2faCode.trim();
+        if (!cleanCode && !disable2faPassword) {
+            notifyError(
+                isEn
+                    ? 'Enter your 6-digit 2FA code or current password to disable 2FA.'
+                    : 'Informe o código 2FA de 6 dígitos ou sua senha atual para desativar.'
+            );
+            return;
+        }
+        setIsDisabling2fa(true);
+        try {
+            await api.put('/auth/2fa', {
+                enabled: false,
+                code: cleanCode || undefined,
+                password: disable2faPassword || undefined,
+            });
+            setUser({ ...user, twoFactorEnabled: false });
+            updateUser({ twoFactorEnabled: false } as any);
+            setShow2FADisable(false);
+            setDisable2faCode('');
+            setDisable2faPassword('');
+            notifySuccess(isEn ? 'Two-factor authentication disabled.' : 'Autenticação de dois fatores desativada.');
+        } catch (err: any) {
+            console.error('Error disabling 2FA:', err);
+            notifyError(
+                err?.response?.data?.message ||
+                    (isEn ? 'Invalid code or password.' : 'Código ou senha inválidos para desativar 2FA.')
+            );
+        } finally {
+            setIsDisabling2fa(false);
         }
     };
 
@@ -286,17 +304,6 @@ export const Configuration = () => {
         } catch (err) {
             console.error('Error verifying 2FA setup:', err);
             notifyError(isEn ? 'Invalid verification code. Please try again.' : 'Código inválido. Tente novamente.');
-        }
-    };
-
-    const handleGenerateWaCode = async () => {
-        try {
-            const { data } = await api.post('/notifications/whatsapp/code');
-            setWaCode(data.code);
-            setWaExpiresAt(data.expiresAt);
-        } catch (err) {
-            console.error('Error generating WA code:', err);
-            notifyError(isEn ? 'Error generating linking code.' : 'Erro ao gerar código de vinculação.');
         }
     };
 
@@ -513,7 +520,7 @@ export const Configuration = () => {
 
                         <div>
                             <label className="text-[10px] uppercase font-bold text-fg-subtle mb-1 block">
-                                WhatsApp
+                                {isEn ? 'Mobile Contact' : 'Contacto Móvel'}
                             </label>
                             <div className="flex gap-2">
                                 <input
@@ -630,14 +637,14 @@ export const Configuration = () => {
                             </div>
                             <p className="text-[11px] text-fg-subtle">
                                 {isEn
-                                    ? 'You will receive a Telegram/WhatsApp alert as soon as your daily drawdown hits this threshold.'
-                                    : 'Você receberá um alerta no Telegram/WhatsApp assim que sua perda diária atingir este valor.'}
+                                    ? 'You will receive an E-mail & In-App security alert as soon as your daily drawdown hits this threshold.'
+                                    : 'Você receberá um alerta por E-mail e na Central de Notificações assim que sua perda diária atingir este valor.'}
                             </p>
                         </div>
                     </div>
                 </Card>
 
-                {/* Right Column: Security + WhatsApp */}
+                {/* Right Column: Security & AI Memory */}
                 <div className="lg:col-span-5 space-y-3">
                     {/* Security Card */}
                     <Card className="space-y-4">
@@ -734,94 +741,59 @@ export const Configuration = () => {
                                 </div>
                             </div>
                         )}
-                    </Card>
 
-                    {/* WhatsApp Connection Card */}
-                    <Card className="space-y-4">
-                        <div className="flex items-center gap-2 pb-3 border-b border-line-subtle">
-                            <Smartphone className="w-4 h-4 text-accent-fg" />
-                            <h2 className="text-xs font-bold text-fg uppercase tracking-wider">
-                                {isEn ? 'WhatsApp Notifications' : 'Notificações WhatsApp'}
-                            </h2>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-canvas-subtle border border-line-subtle">
-                            <div>
-                                <p className="text-xs sm:text-sm font-bold text-fg">
-                                    {isEn ? 'Bot Status' : 'Status do Bot'}
+                        {show2FADisable && user?.twoFactorEnabled && (
+                            <div className="p-3.5 bg-canvas-subtle rounded-xl border border-danger/30 space-y-3">
+                                <p className="text-xs font-bold text-fg uppercase">
+                                    {isEn ? 'Confirm 2FA Deactivation' : 'Confirmar Desativação do 2FA'}
                                 </p>
-                                <div className="flex items-center gap-1.5 mt-1">
-                                    {waStatus?.connected ? (
-                                        <>
-                                            <span className="w-2 h-2 rounded-full bg-accent" />
-                                            <span className="text-[10px] text-accent-fg font-bold uppercase">
-                                                {isEn ? 'Linked' : 'Vinculado'}
-                                            </span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="w-2 h-2 rounded-full bg-fg-subtle" />
-                                            <span className="text-[10px] text-fg-subtle font-bold uppercase">
-                                                {isEn ? 'Not Linked' : 'Não Vinculado'}
-                                            </span>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                            {waStatus?.connected ? (
-                                <CheckCircle2 className="w-5 h-5 text-accent-fg" />
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={handleGenerateWaCode}
-                                    className="h-8 px-3 bg-accent/15 text-accent-fg text-xs font-semibold rounded-lg border border-accent/30 hover:bg-accent/25 transition-colors"
-                                >
-                                    {isEn ? 'Link' : 'Vincular'}
-                                </button>
-                            )}
-                        </div>
-
-                        {waStatus?.connected && (
-                            <div className="p-3 rounded-lg bg-accent/10 text-accent-fg border border-accent/25 text-xs leading-relaxed">
-                                {isEn ? (
-                                    <>Your number <strong>{waStatus.whatsappNumber}</strong> is receiving operational alerts.</>
-                                ) : (
-                                    <>Seu número <strong>{waStatus.whatsappNumber}</strong> está recebendo alertas operacionais.</>
-                                )}
-                            </div>
-                        )}
-
-                        {waCode && !waStatus?.connected && (
-                            <div className="p-3.5 bg-canvas-subtle rounded-xl border border-line space-y-3">
-                                <div className="text-center space-y-1.5">
-                                    <p className="text-[10px] text-fg-muted uppercase font-bold tracking-widest">
-                                        {isEn ? 'Linking Code' : 'Código de Vinculação'}
-                                    </p>
-                                    <div className="text-2xl font-mono font-bold text-fg tracking-[0.4em] bg-surface py-2.5 rounded-lg border border-line">
-                                        {waCode}
+                                <p className="text-[11px] text-fg-muted">
+                                    {isEn
+                                        ? 'Enter your 6-digit authenticator code or current account password.'
+                                        : 'Informe o código de 6 dígitos do autenticador ou sua senha atual.'}
+                                </p>
+                                <div className="space-y-2">
+                                    <input
+                                        value={disable2faCode}
+                                        onChange={(e) => setDisable2faCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        placeholder={isEn ? '6-digit code (optional if password)' : 'Código de 6 dígitos'}
+                                        className="w-full h-9 bg-surface border border-line rounded-lg px-3 text-xs font-mono text-fg focus:outline-none focus:border-accent/60"
+                                    />
+                                    <input
+                                        type="password"
+                                        value={disable2faPassword}
+                                        onChange={(e) => setDisable2faPassword(e.target.value)}
+                                        placeholder={isEn ? 'Current password (or leave empty if code)' : 'Senha atual (opcional se código)'}
+                                        className="w-full h-9 bg-surface border border-line rounded-lg px-3 text-xs text-fg focus:outline-none focus:border-accent/60"
+                                    />
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={isDisabling2fa}
+                                            onClick={handleConfirmDisable2FA}
+                                            className="flex-1 h-9 px-3.5 bg-danger hover:opacity-95 disabled:opacity-60 text-white text-xs font-semibold rounded-lg transition-opacity"
+                                        >
+                                            {isDisabling2fa
+                                                ? isEn
+                                                    ? 'Disabling...'
+                                                    : 'Desativando...'
+                                                : isEn
+                                                  ? 'Disable 2FA'
+                                                  : 'Desativar 2FA'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShow2FADisable(false);
+                                                setDisable2faCode('');
+                                                setDisable2faPassword('');
+                                            }}
+                                            className="h-9 px-3 text-[11px] text-fg-subtle hover:text-fg rounded-lg border border-line"
+                                        >
+                                            {isEn ? 'Cancel' : 'Cancelar'}
+                                        </button>
                                     </div>
-                                    <p className="text-[10px] text-fg-subtle flex items-center justify-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {isEn ? 'Expires at' : 'Expira às'} {new Date(waExpiresAt!).toLocaleTimeString(isEn ? 'en-US' : undefined)}
-                                    </p>
                                 </div>
-                                <div className="p-2.5 bg-surface rounded-lg border border-line-subtle">
-                                    <p className="text-[11px] text-fg-muted leading-relaxed text-center">
-                                        {isEn ? (
-                                            <>Send <strong className="text-fg">/sync {user?.email}</strong> to the bot and enter the code above.</>
-                                        ) : (
-                                            <>Envie <strong className="text-fg">/sync {user?.email}</strong> para o bot e informe o código acima.</>
-                                        )}
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-                        {!waStatus?.connected && !waCode && (
-                            <div className="p-3 rounded-lg bg-canvas-subtle text-fg-muted border border-line-subtle text-xs leading-relaxed">
-                                {isEn
-                                    ? 'Click Link to generate a code and connect your WhatsApp to the platform.'
-                                    : 'Clique em vincular para gerar um código e conectar seu WhatsApp à plataforma.'}
                             </div>
                         )}
                     </Card>

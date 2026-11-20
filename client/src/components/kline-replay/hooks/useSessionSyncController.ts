@@ -557,16 +557,6 @@ export function useSessionSyncController({
                     drawings: freshDrawings,
                 });
             }
-            if (syncRef.current && latestSyncPayloadRef.current) {
-                const pendingSec = pendingPracticeSecondsRef.current;
-                if (pendingSec > 0) pendingPracticeSecondsRef.current = 0;
-                void Promise.resolve(
-                    syncRef.current({
-                        ...latestSyncPayloadRef.current,
-                        ...(pendingSec > 0 ? { deltaSeconds: pendingSec } : {}),
-                    })
-                ).catch(() => {});
-            }
         };
 
         const onVisChange = () => {

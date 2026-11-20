@@ -177,22 +177,53 @@ async function runMigrations() {
 
         console.log('\n--- 7. Leaderboard & Backtest Tables ---');
         await querySafe(client, `
-            CREATE TABLE IF NOT EXISTS leaderboard_ranks (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                user_id UUID NOT NULL,
-                rank INT NOT NULL DEFAULT 999,
-                echelon VARCHAR(50) NOT NULL DEFAULT 'BRONZE',
-                composite_score NUMERIC(5,2) NOT NULL DEFAULT 0,
-                total_pnl NUMERIC(15,2) NOT NULL DEFAULT 0,
-                win_rate NUMERIC(5,2) NOT NULL DEFAULT 0,
-                profit_factor NUMERIC(8,2) NOT NULL DEFAULT 0,
-                trades_count INT NOT NULL DEFAULT 0,
-                win_streak INT NOT NULL DEFAULT 0,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            CREATE TABLE IF NOT EXISTS "leaderboard_ranks" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                "user_id" character varying,
+                "username" character varying NOT NULL,
+                "name" character varying NOT NULL,
+                "avatarUrl" character varying,
+                "currency" character varying(10) NOT NULL DEFAULT 'USD',
+                "rank" integer NOT NULL DEFAULT 1,
+                "tier" character varying(30) NOT NULL DEFAULT 'BRONZE',
+                "tierLevel" character varying(50) NOT NULL DEFAULT 'BRONZE',
+                "winRate" numeric(5,2) NOT NULL DEFAULT 0,
+                "tradesCount" integer NOT NULL DEFAULT 0,
+                "streak" integer NOT NULL DEFAULT 0,
+                "profitFactor" numeric(8,2) NOT NULL DEFAULT 0,
+                "riskReward" numeric(8,2) NOT NULL DEFAULT 0,
+                "totalPnL" numeric(15,2) NOT NULL DEFAULT 0,
+                "compositeScore" numeric(6,2) NOT NULL DEFAULT 0,
+                "scoreBreakdown" jsonb,
+                "badges" text[] NOT NULL DEFAULT '{}',
+                "isBenchmark" boolean NOT NULL DEFAULT false,
+                "createdAt" TIMESTAMP NOT NULL DEFAULT now(),
+                "updatedAt" TIMESTAMP NOT NULL DEFAULT now()
             );
         `);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "user_id" character varying`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "username" character varying`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "name" character varying`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "avatarUrl" character varying`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "currency" character varying(10) NOT NULL DEFAULT 'USD'`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "rank" integer NOT NULL DEFAULT 1`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "tier" character varying(30) NOT NULL DEFAULT 'BRONZE'`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "tierLevel" character varying(50) NOT NULL DEFAULT 'BRONZE'`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "winRate" numeric(5,2) NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "tradesCount" integer NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "streak" integer NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "profitFactor" numeric(8,2) NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "riskReward" numeric(8,2) NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "totalPnL" numeric(15,2) NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "compositeScore" numeric(6,2) NOT NULL DEFAULT 0`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "scoreBreakdown" jsonb`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "badges" text[] NOT NULL DEFAULT '{}'`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "isBenchmark" boolean NOT NULL DEFAULT false`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP NOT NULL DEFAULT now()`);
+        await querySafe(client, `ALTER TABLE "leaderboard_ranks" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP NOT NULL DEFAULT now()`);
         await querySafe(client, 'CREATE INDEX IF NOT EXISTS idx_leaderboard_ranks_user_id ON leaderboard_ranks(user_id)');
         await querySafe(client, 'CREATE INDEX IF NOT EXISTS idx_leaderboard_ranks_rank ON leaderboard_ranks(rank ASC)');
+        await querySafe(client, 'CREATE UNIQUE INDEX IF NOT EXISTS "UQ_leaderboard_ranks_username" ON "leaderboard_ranks" ("username")');
 
         console.log('\n--- 8. Deriv Integration Tables ---');
         await querySafe(client, `
@@ -410,11 +441,15 @@ async function runMigrations() {
                 "name" character varying NOT NULL
             );
         `);
-        await registerMigration(client, 1772600000000, 'MultiAccountAndTransactions1772600000000');
-        await registerMigration(client, 1772529444375, 'AddImportLogId1772529444375');
+        await registerMigration(client, 1769260033286, 'InitialSchemaLoose1769260033286');
         await registerMigration(client, 1772465278897, 'DerivRefactoring1772465278897');
+        await registerMigration(client, 1772529444375, 'AddImportLogId1772529444375');
+        await registerMigration(client, 1772600000000, 'MultiAccountAndTransactions1772600000000');
+        await registerMigration(client, 1772700000000, 'AiDailyCreditsAndPlans1772700000000');
         await registerMigration(client, 1776000000000, 'DeepDbAndModelOptimization1776000000000');
         await registerMigration(client, 1777000000000, 'AiVectorStoragePhase21777000000000');
+        await registerMigration(client, 1778000000000, 'NormalizeBacktestTables1778000000000');
+        await registerMigration(client, 1779000000000, 'AiFeedbackAndSemanticMemory1779000000000');
 
         console.log('\n====================================================');
         console.log('🎉 ALL DATABASE MIGRATIONS COMPLETED SUCCESSFULLY!');

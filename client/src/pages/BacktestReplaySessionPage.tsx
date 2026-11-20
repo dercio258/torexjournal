@@ -27,6 +27,9 @@ import {
 import { useAccount } from '../context/AccountContext';
 import { getCurrentLocale } from '../context/LocaleContext';
 import { ReplayTerminalSkeleton } from '../components/ui/Skeleton';
+import { MobileBottomDock } from '../components/MobileBottomDock';
+import { BarChart3, FolderKanban, Layers, LayoutDashboard, Monitor } from 'lucide-react';
+import { useReplaySessionStore } from '../store/useReplaySessionStore';
 import api from '../api';
 
 export const BacktestReplaySessionPage: React.FC = () => {
@@ -35,6 +38,18 @@ export const BacktestReplaySessionPage: React.FC = () => {
     const navigate = useNavigate();
     const { selectedAccountId } = useAccount();
     const [, setIsFullscreen] = useState(false);
+    const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
+        typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
+    );
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const mql = window.matchMedia('(max-width: 767px)');
+        const onChange = (ev: MediaQueryListEvent) => setIsMobileViewport(ev.matches);
+        setIsMobileViewport(mql.matches);
+        mql.addEventListener('change', onChange);
+        return () => mql.removeEventListener('change', onChange);
+    }, []);
 
     const deepLinkSymbol = searchParams.get('symbol')?.trim().toUpperCase() || undefined;
     const deepLinkTf = searchParams.get('tf')?.trim() || undefined;
@@ -493,6 +508,7 @@ export const BacktestReplaySessionPage: React.FC = () => {
             window.removeEventListener('pagehide', handleUnload);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             if (!isHydratingRef.current) flushSessionBeforeUnload(latestVaultRef.current, accountParam);
+            useReplaySessionStore.getState().clearSessionMemory();
         };
     }, [selectedAccountId]);
 
@@ -516,6 +532,82 @@ export const BacktestReplaySessionPage: React.FC = () => {
         },
         [session.id, session.name, session.strategyName, selectedAccountId]
     );
+
+    if (isMobileViewport) {
+        const isEn = getCurrentLocale() === 'en';
+        return (
+            <div className="min-h-screen bg-canvas text-fg flex flex-col justify-center px-4 py-10 pb-28">
+                <div className="mx-auto w-full max-w-md rounded-2xl border border-line bg-surface/90 p-6 shadow-xl space-y-5 backdrop-blur-xl">
+                    <div className="flex items-start gap-3.5">
+                        <div className="w-11 h-11 rounded-2xl bg-accent/15 border border-accent/30 flex items-center justify-center text-accent-fg shrink-0">
+                            <Monitor size={22} />
+                        </div>
+                        <div className="space-y-1">
+                            <span className="inline-block rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                                {isEn ? 'Desktop Only Replay' : 'Replay Exclusivo Desktop'}
+                            </span>
+                            <h2 className="text-base font-bold text-fg leading-snug">
+                                {isEn
+                                    ? 'Interactive Bar-by-Bar Charting Requires Desktop'
+                                    : 'O Replay e os Gráficos de Backteste estão disponíveis apenas no Desktop'}
+                            </h2>
+                        </div>
+                    </div>
+
+                    <p className="text-xs leading-relaxed text-fg-muted">
+                        {isEn
+                            ? 'Tick-by-tick candlestick replay and multi-pane drawing tools are reserved for wider screens. On mobile, you can still create and manage sessions, inspect strategy playbooks, and review session analytics.'
+                            : 'Para garantir precisão institucional, o terminal gráfico de replay e ferramentas de desenho operam apenas em ecrãs Desktop. No telemóvel pode gerir sessões, editar estratégias e consultar métricas completas.'}
+                    </p>
+
+                    <div className="rounded-xl bg-canvas-subtle border border-line-subtle p-3 space-y-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+                            {isEn ? 'Selected Session' : 'Sessão Selecionada'}
+                        </div>
+                        <div className="text-xs font-semibold text-fg truncate">
+                            {session.name} · {session.primarySymbol} ({session.timeframe})
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => navigate(`/backtesting/sessions/${session.id}`)}
+                            className="w-full h-10 px-4 rounded-xl bg-accent hover:bg-accent-hover text-accent-on text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        >
+                            <BarChart3 size={15} />
+                            <span>{isEn ? 'Open Session Analytics' : 'Ver Métricas da Sessão'}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => navigate('/backtesting/sessions')}
+                            className="w-full h-10 px-4 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line text-fg text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        >
+                            <FolderKanban size={15} />
+                            <span>{isEn ? 'Manage Backtest Sessions' : 'Gerir Sessões de Backteste'}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => navigate('/backtesting/strategies')}
+                            className="w-full h-10 px-4 rounded-xl bg-surface-2 hover:bg-surface-3 border border-line text-fg text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        >
+                            <Layers size={15} />
+                            <span>{isEn ? 'Manage Strategies & Playbooks' : 'Gerir Estratégias & Hipóteses'}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => navigate('/dashboard')}
+                            className="w-full h-9 px-4 rounded-xl text-fg-muted hover:text-fg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                            <LayoutDashboard size={14} />
+                            <span>{isEn ? 'Back to Dashboard' : 'Voltar à Dashboard'}</span>
+                        </button>
+                    </div>
+                </div>
+                <MobileBottomDock />
+            </div>
+        );
+    }
 
     if (!resolvedSession) {
         return <ReplayTerminalSkeleton />;

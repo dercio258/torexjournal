@@ -33,7 +33,11 @@ export class PaymentService {
             basicoPrice,
             proPrice,
             premiumPrice,
-            exchangeRate: Number(this.configService.get<number>('EXCENCHE', 65)),
+            exchangeRate: Number(
+                this.configService.get<number>('EXCHANGE_RATE') ??
+                    this.configService.get<number>('EXCHANGE') ??
+                    this.configService.get<number>('EXCENCHE', 65),
+            ),
         };
     }
 }

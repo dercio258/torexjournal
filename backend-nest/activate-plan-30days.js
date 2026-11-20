@@ -24,12 +24,20 @@ async function activateThirtyDaysPlan() {
     const targetEmail = rawEmail.trim();
     const tier = (process.argv[3] || 'PREMIUM').toUpperCase();
 
+    const dbUser = process.env.DB_USER;
+    const dbPass = process.env.DB_PASS;
+    const dbName = process.env.DB_NAME;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias no ambiente.');
+        process.exit(1);
+    }
+
     const client = new Client({
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432'),
-        user: process.env.DB_USER || 'cossa_trading_user',
-        password: process.env.DB_PASS || 'C0ssa@2026_db!',
-        database: process.env.DB_NAME || 'cossa_trading',
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: parseInt(process.env.DB_PORT || '5432', 10),
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     });
 
     try {

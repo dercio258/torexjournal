@@ -5,6 +5,7 @@ import {
     getUserProfileFromIDB,
     listAccountTransactionsFromIDB,
     listJournalEntitiesFromIDB,
+    listSyncOutbox,
     listUserAccountsFromIDB,
     listUserTradesFromIDB,
     readHttpGetCache,
@@ -19,6 +20,7 @@ import {
     upsertTransactionsInIDB,
 } from './services/offlineDb';
 import { useOfflineSyncStore } from './store/useOfflineSyncStore';
+import { isAdminApiUrl } from './lib/adminAuth';
 
 const api = axios.create({
     baseURL: '/api',
@@ -593,16 +595,14 @@ async function persistEntitiesFromResponse(
 }
 
 api.interceptors.request.use((config) => {
-    const isAdminRequest =
-        config.url?.startsWith('/admin') ||
-        window.location.pathname.startsWith('/admin');
+    const isAdminRequest = isAdminApiUrl(config.url);
     const token = isAdminRequest
-        ? localStorage.getItem('adminToken') || localStorage.getItem('token')
-        : localStorage.getItem('token') || localStorage.getItem('adminToken');
+        ? localStorage.getItem('adminToken')
+        : localStorage.getItem('token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
-    if (!config.headers['x-account-id']) {
+    if (!isAdminRequest && !(config as any)._isSyncEngineRequest && !config.headers['x-account-id']) {
         const accountId = localStorage.getItem('torex_selected_account_id');
         if (accountId) {
             config.headers['x-account-id'] = accountId;
@@ -632,9 +632,7 @@ api.interceptors.response.use(
                     `API Auth Error (401) on URL:`,
                     error.config?.url
                 );
-                const isAdminRequest =
-                    error.config?.url?.startsWith('/admin') ||
-                    window.location.pathname.startsWith('/admin');
+                const isAdminRequest = isAdminApiUrl(error.config?.url);
                 if (isAdminRequest) {
                     localStorage.removeItem('adminToken');
                     if (window.location.pathname !== '/admin') {
@@ -659,6 +657,30 @@ api.interceptors.response.use(
         return Promise.reject(error);
     }
 );
+
+async function hasConflictingPendingOutbox(userScope: string, urlPath: string): Promise<boolean> {
+    try {
+        const pending = (await listSyncOutbox(userScope)).filter((q) => q.status === 'pending');
+        if (pending.length === 0) return false;
+        if (urlPath.includes('/journal')) {
+            return pending.some((q) => q.entityType.startsWith('journal_'));
+        }
+        if (urlPath.startsWith('/accounts')) {
+            return pending.some(
+                (q) => q.entityType === 'account' || q.entityType === 'account_transaction'
+            );
+        }
+        if (urlPath.includes('/trades')) {
+            return pending.some((q) => q.entityType === 'trade_meta');
+        }
+        if (urlPath.includes('/profile') || urlPath.includes('/users/me')) {
+            return pending.some((q) => q.entityType === 'user_profile');
+        }
+        return false;
+    } catch {
+        return false;
+    }
+}
 
 const rawGet = api.get.bind(api);
 
@@ -711,20 +733,27 @@ api.get = async function offlineAwareGet<
             axiosRes.status >= 200 &&
             axiosRes.status < 300
         ) {
-            void saveHttpGetCache(
-                userScope,
-                urlPath,
-                paramsKey,
-                accountScope,
-                axiosRes.data
-            );
-            void persistEntitiesFromResponse(
-                userScope,
-                urlPath,
-                mergedParams,
-                accountScope,
-                axiosRes.data
-            );
+            void (async () => {
+                if (await hasConflictingPendingOutbox(userScope, urlPath)) {
+                    return;
+                }
+                await Promise.all([
+                    saveHttpGetCache(
+                        userScope,
+                        urlPath,
+                        paramsKey,
+                        accountScope,
+                        axiosRes.data
+                    ),
+                    persistEntitiesFromResponse(
+                        userScope,
+                        urlPath,
+                        mergedParams,
+                        accountScope,
+                        axiosRes.data
+                    ),
+                ]);
+            })();
         }
         return response;
     } catch (error: any) {

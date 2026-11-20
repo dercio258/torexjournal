@@ -14,7 +14,11 @@ async function bootstrap() {
     const planRepo = dataSource.getRepository(SubscriptionPlanConfig);
     const subRepo = dataSource.getRepository(Subscription);
 
-    const email = 'derciomatsope9@gmail.com';
+    const email = (process.argv[2] || process.env.TARGET_USER_EMAIL || '').trim().toLowerCase();
+    if (!email) {
+        console.error('Usage: npx ts-node activate-premium.ts <user-email>');
+        process.exit(1);
+    }
     const user = await userRepo.findOne({ where: { email } });
 
     if (!user) {

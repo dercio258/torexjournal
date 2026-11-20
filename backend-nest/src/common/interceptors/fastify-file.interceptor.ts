@@ -82,14 +82,27 @@ export class FastifyFileInterceptor implements NestInterceptor {
             for await (const part of parts) {
                 if (part.file) {
                     if (part.fieldname === this.fieldName) {
-                        const buffer = await part.toBuffer();
-                        if (buffer.length === 0) {
-                            throw new BadRequestException('Arquivo vazio não permitido');
+                        const chunks: Buffer[] = [];
+                        let totalBytes = 0;
+                        for await (const chunk of part.file) {
+                            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                            totalBytes += buf.length;
+                            if (totalBytes > maxSize) {
+                                part.file.resume();
+                                throw new BadRequestException(
+                                    `Arquivo excede o limite máximo permitido (${Math.round(maxSize / (1024 * 1024))}MB)`,
+                                );
+                            }
+                            chunks.push(buf);
                         }
-                        if (buffer.length > maxSize) {
+                        if ((part.file as any).truncated) {
                             throw new BadRequestException(
                                 `Arquivo excede o limite máximo permitido (${Math.round(maxSize / (1024 * 1024))}MB)`,
                             );
+                        }
+                        const buffer = Buffer.concat(chunks, totalBytes);
+                        if (buffer.length === 0) {
+                            throw new BadRequestException('Arquivo vazio não permitido');
                         }
 
                         let verifiedExt: string | null = null;
@@ -127,7 +140,7 @@ export class FastifyFileInterceptor implements NestInterceptor {
                             filePartObj.path = filepath;
                         }
                     } else {
-                        await part.toBuffer();
+                        part.file.resume();
                     }
                 } else {
                     req.body[part.fieldname] = part.value;

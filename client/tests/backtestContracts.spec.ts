@@ -8,13 +8,13 @@ import {
     buildMarketExecutionPreview,
 } from '../src/schemas/backtestContracts.ts';
 
-test('OrderStatusSchema accepts CLOSED and preprocesses legacy CANCELLED to CLOSED', () => {
+test('OrderStatusSchema accepts PENDING/OPEN/WIN/LOSS/CANCELLED/CLOSED and ReplayOrderSchema falls back unknown status to CLOSED', () => {
     assert.equal(OrderStatusSchema.parse('OPEN'), 'OPEN');
     assert.equal(OrderStatusSchema.parse('WIN'), 'WIN');
     assert.equal(OrderStatusSchema.parse('LOSS'), 'LOSS');
     assert.equal(OrderStatusSchema.parse('PENDING'), 'PENDING');
     assert.equal(OrderStatusSchema.parse('CLOSED'), 'CLOSED');
-    assert.equal(OrderStatusSchema.parse('CANCELLED'), 'CLOSED');
+    assert.equal(OrderStatusSchema.parse('CANCELLED'), 'CANCELLED');
     assert.equal(ReplayOrderSchema.shape.status.parse('unexpected_status'), 'CLOSED');
 });
 
@@ -74,7 +74,7 @@ test('sanitizeValidatedOrders preserves journal, psychCheck, nullable MFE/MAE, a
     assert.equal(sanitized.length, 2);
 
     const first = sanitized[0] as any;
-    assert.equal(first.status, 'CLOSED');
+    assert.equal(first.status, 'CANCELLED');
     assert.equal(first.mfe, null);
     assert.equal(first.mae, null);
     assert.equal(first.initialStopLoss, 2640);
@@ -122,6 +122,8 @@ test('calculateInstrumentLots & buildMarketExecutionPreview size risk accurately
     assert.ok(buyPreview.stopLoss < buyPreview.entryPrice);
     assert.ok(buyPreview.takeProfit > buyPreview.entryPrice);
     assert.equal(buyPreview.riskAmount, 100);
-    assert.equal(buyPreview.netRewardAtTp, 196);
-    assert.equal(buyPreview.netLossAtSl, 104);
+    // SL distance = 2650.5 * 0.5% = 13.2525 => $100 / $1,325.25/lot = 0.08 lots => grossReward@TP = 212.08 - 4 comm = 208.08
+    assert.equal(buyPreview.lots, 0.08);
+    assert.equal(buyPreview.netRewardAtTp, 208.08);
+    assert.equal(buyPreview.netLossAtSl, 110);
 });

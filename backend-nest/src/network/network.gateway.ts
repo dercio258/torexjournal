@@ -20,6 +20,8 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { UserEntity } from '../users/user.entity';
 import { SessionEntity } from '../auth/session.entity';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
 
 @WebSocketGateway({
@@ -38,6 +40,7 @@ import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.c
 @Injectable()
 export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly logger = new Logger(NetworkGateway.name);
+    private readonly onlineUserSockets = new Map<string, Set<string>>();
 
     @WebSocketServer()
     server: Server;
@@ -56,6 +59,10 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
         @Optional()
         @Inject(CACHE_MANAGER)
         private readonly cacheManager?: Cache,
+        @Optional()
+        private readonly planPermissionService?: PlanPermissionService,
+        @Optional()
+        private readonly redisSecurity?: RedisSecurityService,
     ) {}
 
     private async verifyUserIdFromToken(rawToken?: string): Promise<string | null> {
@@ -121,14 +128,53 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
             }
 
             client.data.userId = userId;
+            client.data.token = rawToken;
             client.join(`user_room:${userId}`);
+            this.trackOnlineSocket(userId, client.id);
         } catch {
             client.disconnect(true);
         }
     }
 
-    handleDisconnect(_client: Socket) {
-        // Disconnected cleanly
+    handleDisconnect(client: Socket) {
+        const userId = client?.data?.userId;
+        if (userId) {
+            this.untrackOnlineSocket(userId, client.id);
+        }
+    }
+
+    private trackOnlineSocket(userId: string, socketId: string) {
+        const MAX_ONLINE_USERS = 5000;
+        let sockets = this.onlineUserSockets.get(userId);
+        if (!sockets) {
+            while (this.onlineUserSockets.size >= MAX_ONLINE_USERS) {
+                const oldestKey = this.onlineUserSockets.keys().next().value;
+                if (oldestKey === undefined) break;
+                this.onlineUserSockets.delete(oldestKey);
+            }
+            sockets = new Set<string>();
+            this.onlineUserSockets.set(userId, sockets);
+        }
+        sockets.add(socketId);
+    }
+
+    private untrackOnlineSocket(userId: string, socketId: string) {
+        const sockets = this.onlineUserSockets.get(userId);
+        if (!sockets) return;
+        sockets.delete(socketId);
+        if (sockets.size === 0) {
+            this.onlineUserSockets.delete(userId);
+        }
+    }
+
+    getOnlineUserIds(excludeUserId?: string): string[] {
+        const ids: string[] = [];
+        for (const [uid, sockets] of this.onlineUserSockets.entries()) {
+            if (sockets.size > 0 && uid !== excludeUserId) {
+                ids.push(uid);
+            }
+        }
+        return ids;
     }
 
     @OnEvent('notification.created')
@@ -140,6 +186,47 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
         }
     }
 
+    private async authorizeSocketAction(
+        client: Socket,
+        tokenOverride?: string,
+    ): Promise<string | null> {
+        const tokenToCheck = tokenOverride || client.data?.token;
+        const userId = await this.verifyUserIdFromToken(tokenToCheck);
+        if (!userId) {
+            client.disconnect(true);
+            return null;
+        }
+        client.data.userId = userId;
+
+        if (this.planPermissionService) {
+            const hasPro = await this.planPermissionService
+                .checkPermission(userId, PlanTier.PRO)
+                .catch(() => false);
+            if (!hasPro) {
+                client.emit('error', {
+                    code: 'PLAN_REQUIRED',
+                    message: 'Funcionalidade restrita ao plano PRO ou superior.',
+                });
+                return null;
+            }
+        }
+
+        if (this.redisSecurity) {
+            const rl = await this.redisSecurity
+                .incrementWithWindow(`net_ws_rl:${userId}`, 60)
+                .catch(() => ({ count: 1 }));
+            if (rl.count > 20) {
+                client.emit('error', {
+                    code: 'RATE_LIMITED',
+                    message: 'Limite de mensagens por minuto atingido. Aguarde alguns segundos.',
+                });
+                return null;
+            }
+        }
+
+        return userId;
+    }
+
     @SubscribeMessage('msgToServer')
     async handleMessage(
         @MessageBody()
@@ -147,9 +234,7 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
         @ConnectedSocket() client: Socket,
     ) {
         try {
-            const userId =
-                client.data?.userId ||
-                (await this.verifyUserIdFromToken(payload?.token));
+            const userId = await this.authorizeSocketAction(client, payload?.token);
             if (!userId || !payload?.content?.trim()) return;
 
             const safeRoom = String(payload.room || 'global')
@@ -175,9 +260,7 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
         @ConnectedSocket() client: Socket,
     ) {
         try {
-            const senderId =
-                client.data?.userId ||
-                (await this.verifyUserIdFromToken(payload?.token));
+            const senderId = await this.authorizeSocketAction(client, payload?.token);
             if (
                 !senderId ||
                 !payload?.recipientId ||

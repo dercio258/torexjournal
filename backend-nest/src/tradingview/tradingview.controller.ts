@@ -62,17 +62,23 @@ export class TradingViewController {
         @Query('from') from?: string,
         @Query('to') to?: string,
     ) {
-        const { maxBars, earliestTs } = await this.limitsFor(req);
+        const { tier, maxBars, earliestTs } = await this.limitsFor(req);
         const requested = parseInt(range, 10) || maxBars;
         const toTs = to ? parseInt(to, 10) : undefined;
-        // When an explicit historical trade/session window (`to` or `from`) is requested, preserve generous pre-session lookback context (45 days) for indicators & structure
         const parsedFromParam = from ? parseInt(from, 10) : undefined;
+
+        if (tier === PlanTier.FREE && toTs !== undefined && toTs < earliestTs) {
+            return [];
+        }
+
         const fromTs =
-            parsedFromParam && parsedFromParam > 0
-                ? Math.max(0, parsedFromParam - 45 * DAY_MS)
-                : toTs && toTs < earliestTs
-                  ? undefined
-                  : earliestTs;
+            tier === PlanTier.FREE
+                ? Math.max(earliestTs, parsedFromParam && parsedFromParam > 0 ? parsedFromParam : earliestTs)
+                : parsedFromParam && parsedFromParam > 0
+                  ? Math.max(0, parsedFromParam - 45 * DAY_MS)
+                  : toTs && toTs < earliestTs
+                    ? undefined
+                    : earliestTs;
 
         try {
             return await this.tvService.getCandles(symbol, timeframe, {
@@ -101,21 +107,36 @@ export class TradingViewController {
         @Query('from') from?: string,
         @Query('to') to?: string,
     ) {
-        const { maxBars, earliestTs } = await this.limitsFor(req);
+        const { tier, maxBars, earliestTs } = await this.limitsFor(req);
         const parsedChunkSize = Math.min(parseInt(chunkSize || '500', 10) || 500, maxBars);
         const parsedChunkIndex = parseInt(chunkIndex || '0', 10) || 0;
         const parsedCursorTo = cursorTo ? parseInt(cursorTo, 10) : undefined;
         const parsedTo = to ? parseInt(to, 10) : undefined;
         const parsedFromParam = from ? parseInt(from, 10) : undefined;
-        // Preserve at least 45 days of pre-session lookback context before `from` so indicators (EMA/RSI/SMC) and short/weekend sessions never clip to 0 bars
+
+        if (
+            tier === PlanTier.FREE &&
+            ((parsedTo !== undefined && parsedTo < earliestTs) ||
+                (parsedCursorTo !== undefined && parsedCursorTo < earliestTs))
+        ) {
+            return { candles: [], hasMore: false, nextCursorTo: null, limitApplied: 'FREE_MAX_DAYS' };
+        }
+
+        // Preserve at least 45 days of pre-session lookback context before `from` on paid plans; FREE enforces strict earliestTs floor
         const lookbackSafeFrom =
-            parsedFromParam && parsedFromParam > 0 ? Math.max(0, parsedFromParam - 45 * DAY_MS) : undefined;
+            tier === PlanTier.FREE
+                ? Math.max(earliestTs, parsedFromParam && parsedFromParam > 0 ? parsedFromParam : earliestTs)
+                : parsedFromParam && parsedFromParam > 0
+                  ? Math.max(0, parsedFromParam - 45 * DAY_MS)
+                  : undefined;
         const effectiveEarliestTs =
-            lookbackSafeFrom !== undefined ||
-            (parsedCursorTo && parsedCursorTo < earliestTs) ||
-            (parsedTo && parsedTo < earliestTs)
-                ? lookbackSafeFrom
-                : earliestTs;
+            tier === PlanTier.FREE
+                ? earliestTs
+                : lookbackSafeFrom !== undefined ||
+                    (parsedCursorTo && parsedCursorTo < earliestTs) ||
+                    (parsedTo && parsedTo < earliestTs)
+                  ? lookbackSafeFrom
+                  : earliestTs;
 
         try {
             return await this.tvService.getCandlesBatch(symbol, timeframe, {

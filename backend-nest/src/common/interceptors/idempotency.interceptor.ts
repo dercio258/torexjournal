@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
+import { createHash } from 'crypto';
 import { RedisSecurityService } from '../security/redis-security.service';
+import { extractTrustedClientIp } from '../security/security.config';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const VALID_IDEMPOTENCY_KEY_RE = /^[a-zA-Z0-9_.:-]{8,128}$/;
@@ -65,9 +67,18 @@ export class IdempotencyInterceptor implements NestInterceptor {
             return next.handle();
         }
 
-        const userScope = String(req?.user?.id || req?.user?.userId || 'anon');
-        const cleanPath = String(req?.url || '/').split('?')[0];
-        const cacheKey = `idem:${userScope}:${method}:${cleanPath}:${idemKey}`;
+        const authUserId = req?.user?.id || req?.user?.userId;
+        const clientIp = extractTrustedClientIp(req) || 'unknown';
+        const ipHash = createHash('sha256').update(clientIp).digest('hex').slice(0, 12);
+        const userScope = authUserId ? String(authUserId) : `anon:${ipHash}`;
+        const rawUrl = String(req?.url || '/');
+        const qIndex = rawUrl.indexOf('?');
+        const cleanPath = qIndex >= 0 ? rawUrl.slice(0, qIndex) : rawUrl;
+        const rawQuery = qIndex >= 0 ? rawUrl.slice(qIndex + 1) : '';
+        const querySuffix = rawQuery
+            ? `:q_${createHash('sha256').update(rawQuery).digest('hex').slice(0, 10)}`
+            : '';
+        const cacheKey = `idem:${userScope}:${method}:${cleanPath}${querySuffix}:${idemKey}`;
 
         const existingRaw = await this.redisSecurity.getValue(cacheKey);
         if (existingRaw) {

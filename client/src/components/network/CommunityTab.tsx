@@ -99,8 +99,8 @@ export const CommunityTab: React.FC<CommunityTabProps> = ({
                         }}
                         placeholder={
                             isEn
-                                ? 'Search trader by name or @username...'
-                                : 'Buscar trader por nome ou @usuário...'
+                                ? 'Search trader by @username...'
+                                : 'Buscar trader por @usuário...'
                         }
                         className="w-full h-9 bg-canvas-subtle border border-line rounded-lg pl-8 pr-3 text-xs text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent/50"
                     />
@@ -139,11 +139,11 @@ export const CommunityTab: React.FC<CommunityTabProps> = ({
                                 </div>
 
                                 <div className="flex-1 min-w-0">
-                                    <h3 className="font-bold text-xs text-fg truncate">
-                                        {u.name || u.username}
-                                    </h3>
-                                    <p className="text-[11px] text-accent-fg truncate font-mono">
+                                    <h3 className="font-bold text-xs text-fg truncate font-mono">
                                         @{u.username}
+                                    </h3>
+                                    <p className="text-[11px] text-fg-subtle truncate">
+                                        {isEn ? 'Torex Trader' : 'Trader Torex'}
                                     </p>
                                 </div>
 
@@ -155,7 +155,6 @@ export const CommunityTab: React.FC<CommunityTabProps> = ({
                                                 onMessageUser({
                                                     id: u.id,
                                                     username: u.username,
-                                                    name: u.name,
                                                     avatarUrl: u.avatarUrl,
                                                 })
                                             }

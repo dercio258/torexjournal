@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 Script de Inspeção e Reconciliação Direta no MT5 (Windows VPS)
-Alvo padrão: Conta MT5 #419096791 (GoatFunded-Server2 — helidiobusiness@gmail.com)
 Uso:
-  python scripts/inspect_helidio_mt5.py [login_mt5]
+  python scripts/inspect_helidio_mt5.py <login_mt5>
 """
 
 import os
@@ -25,14 +24,24 @@ for venv_candidate in (
 
 import MetaTrader5 as mt5
 from core.account_manager import AccountManager
-from core.process_manager import ProcessManager
+from core.process_manager import MT5ProcessManager
 from core.sync_engine import SyncEngine
-from api_client.client import BackendClient
+from api_client.client import BackendApiClient
 from config.settings import settings
 
 
 def main():
-    target_login = sys.argv[1].strip() if len(sys.argv) > 1 else "419096791"
+    raw_login = sys.argv[1].strip() if len(sys.argv) > 1 else os.getenv("TARGET_MT5_LOGIN", "").strip()
+    if raw_login.startswith("--login="):
+        raw_login = raw_login.split("=", 1)[1].strip()
+    elif raw_login == "--login" and len(sys.argv) > 2:
+        raw_login = sys.argv[2].strip()
+
+    if not raw_login or not raw_login.isdigit():
+        print("❌ Uso: python scripts/inspect_helidio_mt5.py <login_mt5>")
+        sys.exit(1)
+
+    target_login = raw_login
     account_id = int(target_login)
 
     print("=" * 90)
@@ -42,14 +51,14 @@ def main():
     acc_mgr = AccountManager()
     acc = acc_mgr.get_account(account_id)
     if not acc:
-        print(f"⚠️ Conta {target_login} não encontrada no cofre local ({acc_mgr.storage_file}).")
+        print(f"⚠️ Conta {target_login} não encontrada no cofre local ({acc_mgr.pool_file}).")
         sys.exit(1)
 
     print(f"🏦 Conta localizada no cofre: Login={acc.login} | Servidor={acc.server}")
 
-    proc_mgr = ProcessManager()
+    proc_mgr = MT5ProcessManager()
     sync_eng = SyncEngine()
-    api_client = BackendClient()
+    api_client = BackendApiClient()
 
     isolated_path = proc_mgr.get_or_prepare_isolated_terminal_exe(
         account_id,
@@ -106,7 +115,7 @@ def main():
 
     if trades_payload.trades:
         print("\n🚀 Enviando reconciliação completa para o Backend TorexJournal...")
-        api_client.register_worker(max_accounts=settings.max_accounts_per_instance)
+        api_client.register(capacity=settings.max_accounts, system_info={"script": "inspect_mt5"})
         ok = api_client.sync_trades(trades_payload)
         if ok:
             print("✅ Reconciliação enviada com sucesso! Os lucros e horários no banco foram atualizados.")

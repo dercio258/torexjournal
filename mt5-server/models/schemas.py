@@ -30,6 +30,7 @@ class Task(BaseModel):
     type: TaskType
     priority: int = 1
     accountId: int
+    accountUuid: Optional[str] = None
     login: str
     server: str
     credentialToken: Optional[str] = None
@@ -161,6 +162,7 @@ class WorkerHeartbeat(BaseModel):
     memoryUsedMb: Optional[float] = None
     memoryTotalMb: Optional[float] = None
     memoryAvailableMb: Optional[float] = None
+    diskFreeGb: Optional[float] = None
     activeTerminals: int
     monitoredAccounts: List[int]
     timestamp: datetime = Field(default_factory=_utc_now)

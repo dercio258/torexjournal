@@ -11,7 +11,7 @@ import { Mt5Module } from '../mt5/mt5.module';
 import { EconomicCalendarModule } from '../economic-calendar/economic-calendar.module';
 import { AiModule } from '../ai/ai.module';
 import { JwtModule } from '@nestjs/jwt';
-import { getJwtSecret } from '../common/security/security.config';
+import { getAdminJwtSecret } from '../common/security/security.config';
 
 @Module({
     imports: [
@@ -32,7 +32,7 @@ import { getJwtSecret } from '../common/security/security.config';
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({
-                secret: getJwtSecret(configService),
+                secret: getAdminJwtSecret(configService),
                 signOptions: { expiresIn: '12h' },
             }),
             inject: [ConfigService],

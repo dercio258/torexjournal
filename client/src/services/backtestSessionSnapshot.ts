@@ -120,7 +120,18 @@ export interface BacktestSessionSnapshotV2 {
 
 export function getReplayVaultStorageKey(sessionId?: string | null): string {
     const clean = (sessionId || '').trim();
-    return clean ? `${REPLAY_LOCAL_STORAGE_PREFIX}_${clean}` : REPLAY_LOCAL_STORAGE_PREFIX;
+    let scope = 'anon';
+    try {
+        if (typeof localStorage !== 'undefined') {
+            scope = localStorage.getItem('torex_last_user_scope') || 'anon';
+        }
+    } catch {
+        scope = 'anon';
+    }
+    const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return clean
+        ? `${REPLAY_LOCAL_STORAGE_PREFIX}_${safeScope}_${clean}`
+        : `${REPLAY_LOCAL_STORAGE_PREFIX}_${safeScope}`;
 }
 
 /**

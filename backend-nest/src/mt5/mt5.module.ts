@@ -32,8 +32,10 @@ import { TradingViewModule } from '../tradingview/tradingview.module';
 import { EconomicCalendarModule } from '../economic-calendar/economic-calendar.module';
 import { Mt5WorkerController } from './worker/mt5-worker.controller';
 import { Mt5WorkerService } from './worker/mt5-worker.service';
+import { Mt5ClusterBalancerService } from './worker/mt5-cluster-balancer.service';
 import { WorkerAuthGuard } from './worker/worker-auth.guard';
 import { UserEntity } from '../users/user.entity';
+import { NotificationEntity } from '../notifications/notification.entity';
 import { SessionEntity } from '../auth/session.entity';
 import { getJwtSecret } from '../common/security/security.config';
 import { DailyNoteEntity, TradeNoteEntity } from '../dashboard/journal-notes.entity';
@@ -57,19 +59,29 @@ import { AlertEntity } from '../alerts/alert.entity';
             TechnicalJournal,
             MentalLog,
             AlertEntity,
+            NotificationEntity,
         ]),
         NotificationsModule,
-        AiModule,
         NormalizationModule,
         AlertsModule,
         PaymentModule,
         EmailModule,
         DashboardModule,
-        TradingViewModule,
-        EconomicCalendarModule,
-        BullModule.registerQueue({ name: 'mt5-data' }),
-        BullModule.registerQueue({ name: 'behavioral-analysis' }),
-        BullModule.registerQueue({ name: 'trade-import' }),
+        ...(process.env.MT5_DEDICATED_SERVER === 'true'
+            ? []
+            : [AiModule, TradingViewModule, EconomicCalendarModule]),
+        BullModule.registerQueue({
+            name: 'mt5-data',
+            defaultJobOptions: { removeOnComplete: 200, removeOnFail: 200 },
+        }),
+        BullModule.registerQueue({
+            name: 'behavioral-analysis',
+            defaultJobOptions: { removeOnComplete: 200, removeOnFail: 200 },
+        }),
+        BullModule.registerQueue({
+            name: 'trade-import',
+            defaultJobOptions: { removeOnComplete: 200, removeOnFail: 200 },
+        }),
         JwtModule.registerAsync({
             imports: [ConfigModule],
             inject: [ConfigService],
@@ -92,8 +104,15 @@ import { AlertEntity } from '../alerts/alert.entity';
         Mt5InstanceService,
         ReportParserService,
         Mt5WorkerService,
+        Mt5ClusterBalancerService,
         WorkerAuthGuard,
     ],
-    exports: [Mt5Service, Mt5InstanceService, Mt5WorkerService, BehaviorRetrainScheduler],
+    exports: [
+        Mt5Service,
+        Mt5InstanceService,
+        Mt5WorkerService,
+        Mt5ClusterBalancerService,
+        BehaviorRetrainScheduler,
+    ],
 })
 export class Mt5Module {}

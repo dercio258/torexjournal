@@ -32,7 +32,7 @@ export const Mt5EaSyncPage = () => {
             if (selectedAccount?.appToken) {
                 setAppToken(selectedAccount.appToken);
             } else {
-                setAppToken(user?.id ? `ea-${user.id.substring(0, 8)}` : null);
+                setAppToken(null);
             }
         };
         fetchToken();

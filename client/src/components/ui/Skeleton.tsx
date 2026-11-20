@@ -10,7 +10,7 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
 export const Skeleton: React.FC<SkeletonProps> = ({ className, ...props }) => (
     <div
         aria-hidden="true"
-        className={cn('skeleton-shimmer rounded-lg border border-line-subtle/60', className)}
+        className={cn('skeleton-shimmer rounded-lg border-0', className)}
         {...props}
     />
 );
@@ -24,7 +24,7 @@ export const TableRowsSkeleton: React.FC<{ columns?: number; rows?: number }> = 
 }) => (
     <>
         {Array.from({ length: rows }).map((_, rowIdx) => (
-            <tr key={rowIdx} className="border-b border-line-subtle/50 last:border-0">
+            <tr key={rowIdx}>
                 {Array.from({ length: columns }).map((__, colIdx) => {
                     const widthClass =
                         colIdx === 0
@@ -64,7 +64,7 @@ export const DashboardSkeleton: React.FC = () => (
             {Array.from({ length: 4 }).map((_, idx) => (
                 <div
                     key={idx}
-                    className="bg-surface border border-line rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 flex flex-col justify-between min-h-[82px]"
+                    className="bg-surface/80 rounded-xl px-3.5 py-2.5 sm:px-4 sm:py-3 flex flex-col justify-between min-h-[82px]"
                 >
                     <div className="flex items-center justify-between gap-2">
                         <Skeleton className="h-3 w-24 rounded" />
@@ -83,7 +83,7 @@ export const DashboardSkeleton: React.FC = () => (
             {Array.from({ length: 3 }).map((_, idx) => (
                 <div
                     key={idx}
-                    className="bg-surface border border-line rounded-xl p-4 flex flex-col justify-between h-[285px]"
+                    className="bg-surface/80 rounded-xl p-4 flex flex-col justify-between h-[285px]"
                 >
                     <div className="flex items-center justify-between">
                         <Skeleton className="h-3.5 w-32 rounded" />
@@ -100,7 +100,7 @@ export const DashboardSkeleton: React.FC = () => (
 
         {/* Operational Calendar (8 cols) + Recent Trades Table (4 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
-            <div className="lg:col-span-8 bg-surface border border-line rounded-xl p-4 space-y-3 min-h-[340px]">
+            <div className="lg:col-span-8 bg-surface/80 rounded-xl p-4 space-y-3 min-h-[340px]">
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-4 w-36 rounded" />
                     <div className="flex items-center gap-1.5">
@@ -116,7 +116,7 @@ export const DashboardSkeleton: React.FC = () => (
                 </div>
             </div>
 
-            <div className="lg:col-span-4 bg-surface border border-line rounded-xl p-4 space-y-2.5 min-h-[340px]">
+            <div className="lg:col-span-4 bg-surface/80 rounded-xl p-4 space-y-2.5 min-h-[340px]">
                 <div className="flex items-center justify-between pb-1">
                     <Skeleton className="h-4 w-28 rounded" />
                     <Skeleton className="h-3.5 w-16 rounded" />
@@ -124,7 +124,7 @@ export const DashboardSkeleton: React.FC = () => (
                 {Array.from({ length: 7 }).map((_, i) => (
                     <div
                         key={i}
-                        className="flex items-center justify-between py-2 border-b border-line-subtle/50 last:border-0"
+                        className="flex items-center justify-between py-2"
                     >
                         <div className="space-y-1">
                             <Skeleton className="h-3.5 w-20 rounded" />
@@ -139,7 +139,7 @@ export const DashboardSkeleton: React.FC = () => (
         {/* Operational Breakdown */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {Array.from({ length: 3 }).map((_, idx) => (
-                <div key={idx} className="bg-surface border border-line rounded-xl p-4 space-y-2.5">
+                <div key={idx} className="bg-surface/80 rounded-xl p-4 space-y-2.5">
                     <Skeleton className="h-3.5 w-28 rounded" />
                     {Array.from({ length: 4 }).map((__, row) => (
                         <Skeleton key={row} className="h-7 w-full rounded-md" />
@@ -167,7 +167,7 @@ export const TradesTableSkeleton: React.FC = () => (
             </div>
         </div>
 
-        <div className="bg-surface border border-line p-3 rounded-xl flex flex-wrap gap-2 items-center justify-between">
+        <div className="bg-surface/80 p-3 rounded-xl flex flex-wrap gap-2 items-center justify-between">
             <div className="flex flex-wrap gap-2 items-center">
                 <Skeleton className="h-8 w-28 rounded-lg" />
                 <Skeleton className="h-8 w-36 rounded-lg" />
@@ -179,7 +179,7 @@ export const TradesTableSkeleton: React.FC = () => (
             </div>
         </div>
 
-        <div className="bg-surface border border-line rounded-xl overflow-hidden">
+        <div className="bg-surface/80 rounded-xl overflow-hidden">
             <table className="w-full">
                 <tbody>
                     <TableRowsSkeleton columns={9} rows={10} />
@@ -196,7 +196,7 @@ export const ReportsBodySkeleton: React.FC = () => (
     <div className="space-y-4 pt-1 animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading report' : 'Carregando relatório'}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="bg-canvas-subtle border border-line rounded-xl p-3.5 space-y-2">
+                <div key={i} className="bg-canvas-subtle/80 rounded-xl p-3.5 space-y-2">
                     <Skeleton className="h-3 w-24 rounded" />
                     <Skeleton className="h-6 w-28 rounded-md" />
                     <Skeleton className="h-2.5 w-32 rounded" />
@@ -205,11 +205,11 @@ export const ReportsBodySkeleton: React.FC = () => (
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-            <div className="lg:col-span-8 bg-canvas-subtle border border-line rounded-xl p-4 space-y-3">
+            <div className="lg:col-span-8 bg-canvas-subtle/80 rounded-xl p-4 space-y-3">
                 <Skeleton className="h-4 w-40 rounded" />
                 <Skeleton className="h-56 w-full rounded-lg" />
             </div>
-            <div className="lg:col-span-4 bg-canvas-subtle border border-line rounded-xl p-4 space-y-3">
+            <div className="lg:col-span-4 bg-canvas-subtle/80 rounded-xl p-4 space-y-3">
                 <Skeleton className="h-4 w-32 rounded" />
                 <Skeleton className="h-56 w-full rounded-lg" />
             </div>
@@ -217,7 +217,7 @@ export const ReportsBodySkeleton: React.FC = () => (
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="bg-canvas-subtle border border-line rounded-xl p-4 space-y-2.5">
+                <div key={i} className="bg-canvas-subtle/80 rounded-xl p-4 space-y-2.5">
                     <Skeleton className="h-3.5 w-28 rounded" />
                     <Skeleton className="h-32 w-full rounded-lg" />
                 </div>
@@ -228,8 +228,8 @@ export const ReportsBodySkeleton: React.FC = () => (
 
 export const ReportsSkeleton: React.FC = () => (
     <div className="w-full space-y-3 pb-10 animate-fade-in-up">
-        <div className="bg-surface border border-line rounded-xl p-4 sm:p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-subtle pb-4">
+        <div className="bg-surface/80 rounded-xl p-4 sm:p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
                 <div className="flex items-center gap-3">
                     <Skeleton className="w-10 h-10 rounded-lg" />
                     <div className="space-y-1.5">
@@ -261,7 +261,7 @@ export const JournalSkeleton: React.FC = () => (
                 </div>
                 <div className="space-y-2.5">
                     {Array.from({ length: 6 }).map((_, idx) => (
-                        <div key={idx} className="bg-surface border border-line rounded-xl p-3.5 space-y-2">
+                        <div key={idx} className="bg-surface/80 rounded-xl p-3.5 space-y-2">
                             <div className="flex items-center justify-between">
                                 <Skeleton className="h-3.5 w-24 rounded" />
                                 <Skeleton className="h-4 w-16 rounded" />
@@ -274,8 +274,8 @@ export const JournalSkeleton: React.FC = () => (
             </aside>
 
             <section className="lg:col-span-8 xl:col-span-9 space-y-3">
-                <div className="bg-surface border border-line rounded-xl p-5 space-y-4 min-h-[480px]">
-                    <div className="flex items-center justify-between border-b border-line-subtle pb-3">
+                <div className="bg-surface/80 rounded-xl p-5 space-y-4 min-h-[480px]">
+                    <div className="flex items-center justify-between pb-3">
                         <div className="space-y-1.5">
                             <Skeleton className="h-5 w-48 rounded" />
                             <Skeleton className="h-3 w-32 rounded" />
@@ -302,7 +302,7 @@ export const JournalSkeleton: React.FC = () => (
  */
 export const TradeDetailsSkeleton: React.FC = () => (
     <div className="space-y-3 pb-8 animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading trade details' : 'Carregando operação'}>
-        <div className="bg-surface border border-line rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-surface/80 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
                 <Skeleton className="h-8 w-8 rounded-lg" />
                 <div className="space-y-1.5">
@@ -317,11 +317,11 @@ export const TradeDetailsSkeleton: React.FC = () => (
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-            <div className="lg:col-span-8 bg-surface border border-line rounded-xl p-4 space-y-3">
+            <div className="lg:col-span-8 bg-surface/80 rounded-xl p-4 space-y-3">
                 <Skeleton className="h-4 w-36 rounded" />
                 <Skeleton className="h-[360px] w-full rounded-xl" />
             </div>
-            <div className="lg:col-span-4 bg-surface border border-line rounded-xl p-4 space-y-3">
+            <div className="lg:col-span-4 bg-surface/80 rounded-xl p-4 space-y-3">
                 <Skeleton className="h-4 w-32 rounded" />
                 {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-11 w-full rounded-lg" />
@@ -336,7 +336,7 @@ export const TradeDetailsSkeleton: React.FC = () => (
  */
 export const TorexAiSkeleton: React.FC = () => (
     <div className="flex h-full w-full bg-canvas overflow-hidden animate-fade-in-up" role="status" aria-label="Carregando Torex AI">
-        <div className="hidden md:flex w-64 shrink-0 border-r border-line bg-surface/60 p-3 flex-col gap-2.5">
+        <div className="hidden md:flex w-64 shrink-0 bg-surface/60 p-3 flex-col gap-2.5">
             <Skeleton className="h-9 w-full rounded-lg" />
             <div className="space-y-2 mt-2">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -365,12 +365,12 @@ export const TorexAiSkeleton: React.FC = () => (
 export const CalendarSkeleton: React.FC = () => (
     <div className="space-y-3 animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading economic calendar' : 'Carregando calendário econômico'}>
         {Array.from({ length: 3 }).map((_, groupIdx) => (
-            <div key={groupIdx} className="bg-surface border border-line rounded-xl overflow-hidden">
-                <div className="px-4 py-2.5 bg-canvas-subtle border-b border-line flex items-center justify-between">
+            <div key={groupIdx} className="bg-surface/80 rounded-xl overflow-hidden">
+                <div className="px-4 py-2.5 bg-canvas-subtle flex items-center justify-between">
                     <Skeleton className="h-3.5 w-36 rounded" />
                     <Skeleton className="h-3.5 w-16 rounded" />
                 </div>
-                <div className="divide-y divide-line-subtle">
+                <div className="space-y-1">
                     {Array.from({ length: 4 }).map((__, rowIdx) => (
                         <div key={rowIdx} className="px-4 py-3 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3 min-w-0">
@@ -397,8 +397,8 @@ export const CalendarSkeleton: React.FC = () => (
 export const ConfigurationSkeleton: React.FC = () => (
     <div className="w-full space-y-3 pb-10 animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading settings' : 'Carregando configurações'}>
         {Array.from({ length: 3 }).map((_, idx) => (
-            <div key={idx} className="bg-surface border border-line rounded-xl p-5 space-y-4">
-                <div className="space-y-1.5 border-b border-line-subtle pb-3">
+            <div key={idx} className="bg-surface/80 rounded-xl p-5 space-y-4">
+                <div className="space-y-1.5 pb-3">
                     <Skeleton className="h-4 w-40 rounded" />
                     <Skeleton className="h-3 w-64 rounded" />
                 </div>
@@ -419,13 +419,13 @@ export const LessonPlayerSkeleton: React.FC = () => (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             <div className="lg:col-span-8 space-y-3">
                 <Skeleton className="w-full aspect-video rounded-xl" />
-                <div className="bg-surface border border-line rounded-xl p-4 space-y-2.5">
+                <div className="bg-surface/80 rounded-xl p-4 space-y-2.5">
                     <Skeleton className="h-5 w-2/3 rounded" />
                     <Skeleton className="h-3.5 w-1/3 rounded" />
                     <Skeleton className="h-16 w-full rounded-lg" />
                 </div>
             </div>
-            <div className="lg:col-span-4 bg-surface border border-line rounded-xl p-4 space-y-2.5">
+            <div className="lg:col-span-4 bg-surface/80 rounded-xl p-4 space-y-2.5">
                 <Skeleton className="h-4 w-36 rounded" />
                 {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-14 w-full rounded-lg" />
@@ -440,7 +440,7 @@ export const LessonPlayerSkeleton: React.FC = () => (
  */
 export const ReplayTerminalSkeleton: React.FC = () => (
     <div className="w-full h-screen bg-canvas flex flex-col overflow-hidden" role="status" aria-label="Preparando terminal de replay">
-        <div className="h-11 border-b border-line bg-surface px-3 flex items-center justify-between gap-3">
+        <div className="h-11 bg-surface px-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
                 <Skeleton className="h-7 w-24 rounded-md" />
                 <Skeleton className="h-7 w-16 rounded-md" />
@@ -452,7 +452,7 @@ export const ReplayTerminalSkeleton: React.FC = () => (
             </div>
         </div>
         <div className="flex-1 flex min-h-0">
-            <div className="w-11 border-r border-line bg-surface/70 p-1.5 space-y-2 hidden sm:block">
+            <div className="w-11 bg-surface/70 p-1.5 space-y-2 hidden sm:block">
                 {Array.from({ length: 8 }).map((_, i) => (
                     <Skeleton key={i} className="h-7 w-full rounded-md" />
                 ))}
@@ -478,7 +478,7 @@ export const PricingSkeleton: React.FC = () => (
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
                 {Array.from({ length: 3 }).map((_, idx) => (
-                    <div key={idx} className="bg-surface border border-line rounded-3xl p-7 space-y-5">
+                    <div key={idx} className="bg-surface/80 rounded-3xl p-7 space-y-5">
                         <Skeleton className="h-5 w-28 rounded" />
                         <Skeleton className="h-10 w-36 rounded-lg" />
                         <div className="space-y-2.5 pt-2">
@@ -499,7 +499,7 @@ export const PricingSkeleton: React.FC = () => (
  */
 export const StandalonePageSkeleton: React.FC = () => (
     <div className="min-h-screen bg-canvas flex items-center justify-center p-4" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading page' : 'Carregando página'}>
-        <div className="w-full max-w-lg bg-surface border border-line rounded-2xl p-6 space-y-4">
+        <div className="w-full max-w-lg bg-surface/80 rounded-2xl p-6 space-y-4">
             <Skeleton className="h-6 w-44 rounded-md" />
             <Skeleton className="h-3.5 w-64 rounded" />
             <div className="space-y-3 pt-2">
@@ -525,7 +525,7 @@ export const AppShellSkeleton: React.FC = () => {
     return (
         <div className="flex h-screen overflow-hidden bg-canvas font-sans text-fg">
             {/* Desktop Sidebar Skeleton */}
-            <aside className="hidden md:flex w-60 shrink-0 border-r border-line-subtle bg-surface flex-col justify-between p-3">
+            <aside className="hidden md:flex w-60 shrink-0 bg-surface/80 flex-col justify-between p-3">
                 <div className="space-y-4">
                     <div className="flex items-center gap-2.5 px-2 py-1.5">
                         <Skeleton className="w-7 h-7 rounded-lg" />
@@ -542,7 +542,7 @@ export const AppShellSkeleton: React.FC = () => {
 
             {/* Main Column */}
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                <header className="h-12 border-b border-line-subtle bg-canvas/95 px-3 sm:px-5 flex items-center justify-between shrink-0">
+                <header className="h-12 bg-canvas/95 px-3 sm:px-5 flex items-center justify-between shrink-0">
                     <Skeleton className="h-4 w-32 rounded" />
                     <div className="flex items-center gap-2">
                         <Skeleton className="h-8 w-24 rounded-lg hidden sm:block" />

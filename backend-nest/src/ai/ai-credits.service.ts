@@ -3,6 +3,7 @@ import {
     Injectable,
     Logger,
     OnModuleInit,
+    Optional,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,6 +14,7 @@ import {
     AiUserCreditEntity,
 } from './ai-credits.entity';
 import { PlanPermissionService } from '../payment/plan-permission.service';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 
 @Injectable()
 export class AiCreditsService implements OnModuleInit {
@@ -22,7 +24,8 @@ export class AiCreditsService implements OnModuleInit {
         private readonly dataSource: DataSource,
         @InjectRepository(AiUserCreditEntity)
         private readonly creditsRepo: Repository<AiUserCreditEntity>,
-        private readonly planPermissionService: PlanPermissionService
+        private readonly planPermissionService: PlanPermissionService,
+        @Optional() private readonly redisSecurity?: RedisSecurityService,
     ) {}
 
     async onModuleInit() {
@@ -101,28 +104,36 @@ export class AiCreditsService implements OnModuleInit {
      */
     @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
     async handleDailyCreditsReset() {
-        const todayKey = this.getCurrentDateKey();
-        try {
-            await this.dataSource.query(
-                `
-                UPDATE ai_user_credits
-                SET
-                    credits_used_today = 0,
-                    credits_remaining = daily_limit,
-                    last_reset_date = $1,
-                    updated_at = now()
-                WHERE last_reset_date <> $1
-                `,
-                [todayKey]
-            );
-            this.logger.log(
-                `[AiCreditsService] Créditos diários de IA resetados para o dia ${todayKey}.`
-            );
-        } catch (err) {
-            this.logger.error(
-                `[AiCreditsService] Falha no reset diário de créditos: ${(err as Error).message}`
-            );
+        const exec = async () => {
+            const todayKey = this.getCurrentDateKey();
+            try {
+                await this.dataSource.query(
+                    `
+                    UPDATE ai_user_credits
+                    SET
+                        credits_used_today = 0,
+                        credits_remaining = daily_limit,
+                        last_reset_date = $1,
+                        updated_at = now()
+                    WHERE last_reset_date <> $1
+                    `,
+                    [todayKey]
+                );
+                this.logger.log(
+                    `[AiCreditsService] Créditos diários de IA resetados para o dia ${todayKey}.`
+                );
+            } catch (err) {
+                this.logger.error(
+                    `[AiCreditsService] Falha no reset diário de créditos: ${(err as Error).message}`
+                );
+            }
+        };
+
+        if (this.redisSecurity) {
+            await this.redisSecurity.withLock('cron:ai_daily_credits_reset', 10 * 60_000, exec);
+            return;
         }
+        await exec();
     }
 
     private toDto(entity: AiUserCreditEntity, now = new Date()): AiCreditStatusDto {
@@ -302,6 +313,115 @@ export class AiCreditsService implements OnModuleInit {
         return {
             creditsUsed: actualDeducted,
             credits: updatedStatus,
+        };
+    }
+
+    /**
+     * Reserva créditos atomicamente no início da geração (evita corrida paralela quando há saldo baixo).
+     */
+    async reserveCredits(
+        userId: string,
+        holdAmount = 1
+    ): Promise<{ reserved: boolean; reservedAmount: number; credits: AiCreditStatusDto }> {
+        const current = await this.getCreditStatus(userId);
+        if (!current.canInteract || current.creditsRemaining <= 0) {
+            return { reserved: false, reservedAmount: 0, credits: current };
+        }
+
+        const safeHold = Math.max(1, Math.round(holdAmount || 1));
+        const rows = await this.dataSource.query(
+            `
+            UPDATE ai_user_credits
+            SET
+                credits_used_today = credits_used_today + LEAST(credits_remaining, $2),
+                total_credits_used = total_credits_used + LEAST(credits_remaining, $2),
+                credits_remaining = credits_remaining - LEAST(credits_remaining, $2),
+                updated_at = now()
+            WHERE user_id = $1
+              AND credits_remaining > 0
+            RETURNING
+                user_id AS "userId",
+                plan_tier AS "planTier",
+                daily_limit AS "dailyLimit",
+                credits_remaining AS "creditsRemaining",
+                credits_used_today AS "creditsUsedToday",
+                total_credits_used AS "totalCreditsUsed",
+                last_reset_date AS "lastResetDate"
+            `,
+            [userId, safeHold]
+        );
+
+        const updatedRow = Array.isArray(rows?.[0]) ? rows[0][0] : rows?.[0];
+        if (!updatedRow) {
+            const refreshed = await this.getCreditStatus(userId);
+            return { reserved: false, reservedAmount: 0, credits: refreshed };
+        }
+
+        const updatedStatus = this.toDto(updatedRow as AiUserCreditEntity);
+        const reservedAmount = Math.max(
+            0,
+            current.creditsRemaining - updatedStatus.creditsRemaining
+        );
+
+        return {
+            reserved: reservedAmount > 0,
+            reservedAmount,
+            credits: updatedStatus,
+        };
+    }
+
+    /**
+     * Liquida uma reserva atómica anterior: reembolsa em falha/custo menor ou debita a diferença real.
+     */
+    async settleReservedCredits(
+        userId: string,
+        reservedAmount: number,
+        finalCost: number
+    ): Promise<{ creditsUsed: number; credits: AiCreditStatusDto }> {
+        const safeReserved = Math.max(0, Math.round(reservedAmount || 0));
+        const safeFinal = Math.max(0, Math.round(finalCost || 0));
+
+        if (safeFinal === safeReserved) {
+            return {
+                creditsUsed: safeFinal,
+                credits: await this.getCreditStatus(userId),
+            };
+        }
+
+        if (safeFinal < safeReserved) {
+            const refund = safeReserved - safeFinal;
+            const rows = await this.dataSource.query(
+                `
+                UPDATE ai_user_credits
+                SET
+                    credits_remaining = LEAST(daily_limit, credits_remaining + $2),
+                    credits_used_today = GREATEST(0, credits_used_today - $2),
+                    total_credits_used = GREATEST(0, total_credits_used - $2),
+                    updated_at = now()
+                WHERE user_id = $1
+                RETURNING
+                    user_id AS "userId",
+                    plan_tier AS "planTier",
+                    daily_limit AS "dailyLimit",
+                    credits_remaining AS "creditsRemaining",
+                    credits_used_today AS "creditsUsedToday",
+                    total_credits_used AS "totalCreditsUsed",
+                    last_reset_date AS "lastResetDate"
+                `,
+                [userId, refund]
+            );
+            const updatedRow = Array.isArray(rows?.[0]) ? rows[0][0] : rows?.[0];
+            const credits = updatedRow
+                ? this.toDto(updatedRow as AiUserCreditEntity)
+                : await this.getCreditStatus(userId);
+            return { creditsUsed: safeFinal, credits };
+        }
+
+        const extraNeeded = safeFinal - safeReserved;
+        const deltaResult = await this.consumeCredits(userId, extraNeeded);
+        return {
+            creditsUsed: safeReserved + deltaResult.creditsUsed,
+            credits: deltaResult.credits,
         };
     }
 }

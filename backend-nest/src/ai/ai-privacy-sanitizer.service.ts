@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { GeminiHandoffSpec } from './ai-router.service';
+import { getAiQuorumHmacSalt } from '../common/security/security.config';
 
 export interface TextSanitizationResult {
     cleanText: string;
@@ -76,11 +77,7 @@ const KNOWN_SYMBOL_RX =
 @Injectable()
 export class AiPrivacySanitizerService {
     private getQuorumSalt(): string {
-        return (
-            process.env.AI_QUORUM_HMAC_SALT ||
-            process.env.JWT_SECRET ||
-            'torex-ai-quorum-salt-v1'
-        );
+        return getAiQuorumHmacSalt();
     }
 
     hashUserForQuorum(userId: string): string {

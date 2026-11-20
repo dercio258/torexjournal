@@ -73,7 +73,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
             );
         }
 
-        if (user.twoFactorEnabled && user.isTwoFactorConfirmed) {
+        if (user.twoFactorEnabled) {
             if (!reqUser.isTwoFactorVerified) {
                 throw new UnauthorizedException('Verificação 2FA pendente para esta sessão');
             }

@@ -505,6 +505,8 @@ export const AdminLessons: React.FC = () => {
                                 <iframe
                                     src={liveEmbedPreview.embedUrl}
                                     title="Admin Embed Preview"
+                                    sandbox="allow-scripts allow-same-origin allow-presentation"
+                                    referrerPolicy="strict-origin-when-cross-origin"
                                     className="w-full h-full border-0 bg-black"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                     allowFullScreen

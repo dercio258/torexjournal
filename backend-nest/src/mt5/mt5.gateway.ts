@@ -8,10 +8,12 @@ import {
     MessageBody,
     ConnectedSocket,
 } from '@nestjs/websockets';
-import { Inject, Logger, Optional } from '@nestjs/common';
+import { Inject, Logger, Optional, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
+import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 import { browser } from '../proto/browser_packet';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -35,9 +37,14 @@ import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.c
         credentials: true,
     },
 })
-export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
     @WebSocketServer() server: Server;
     private logger: Logger = new Logger('Mt5Gateway');
+    private readonly instanceId = randomUUID();
+    private pubRedis: Redis | null = null;
+    private subRedis: Redis | null = null;
+    private pubReady = false;
+    private pubsubChannel = 'torex:ws:mt5_events';
     private clients = new Map<
         any,
         { authenticated: boolean; userId?: string; timeout?: NodeJS.Timeout }
@@ -63,6 +70,51 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
 
     afterInit() {
         this.logger.log('WebSocket Gateway Initialized (Socket.IO + Protobuf/JSON Hybrid)');
+    }
+
+    async onModuleInit() {
+        const host = (this.configService?.get<string>('REDIS_HOST') || process.env.REDIS_HOST || '').trim();
+        if (!host) return;
+        const port = Number(this.configService?.get<number>('REDIS_PORT') || process.env.REDIS_PORT || 6379);
+        const password = this.configService?.get<string>('REDIS_PASSWORD') || process.env.REDIS_PASSWORD || undefined;
+        const prefix = (this.configService?.get<string>('REDIS_PREFIX') || process.env.REDIS_PREFIX || '{cossa_trading}').trim();
+        this.pubsubChannel = `${prefix}:ws:mt5_events`;
+
+        try {
+            this.pubRedis = new Redis({ host, port, password, maxRetriesPerRequest: 1, lazyConnect: true });
+            this.subRedis = new Redis({ host, port, password, maxRetriesPerRequest: 1, lazyConnect: true });
+            this.pubRedis.on('ready', () => { this.pubReady = true; });
+            this.pubRedis.on('error', () => { this.pubReady = false; });
+            this.subRedis.on('error', () => {});
+            this.subRedis.on('message', (channel, raw) => {
+                if (channel !== this.pubsubChannel) return;
+                try {
+                    const msg = JSON.parse(raw);
+                    if (!msg || msg.originId === this.instanceId || !msg.userId) return;
+                    if (msg.kind === 'packet' && msg.packet) {
+                        this.emitLocalPacket(msg.packet, msg.eventName, msg.jsonPayload, msg.userId);
+                    } else if (msg.kind === 'behavior_alert' && msg.jsonPayload) {
+                        this.emitLocalBehaviorAlert(msg.jsonPayload, msg.userId);
+                    }
+                } catch {}
+            });
+
+            await this.pubRedis.connect().catch(() => {});
+            await this.subRedis.connect().catch(() => {});
+            if (this.subRedis.status === 'ready') {
+                await this.subRedis.subscribe(this.pubsubChannel).catch(() => {});
+            }
+        } catch (err: any) {
+            this.logger.warn(`Mt5Gateway Redis Pub/Sub bridge disabled: ${err?.message || err}`);
+        }
+    }
+
+    async onModuleDestroy() {
+        this.pubReady = false;
+        await Promise.allSettled([
+            this.pubRedis ? this.pubRedis.quit().catch(() => this.pubRedis?.disconnect()) : Promise.resolve(),
+            this.subRedis ? this.subRedis.quit().catch(() => this.subRedis?.disconnect()) : Promise.resolve(),
+        ]);
     }
 
     private async resolveActualMt5ConnectionState(userId: string): Promise<boolean> {
@@ -261,19 +313,12 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         }
     }
 
-    private broadcast(
+    private emitLocalPacket(
         packet: browser.IBrowserPacket,
-        eventName?: string,
-        jsonPayload?: any,
-        userId?: string,
+        eventName: string | undefined,
+        jsonPayload: any,
+        userId: string,
     ) {
-        if (!userId) {
-            this.logger.warn(
-                `Blocked unscoped WS broadcast (${eventName || packet.type}): userId is required.`,
-            );
-            return;
-        }
-
         const message = browser.BrowserPacket.create(packet);
         const buffer = browser.BrowserPacket.encode(message).finish();
         const roomName = `mt5_user:${userId}`;
@@ -302,6 +347,57 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
                 this.logger.warn(`Failed to send to client: ${e.message}`);
             }
         });
+    }
+
+    private emitLocalBehaviorAlert(payload: Record<string, any>, userId: string) {
+        const roomName = `mt5_user:${userId}`;
+        if (this.server && typeof this.server.to === 'function') {
+            this.server.to(roomName).emit('mt5_behavior_alert', payload);
+            return;
+        }
+
+        this.clients.forEach((clientData, client) => {
+            if (!clientData?.authenticated || clientData.userId !== userId) return;
+            try {
+                if (typeof client.emit === 'function') {
+                    client.emit('mt5_behavior_alert', payload);
+                }
+            } catch (e: any) {
+                this.logger.warn(`Failed to emit mt5_behavior_alert to client: ${e?.message || e}`);
+            }
+        });
+    }
+
+    private broadcast(
+        packet: browser.IBrowserPacket,
+        eventName?: string,
+        jsonPayload?: any,
+        userId?: string,
+    ) {
+        if (!userId) {
+            this.logger.warn(
+                `Blocked unscoped WS broadcast (${eventName || packet.type}): userId is required.`,
+            );
+            return;
+        }
+
+        this.emitLocalPacket(packet, eventName, jsonPayload, userId);
+
+        if (this.pubRedis && this.pubReady) {
+            void this.pubRedis
+                .publish(
+                    this.pubsubChannel,
+                    JSON.stringify({
+                        originId: this.instanceId,
+                        kind: 'packet',
+                        packet,
+                        eventName,
+                        jsonPayload,
+                        userId,
+                    }),
+                )
+                .catch(() => {});
+        }
     }
 
     broadcastAccountUpdate(data: browser.IAccountUpdate, userId?: string) {
@@ -349,21 +445,20 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
             return;
         }
 
-        const roomName = `mt5_user:${userId}`;
-        if (this.server && typeof this.server.to === 'function') {
-            this.server.to(roomName).emit('mt5_behavior_alert', payload);
-            return;
-        }
+        this.emitLocalBehaviorAlert(payload, userId);
 
-        this.clients.forEach((clientData, client) => {
-            if (!clientData?.authenticated || clientData.userId !== userId) return;
-            try {
-                if (typeof client.emit === 'function') {
-                    client.emit('mt5_behavior_alert', payload);
-                }
-            } catch (e: any) {
-                this.logger.warn(`Failed to emit mt5_behavior_alert to client: ${e?.message || e}`);
-            }
-        });
+        if (this.pubRedis && this.pubReady) {
+            void this.pubRedis
+                .publish(
+                    this.pubsubChannel,
+                    JSON.stringify({
+                        originId: this.instanceId,
+                        kind: 'behavior_alert',
+                        jsonPayload: payload,
+                        userId,
+                    }),
+                )
+                .catch(() => {});
+        }
     }
 }

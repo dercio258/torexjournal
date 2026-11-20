@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    ArrowLeft,
     Hash,
     MessageSquare,
     Search,
@@ -24,7 +25,6 @@ interface ChannelMessage {
     user: {
         id: string;
         username: string;
-        name?: string;
         avatarUrl?: string | null;
     };
 }
@@ -32,7 +32,6 @@ interface ChannelMessage {
 export interface ChatPartnerTarget {
     id: string;
     username: string;
-    name?: string;
     avatarUrl?: string | null;
 }
 
@@ -102,6 +101,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
     const [newMessage, setNewMessage] = useState('');
     const [sending, setSending] = useState(false);
+    const [mobilePane, setMobilePane] = useState<'list' | 'chat'>(() =>
+        initialPartner?.id ? 'chat' : 'list'
+    );
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const scrollToBottom = useCallback(() => {
@@ -148,6 +150,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         async (partner: ChatPartnerTarget) => {
             setMode('dm');
             setActivePartner(partner);
+            setMobilePane('chat');
             try {
                 const res = await api.get(
                     `/network/conversations/${partner.id}/messages`
@@ -325,9 +328,13 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         COMMUNITY_CHANNELS[0];
 
     return (
-        <div className="h-full bg-surface border border-line rounded-xl overflow-hidden flex flex-col md:flex-row">
+        <div className="h-full min-h-[420px] bg-surface border border-line rounded-xl overflow-hidden flex flex-col md:flex-row">
             {/* Coluna Lateral: Salas Temáticas + Conversas Diretas entre Usuários */}
-            <div className="w-full md:w-64 lg:w-72 border-b md:border-b-0 md:border-r border-line-subtle bg-canvas-subtle flex flex-col shrink-0 max-h-56 md:max-h-full">
+            <div
+                className={`${
+                    mobilePane === 'chat' ? 'hidden md:flex' : 'flex'
+                } w-full md:w-64 lg:w-72 border-b md:border-b-0 md:border-r border-line-subtle bg-canvas-subtle flex-col shrink-0 flex-1 md:flex-initial min-h-0`}
+            >
                 {/* Salas da Comunidade */}
                 <div className="p-3 border-b border-line-subtle">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle px-1.5 mb-1.5 flex items-center gap-1.5">
@@ -346,6 +353,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                                     onClick={() => {
                                         setMode('channel');
                                         setActiveRoom(ch.id);
+                                        setMobilePane('chat');
                                     }}
                                     className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer text-left ${
                                         selected
@@ -415,11 +423,11 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                                             )}
                                         </div>
                                         <div className="min-w-0">
-                                            <div className="text-xs font-bold text-fg truncate">
-                                                {u.name || u.username}
-                                            </div>
-                                            <div className="text-[10px] font-mono text-accent-fg truncate">
+                                            <div className="text-xs font-bold text-fg font-mono truncate">
                                                 @{u.username}
+                                            </div>
+                                            <div className="text-[10px] text-fg-subtle truncate">
+                                                {isEn ? 'Community Trader' : 'Trader Torex'}
                                             </div>
                                         </div>
                                     </button>
@@ -470,9 +478,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between gap-1">
-                                                <span className="text-xs font-bold text-fg truncate">
-                                                    {conv.partner.name ||
-                                                        conv.partner.username}
+                                                <span className="text-xs font-bold text-fg font-mono truncate">
+                                                    @{conv.partner.username}
                                                 </span>
                                                 {conv.unreadCount > 0 && (
                                                     <span className="px-1.5 py-0.2 rounded-full bg-accent text-accent-on text-[10px] font-extrabold tabular-nums">
@@ -493,45 +500,58 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             </div>
 
             {/* Palco Principal da Conversa */}
-            <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            <div
+                className={`${
+                    mobilePane === 'list' ? 'hidden md:flex' : 'flex'
+                } flex-1 flex-col min-w-0 min-h-0`}
+            >
                 {/* Cabeçalho da Conversa Ativa */}
-                <div className="px-4 py-2.5 border-b border-line-subtle bg-canvas-subtle flex items-center justify-between gap-2 shrink-0">
-                    {mode === 'channel' ? (
-                        <div className="min-w-0">
-                            <h3 className="text-xs font-bold text-fg flex items-center gap-1.5">
-                                <Hash size={14} className="text-accent-fg" />
-                                <span>{isEn ? currentChannelMeta.labelEn : currentChannelMeta.label}</span>
-                            </h3>
-                            <p className="text-[11px] text-fg-muted truncate">
-                                {isEn ? currentChannelMeta.descriptionEn : currentChannelMeta.description}
-                            </p>
-                        </div>
-                    ) : activePartner ? (
-                        <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-surface-2 border border-line-strong flex items-center justify-center text-xs font-bold text-fg overflow-hidden shrink-0">
-                                {activePartner.avatarUrl ? (
-                                    <img
-                                        src={activePartner.avatarUrl}
-                                        alt={activePartner.username}
-                                        className="w-full h-full object-cover"
-                                    />
-                                ) : (
-                                    <span>
-                                        {activePartner.username?.[0]?.toUpperCase()}
-                                    </span>
-                                )}
-                            </div>
+                <div className="px-3 sm:px-4 py-2.5 border-b border-line-subtle bg-canvas-subtle flex items-center justify-between gap-2 shrink-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <button
+                            type="button"
+                            onClick={() => setMobilePane('list')}
+                            className="md:hidden p-1.5 -ml-1 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors cursor-pointer shrink-0"
+                            aria-label={isEn ? 'Back to rooms & chats' : 'Voltar para salas e conversas'}
+                        >
+                            <ArrowLeft size={16} />
+                        </button>
+                        {mode === 'channel' ? (
                             <div className="min-w-0">
-                                <h3 className="text-xs font-bold text-fg truncate">
-                                    {activePartner.name ||
-                                        activePartner.username}
+                                <h3 className="text-xs font-bold text-fg flex items-center gap-1.5">
+                                    <Hash size={14} className="text-accent-fg shrink-0" />
+                                    <span className="truncate">{isEn ? currentChannelMeta.labelEn : currentChannelMeta.label}</span>
                                 </h3>
-                                <p className="text-[11px] font-mono text-accent-fg truncate">
-                                    @{activePartner.username} · {isEn ? 'Direct Message' : 'Conversa Direta'}
+                                <p className="text-[11px] text-fg-muted truncate">
+                                    {isEn ? currentChannelMeta.descriptionEn : currentChannelMeta.description}
                                 </p>
                             </div>
-                        </div>
-                    ) : null}
+                        ) : activePartner ? (
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-full bg-surface-2 border border-line-strong flex items-center justify-center text-xs font-bold text-fg overflow-hidden shrink-0">
+                                    {activePartner.avatarUrl ? (
+                                        <img
+                                            src={activePartner.avatarUrl}
+                                            alt={activePartner.username}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : (
+                                        <span>
+                                            {activePartner.username?.[0]?.toUpperCase()}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="text-xs font-bold text-fg font-mono truncate">
+                                        @{activePartner.username}
+                                    </h3>
+                                    <p className="text-[11px] text-accent-fg truncate">
+                                        {isEn ? 'Direct Message' : 'Conversa Direta'}
+                                    </p>
+                                </div>
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
 
                 {/* Lista de Mensagens */}
@@ -564,7 +584,6 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                                                         id: msg.user.id,
                                                         username:
                                                             msg.user.username,
-                                                        name: msg.user.name,
                                                         avatarUrl:
                                                             msg.user.avatarUrl,
                                                     });
@@ -619,9 +638,6 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                                                                     username:
                                                                         msg.user
                                                                             .username,
-                                                                    name: msg
-                                                                        .user
-                                                                        .name,
                                                                     avatarUrl:
                                                                         msg.user
                                                                             .avatarUrl,
@@ -683,9 +699,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                                 ? user?.avatarUrl
                                 : activePartner?.avatarUrl;
                             const initial = (isMe
-                                ? user?.username || user?.name
-                                : activePartner?.username ||
-                                  activePartner?.name)?.[0]?.toUpperCase();
+                                ? user?.username
+                                : activePartner?.username)?.[0]?.toUpperCase();
 
                             return (
                                 <div

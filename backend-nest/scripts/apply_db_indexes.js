@@ -78,12 +78,20 @@ const INDEX_STATEMENTS = [
 ];
 
 async function applyIndexes() {
+    const dbUser = process.env.DB_USER || process.env.DB_USERNAME;
+    const dbPass = process.env.DB_PASS || process.env.DB_PASSWORD;
+    const dbName = process.env.DB_NAME || process.env.DB_DATABASE;
+    if (!dbUser || !dbPass || !dbName) {
+        console.error('❌ Variáveis DB_USER, DB_PASS e DB_NAME são obrigatórias.');
+        process.exit(1);
+    }
+
     const pgConfig = {
         host: process.env.DB_HOST || '127.0.0.1',
         port: parseInt(process.env.DB_PORT || '5432', 10),
-        user: process.env.DB_USER || process.env.DB_USERNAME || 'postgres',
-        password: process.env.DB_PASS || process.env.DB_PASSWORD || 'postgres',
-        database: process.env.DB_NAME || process.env.DB_DATABASE || 'trading_cossa',
+        user: dbUser,
+        password: dbPass,
+        database: dbName,
     };
 
     const pg = new Client(pgConfig);

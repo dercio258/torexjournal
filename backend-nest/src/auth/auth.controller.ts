@@ -42,6 +42,9 @@ import {
     Verify2faSetupDto,
     OnboardingSurveyDto,
     OAuthExchangeDto,
+    RegisterInitiateDto,
+    VerifyRegistrationDto,
+    ResendRegistrationOtpDto,
 } from './dto/auth.dto';
 
 @Controller('auth')
@@ -71,6 +74,34 @@ export class AuthController {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
         return this.authService.refresh(body.refreshToken, ip, userAgent);
+    }
+
+    @Get('geo-hint')
+    @Throttle({ default: { limit: 20, ttl: 60000 } })
+    getGeoHint(@Request() req, @Query('tz') tz?: string) {
+        return this.authService.getGeoHint(req.headers, tz);
+    }
+
+    @Post('register/initiate')
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
+    async initiateRegistration(@Body() body: RegisterInitiateDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
+        const userAgent = req.headers['user-agent'];
+        return this.authService.initiateRegistration(body, ip, userAgent);
+    }
+
+    @Post('register/verify')
+    @Throttle({ default: { limit: 6, ttl: 60000 } })
+    async verifyRegistration(@Body() body: VerifyRegistrationDto, @Request() req) {
+        const ip = extractTrustedClientIp(req);
+        const userAgent = req.headers['user-agent'];
+        return this.authService.verifyRegistration(body.verificationToken, body.otp, ip, userAgent);
+    }
+
+    @Post('register/resend')
+    @Throttle({ default: { limit: 3, ttl: 60000 } })
+    async resendRegistrationOtp(@Body() body: ResendRegistrationOtpDto) {
+        return this.authService.resendRegistrationOtp(body.verificationToken);
     }
 
     @Post('register')
@@ -126,7 +157,7 @@ export class AuthController {
     @Post('logout')
     async logout(@Request() req) {
         const token = req.headers.authorization?.replace('Bearer ', '');
-        await this.authService.logout(token);
+        await this.authService.logout(token, req.user?.id);
         return { success: true, message: 'Logged out successfully' };
     }
 
@@ -252,7 +283,10 @@ export class AuthController {
     @UseGuards(JwtAuthGuard)
     @Put('2fa')
     async update2fa(@Request() req, @Body() body: Update2faDto) {
-        return this.authService.setTwoFactor(req.user.id, body.enabled);
+        return this.authService.setTwoFactor(req.user.id, body.enabled, {
+            code: body.code,
+            password: body.password,
+        });
     }
 
     @UseGuards(JwtAuthGuard)
@@ -301,8 +335,9 @@ export class AuthController {
 
         const code = await this.authService.createOAuthExchangeCode({
             token: result.token || null,
-            twoFactorRequired: Boolean(result.twoFactorRequired),
-            twoFactorToken: result.twoFactorToken || null,
+            twoFactorRequired: 'twoFactorRequired' in result ? Boolean(result.twoFactorRequired) : false,
+            twoFactorType: 'twoFactorType' in result ? result.twoFactorType || null : null,
+            twoFactorToken: 'twoFactorToken' in result ? result.twoFactorToken || null : null,
             requiresContact: Boolean(result.requiresContact),
         });
 
@@ -332,8 +367,9 @@ export class AuthController {
 
         const code = await this.authService.createOAuthExchangeCode({
             token: result.token || null,
-            twoFactorRequired: Boolean(result.twoFactorRequired),
-            twoFactorToken: result.twoFactorToken || null,
+            twoFactorRequired: 'twoFactorRequired' in result ? Boolean(result.twoFactorRequired) : false,
+            twoFactorType: 'twoFactorType' in result ? result.twoFactorType || null : null,
+            twoFactorToken: 'twoFactorToken' in result ? result.twoFactorToken || null : null,
             requiresContact: Boolean(result.requiresContact),
         });
 

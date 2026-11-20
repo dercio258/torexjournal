@@ -100,6 +100,12 @@ export class RegisterDto {
     @IsString()
     @MaxLength(120)
     visitorId?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(32)
+    referralCode?: string;
 }
 
 export class ForgotPasswordDto {
@@ -202,7 +208,7 @@ export class UpdateContactDto {
     @Transform(trimString)
     @IsString()
     @Matches(/^\+?[0-9\s()-]{6,24}$/, {
-        message: 'Informe um número de WhatsApp válido com código do país.',
+        message: 'Informe um contacto móvel válido com indicativo do país.',
     })
     whatsapp: string;
 }
@@ -227,11 +233,28 @@ export class UpdatePreferencesDto {
     @IsString()
     @MaxLength(120)
     visitorId?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(32)
+    referralCode?: string;
 }
 
 export class Update2faDto {
     @IsBoolean()
     enabled: boolean;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @Matches(/^\d{6}$/, { message: 'O código 2FA deve conter 6 dígitos.' })
+    code?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(128)
+    password?: string;
 }
 
 export class Verify2faSetupDto {
@@ -277,4 +300,80 @@ export class OAuthExchangeDto {
     @MinLength(16)
     @MaxLength(256)
     code: string;
+}
+
+export class RegisterInitiateDto {
+    @Transform(trimString)
+    @IsString()
+    @MinLength(2, { message: 'Nome deve ter pelo menos 2 caracteres.' })
+    @MaxLength(120)
+    name: string;
+
+    @Transform(trimLowerEmail)
+    @IsEmail({}, { message: 'Informe um e-mail válido.' })
+    @MaxLength(254)
+    email: string;
+
+    @IsString()
+    @MinLength(8, { message: 'A senha deve ter no mínimo 8 caracteres.' })
+    @MaxLength(128)
+    password: string;
+
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(32)
+    contact: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4)
+    countryIso2?: string;
+
+    @IsOptional()
+    @IsIn(['pt', 'en'])
+    preferredLocale?: 'pt' | 'en';
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(64)
+    timezone?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(120)
+    visitorId?: string;
+
+    @IsOptional()
+    @IsObject()
+    attributionData?: Record<string, unknown>;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(32)
+    referralCode?: string;
+}
+
+export class VerifyRegistrationDto {
+    @Transform(trimString)
+    @IsString()
+    @MinLength(16)
+    @MaxLength(2048)
+    verificationToken: string;
+
+    @Transform(trimString)
+    @IsString()
+    @Matches(/^\d{6}$/, { message: 'O código de verificação deve conter 6 dígitos.' })
+    otp: string;
+}
+
+export class ResendRegistrationOtpDto {
+    @Transform(trimString)
+    @IsString()
+    @MinLength(16)
+    @MaxLength(2048)
+    verificationToken: string;
 }

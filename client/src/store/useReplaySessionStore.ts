@@ -105,10 +105,36 @@ interface ReplaySessionStore {
     setStorageTelemetry: (patch: { cacheLayer?: CacheLayerSource; offlineOutboxCount?: number }) => void;
     pushExecutionEvent: (evt: Omit<ExecutionFeedEvent, 'id' | 'timestamp'>) => void;
     dismissExecutionEvent: (id: string) => void;
+    clearSessionMemory: () => void;
 }
 
-const MAX_HISTORY_STACK = 60;
+const MAX_HISTORY_STACK = 25;
 const BROADCAST_CHANNEL_NAME = 'torex_backtest_sync_v2';
+
+function stripHeavyHistoryFields(snap: ReplayStateSnapshot): ReplayStateSnapshot {
+    if (!Array.isArray(snap.sessionScreenshots) || snap.sessionScreenshots.length === 0) {
+        return snap;
+    }
+    return {
+        ...snap,
+        sessionScreenshots: snap.sessionScreenshots.map((item: any) => {
+            if (typeof item === 'string') {
+                return item.startsWith('data:image/') ? '' : item;
+            }
+            if (item && typeof item === 'object') {
+                const cleaned = { ...item };
+                if (typeof cleaned.url === 'string' && cleaned.url.startsWith('data:image/')) {
+                    cleaned.url = '';
+                }
+                if (typeof cleaned.dataUrl === 'string' && cleaned.dataUrl.startsWith('data:image/')) {
+                    cleaned.dataUrl = '';
+                }
+                return cleaned;
+            }
+            return item;
+        }),
+    };
+}
 
 let broadcastChannelInstance: BroadcastChannel | null = null;
 function getBacktestBroadcastChannel(): BroadcastChannel | null {
@@ -546,7 +572,7 @@ export const useReplaySessionStore = create<ReplaySessionStore>((set, get) => ({
             stampedEvents.length > 0 ? [...stampedEvents, ...executionFeed].slice(0, 4) : executionFeed;
 
         const nextPast = currentSnapshot
-            ? [...pastStates.slice(-(MAX_HISTORY_STACK - 1)), currentSnapshot]
+            ? [...pastStates.slice(-(MAX_HISTORY_STACK - 1)), stripHeavyHistoryFields(currentSnapshot)]
             : pastStates;
 
         set({
@@ -581,7 +607,7 @@ export const useReplaySessionStore = create<ReplaySessionStore>((set, get) => ({
         lastComputedSignature = computeFastSnapshotSignature(previous);
         const newPast = pastStates.slice(0, -1);
         const newFuture = currentSnapshot
-            ? [currentSnapshot, ...futureStates.slice(0, MAX_HISTORY_STACK - 1)]
+            ? [stripHeavyHistoryFields(currentSnapshot), ...futureStates.slice(0, MAX_HISTORY_STACK - 1)]
             : futureStates;
 
         set({
@@ -617,7 +643,7 @@ export const useReplaySessionStore = create<ReplaySessionStore>((set, get) => ({
         lastComputedSignature = computeFastSnapshotSignature(next);
         const newFuture = futureStates.slice(1);
         const newPast = currentSnapshot
-            ? [...pastStates.slice(-(MAX_HISTORY_STACK - 1)), currentSnapshot]
+            ? [...pastStates.slice(-(MAX_HISTORY_STACK - 1)), stripHeavyHistoryFields(currentSnapshot)]
             : pastStates;
 
         set({
@@ -668,5 +694,13 @@ export const useReplaySessionStore = create<ReplaySessionStore>((set, get) => ({
         set((state) => ({
             executionFeed: state.executionFeed.filter((item) => item.id !== id),
         }));
+    },
+
+    clearSessionMemory: () => {
+        set({
+            pastStates: [],
+            futureStates: [],
+            executionFeed: [],
+        });
     },
 }));

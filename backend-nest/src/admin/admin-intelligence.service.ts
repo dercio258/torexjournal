@@ -60,7 +60,8 @@ export interface JourneySignalsInput {
     journalEntriesCount: number;
     backtestSessionsCount: number;
     aiSessionsCount: number;
-    whatsappLinked: boolean;
+    pushSubscribed?: boolean;
+    whatsappLinked?: boolean;
     emailOpensCount: number;
     planStatus: AdminPlanStatus;
     expiredDaysAgo: number | null;
@@ -451,7 +452,7 @@ export function computeJourneySummary(input: JourneySignalsInput): JourneySummar
     if (checklist.importedTrades) score += 20;
     if (checklist.usedProductTools) score += 15;
     if (checklist.convertedPaid) score += 15;
-    if (input.whatsappLinked) score += 5;
+    if (input.pushSubscribed || input.whatsappLinked) score += 5;
     const engagementScore = Math.min(100, Math.max(0, score));
 
     let funnelStage: JourneySummary['funnelStage'] = 'REGISTERED';
@@ -476,7 +477,7 @@ export function computeJourneySummary(input: JourneySignalsInput): JourneySummar
     const recommendations: string[] = [];
     if (input.planStatus === 'EXPIRED') {
         recommendations.push(
-            `Plano expirado há ${input.expiredDaysAgo ?? 0} dia(s) — enviar proposta de renovação${input.hasWhatsapp ? ' via WhatsApp' : ' por e-mail'}.`,
+            `Plano expirado há ${input.expiredDaysAgo ?? 0} dia(s) — enviar proposta de renovação via E-mail / Notificação Push.`,
         );
     } else if (input.planStatus === 'ACTIVE' && input.daysLeft !== null && input.daysLeft <= 7) {
         recommendations.push(`Assinatura vence em ${input.daysLeft} dia(s) — acionar lembrete preventivo de renovação.`);
@@ -514,6 +515,8 @@ export function computeJourneySummary(input: JourneySignalsInput): JourneySummar
 @Injectable()
 export class AdminIntelligenceService {
     private readonly logger = new Logger(AdminIntelligenceService.name);
+    private enrichedDatasetCache: { data: any; expiresAt: number } | null = null;
+    private inFlightDatasetPromise: Promise<any> | null = null;
 
     constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
@@ -542,6 +545,28 @@ export class AdminIntelligenceService {
     }
 
     private async buildEnrichedUsersDataset() {
+        const nowMs = Date.now();
+        if (this.enrichedDatasetCache && this.enrichedDatasetCache.expiresAt > nowMs) {
+            return this.enrichedDatasetCache.data;
+        }
+        if (this.inFlightDatasetPromise) {
+            return this.inFlightDatasetPromise;
+        }
+
+        const task = this.computeEnrichedUsersDataset()
+            .then((result) => {
+                this.enrichedDatasetCache = { data: result, expiresAt: Date.now() + 30_000 };
+                return result;
+            })
+            .finally(() => {
+                this.inFlightDatasetPromise = null;
+            });
+
+        this.inFlightDatasetPromise = task;
+        return task;
+    }
+
+    private async computeEnrichedUsersDataset() {
         const now = new Date();
         const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -553,23 +578,8 @@ export class AdminIntelligenceService {
             order: { createdAt: 'DESC' },
         });
 
-        const [
-            paymentsAgg,
-            sessionsAgg,
-            auditLoginAgg,
-            importsAgg,
-            latestImports,
-            accountsAgg,
-            tradesAgg,
-            trackingAgg,
-            latestTracking,
-            backtestAgg,
-            dailyNotesAgg,
-            tradeNotesAgg,
-            aiChatsAgg,
-            whatsappLinksAgg,
-            emailTrackingAgg,
-        ] = await Promise.all([
+        // Batched in 3 waves of 5 concurrent queries to avoid saturating the PostgreSQL connection pool
+        const [paymentsAgg, sessionsAgg, auditLoginAgg, importsAgg, latestImports] = await Promise.all([
             this.safeQuery(
                 `SELECT LOWER(TRIM("email")) AS email_key,
                         COUNT(*) FILTER (WHERE LOWER(COALESCE("status", '')) IN ('aprovada', 'approved', 'paid', 'completed', 'active'))::int AS approved_count,
@@ -608,6 +618,9 @@ export class AdminIntelligenceService {
                  WHERE "userId" IS NOT NULL
                  ORDER BY "userId", "createdAt" DESC`,
             ),
+        ]);
+
+        const [accountsAgg, tradesAgg, trackingAgg, latestTracking, backtestAgg] = await Promise.all([
             this.safeQuery(
                 `SELECT "user_id",
                         COUNT(*) FILTER (WHERE COALESCE("is_archived", false) = false)::int AS accounts_count,
@@ -628,7 +641,7 @@ export class AdminIntelligenceService {
                         COUNT(DISTINCT "page_path") FILTER (WHERE "event_type" = 'pageview' AND "page_path" IS NOT NULL)::int AS distinct_pages_count,
                         COUNT(*) FILTER (WHERE "event_type" = 'button_click')::int AS clicks_count,
                         COUNT(*) FILTER (WHERE "event_type" = 'conversion')::int AS conversions_count,
-                        COUNT(*) FILTER (WHERE LOWER(COALESCE("page_path", '')) ~ '(\/pricing|\/plans|\/checkout|\/subscribe)' OR LOWER(COALESCE("cta_tag", '') || ' ' || COALESCE("intent", '')) ~ '(checkout|upgrade|plan|subscribe|pricing|trial)')::int AS checkout_intent_count,
+                        COUNT(*) FILTER (WHERE LOWER(COALESCE("page_path", '')) ~ '(\\/pricing|\\/plans|\\/checkout|\\/subscribe)' OR LOWER(COALESCE("cta_tag", '') || ' ' || COALESCE("intent", '')) ~ '(checkout|upgrade|plan|subscribe|pricing|trial)')::int AS checkout_intent_count,
                         MAX("created_at") FILTER (WHERE "event_type" <> 'email_open') AS last_event_at
                  FROM "tracking_events"
                  WHERE "user_id" IS NOT NULL
@@ -644,6 +657,9 @@ export class AdminIntelligenceService {
             this.safeQuery(
                 `SELECT "user_id", COUNT(*)::int AS cnt FROM "backtest_sessions" GROUP BY "user_id"`,
             ),
+        ]);
+
+        const [dailyNotesAgg, tradeNotesAgg, aiChatsAgg, pushSubsAgg, emailTrackingAgg] = await Promise.all([
             this.safeQuery(
                 `SELECT "user_id", COUNT(*)::int AS cnt FROM "daily_notes" GROUP BY "user_id"`,
             ),
@@ -654,8 +670,8 @@ export class AdminIntelligenceService {
                 `SELECT "user_id", COUNT(*)::int AS cnt FROM "ai_chat_sessions" GROUP BY "user_id"`,
             ),
             this.safeQuery(
-                `SELECT "user_id", COUNT(*) FILTER (WHERE "is_active" = true)::int AS active_count, MAX("last_interaction_at") AS last_interaction_at
-                 FROM "whatsapp_links"
+                `SELECT "user_id", COUNT(*) FILTER (WHERE "is_active" = true)::int AS active_count, MAX("last_sent_at") AS last_interaction_at
+                 FROM "push_subscriptions"
                  GROUP BY "user_id"`,
             ),
             this.safeQuery(
@@ -697,7 +713,7 @@ export class AdminIntelligenceService {
         const dailyNotesByUser = toMap(dailyNotesAgg);
         const tradeNotesByUser = toMap(tradeNotesAgg);
         const aiChatsByUser = toMap(aiChatsAgg);
-        const waLinksByUser = toMap(whatsappLinksAgg);
+        const pushSubsByUser = toMap(pushSubsAgg);
         const emailTrackByEmail = toMap(emailTrackingAgg, 'email_key');
 
         const originAccumulator = new Map<string, OriginPerformanceMetric>();
@@ -730,7 +746,7 @@ export class AdminIntelligenceService {
             const trd = tradesByUser.get(u.id);
             const trk = trackingByUser.get(u.id);
             const latestTrk = latestTrackingByUser.get(u.id);
-            const waLink = waLinksByUser.get(u.id);
+            const pushSubInfo = pushSubsByUser.get(u.id);
             const emailTrk = emailTrackByEmail.get(emailKey);
 
             const loginDates = [
@@ -832,7 +848,7 @@ export class AdminIntelligenceService {
                 Number(tradeNotesByUser.get(u.id)?.cnt || 0);
             const backtestSessionsCount = Number(backtestsByUser.get(u.id)?.cnt || 0);
             const aiSessionsCount = Number(aiChatsByUser.get(u.id)?.cnt || 0);
-            const whatsappLinked = Number(waLink?.active_count || 0) > 0;
+            const pushSubscribed = Number(pushSubInfo?.active_count || 0) > 0;
             const emailOpensCount = Number(emailTrk?.open_count || 0);
 
             const createdMs = u.createdAt ? new Date(u.createdAt).getTime() : now.getTime();
@@ -854,7 +870,7 @@ export class AdminIntelligenceService {
                 journalEntriesCount,
                 backtestSessionsCount,
                 aiSessionsCount,
-                whatsappLinked,
+                pushSubscribed,
                 emailOpensCount,
                 planStatus: plan.planStatus,
                 expiredDaysAgo: plan.expiredDaysAgo,
@@ -936,7 +952,7 @@ export class AdminIntelligenceService {
                     journalEntriesCount,
                     backtestSessionsCount,
                     aiSessionsCount,
-                    whatsappLinked,
+                    pushSubscribed,
                     emailSentCount: Number(emailTrk?.sent_count || 0),
                     emailOpenCount: emailOpensCount,
                     emailClickCount: Number(emailTrk?.click_count || 0),
@@ -1514,7 +1530,7 @@ export class AdminIntelligenceService {
                 category: 'Recuperação de Receita',
                 title: `${checkoutAbandoned.length} lead(s) com intenção de compra ou checkout pendente`,
                 description:
-                    'Usuários que abriram preços/checkout recentemente ou possuem assinatura pendente sem pagamento aprovado. Abordagem direta via WhatsApp costuma recuperar vendas no mesmo dia.',
+                    'Usuários que abriram preços/checkout recentemente ou possuem assinatura pendente sem pagamento aprovado. Campanha segmentada via E-mail / Notificação Push costuma recuperar assinaturas no mesmo dia.',
                 metric: `${checkoutAbandoned.length} em aberto`,
                 actionLabel: 'Ver leads no /admin/users',
                 actionPath: '/admin/users?activityFilter=CHECKOUT_INTENT',

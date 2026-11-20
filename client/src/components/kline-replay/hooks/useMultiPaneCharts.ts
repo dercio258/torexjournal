@@ -174,12 +174,21 @@ export function useMultiPaneCharts({
                     if (auxChart) {
                         auxChartRefs.current[i] = auxChart;
                         applyChartTheme(auxChart, chartTheme);
+                        let auxResizeRaf: number | null = null;
                         const ro = new ResizeObserver(() => {
-                            requestAnimationFrame(() => auxChart.resize());
+                            if (auxResizeRaf !== null) cancelAnimationFrame(auxResizeRaf);
+                            auxResizeRaf = requestAnimationFrame(() => {
+                                auxResizeRaf = null;
+                                auxChart.resize();
+                            });
                         });
                         ro.observe(auxEl);
                         const unbindAuxYAxis = bindPrecisionYAxisEvents(auxEl, auxChart);
                         auxCleanupsRef.current[i] = () => {
+                            if (auxResizeRaf !== null) {
+                                cancelAnimationFrame(auxResizeRaf);
+                                auxResizeRaf = null;
+                            }
                             unbindAuxYAxis();
                             ro.disconnect();
                             dispose(auxEl);

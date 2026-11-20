@@ -1,23 +1,21 @@
-import { Injectable, Logger, OnModuleInit, Inject, ForbiddenException, Optional } from '@nestjs/common';
-import { randomInt, randomBytes } from 'crypto';
+import { Injectable, Logger, OnModuleInit, Inject, ForbiddenException, BadRequestException, Optional } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual } from 'typeorm';
+import { Repository, In, Not } from 'typeorm';
 import { SubscriptionPlanConfig } from './subscription-plan.entity';
 import { Subscription, SubscriptionStatus, SubscriptionCycle } from './subscription.entity';
 import { AlertsService } from '../alerts/alerts.service';
 import { AlertType, AlertSeverity } from '../alerts/alert.entity';
-import { DebitoService } from './debito.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailProducerService } from '../email/email-producer.service';
 import { UserEntity } from '../users/user.entity';
-import { SmsService } from '../notifications/sms.service';
-import { SmsTemplates } from '../notifications/sms-templates';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ReferralService } from '../users/referral.service';
 
 @Injectable()
 export class SubscriptionService implements OnModuleInit {
@@ -26,7 +24,6 @@ export class SubscriptionService implements OnModuleInit {
     constructor(
         private configService: ConfigService,
         private alertsService: AlertsService,
-        private debitoService: DebitoService,
         private notificationsService: NotificationsService,
         private emailProducer: EmailProducerService,
         @InjectRepository(SubscriptionPlanConfig)
@@ -35,10 +32,10 @@ export class SubscriptionService implements OnModuleInit {
         private subscriptionRepo: Repository<Subscription>,
         @InjectRepository(UserEntity)
         private userRepo: Repository<UserEntity>,
-        private smsService: SmsService,
         @Inject(CACHE_MANAGER) private cacheManager: Cache,
         @InjectQueue('subscription-queue') private subscriptionQueue: Queue,
         @Optional() private analyticsService?: AnalyticsService,
+        @Optional() private referralService?: ReferralService,
     ) { }
 
     async onModuleInit() {
@@ -181,14 +178,99 @@ export class SubscriptionService implements OnModuleInit {
 
     // --- Subscription Creation ---
 
-    private getAmount(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
-        // Prioritize DB monthlyPrice over environment variables
+    getUsdToMznRate(): number {
+        const raw =
+            this.configService.get<string | number>('USD_TO_MZN_RATE') ??
+            this.configService.get<string | number>('EXCHANGE_RATE_USD_MZN') ??
+            65;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 65;
+    }
+
+    getAmountUsd(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
         const monthlyPrice = Number(config.monthlyPrice);
-        const total = cycle === SubscriptionCycle.MONTHLY ? monthlyPrice : (monthlyPrice * 12 * (1 - config.annualDiscountPercent / 100));
+        const discount = Number(config.annualDiscountPercent || 0);
+        const total =
+            cycle === SubscriptionCycle.MONTHLY
+                ? monthlyPrice
+                : monthlyPrice * 12 * (1 - discount / 100);
         return Number(total.toFixed(2));
     }
 
-    async createMobileSubscription(userId: string, tier: string, cycle: SubscriptionCycle, paymentMethod: 'mpesa' | 'emola', phoneNumber: string, savePreference?: boolean) {
+    getAmountMzn(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
+        const usd = this.getAmountUsd(config, cycle);
+        return Number((usd * this.getUsdToMznRate()).toFixed(2));
+    }
+
+    private getAmount(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
+        return this.getAmountMzn(config, cycle);
+    }
+
+    private async invalidateUserPlanCaches(userId: string): Promise<void> {
+        await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
+        await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
+        await this.cacheManager.del('admin:financial_stats').catch(() => {});
+    }
+
+    async cancelScheduledSubscriptionJobs(subscriptionId: string): Promise<void> {
+        const jobIds = [
+            `exp-warn-sched:${subscriptionId}`,
+            `renewal-sched:${subscriptionId}`,
+            `remarketing-trigger:${subscriptionId}`,
+        ];
+        for (const jobId of jobIds) {
+            try {
+                const job = await this.subscriptionQueue.getJob(jobId);
+                if (job) {
+                    await job.remove();
+                }
+            } catch (err: any) {
+                this.logger.warn(
+                    `Failed removing Bull job ${jobId} for subscription ${subscriptionId}: ${err?.message || err}`,
+                );
+            }
+        }
+    }
+
+    async scheduleSubscriptionLifecycleJobs(subscriptionId: string, expiry: Date): Promise<void> {
+        await this.cancelScheduledSubscriptionJobs(subscriptionId);
+        const nowMs = Date.now();
+        const warningTime = expiry.getTime() - 5 * 24 * 60 * 60 * 1000;
+        const warningDelay = warningTime - nowMs;
+        if (warningDelay > 0) {
+            await this.subscriptionQueue.add(
+                'expiration-warning',
+                { subscriptionId },
+                { delay: warningDelay, jobId: `exp-warn-sched:${subscriptionId}` },
+            );
+            this.logger.log(
+                `Scheduled expiration warning job for subscription ${subscriptionId} in ${warningDelay}ms`,
+            );
+        }
+
+        // Schedule auto-renewal slightly ahead of expiry so the 5-min expiration sweep does not race ahead of it
+        if (expiry.getTime() > nowMs) {
+            const renewalDelay = Math.max(1000, expiry.getTime() - 2 * 60 * 1000 - nowMs);
+            await this.subscriptionQueue.add(
+                'renewal-charge',
+                { subscriptionId },
+                { delay: renewalDelay, jobId: `renewal-sched:${subscriptionId}` },
+            );
+            this.logger.log(
+                `Scheduled renewal charge job for subscription ${subscriptionId} in ${renewalDelay}ms`,
+            );
+        }
+    }
+
+    async createMobileSubscription(
+        userId: string,
+        tier: string,
+        cycle: SubscriptionCycle,
+        paymentMethod: 'mpesa' | 'emola',
+        phoneNumber: string,
+        savePreference?: boolean,
+        useReferralCredits?: boolean,
+    ) {
         const config = await this.planConfigRepo.findOne({
             where: { tier: tier.toUpperCase(), isActive: true }
         });
@@ -200,24 +282,22 @@ export class SubscriptionService implements OnModuleInit {
             throw new Error(`Configuração do plano ${tier} não encontrada. Planos disponíveis: ${tiers}`);
         }
 
-        const amount = this.getAmount(config, cycle);
+        const baseUsd = this.getAmountUsd(config, cycle);
+        let appliedCreditUsd = 0;
+        if (useReferralCredits && this.referralService) {
+            const userRow = await this.userRepo.findOne({ where: { id: userId }, select: ['id', 'referralCreditsUsd'] });
+            const available = Math.max(0, Number(userRow?.referralCreditsUsd || 0));
+            const candidate = Number(Math.min(available, Math.max(0, baseUsd - 0.5)).toFixed(2));
+            if (candidate > 0) {
+                const consumed = await this.referralService.consumeReferralCredits(userId, candidate);
+                if (consumed) appliedCreditUsd = candidate;
+            }
+        }
+        const netUsd = Math.max(0, Number((baseUsd - appliedCreditUsd).toFixed(2)));
+        const amount = Number((netUsd * this.getUsdToMznRate()).toFixed(2));
         const reference = this.generateReference();
 
-        // Call Debito
-        const paymentData = {
-            msisdn: phoneNumber,
-            amount: amount,
-            reference_description: reference
-        };
-
-        let debitoRes = null;
         try {
-            if (paymentMethod === 'mpesa') {
-                debitoRes = await this.debitoService.initiateMpesaPayment(paymentData);
-            } else {
-                debitoRes = await this.debitoService.initiateEmolaPayment(paymentData);
-            }
-
             // Save preferences if requested
             if (savePreference) {
                 await this.userRepo.update(userId, {
@@ -227,15 +307,14 @@ export class SubscriptionService implements OnModuleInit {
                 });
             }
 
-            // Save subscription as PENDING
-            const debitoId = debitoRes?.payment_id || debitoRes?.debito_reference || debitoRes?.transaction_id || debitoRes?.id;
-            this.logger.log(`Creating subscription for reference ${reference}. Linked Debito ID: ${debitoId}`);
+            // Save subscription as PENDING ready for payment confirmation/webhook
+            this.logger.log(`Creating ${paymentMethod} subscription for reference ${reference}.`);
 
             const sub = this.subscriptionRepo.create({
                 userId,
                 planConfigId: config.id,
                 paymentReference: reference,
-                debitoTransactionId: debitoId ? String(debitoId) : null,
+                externalTransactionId: null,
                 status: SubscriptionStatus.APPROVAL_PENDING,
                 cycle,
                 paymentMethod,
@@ -245,11 +324,8 @@ export class SubscriptionService implements OnModuleInit {
 
             // Set active polling state in Redis with 3 minutes TTL (in ms)
             await this.cacheManager.set(`payment_polling:${reference}`, 'active', 3 * 60 * 1000);
-            if (debitoId) {
-                await this.cacheManager.set(`payment_polling:${debitoId}`, 'active', 3 * 60 * 1000);
-            }
 
-            // Start mobile polling loop for 3 minutes via Bull Queue
+            // Start mobile timeout watcher for 3 minutes via Bull Queue
             await this.subscriptionQueue.add('check-pending', {
                 subscriptionId: sub.id,
                 reference: reference,
@@ -280,12 +356,19 @@ export class SubscriptionService implements OnModuleInit {
                 userId,
                 {
                     title: 'Pagamento Iniciado',
-                    message: `Solicitação de pagamento de ${amount} MZN via ${paymentMethod.toUpperCase()} gerada. Confirme no seu telemóvel.`,
+                    message: `Solicitação de pagamento de ${amount} MZN via ${paymentMethod.toUpperCase()} registrada (Ref. ${reference}).`,
                 },
                 { skipEmail: true },
             );
 
-            return { success: true, reference };
+            return {
+                success: true,
+                status: 'PENDING',
+                reference,
+                amount,
+                currency: 'MZN',
+                paymentMethod,
+            };
         } catch (error) {
             this.logger.error(`Mobile subscription failed: ${error.message}`);
             await this.notificationsService.create(
@@ -302,13 +385,13 @@ export class SubscriptionService implements OnModuleInit {
 
 
     async createCardSubscription(
-        userId: string, 
-        tier: string, 
-        cycle: SubscriptionCycle, 
-        returnUrl: string, 
-        cancelUrl: string, 
-        phoneNumber?: string,
-        paymentMethod: 'card' | 'payfast' = 'card'
+        userId: string,
+        tier: string,
+        cycle: SubscriptionCycle,
+        _returnUrl?: string,
+        _cancelUrl?: string,
+        _phoneNumber?: string,
+        useReferralCredits?: boolean,
     ) {
         const config = await this.planConfigRepo.findOne({
             where: { tier: tier.toUpperCase(), isActive: true }
@@ -324,63 +407,39 @@ export class SubscriptionService implements OnModuleInit {
         const user = await this.userRepo.findOne({ where: { id: userId } });
         if (!user) throw new Error('Usuário não encontrado');
 
-        const amount = this.getAmount(config, cycle);
+        const baseUsd = this.getAmountUsd(config, cycle);
+        let appliedCreditUsd = 0;
+        if (useReferralCredits && this.referralService) {
+            const available = Math.max(0, Number(user.referralCreditsUsd || 0));
+            const candidate = Number(Math.min(available, Math.max(0, baseUsd - 0.5)).toFixed(2));
+            if (candidate > 0) {
+                const consumed = await this.referralService.consumeReferralCredits(userId, candidate);
+                if (consumed) appliedCreditUsd = candidate;
+            }
+        }
+        const amountUsd = Math.max(0, Number((baseUsd - appliedCreditUsd).toFixed(2)));
+        const amountMzn = Number((amountUsd * this.getUsdToMznRate()).toFixed(2));
         const reference = this.generateReference();
 
-        const names = (user.name || '').trim().split(' ');
-        const firstName = names[0] || 'User';
-        const lastName = names.slice(1).join(' ') || 'Torex';
-
         try {
-            // Construct backend return status handler URL
-            const backendBaseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
-            const callbackUrl = `${backendBaseUrl}/api/subscription/payment/status/card?reference=${reference}`;
-
-            let res;
-            if (paymentMethod === 'payfast') {
-                res = await this.debitoService.initiatePayFastPayment({
-                    amount: amount,
-                    reference_description: reference,
-                    first_name: firstName,
-                    last_name: lastName,
-                    email: user.email || 'user@torexjournal.com',
-                    callback_url: callbackUrl
-                });
-            } else {
-                res = await this.debitoService.initiateCardPayment({
-                    amount: Math.round(amount),
-                    reference_description: reference,
-                    first_name: firstName,
-                    last_name: lastName,
-                    email: user.email || 'user@torexjournal.com',
-                    phone: (phoneNumber || user.whatsapp || '840000000').replace(/\+/g, ''),
-                    callback_url: callbackUrl
-                });
-            }
-
-            // Save subscription
-            const debitoId = res?.payment_id || res?.debito_reference || res?.transaction_id || res?.id;
-            this.logger.log(`Creating ${paymentMethod} subscription for reference ${reference}. Linked Debito ID: ${debitoId}`);
+            this.logger.log(`Creating card subscription for reference ${reference}.`);
 
             const sub = this.subscriptionRepo.create({
                 userId,
                 planConfigId: config.id,
                 paymentReference: reference,
-                debitoTransactionId: debitoId ? String(debitoId) : null,
+                externalTransactionId: null,
                 status: SubscriptionStatus.APPROVAL_PENDING,
                 cycle,
-                paymentMethod,
+                paymentMethod: 'card',
             });
             sub.planConfig = config; // Attach config to avoid 500 error in activateSubscription
             await this.subscriptionRepo.save(sub);
 
             // Set active polling state in Redis with 30 minutes TTL (in ms)
             await this.cacheManager.set(`payment_polling:${reference}`, 'active', 30 * 60 * 1000);
-            if (debitoId) {
-                await this.cacheManager.set(`payment_polling:${debitoId}`, 'active', 30 * 60 * 1000);
-            }
 
-            // Start background polling for up to 30 minutes via Bull Queue
+            // Start background timeout watcher for up to 30 minutes via Bull Queue
             await this.subscriptionQueue.add('check-pending', {
                 subscriptionId: sub.id,
                 reference: reference,
@@ -389,31 +448,118 @@ export class SubscriptionService implements OnModuleInit {
                 timeoutMs: 30 * 60 * 1000
             }, { delay: 60000 });
 
-            this.logger.log(`${paymentMethod} subscription created for reference ${reference}. Waiting for webhook / return confirmation.`);
+            if (user.email) {
+                await this.emailProducer.enqueue(
+                    user.email,
+                    'PAYMENT_INITIATED',
+                    {
+                        userName: user.name || undefined,
+                        plan: config.tier,
+                        amount: amountUsd,
+                        currency: 'USD',
+                        method: 'card',
+                        reference,
+                    },
+                    { jobId: `payment-initiated:${sub.id}` },
+                );
+            }
 
-            return res;
+            await this.notificationsService.create(
+                userId,
+                {
+                    title: 'Pagamento Iniciado',
+                    message: `Solicitação de pagamento de ${amountUsd} USD via Cartão registrada (Ref. ${reference}).`,
+                },
+                { skipEmail: true },
+            );
+
+            this.logger.log(`Card subscription created for reference ${reference}. Waiting for confirmation.`);
+
+            return {
+                success: true,
+                status: 'PENDING',
+                reference,
+                checkoutUrl: null,
+                amountUsd,
+                amountMzn,
+                paymentMethod: 'card',
+            };
         } catch (error) {
-            this.logger.error(`${paymentMethod} subscription failed: ${error.message}`);
+            this.logger.error(`Card subscription failed: ${error.message}`);
             throw error;
         }
     }
 
 
-    async processDebitoWebhook(payload: any) {
-        this.logger.log(`Receiving Debito Webhook: ${JSON.stringify(payload)}`);
+    async redeemSubscriptionWithReferralCredits(
+        userId: string,
+        tier: string,
+        cycle: SubscriptionCycle,
+    ) {
+        const config = await this.planConfigRepo.findOne({
+            where: { tier: tier.toUpperCase(), isActive: true },
+        });
+        if (!config) {
+            throw new BadRequestException(`Plano ${tier} não encontrado ou inativo.`);
+        }
+        if (!this.referralService) {
+            throw new BadRequestException('Serviço de créditos de afiliado indisponível.');
+        }
+
+        const amountUsd = this.getAmountUsd(config, cycle);
+        const user = await this.userRepo.findOne({
+            where: { id: userId },
+            select: ['id', 'referralCreditsUsd'],
+        });
+        const availableUsd = Math.max(0, Number(user?.referralCreditsUsd || 0));
+        if (availableUsd < amountUsd) {
+            throw new BadRequestException(
+                `Crédito de afiliados insuficiente ($${availableUsd.toFixed(2)} disponível vs $${amountUsd.toFixed(2)} necessários).`,
+            );
+        }
+
+        const debited = await this.referralService.consumeReferralCredits(userId, amountUsd);
+        if (!debited) {
+            throw new BadRequestException('Não foi possível debitar seus créditos de afiliado.');
+        }
+
+        const reference = this.generateReference();
+        const sub = this.subscriptionRepo.create({
+            userId,
+            planConfigId: config.id,
+            paymentReference: reference,
+            externalTransactionId: `REFCRED-${reference}`,
+            status: SubscriptionStatus.APPROVAL_PENDING,
+            cycle,
+            paymentMethod: 'referral_credits',
+        });
+        sub.planConfig = config;
+        await this.subscriptionRepo.save(sub);
+
+        await this.activateSubscription(sub, reference);
+        return {
+            success: true,
+            status: 'ACTIVE',
+            reference,
+            debitedUsd: amountUsd,
+            tier: config.tier,
+        };
+    }
+
+    async processPaymentWebhook(payload: any) {
+        this.logger.log(`Receiving Payment Webhook: ${JSON.stringify(payload)}`);
         
         let reference: string | null = null;
         let paymentId: string | null = null;
         let eventStatus: string | null = null;
 
-        // Check if it's the new webhook format
-        if (payload.event && payload.data) {
+        if (payload?.event && payload?.data) {
             eventStatus = payload.event;
             reference = payload.data.reference;
             paymentId = payload.data.payment_id;
-        } else {
-            // Old webhook format
+        } else if (payload) {
             reference = payload.reference_description || payload.reference;
+            paymentId = payload.payment_id || payload.transaction_id || null;
             eventStatus = payload.status;
         }
 
@@ -422,12 +568,12 @@ export class SubscriptionService implements OnModuleInit {
             return;
         }
 
-        // Find subscription by paymentReference or debitoTransactionId
+        // Find subscription by paymentReference or externalTransactionId
         const subscription = await this.subscriptionRepo.findOne({
             where: [
                 ...(reference ? [{ paymentReference: reference }] : []),
-                ...(reference ? [{ debitoTransactionId: reference }] : []),
-                ...(paymentId ? [{ debitoTransactionId: paymentId }] : [])
+                ...(reference ? [{ externalTransactionId: reference }] : []),
+                ...(paymentId ? [{ externalTransactionId: paymentId }] : [])
             ],
             relations: ['planConfig']
         });
@@ -447,22 +593,56 @@ export class SubscriptionService implements OnModuleInit {
         if (subscription.paymentReference) {
             await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
         }
-        if (subscription.debitoTransactionId) {
-            await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
+        if (subscription.externalTransactionId) {
+            await this.cacheManager.del(`payment_polling:${subscription.externalTransactionId}`);
         }
 
         // Standardize status logic
-        const isSuccess = eventStatus === 'payment.completed' || eventStatus === 'SUCCESSFULL' || eventStatus === 'SUCCESSFUL';
-        const isFailure = eventStatus === 'payment.failed' || eventStatus === 'payment.refunded' || eventStatus === 'payment.chargeback' ||
-                          eventStatus === 'FAILED' || eventStatus === 'CANCELLED' || eventStatus === 'REJECTED';
+        const normalizedEvent = String(eventStatus || '').trim();
+        const normalizedUpper = normalizedEvent.toUpperCase();
+        const isSuccess =
+            normalizedEvent === 'payment.completed' ||
+            normalizedUpper === 'SUCCESSFULL' ||
+            normalizedUpper === 'SUCCESSFUL' ||
+            normalizedUpper === 'COMPLETED' ||
+            normalizedUpper === 'APPROVED';
+        const isRefundOrChargeback =
+            normalizedEvent === 'payment.refunded' ||
+            normalizedEvent === 'payment.chargeback' ||
+            normalizedUpper === 'REFUNDED' ||
+            normalizedUpper === 'CHARGEBACK';
+        const isFailure =
+            normalizedEvent === 'payment.failed' ||
+            normalizedUpper === 'FAILED' ||
+            normalizedUpper === 'CANCELLED' ||
+            normalizedUpper === 'REJECTED';
 
         if (isSuccess) {
-            // Update transaction id if it was not set or changed
-            if (paymentId && subscription.debitoTransactionId !== paymentId) {
-                subscription.debitoTransactionId = paymentId;
+            if (paymentId && subscription.externalTransactionId !== paymentId) {
+                subscription.externalTransactionId = paymentId;
                 await this.subscriptionRepo.save(subscription);
             }
             await this.activateSubscription(subscription, resolvedRef);
+        } else if (isRefundOrChargeback) {
+            this.logger.warn(
+                `Refund/Chargeback webhook received for subscription ${subscription.id} (Ref: ${resolvedRef}): ${normalizedEvent}`,
+            );
+            subscription.status = SubscriptionStatus.CANCELLED;
+            subscription.currentPeriodEnd = new Date();
+            if (paymentId) {
+                subscription.externalTransactionId = paymentId;
+            }
+            await this.subscriptionRepo.save(subscription);
+            await this.cancelScheduledSubscriptionJobs(subscription.id);
+            await this.invalidateUserPlanCaches(subscription.userId);
+            await this.notificationsService.create(
+                subscription.userId,
+                {
+                    title: 'Assinatura Cancelada por Reembolso/Estorno',
+                    message: `A assinatura vinculada à referência ${resolvedRef} foi encerrada (${normalizedEvent}).`,
+                },
+                { skipEmail: true },
+            );
         } else if (isFailure) {
             this.logger.log(`Payment failure received for reference ${resolvedRef}: ${eventStatus}`);
             
@@ -482,7 +662,7 @@ export class SubscriptionService implements OnModuleInit {
                         plan: subscription.planConfig?.tier,
                         reference: resolvedRef,
                         reason:
-                            eventStatus === 'CANCELLED' || eventStatus === 'payment.failed'
+                            normalizedUpper === 'CANCELLED' || normalizedEvent === 'payment.failed'
                                 ? 'A transação foi cancelada ou não autorizada pela operadora.'
                                 : `Status reportado pela operadora: ${eventStatus}`,
                     },
@@ -500,7 +680,7 @@ export class SubscriptionService implements OnModuleInit {
             );
             subscription.status = SubscriptionStatus.CANCELLED;
             if (paymentId) {
-                subscription.debitoTransactionId = paymentId;
+                subscription.externalTransactionId = paymentId;
             }
             await this.subscriptionRepo.save(subscription);
             await this.scheduleRemarketingFollowup(subscription.id);
@@ -519,52 +699,60 @@ export class SubscriptionService implements OnModuleInit {
         }
 
         // Acquire row-level pessimistic_write lock inside transaction to prevent double-activation race conditions
-        const activated = await this.subscriptionRepo.manager.transaction(async (manager) => {
+        const txActivation = await this.subscriptionRepo.manager.transaction(async (manager) => {
             const lockedSub = await manager.findOne(Subscription, {
                 where: { id: subscription.id },
                 lock: { mode: 'pessimistic_write' },
             });
 
             if (!lockedSub || lockedSub.status === SubscriptionStatus.ACTIVE) {
-                return false;
+                return null;
+            }
+
+            // Close any previously ACTIVE or stale APPROVAL_PENDING/APPROVED subscriptions on upgrade
+            const supersededSubs = await manager.find(Subscription, {
+                where: {
+                    userId: lockedSub.userId,
+                    status: In([
+                        SubscriptionStatus.ACTIVE,
+                        SubscriptionStatus.APPROVAL_PENDING,
+                        SubscriptionStatus.APPROVED,
+                    ]),
+                    id: Not(lockedSub.id),
+                },
+            });
+            for (const prevSub of supersededSubs) {
+                prevSub.status = SubscriptionStatus.CANCELLED;
+                prevSub.currentPeriodEnd = now;
+                await manager.save(Subscription, prevSub);
             }
 
             lockedSub.currentPeriodEnd = expiry;
             lockedSub.status = SubscriptionStatus.ACTIVE;
             await manager.save(Subscription, lockedSub);
-            return true;
+            return { supersededIds: supersededSubs.map((s) => s.id) };
         });
 
-        if (!activated) {
+        if (!txActivation) {
             this.logger.warn(`Subscription ${subscription.id} (Ref: ${reference}) is already active. Skipping activation.`);
             return;
         }
 
         subscription.currentPeriodEnd = expiry;
         subscription.status = SubscriptionStatus.ACTIVE;
-        this.logger.log(`Activating subscription ${subscription.id} for user ${subscription.userId} (Ref: ${reference})`);
+        this.logger.log(
+            `Activating subscription ${subscription.id} for user ${subscription.userId} (Ref: ${reference}, superseded=${txActivation.supersededIds.length})`,
+        );
 
-        // Invalidate user plan cache in Redis
-        await this.cacheManager.del(`user_plan_tier:${subscription.userId}`).catch(() => {});
-        await this.cacheManager.del(`user_subscription_status:${subscription.userId}`).catch(() => {});
-
-        // Schedule warning and renewal jobs in Bull Queue
-        const warningTime = expiry.getTime() - 5 * 24 * 60 * 60 * 1000;
-        const warningDelay = warningTime - Date.now();
-        if (warningDelay > 0) {
-            await this.subscriptionQueue.add('expiration-warning', {
-                subscriptionId: subscription.id
-            }, { delay: warningDelay, jobId: `exp-warn-sched:${subscription.id}` });
-            this.logger.log(`Scheduled expiration warning job for subscription ${subscription.id} in ${warningDelay}ms`);
+        for (const prevId of txActivation.supersededIds) {
+            await this.cancelScheduledSubscriptionJobs(prevId);
         }
 
-        const renewalDelay = expiry.getTime() - Date.now();
-        if (renewalDelay > 0) {
-            await this.subscriptionQueue.add('renewal-charge', {
-                subscriptionId: subscription.id
-            }, { delay: renewalDelay, jobId: `renewal-sched:${subscription.id}` });
-            this.logger.log(`Scheduled renewal charge job for subscription ${subscription.id} in ${renewalDelay}ms`);
-        }
+        // Invalidate user plan & admin financial caches in Redis
+        await this.invalidateUserPlanCaches(subscription.userId);
+
+        // Schedule warning and renewal jobs in Bull Queue cleanly
+        await this.scheduleSubscriptionLifecycleJobs(subscription.id, expiry);
 
         await this.alertsService.create(subscription.userId, {
             type: AlertType.SYSTEM,
@@ -590,16 +778,6 @@ export class SubscriptionService implements OnModuleInit {
             );
         }
 
-        // Dispatch Payment SMS (Systemic)
-        if (user?.whatsapp) {
-            await this.smsService.sendSms(
-                user.id, 
-                user.whatsapp, 
-                SmsTemplates.PAYMENT_CONFIRMED(user.name, subscription.planConfig?.tier || 'PRO'),
-                true // isSystemic
-            );
-        }
-
         await this.notificationsService.create(
             subscription.userId,
             {
@@ -608,6 +786,17 @@ export class SubscriptionService implements OnModuleInit {
             },
             { skipEmail: true },
         );
+
+        const isNonTrialPaid =
+            !['trial', 'free_trial', 'referral_credits'].includes(
+                String(subscription.paymentMethod || '').toLowerCase(),
+            ) && Number(subscription.planConfig?.monthlyPrice || 0) > 0;
+        if (isNonTrialPaid) {
+            await this.referralService
+                ?.unlockPendingCreditsOnPaidPlan(subscription.userId)
+                .catch(() => {});
+        }
+        await this.referralService?.processPaidConversion(subscription.userId).catch(() => {});
 
         const monthly = Number(subscription.planConfig?.monthlyPrice || 0);
         const discount = Number(subscription.planConfig?.annualDiscountPercent || 0);
@@ -636,82 +825,27 @@ export class SubscriptionService implements OnModuleInit {
         this.logger.log(`Subscription activated via webhook for reference: ${reference}`);
     }
 
-    async handleDebitoStatusUpdate(reference: string, expectedUserId?: string) {
-        // Find subscription by either Torex reference or Debito ID
+    async checkPaymentStatus(
+        reference: string,
+        expectedUserId?: string,
+    ): Promise<{ found: boolean; status: SubscriptionStatus | null }> {
         const subscription = await this.subscriptionRepo.findOne({
             where: [
                 { paymentReference: reference },
-                { debitoTransactionId: reference }
+                { externalTransactionId: reference }
             ],
             relations: ['planConfig']
         });
 
-        if (!subscription) return;
+        if (!subscription) {
+            return { found: false, status: null };
+        }
 
         if (expectedUserId && subscription.userId !== expectedUserId) {
             throw new ForbiddenException('Acesso negado a esta referência de assinatura.');
         }
 
-        // Use Debito ID for polling if available, OTHERWISE DO NOT POLL (prevents 404s with internal refs)
-        if (!subscription.debitoTransactionId) {
-            this.logger.warn(`No Debito ID for subscription ${subscription.id} (Ref: ${reference}), skipping background polling.`);
-            return;
-        }
-
-        const pollingRef = subscription.debitoTransactionId;
-        this.logger.log(`Polling status for reference ${reference} using Debito ID: ${pollingRef}`);
-        const result = await this.debitoService.checkTransactionStatus(pollingRef);
-
-        if (result && (result.status === 'SUCCESSFULL' || result.status === 'SUCCESSFUL')) {
-            await this.cacheManager.del(`payment_polling:${reference}`);
-            if (subscription.paymentReference) {
-                await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
-            }
-            if (subscription.debitoTransactionId) {
-                await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
-            }
-            await this.activateSubscription(subscription, reference);
-        } else if (result && (result.status === 'FAILED' || result.status === 'CANCELLED' || result.status === 'REJECTED')) {
-            this.logger.log(`Status check failed for ${reference}: ${result.status}. Marking as CANCELLED.`);
-            
-            // Send notification ONLY if not already cancelled (redundancy check)
-            if (subscription.status !== SubscriptionStatus.CANCELLED) {
-                const user = await this.userRepo.findOne({ where: { id: subscription.userId } });
-                if (user?.email) {
-                    await this.emailProducer.enqueue(
-                        user.email,
-                        'PAYMENT_FAILED',
-                        {
-                            userName: user.name || undefined,
-                            plan: subscription.planConfig?.tier,
-                            reference,
-                            reason: `Transação não autorizada (${result.status}).`,
-                        },
-                        { jobId: `payment-failed:${subscription.id}` },
-                    );
-                }
-
-                await this.notificationsService.create(
-                    subscription.userId,
-                    {
-                        title: 'Pagamento Não Concluído',
-                        message: `O pagamento de referência ${reference} não foi concluído (${result.status}).`,
-                    },
-                    { skipEmail: true },
-                );
-                
-                subscription.status = SubscriptionStatus.CANCELLED;
-                await this.subscriptionRepo.save(subscription);
-                await this.scheduleRemarketingFollowup(subscription.id);
-            }
-            await this.cacheManager.del(`payment_polling:${reference}`);
-            if (subscription.paymentReference) {
-                await this.cacheManager.del(`payment_polling:${subscription.paymentReference}`);
-            }
-            if (subscription.debitoTransactionId) {
-                await this.cacheManager.del(`payment_polling:${subscription.debitoTransactionId}`);
-            }
-        }
+        return { found: true, status: subscription.status };
     }
 
     async getSubscriptionStatus(userId: string) {
@@ -784,33 +918,127 @@ export class SubscriptionService implements OnModuleInit {
         };
     }
 
+    async renewSubscriptionById(subscriptionId: string): Promise<{
+        action: 'noop' | 'rescheduled' | 'superseded' | 'renewal_initiated' | 'cannot_auto_renew' | 'failed';
+        sub?: Subscription;
+        reason?: string;
+        reference?: string;
+    }> {
+        const sub = await this.subscriptionRepo.findOne({
+            where: { id: subscriptionId },
+            relations: ['user', 'planConfig'],
+        });
+
+        if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
+            return { action: 'noop' };
+        }
+
+        const nowMs = Date.now();
+        // Protect manually extended subscriptions against stale scheduled Bull jobs
+        if (sub.currentPeriodEnd && new Date(sub.currentPeriodEnd).getTime() > nowMs + 5 * 60 * 1000) {
+            this.logger.log(
+                `Subscription ${sub.id} period end (${sub.currentPeriodEnd.toISOString()}) was extended; rescheduling Bull jobs without expiring.`,
+            );
+            await this.scheduleSubscriptionLifecycleJobs(sub.id, new Date(sub.currentPeriodEnd));
+            return { action: 'rescheduled', sub };
+        }
+
+        // Check if another active subscription for this user already exists with a later expiry (e.g. upgrade / manual assign)
+        const newerActive = await this.subscriptionRepo.findOne({
+            where: {
+                userId: sub.userId,
+                status: SubscriptionStatus.ACTIVE,
+                id: Not(sub.id),
+            },
+            order: { currentPeriodEnd: 'DESC' },
+        });
+        if (
+            newerActive &&
+            newerActive.currentPeriodEnd &&
+            new Date(newerActive.currentPeriodEnd).getTime() > nowMs
+        ) {
+            sub.status = SubscriptionStatus.CANCELLED;
+            await this.subscriptionRepo.save(sub);
+            await this.cancelScheduledSubscriptionJobs(sub.id);
+            await this.invalidateUserPlanCaches(sub.userId);
+            return { action: 'superseded', sub };
+        }
+
+        const user = sub.user || (await this.userRepo.findOne({ where: { id: sub.userId } }));
+        const method = user?.lastPaymentMethod;
+        const phone =
+            method === 'mpesa'
+                ? user?.preferredMpesa
+                : method === 'emola'
+                  ? user?.preferredEmola
+                  : null;
+
+        if (!user || (method !== 'mpesa' && method !== 'emola') || !phone || !sub.planConfig) {
+            return {
+                action: 'cannot_auto_renew',
+                sub,
+                reason: 'Nenhum método móvel automático (M-Pesa/e-Mola) disponível para renovação.',
+            };
+        }
+
+        try {
+            const initiated = await this.createMobileSubscription(
+                sub.userId,
+                sub.planConfig.tier,
+                sub.cycle,
+                method,
+                phone,
+            );
+            if (!sub.currentPeriodEnd || new Date(sub.currentPeriodEnd).getTime() <= Date.now()) {
+                sub.status = SubscriptionStatus.EXPIRED;
+                await this.subscriptionRepo.save(sub);
+                await this.invalidateUserPlanCaches(sub.userId);
+            }
+            return { action: 'renewal_initiated', sub, reference: initiated?.reference };
+        } catch (err: any) {
+            return {
+                action: 'failed',
+                sub,
+                reason: err?.message || 'Gateway error during auto-renewal',
+            };
+        }
+    }
+
     async renewActiveSubscription(userId: string) {
         const user = await this.userRepo.findOne({ where: { id: userId } });
         if (!user || !user.lastPaymentMethod) {
             throw new Error('Nenhum método de pagamento preferencial encontrado para renovação dinâmica.');
         }
 
-        const currentSub = await this.getSubscriptionStatus(userId);
-        if (!currentSub.hasActive) throw new Error('Nenhuma assinatura activa para renovar.');
-
-        const phoneNumber = user.lastPaymentMethod === 'mpesa' ? user.preferredMpesa : user.preferredEmola;
-        if (!phoneNumber && user.lastPaymentMethod !== 'card') {
-            throw new Error('Contacto de pagamento não encontrado.');
+        // Look up directly by DB rows so expired-on-exact-second subscriptions remain renewable
+        const sub = await this.subscriptionRepo.findOne({
+            where: {
+                userId,
+                status: In([SubscriptionStatus.ACTIVE, SubscriptionStatus.EXPIRED]),
+            },
+            relations: ['planConfig'],
+            order: { currentPeriodEnd: 'DESC' },
+        });
+        if (!sub || !sub.planConfig) {
+            throw new Error('Nenhuma assinatura activa ou elegível para renovar.');
         }
-
-        // Always renew with the same tier and cycle as current active
-        const sub = await this.subscriptionRepo.findOne({ where: { id: (currentSub as any).id } });
 
         if (user.lastPaymentMethod === 'card') {
             throw new Error('Renovação automática para cartão não implementada (requer retorno de URL).');
         }
 
+        const phoneNumber =
+            user.lastPaymentMethod === 'mpesa' ? user.preferredMpesa : user.preferredEmola;
+        if (!phoneNumber) {
+            throw new Error('Contacto de pagamento não encontrado.');
+        }
+
         return this.createMobileSubscription(
             userId,
-            currentSub.tier,
+            sub.planConfig.tier,
             sub.cycle,
-            user.lastPaymentMethod as any,
-            phoneNumber
+            user.lastPaymentMethod as 'mpesa' | 'emola',
+            phoneNumber,
         );
     }
 
@@ -898,33 +1126,20 @@ export class SubscriptionService implements OnModuleInit {
         const activeSubs = subscriptions.filter(s => s.status === SubscriptionStatus.ACTIVE);
         const activeSubscribers = activeSubs.length;
 
-        const mznRateZar = Number(this.configService.get('mznratezar') || '0.25');
+        const usdToMzn = this.getUsdToMznRate();
         let estimatedMonthlyRevenueMZN = 0;
-        let estimatedMonthlyRevenueZAR = 0;
 
         for (const sub of activeSubs) {
-            const price = sub.planConfig ? Number(sub.planConfig.monthlyPrice) : 0;
-            let subMonthlyRevenue = 0;
+            const priceUsd = sub.planConfig ? Number(sub.planConfig.monthlyPrice) : 0;
+            let subMonthlyRevenueUsd = 0;
             if (sub.cycle === SubscriptionCycle.YEARLY) {
-                const discount = price * 12 * (1 - (sub.planConfig?.annualDiscountPercent || 0) / 100);
-                subMonthlyRevenue = discount / 12;
+                const discount = priceUsd * 12 * (1 - (sub.planConfig?.annualDiscountPercent || 0) / 100);
+                subMonthlyRevenueUsd = discount / 12;
             } else {
-                subMonthlyRevenue = price;
+                subMonthlyRevenueUsd = priceUsd;
             }
-
-            let method = sub.paymentMethod?.toLowerCase() || 'card';
-            if (sub.paymentReference && !['mpesa', 'emola', 'card', 'payfast'].includes(method)) {
-                const ref = sub.paymentReference.toLowerCase();
-                if (ref.includes('mpesa')) method = 'mpesa';
-                else if (ref.includes('emola')) method = 'emola';
-                else method = 'card';
-            }
-
-            if (method === 'payfast') {
-                estimatedMonthlyRevenueZAR += subMonthlyRevenue * mznRateZar;
-            } else {
-                estimatedMonthlyRevenueMZN += subMonthlyRevenue;
-            }
+            const subMonthlyRevenueMzn = subMonthlyRevenueUsd * usdToMzn;
+            estimatedMonthlyRevenueMZN += subMonthlyRevenueMzn;
         }
 
         const statuses = {
@@ -937,11 +1152,10 @@ export class SubscriptionService implements OnModuleInit {
             mpesa: 0,
             emola: 0,
             card: 0,
-            payfast: 0
         };
         for (const sub of subscriptions) {
             let method = sub.paymentMethod?.toLowerCase() || 'card';
-            if (sub.paymentReference && !['mpesa', 'emola', 'card', 'payfast'].includes(method)) {
+            if (sub.paymentReference && !['mpesa', 'emola', 'card'].includes(method)) {
                 const ref = sub.paymentReference.toLowerCase();
                 if (ref.includes('mpesa')) method = 'mpesa';
                 else if (ref.includes('emola')) method = 'emola';
@@ -963,23 +1177,30 @@ export class SubscriptionService implements OnModuleInit {
             userSubMap[sub.userId].push(sub);
         }
 
+        const tierRankMap: Record<string, number> = {
+            FREE: 0,
+            BASIC: 1,
+            BASICO: 1,
+            PRO: 2,
+            PREMIUM: 3,
+            VIP: 3,
+            ELITE: 3,
+            ENTERPRISE: 3,
+        };
         const classificationMap: Record<string, 'new' | 'renewal' | 'upgrade'> = {};
         for (const [, userSubs] of Object.entries(userSubMap)) {
             userSubs.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-            let lastTier: string | null = null;
+            let lastRank = 0;
             for (let i = 0; i < userSubs.length; i++) {
                 const sub = userSubs[i];
-                const tier = sub.planConfig?.tier || 'BASIC';
+                const tier = String(sub.planConfig?.tier || 'BASIC').toUpperCase();
+                const currentRank = tierRankMap[tier] ?? 1;
                 let classification: 'new' | 'renewal' | 'upgrade' = 'new';
                 if (i > 0) {
-                    if (tier === 'PRO' && lastTier === 'BASIC') {
-                        classification = 'upgrade';
-                    } else {
-                        classification = 'renewal';
-                    }
+                    classification = currentRank > lastRank ? 'upgrade' : 'renewal';
                 }
                 classificationMap[sub.id] = classification;
-                lastTier = tier;
+                lastRank = Math.max(lastRank, currentRank);
             }
         }
 
@@ -1023,7 +1244,6 @@ export class SubscriptionService implements OnModuleInit {
             activeSubscribers,
             estimatedMonthlyRevenue: estimatedMonthlyRevenueMZN,
             estimatedMonthlyRevenueMZN,
-            estimatedMonthlyRevenueZAR,
             paymentMethods,
             statuses,
             dailyMetrics
@@ -1183,9 +1403,9 @@ export class SubscriptionService implements OnModuleInit {
             };
         }
 
-        // Invalidate cache immediately so PlanPermissionService reflects PREMIUM tier instantly
-        await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
-        await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
+        // Invalidate cache immediately and schedule trial lifecycle jobs
+        await this.invalidateUserPlanCaches(userId);
+        await this.scheduleSubscriptionLifecycleJobs(txResult.subId, expiryDate);
 
         this.logger.log(`[SubscriptionService] Trial granted to user ${txResult.email} for ${trialDays} days (until ${expiryDate.toISOString()})`);
 
@@ -1257,10 +1477,10 @@ export class SubscriptionService implements OnModuleInit {
                 sub.status = SubscriptionStatus.CANCELLED;
                 sub.currentPeriodEnd = now;
                 await this.subscriptionRepo.save(sub);
+                await this.cancelScheduledSubscriptionJobs(sub.id);
             }
 
-            await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
-            await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
+            await this.invalidateUserPlanCaches(userId);
 
             await this.notificationsService.create(
                 userId,
@@ -1307,9 +1527,9 @@ export class SubscriptionService implements OnModuleInit {
 
             activeSub.currentPeriodEnd = newExpiry;
             await this.subscriptionRepo.save(activeSub);
+            await this.scheduleSubscriptionLifecycleJobs(activeSub.id, newExpiry);
 
-            await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
-            await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
+            await this.invalidateUserPlanCaches(userId);
 
             const formattedDate = newExpiry.toLocaleDateString('pt-PT');
 
@@ -1371,7 +1591,9 @@ export class SubscriptionService implements OnModuleInit {
             });
             for (const sub of activeSubs) {
                 sub.status = SubscriptionStatus.CANCELLED;
+                sub.currentPeriodEnd = now;
                 await this.subscriptionRepo.save(sub);
+                await this.cancelScheduledSubscriptionJobs(sub.id);
             }
 
             // Create new active subscription
@@ -1388,9 +1610,9 @@ export class SubscriptionService implements OnModuleInit {
             });
 
             await this.subscriptionRepo.save(newSub);
+            await this.scheduleSubscriptionLifecycleJobs(newSub.id, expiryDate);
 
-            await this.cacheManager.del(`user_plan_tier:${userId}`).catch(() => {});
-            await this.cacheManager.del(`user_subscription_status:${userId}`).catch(() => {});
+            await this.invalidateUserPlanCaches(userId);
 
             const formattedDate = expiryDate.toLocaleDateString('pt-PT');
 

@@ -56,8 +56,8 @@ export const CompleteProfile = () => {
                     </h2>
                     <p className="text-fg-muted text-sm">
                         {isEn
-                            ? 'Add your WhatsApp number for risk alerts, drawdown warnings, and account notifications.'
-                            : 'Precisamos do seu WhatsApp para enviar notificações importantes e bónus exclusivos.'}
+                            ? 'Add your mobile contact number to personalize your security and regional preferences.'
+                            : 'Informe o seu contacto móvel com indicativo para completar o registo e receber alertas por E-mail e no App.'}
                     </p>
                 </div>
 
@@ -80,7 +80,7 @@ export const CompleteProfile = () => {
 
                     <div className="space-y-4">
                         <Input
-                            label={isEn ? 'WhatsApp (with country code)' : 'WhatsApp (com código do país)'}
+                            label={isEn ? 'Mobile Phone (with country code)' : 'Contacto Móvel (com indicativo do país)'}
                             placeholder={isEn ? '+1 555 019 4820' : '+258 84 123 4567'}
                             value={whatsapp}
                             onChange={(e) => setWhatsapp(e.target.value)}

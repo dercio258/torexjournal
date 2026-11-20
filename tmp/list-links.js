@@ -7,7 +7,7 @@ async function checkLinks() {
         host: 'localhost',
         port: 5432,
         username: 'cossa_trading_user',
-        password: 'C0ssa@2026_db!',
+        password: process.env.DB_PASS || process.env.DB_PASSWORD || '',
         database: 'cossa_trading',
         synchronize: false,
     });

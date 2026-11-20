@@ -66,14 +66,6 @@ export const AdminFinance = () => {
             description: 'M-Pesa, e-Mola e Cartões'
         },
         {
-            label: 'Receita Est. ZAR',
-            value: `R ${stats?.estimatedMonthlyRevenueZAR?.toFixed(2) || '0.00'}`,
-            icon: DollarSign,
-            color: 'text-sky-500',
-            bg: 'bg-sky-500/10',
-            description: 'PayFast'
-        },
-        {
             label: 'Assinantes Ativos',
             value: stats?.activeSubscribers || 0,
             icon: Award,
@@ -223,19 +215,17 @@ export const AdminFinance = () => {
 
     // Payment Methods Pie Chart
     const paymentMethodsChartData = {
-        labels: ['M-Pesa (MZN)', 'e-Mola (MZN)', 'Cartão (MZN)', 'PayFast (ZAR)'],
+        labels: ['M-Pesa (MZN)', 'e-Mola (MZN)', 'Cartão (USD/MZN)'],
         datasets: [{
             data: [
                 stats?.paymentMethods?.mpesa || 0,
                 stats?.paymentMethods?.emola || 0,
                 stats?.paymentMethods?.card || 0,
-                stats?.paymentMethods?.payfast || 0
             ],
             backgroundColor: [
                 '#e11d48', // Rose / Red (M-Pesa)
                 '#0284c7', // Sky Blue (e-Mola)
                 '#8b5cf6', // Violet (Cartão)
-                '#f59e0b'  // Orange / Yellow (PayFast)
             ],
             borderWidth: 1,
             borderColor: ct.background
@@ -331,7 +321,7 @@ export const AdminFinance = () => {
             />
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {cards.map((card, idx) => {
                     const Icon = card.icon;
                     return (

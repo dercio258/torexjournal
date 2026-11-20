@@ -60,6 +60,7 @@ const FUNNEL_PATHS = new Set([
     '/',
     '/login',
     '/register',
+    '/verify-account',
     '/forgot-password',
     '/pricing',
     '/checkout',
@@ -422,6 +423,7 @@ export function mergeSessionUtmsIntoSearch(currentSearch: string): string {
 const BLOCKED_RETURN_TO_PREFIXES = [
     '/login',
     '/register',
+    '/verify-account',
     '/2fa',
     '/forgot-password',
     '/auth/callback',

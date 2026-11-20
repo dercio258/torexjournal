@@ -10,7 +10,6 @@ import {
     renderGreeting,
     renderHeading,
     renderKeyValueTable,
-    renderStatusEyebrow,
     renderStepList,
 } from './layout';
 import { EmailTemplateDefinition, EmailTemplatePayloadMap } from './types';
@@ -28,7 +27,7 @@ export const billingTemplates: {
         | 'REMARKETING_FOLLOWUP']: EmailTemplateDefinition<EmailTemplatePayloadMap[K]>;
 } = {
     PAYMENT_INITIATED: {
-        category: 'Faturamento',
+        category: '',
         tone: 'amber',
         subject: (data) =>
             data.subject ||
@@ -40,7 +39,6 @@ export const billingTemplates: {
             const paymentsUrl = buildAppUrl('/payments');
 
             return `
-                ${renderStatusEyebrow('Aguardando Confirmação', 'amber')}
                 ${renderHeading('Solicitação de pagamento registrada')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -57,7 +55,7 @@ export const billingTemplates: {
                     { label: 'Referência da Transação', value: data.reference, mono: true },
                 ])}
                 ${renderCalloutBox(
-                    'Autorize a cobrança diretamente na notificação enviada ao seu telemóvel (M-Pesa / e-Mola). Assim que liquidada pela operadora, sua assinatura será ativada automaticamente.',
+                    'Autorize a cobrança diretamente na notificação enviada ao seu telemóvel (M-Pesa / e-Mola) ou no canal selecionado. Assim que liquidada, sua assinatura será ativada automaticamente.',
                     'amber',
                 )}
                 ${renderActionButton('Consultar Histórico de Pagamentos', paymentsUrl, 'slate')}
@@ -66,7 +64,7 @@ export const billingTemplates: {
     },
 
     PAYMENT_SUCCESS: {
-        category: 'Faturamento',
+        category: '',
         tone: 'emerald',
         subject: (data) =>
             data.subject ||
@@ -76,7 +74,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const dashboardUrl = buildAppUrl('/dashboard');
             return `
-                ${renderStatusEyebrow('Assinatura Ativa', 'emerald')}
                 ${renderHeading('Pagamento confirmado com sucesso')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -109,7 +106,7 @@ export const billingTemplates: {
     },
 
     PAYMENT_FAILED: {
-        category: 'Faturamento',
+        category: '',
         tone: 'crimson',
         subject: (data) =>
             data.subject ||
@@ -119,7 +116,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const pricingUrl = buildAppUrl('/pricing');
             return `
-                ${renderStatusEyebrow('Falha na Liquidação', 'crimson')}
                 ${renderHeading('Pagamento não concluído')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -145,7 +141,7 @@ export const billingTemplates: {
     },
 
     TRIAL_WELCOME: {
-        category: 'Assinatura',
+        category: '',
         tone: 'emerald',
         subject: (data) =>
             data.subject ||
@@ -157,7 +153,6 @@ export const billingTemplates: {
             const planLabel = data.plan || 'Acesso Completo (Avaliação)';
 
             return `
-                ${renderStatusEyebrow('Período de Avaliação Ativo', 'emerald')}
                 ${renderHeading(`${data.days} dias de acesso integral liberados`)}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -195,7 +190,7 @@ export const billingTemplates: {
     },
 
     SUBSCRIPTION_EXPIRING: {
-        category: 'Faturamento',
+        category: '',
         tone: 'amber',
         subject: (data) =>
             data.subject ||
@@ -205,7 +200,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const renewalUrl = buildAppUrl(data.renewalUrl || '/pricing');
             return `
-                ${renderStatusEyebrow('Renovação Programada', 'amber')}
                 ${renderHeading('Vigência da assinatura próxima do vencimento')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -230,7 +224,7 @@ export const billingTemplates: {
     },
 
     SUBSCRIPTION_EXPIRED: {
-        category: 'Faturamento',
+        category: '',
         tone: 'amber',
         subject: (data) =>
             data.subject || `Vigência encerrada: assinatura ${data.plan || ''} — Torex Journal`,
@@ -239,7 +233,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const renewalUrl = buildAppUrl(data.renewalUrl || '/pricing');
             return `
-                ${renderStatusEyebrow('Assinatura Expirada', 'amber')}
                 ${renderHeading('Encerramento do ciclo da assinatura')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -268,7 +261,7 @@ export const billingTemplates: {
     },
 
     SUBSCRIPTION_CANCELLED: {
-        category: 'Faturamento',
+        category: '',
         tone: 'slate',
         subject: (data) =>
             data.subject || 'Confirmação de cancelamento de assinatura — Torex Journal',
@@ -277,7 +270,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const paymentsUrl = buildAppUrl('/payments');
             return `
-                ${renderStatusEyebrow('Cancelamento Registrado', 'slate')}
                 ${renderHeading('Confirmação de cancelamento de assinatura')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
@@ -301,7 +293,7 @@ export const billingTemplates: {
     },
 
     REMARKETING_FOLLOWUP: {
-        category: 'Assinatura',
+        category: '',
         tone: 'slate',
         subject: (data) =>
             data.subject || 'Conclusão de assinatura pendente — Torex Journal',
@@ -310,7 +302,6 @@ export const billingTemplates: {
         renderBody: (data) => {
             const pricingUrl = buildAppUrl(data.pricingUrl || '/pricing');
             return `
-                ${renderStatusEyebrow('Solicitação em Aberto', 'slate')}
                 ${renderHeading('Ativação de plano pendente')}
                 ${renderGreeting(data.userName)}
                 <p class="body-p">

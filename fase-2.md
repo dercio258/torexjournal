@@ -1,0 +1,3 @@
+Fase 2 (Curto Prazo)	Pagamentos, Planos & Automações/Filas	1. Corrigir moeda USD/MZN, cancelamento de plano antigo em upgrades, ordenação em PlanPermissionService e unificar PlanGuard.
+2. Consertar renewal-charge + limpeza de jobs Bull em EXTEND/CANCEL e fluxos Cartão/Webhook Debito.
+3. Isolar workers do MT5_DEDICATED_SERVER, adicionar @socket.io/redis-adapter, locks Redis nos crons, removeOnComplete/removeOnFail nas filas Bull, XACK/XTRIM nas Redis Streams e desativar tracking em e-mails de segurança.

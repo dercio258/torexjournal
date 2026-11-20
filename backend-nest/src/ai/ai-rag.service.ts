@@ -72,6 +72,24 @@ export class AiRagService implements OnApplicationBootstrap {
         }
     }
 
+    private setUserSyncTimestamp(key: string, ts: number): void {
+        const MAX_ENTRIES = 2000;
+        for (const [k, existingTs] of this.userSyncTimestamps.entries()) {
+            if (ts - existingTs > USER_SYNC_THROTTLE_MS * 2) {
+                this.userSyncTimestamps.delete(k);
+            }
+        }
+        if (this.userSyncTimestamps.has(key)) {
+            this.userSyncTimestamps.delete(key);
+        }
+        while (this.userSyncTimestamps.size >= MAX_ENTRIES) {
+            const oldestKey = this.userSyncTimestamps.keys().next().value;
+            if (oldestKey === undefined) break;
+            this.userSyncTimestamps.delete(oldestKey);
+        }
+        this.userSyncTimestamps.set(key, ts);
+    }
+
     invalidateUserSyncCache(userId: string): void {
         const cleanUserId = String(userId || '').trim();
         if (!cleanUserId) return;
@@ -560,7 +578,7 @@ export class AiRagService implements OnApplicationBootstrap {
             totalPruned += rep.pruned;
         }
 
-        this.userSyncTimestamps.set(throttleKey, Date.now());
+        this.setUserSyncTimestamp(throttleKey, Date.now());
         return {
             syncedChunks: totalSynced,
             skippedUnchanged: totalSkipped,

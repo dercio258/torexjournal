@@ -170,6 +170,22 @@ export function Leaderboard() {
         retry: 1,
     });
 
+    const { data: myReferralData } = useQuery({
+        queryKey: ['referrals', 'me'],
+        queryFn: async () => {
+            try {
+                const res = await api.get('/referrals/me');
+                return res.data;
+            } catch {
+                return null;
+            }
+        },
+        enabled: Boolean(user?.id),
+        staleTime: 60_000,
+    });
+    const myReferralCode = myReferralData?.referralCode ? String(myReferralData.referralCode) : '';
+    const challengeStatus = myRankData?.challengeStatus;
+
     const tradersList = useMemo(() => {
         const raw = Array.isArray(serverTraders) ? serverTraders : [];
         return raw.map((t: any) => {
@@ -275,6 +291,55 @@ export function Leaderboard() {
                             <X className="w-3.5 h-3.5" />
                         </button>
                     )}
+                </div>
+            </div>
+
+            {/* Desafio Mensal de Consistência Torex */}
+            <div className="bg-surface border border-accent/25 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-accent-fg">
+                            <Award className="w-3.5 h-3.5" />
+                            {isEn ? 'Torex Monthly Consistency Challenge' : 'Desafio Mensal de Consistência Torex'}
+                        </span>
+                        {challengeStatus?.monthKey && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-canvas-subtle border border-line text-fg-muted">
+                                {challengeStatus.monthKey}
+                            </span>
+                        )}
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-accent/10 text-accent-fg border border-accent/20">
+                            {challengeStatus?.eligible
+                                ? (isEn ? 'Eligible for Monthly Prizes' : 'Elegível para Prémios Mensais')
+                                : (isEn ? 'Tournaments & Rewards Roadmap' : 'Torneios com Créditos e Contas')}
+                        </span>
+                    </div>
+                    <p className="text-xs text-fg-muted">
+                        {isEn
+                            ? 'Qualify for upcoming monthly tournaments & plan rewards by fulfilling both consistency criteria:'
+                            : 'Habilite-se aos próximos torneios mensais de consistência e recompensas cumprindo os 2 pré-requisitos:'}
+                    </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border ${
+                        challengeStatus?.hasConnectedBroker
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-canvas-subtle border-line text-fg-muted'
+                    }`}>
+                        <Check className="w-3 h-3" />
+                        {isEn
+                            ? `Broker connected (${challengeStatus?.connectedAccountsCount ?? 0}/${challengeStatus?.requiredAccounts ?? 1})`
+                            : `Corretora conectada (${challengeStatus?.connectedAccountsCount ?? 0}/${challengeStatus?.requiredAccounts ?? 1})`}
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border ${
+                        (challengeStatus?.verifiedReferrals ?? 0) >= (challengeStatus?.requiredReferrals ?? 1)
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-canvas-subtle border-line text-fg-muted'
+                    }`}>
+                        <Sparkles className="w-3 h-3" />
+                        {isEn
+                            ? `Verified invite (${challengeStatus?.verifiedReferrals ?? 0}/${challengeStatus?.requiredReferrals ?? 1})`
+                            : `Amigo convidado (${challengeStatus?.verifiedReferrals ?? 0}/${challengeStatus?.requiredReferrals ?? 1})`}
+                    </span>
                 </div>
             </div>
 
@@ -615,7 +680,11 @@ export function Leaderboard() {
 
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(`${window.location.origin}${isEn ? '/en' : ''}/leaderboard?user=${currentUser.username}`);
+                                const baseUrl = `${window.location.origin}${isEn ? '/en' : ''}/leaderboard?user=${encodeURIComponent(currentUser.username)}`;
+                                const finalUrl = myReferralCode
+                                    ? `${baseUrl}&ref=${encodeURIComponent(myReferralCode)}`
+                                    : baseUrl;
+                                navigator.clipboard.writeText(finalUrl);
                                 setIsShareModalOpen(false);
                                 showToast(isEn ? 'Share link copied to clipboard!' : 'Link copiado para a área de transferência!');
                             }}

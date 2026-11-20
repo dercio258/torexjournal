@@ -39,7 +39,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
                 ? _json.email_verified
                 : typeof primaryEmailObj?.verified === 'boolean'
                   ? primaryEmailObj.verified
-                  : true;
+                  : false;
 
         const user = {
             googleId: id,

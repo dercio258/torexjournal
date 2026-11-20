@@ -20,6 +20,7 @@ import {
 import { Button } from '../../components/ui/Button';
 import { useTheme } from '../../context/ThemeContext';
 import { cn } from '../../lib/cn';
+import { isValidAdminToken } from '../../lib/adminAuth';
 
 interface NavDomain {
     domain: string;
@@ -67,7 +68,7 @@ const ADMIN_DOMAINS: NavDomain[] = [
             {
                 path: '/admin/finance',
                 label: 'Financeiro & MRR',
-                description: 'Receita, gateways & retenção',
+                description: 'Receita, pagamentos & retenção',
                 icon: DollarSign,
             },
         ],
@@ -85,23 +86,7 @@ const ADMIN_DOMAINS: NavDomain[] = [
     },
 ];
 
-function isValidAdminToken(): boolean {
-    const token = localStorage.getItem('adminToken');
-    if (!token) return false;
-    try {
-        const parts = token.split('.');
-        if (parts.length === 3) {
-            const payload = JSON.parse(atob(parts[1]));
-            if (payload?.exp && payload.exp * 1000 < Date.now()) {
-                localStorage.removeItem('adminToken');
-                return false;
-            }
-        }
-    } catch {
-        // Non-JWT or malformed payload — let backend verify
-    }
-    return true;
-}
+// Admin JWT check is centralized in ../../lib/adminAuth (isValidAdminToken)
 
 export const AdminLayout = () => {
     const navigate = useNavigate();
@@ -205,7 +190,7 @@ export const AdminLayout = () => {
 
             <div className="border-t border-line p-3.5 space-y-2.5 bg-surface-2/40">
                 <Link
-                    to="/economic-calendar"
+                    to="/calendar"
                     className="flex items-center justify-between rounded-xl border border-line bg-surface px-3 py-2 text-xs text-fg-muted hover:border-accent/30 hover:text-fg transition-colors"
                 >
                     <span className="flex items-center gap-2 font-medium">

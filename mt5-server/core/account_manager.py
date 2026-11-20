@@ -22,19 +22,47 @@ class _DATA_BLOB(ctypes.Structure):
     ]
 
 
+def _configure_dpapi_win64(crypt32, kernel32) -> None:
+    crypt32.CryptProtectData.argtypes = [
+        ctypes.POINTER(_DATA_BLOB),
+        ctypes.wintypes.LPCWSTR,
+        ctypes.POINTER(_DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+        ctypes.POINTER(_DATA_BLOB),
+    ]
+    crypt32.CryptProtectData.restype = ctypes.wintypes.BOOL
+    crypt32.CryptUnprotectData.argtypes = [
+        ctypes.POINTER(_DATA_BLOB),
+        ctypes.POINTER(ctypes.wintypes.LPWSTR),
+        ctypes.POINTER(_DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.wintypes.DWORD,
+        ctypes.POINTER(_DATA_BLOB),
+    ]
+    crypt32.CryptUnprotectData.restype = ctypes.wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+
 def _dpapi_encrypt(raw_bytes: bytes) -> Optional[bytes]:
     if os.name != "nt":
         return None
     try:
         crypt32 = ctypes.windll.crypt32
         kernel32 = ctypes.windll.kernel32
+        _configure_dpapi_win64(crypt32, kernel32)
         buf = ctypes.create_string_buffer(raw_bytes, len(raw_bytes))
         blob_in = _DATA_BLOB(len(raw_bytes), buf)
         blob_out = _DATA_BLOB()
         if crypt32.CryptProtectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-            encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-            kernel32.LocalFree(blob_out.pbData)
-            return encrypted
+            try:
+                encrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+                return encrypted
+            finally:
+                kernel32.LocalFree(ctypes.cast(blob_out.pbData, ctypes.c_void_p))
     except Exception:
         pass
     return None
@@ -46,13 +74,16 @@ def _dpapi_decrypt(enc_bytes: bytes) -> Optional[bytes]:
     try:
         crypt32 = ctypes.windll.crypt32
         kernel32 = ctypes.windll.kernel32
+        _configure_dpapi_win64(crypt32, kernel32)
         buf = ctypes.create_string_buffer(enc_bytes, len(enc_bytes))
         blob_in = _DATA_BLOB(len(enc_bytes), buf)
         blob_out = _DATA_BLOB()
         if crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-            decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-            kernel32.LocalFree(blob_out.pbData)
-            return decrypted
+            try:
+                decrypted = ctypes.string_at(blob_out.pbData, blob_out.cbData)
+                return decrypted
+            finally:
+                kernel32.LocalFree(ctypes.cast(blob_out.pbData, ctypes.c_void_p))
     except Exception:
         pass
     return None
@@ -97,6 +128,7 @@ def _decrypt_secret(cipher_text: Optional[str]) -> Optional[str]:
 
 class AccountSession(BaseModel):
     account_id: int
+    account_uuid: Optional[str] = None
     login: str
     server: str
     password: Optional[str] = None
@@ -148,6 +180,7 @@ class AccountManager:
 
                             session = AccountSession(
                                 account_id=acc_id,
+                                account_uuid=item.get("account_uuid"),
                                 login=str(item["login"]),
                                 server=str(item["server"]),
                                 password=decrypted_pwd,
@@ -178,6 +211,7 @@ class AccountManager:
                 for acc in self.accounts.values():
                     export_data.append({
                         "account_id": acc.account_id,
+                        "account_uuid": acc.account_uuid,
                         "login": acc.login,
                         "server": acc.server,
                         "password_enc": _encrypt_secret(acc.password),
@@ -209,12 +243,15 @@ class AccountManager:
         password: Optional[str] = None,
         last_deal_ticket: int = 0,
         last_deal_time: Optional[datetime] = None,
+        account_uuid: Optional[str] = None,
     ) -> AccountSession:
         with self._lock:
             if account_id in self.accounts:
                 acc = self.accounts[account_id]
                 acc.login = login
                 acc.server = server
+                if account_uuid:
+                    acc.account_uuid = account_uuid
                 if password:
                     acc.password = password
                 if last_deal_ticket > acc.last_deal_ticket:
@@ -232,6 +269,7 @@ class AccountManager:
 
             session = AccountSession(
                 account_id=account_id,
+                account_uuid=account_uuid,
                 login=login,
                 server=server,
                 password=password,

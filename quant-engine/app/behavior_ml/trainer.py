@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -711,6 +712,11 @@ def train_behavior_model(
 
         resolved_ensemble_path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(ensemble_fit["artifact"], resolved_ensemble_path, compress=3)
+        ens_sha256 = hashlib.sha256(resolved_ensemble_path.read_bytes()).hexdigest()
+        Path(f"{resolved_ensemble_path}.sha256").write_text(
+            f"{ens_sha256}\n",
+            encoding="utf-8",
+        )
 
     metrics = {
         "modelVersion": MODEL_VERSION,

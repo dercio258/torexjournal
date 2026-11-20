@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
-    MoreHorizontal, Download, RefreshCw, ChevronLeft, ChevronRight, Plus, FileSpreadsheet, Globe, Printer
+    MoreHorizontal, Download, RefreshCw, ChevronLeft, ChevronRight, Plus, FileSpreadsheet, Globe, Printer, Share2
 } from 'lucide-react';
 import api from '../api';
 import { useAccount } from '../context/AccountContext';
@@ -17,6 +17,7 @@ import {
     TradeBehaviorMlInfo,
 } from '../components/trades/BehaviorMlBadge';
 import { BehaviorReviewQueue } from '../components/trades/BehaviorReviewQueue';
+import { ShareablePerformanceCard, ShareablePerformanceStats } from '../components/reports/ShareablePerformanceCard';
 
 interface Trade {
     id: number | string;
@@ -98,6 +99,8 @@ export const Trades = () => {
     const [dateRange, setDateRange] = useState({ start: '', end: '' });
     const [sortOption, setSortOption] = useState('date-desc');
     const [isExporting, setIsExporting] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [shareStats, setShareStats] = useState<ShareablePerformanceStats | null>(null);
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -262,6 +265,28 @@ export const Trades = () => {
         }
     };
 
+    const handleOpenShareModal = () => {
+        const wins = paginatedTrades.filter((t) => t.profit > 0).length;
+        const grossProfit = paginatedTrades.filter((t) => t.profit > 0).reduce((acc, t) => acc + t.profit, 0);
+        const grossLoss = Math.abs(paginatedTrades.filter((t) => t.profit < 0).reduce((acc, t) => acc + t.profit, 0));
+        const winRate = paginatedTrades.length > 0 ? ((wins / paginatedTrades.length) * 100).toFixed(1) : '0.0';
+        const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? '∞' : '0.00';
+        const periodLabel =
+            dateRange.start && dateRange.end
+                ? isEn ? `${dateRange.start} to ${dateRange.end}` : `${dateRange.start} a ${dateRange.end}`
+                : isEn ? 'Filtered Executions' : 'Operações Filtradas';
+        setShareStats({
+            periodLabel,
+            totalTrades: totalFilteredCount,
+            winRate,
+            profitFactor,
+            netProfit: summaryNet,
+            currency: selectedAccount?.currency || 'USD',
+            symbolFocus: symbolFilter !== 'ALL' ? symbolFilter : undefined,
+        });
+        setShowShareModal(true);
+    };
+
     return (
         <div className="space-y-3 animate-in fade-in duration-300">
             <BehaviorReviewQueue accountId={isConsolidated ? 'all' : selectedAccountId} isEn={isEn} />
@@ -314,6 +339,14 @@ export const Trades = () => {
                             title={isEn ? 'Generate Executive PDF' : 'Gerar PDF Executivo'}
                         >
                             <Printer size={12} /> PDF
+                        </button>
+                        <button
+                            onClick={handleOpenShareModal}
+                            disabled={isLoading || totalFilteredCount === 0}
+                            className="h-7 px-2.5 rounded-md text-[11px] font-semibold text-accent-fg hover:bg-surface-2 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                            title={isEn ? 'Share Track Record Card' : 'Partilhar Card de Resultados'}
+                        >
+                            <Share2 size={12} /> {isEn ? 'Share' : 'Partilhar'}
                         </button>
                     </div>
 
@@ -574,6 +607,13 @@ export const Trades = () => {
                     </div>
                 </div>
             </div>
+            {shareStats && (
+                <ShareablePerformanceCard
+                    isOpen={showShareModal}
+                    onClose={() => setShowShareModal(false)}
+                    stats={shareStats}
+                />
+            )}
         </div>
     );
 };

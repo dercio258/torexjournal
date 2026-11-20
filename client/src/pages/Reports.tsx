@@ -13,6 +13,8 @@ import {
     FileSpreadsheet,
     FileCode,
     RotateCcw,
+    Share2,
+    Sparkles,
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
 import { useLocale } from '../context/LocaleContext';
@@ -24,6 +26,7 @@ import {
     toWeekdayRows,
 } from '../components/dashboard/OperationalBreakdown';
 import { TradingCalendarView } from '../components/reports/TradingCalendarView';
+import { ShareablePerformanceCard } from '../components/reports/ShareablePerformanceCard';
 import { exportTradingDocument, DocumentFormat, TOREX_LOGO_URL } from '../utils/documentExporter';
 import { formatTradeDate, formatTradeTime, getLocalWeekdayIndex, toLocalDateKey } from '../utils/timezone';
 import { ReportsBodySkeleton } from '../components/ui/Skeleton';
@@ -97,6 +100,7 @@ export const Reports = () => {
     const [loading, setLoading] = useState(true);
     const [rawReportData, setReportData] = useState<any>(null);
     const [executionChartMode, setExecutionChartMode] = useState<'executions' | 'cumulative'>('executions');
+    const [showShareModal, setShowShareModal] = useState(false);
 
     // Trade ledger search and pagination
     const [searchTerm, setSearchTerm] = useState('');
@@ -718,6 +722,14 @@ export const Reports = () => {
                             >
                                 <Printer size={12} /> PDF
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowShareModal(true)}
+                                disabled={!reportData?.trades?.length}
+                                className="h-8 px-2.5 rounded-lg bg-surface hover:bg-surface-2 text-fg border border-line font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                                <Share2 size={12} className="text-accent-fg" /> {isEn ? 'Share Card' : 'Partilhar Card'}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -749,6 +761,23 @@ export const Reports = () => {
                     </div>
                 ) : (
                     <>
+                        {Number(kpis.netProfit || 0) > 0 && (
+                            <div className="print:hidden flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-accent/10 border border-accent/25 text-xs">
+                                <span className="flex items-center gap-1.5 text-fg">
+                                    <Sparkles size={13} className="text-accent-fg shrink-0" />
+                                    {isEn
+                                        ? 'Positive period performance! Share your verified Track Record card and unlock +50 AI credits/day.'
+                                        : 'Resultado positivo no período! Partilhe o seu card de Track Record e ganhe +50 créditos IA/dia.'}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowShareModal(true)}
+                                    className="px-2.5 py-1 rounded-md bg-accent text-accent-on font-semibold text-[11px] hover:opacity-90 transition-opacity cursor-pointer"
+                                >
+                                    {isEn ? 'Share Result' : 'Partilhar Resultado'}
+                                </button>
+                            </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                             {/* Net Profit */}
                             <div className="bg-canvas-subtle p-3.5 rounded-xl border border-line-subtle">
@@ -1197,6 +1226,19 @@ export const Reports = () => {
                     </>
                 )}
             </div>
+            <ShareablePerformanceCard
+                isOpen={showShareModal}
+                onClose={() => setShowShareModal(false)}
+                stats={{
+                    periodLabel: periodDisplayLabel,
+                    totalTrades: Number(kpis?.totalTrades || 0),
+                    winRate: Number(kpis?.winRate || 0).toFixed(1),
+                    profitFactor: kpis?.profitFactor ?? '0.00',
+                    netProfit: Number(kpis?.netProfit || 0),
+                    currency: accountInfo?.currency || selectedAccount?.currency || 'USD',
+                    symbolFocus: reportData?.bySymbol?.[0]?.symbol,
+                }}
+            />
         </div>
     );
 };

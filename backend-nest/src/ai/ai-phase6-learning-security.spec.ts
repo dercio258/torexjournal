@@ -510,7 +510,11 @@ describe('Phase 6 — Per-Response Feedback, Self-Growing Hybrid Memory, DLP Sec
                     canonical_question: 'Como importar trades MT5 sincronizar?',
                     normalized_question: 'como importar trades mt5 sincronizar',
                     content_hash: 'hash-mt5-import',
-                    variant_phrases: ['sincronizar mt5 importar operacoes'],
+                    variant_phrases: [
+                        'sincronizar mt5 importar operacoes',
+                        'como puxar operacoes do mt5',
+                        'como importar operacoes do mt5',
+                    ],
                     embedding_model: 'gemini-embedding-2',
                     dimensions: 768,
                     embedding_f64: [],

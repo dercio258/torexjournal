@@ -28,6 +28,7 @@ import {
     Toggle,
 } from '../../components/backtesting/primitives';
 import { cn } from '../../lib/cn';
+import { getQuantAuthHeaders } from '../../lib/quantAuth';
 import { useLocale } from '../../context/LocaleContext';
 
 type View = 'account' | 'projection' | 'optimizer' | 'saved';
@@ -359,7 +360,7 @@ const Projection = ({ isEn }: { isEn: boolean }) => {
                         try {
                             const res = await fetch('/api/quant/simulate/monte-carlo', {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: getQuantAuthHeaders({ 'Content-Type': 'application/json' }),
                                 body: JSON.stringify({
                                     capital: inp.capital,
                                     riskPct: inp.riskPct,
@@ -907,7 +908,10 @@ const QuantOptimizerView = ({ isEn }: { isEn: boolean }) => {
 
     const loadCatalog = async () => {
         try {
-            const res = await fetch('/api/quant/market-data/catalog', { signal: AbortSignal.timeout(15000) });
+            const res = await fetch('/api/quant/market-data/catalog', {
+                headers: getQuantAuthHeaders(),
+                signal: AbortSignal.timeout(15000),
+            });
             if (res.ok) {
                 const json: ParquetCatalogResponse = await res.json();
                 setCatalog(json);
@@ -928,7 +932,7 @@ const QuantOptimizerView = ({ isEn }: { isEn: boolean }) => {
         try {
             const res = await fetch('/api/quant/market-data/sync', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getQuantAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     symbol,
                     timeframe,
@@ -968,7 +972,7 @@ const QuantOptimizerView = ({ isEn }: { isEn: boolean }) => {
         try {
             const res = await fetch('/api/quant/vector-sweep', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getQuantAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     symbol,
                     timeframe,
@@ -1007,7 +1011,7 @@ const QuantOptimizerView = ({ isEn }: { isEn: boolean }) => {
         try {
             const res = await fetch('/api/quant/optimize', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getQuantAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({
                     symbol,
                     timeframe,

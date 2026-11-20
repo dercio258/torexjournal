@@ -48,6 +48,16 @@ export interface DailyJournalMetrics {
 export class JournalService implements OnModuleInit {
     private readonly logger = new Logger(JournalService.name);
 
+    private escapeHtml(raw: unknown): string {
+        if (raw === null || raw === undefined) return '';
+        return String(raw)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     constructor(
         private readonly dataSource: DataSource,
         @InjectRepository(TradeEntity)
@@ -524,7 +534,7 @@ export class JournalService implements OnModuleInit {
             const tn = tradeNoteMap.get(t.id);
             const fallbackNoteContent =
                 tn?.content ||
-                (t.lesson ? `<p>${t.lesson}</p>` : '');
+                (t.lesson ? `<p>${this.escapeHtml(t.lesson)}</p>` : '');
 
             normalizedTrades.push({
                 id: t.id,

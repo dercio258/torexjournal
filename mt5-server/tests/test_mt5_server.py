@@ -126,6 +126,7 @@ class TestSyncEnginePositionPairingAndStartupPrompt(unittest.TestCase):
         )
 
         mock_mt5 = MagicMock()
+        mock_mt5.account_info.return_value = SimpleNamespace(login=777)
         mock_mt5.history_deals_get.return_value = [deal_in, deal_out]
 
         with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
@@ -211,6 +212,11 @@ class TestWorkerManagerOrchestrator(unittest.TestCase):
         mgr.sync_engine.fetch_incremental_deals = MagicMock(
             return_value=SyncTradesPayload(accountId=101, lastDealTicket=0, trades=[])
         )
+        from pathlib import Path
+        mgr.process_manager.instances_dir = Path(self.tmp_dir.name) / "instances"
+        mgr.process_manager.get_or_prepare_isolated_terminal_exe = MagicMock(
+            return_value="C:\\fake\\terminal64.exe"
+        )
         mgr.process_manager.is_running = MagicMock(return_value=True)
 
         # Simula 2 tarefas fora de ordem (prioridade 10 e prioridade 1)
@@ -243,6 +249,126 @@ class TestWorkerManagerOrchestrator(unittest.TestCase):
         self.assertEqual(executed_order, ["t-high", "t-low"])
         self.assertTrue(mgr.is_registered)
         mgr.api_client.heartbeat.assert_called_once()
+
+
+class TestPhase1SecurityHardening(unittest.TestCase):
+    """Testes unitários de isolamento multi-tenant, credenciais INI e DPAPI Win64."""
+
+    def test_process_manager_omits_accounts_dat_and_ini_passwords(self):
+        from pathlib import Path
+        from core.process_manager import MT5ProcessManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            instances_dir = tmp_path / "instances"
+            master_root = tmp_path / "master_appdata"
+            master_config = master_root / "Config"
+            master_config.mkdir(parents=True, exist_ok=True)
+            (master_config / "servers.dat").write_bytes(b"SERVERS")
+            (master_config / "accounts.dat").write_bytes(b"SENSITIVE_ACCOUNTS")
+            (master_config / "common.ini").write_text("[Common]\nLogin=999\nPassword=Leak!\n", encoding="utf-8")
+
+            fake_terminal = tmp_path / "terminal64.exe"
+            fake_terminal.write_bytes(b"MZ")
+
+            pm = MT5ProcessManager()
+            pm.terminal_path = str(fake_terminal)
+            pm.instances_dir = instances_dir
+
+            with patch("core.process_manager.os.path.expandvars", return_value=str(tmp_path)), \
+                 patch.object(pm, "_deploy_calendar_ea"):
+                exe_path = pm.get_or_prepare_isolated_terminal_exe(
+                    account_id=42,
+                    login="4200\r\nBadKey=Injected",
+                    server="Broker-Live\nX=1",
+                    password="SuperSecretPassword",
+                )
+
+            acc_dir = instances_dir / "acc_42"
+            self.assertTrue(Path(exe_path).exists())
+            self.assertFalse((acc_dir / "Config" / "accounts.dat").exists())
+            common_txt = (acc_dir / "Config" / "common.ini").read_text(encoding="utf-8")
+            self.assertNotIn("\nPassword=", common_txt)
+            self.assertNotIn("\nBadKey=", common_txt)
+            self.assertNotIn("SuperSecretPassword", common_txt)
+            self.assertNotIn("\nX=1", common_txt)
+
+            startup_path = pm.create_startup_config(
+                account_id=42,
+                login="4200",
+                server="Broker-Live",
+                password="SuperSecretPassword",
+            )
+            startup_txt = startup_path.read_text(encoding="utf-8")
+            self.assertNotIn("Password=", startup_txt)
+            self.assertNotIn("SuperSecretPassword", startup_txt)
+
+            # is_running exige exe exatamente em acc_<id>/terminal64.exe (sem colisão acc_4 vs acc_42)
+            fake_proc = MagicMock()
+            fake_proc.info = {
+                "pid": 1234,
+                "name": "terminal64.exe",
+                "exe": str(acc_dir / "terminal64.exe"),
+                "status": "running",
+            }
+            with patch("core.process_manager.psutil.process_iter", return_value=[fake_proc]):
+                self.assertTrue(pm.is_running(42))
+                self.assertFalse(pm.is_running(4))
+
+    def test_sync_engine_blocks_cached_bypass_and_passwordless_fallback(self):
+        from types import SimpleNamespace
+        from pathlib import Path
+        import core.sync_engine as sync_engine_mod
+        from core.sync_engine import SyncEngine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_pm = MagicMock()
+            fake_pm.get_account_instance_dir.return_value = Path(tmp) / "acc_99"
+            fake_pm.get_or_prepare_isolated_terminal_exe.return_value = "C:\\fake\\terminal64.exe"
+            fake_pm.is_running.return_value = True
+
+            engine = SyncEngine()
+            engine.process_manager = fake_pm
+            mock_mt5 = MagicMock()
+            mock_mt5.initialize.return_value = True
+            mock_mt5.terminal_info.return_value = SimpleNamespace(connected=True)
+            mock_mt5.account_info.return_value = SimpleNamespace(
+                login=999999,
+                server="Broker-Live",
+                name="Holder",
+                balance=1000.0,
+            )
+            mock_mt5.login.return_value = False
+            mock_mt5.last_error.return_value = (-6, "Authorization failed")
+
+            with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
+                 patch.object(sync_engine_mod, "mt5", mock_mt5, create=True), \
+                 patch("core.sync_engine.time.sleep", return_value=None):
+                ok = engine.connect_account(
+                    account_id=99,
+                    login="999999",
+                    server="Broker-Live",
+                    password="WrongPassword",
+                )
+
+            self.assertFalse(ok)
+            self.assertGreaterEqual(mock_mt5.login.call_count, 1)
+            for call in mock_mt5.login.call_args_list:
+                self.assertIn("password", call.kwargs)
+                self.assertEqual(call.kwargs["password"], "WrongPassword")
+
+    def test_dpapi_win64_configures_localfree_pointer_argtypes(self):
+        import ctypes
+        import sys
+        from core.account_manager import _configure_dpapi_win64
+
+        if sys.platform != "win32":
+            self.skipTest("DPAPI Win64 pointer config applies to win32")
+
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        _configure_dpapi_win64(crypt32, kernel32)
+        self.assertEqual(list(kernel32.LocalFree.argtypes), [ctypes.c_void_p])
 
 
 if __name__ == "__main__":

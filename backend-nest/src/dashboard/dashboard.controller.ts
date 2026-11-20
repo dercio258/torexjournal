@@ -269,7 +269,7 @@ export class DashboardController {
     }
 
     @Post('journal/screenshot')
-    @UseInterceptors(new FastifyFileInterceptor('file'))
+    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true }))
     async uploadJournalScreenshot(
         @Req() req,
         @UploadedFile() file: any,
@@ -363,7 +363,7 @@ export class DashboardController {
 
     @Post('backtest/screenshot')
     @RequirePlan(PlanTier.FREE)
-    @UseInterceptors(new FastifyFileInterceptor('file'))
+    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true }))
     async uploadBacktestScreenshot(
         @Req() req,
         @UploadedFile() file: any,

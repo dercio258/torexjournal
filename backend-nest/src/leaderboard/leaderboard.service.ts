@@ -265,11 +265,41 @@ export class LeaderboardService implements OnModuleInit {
         return result;
     }
 
+    private async getUserMonthlyChallengeStatus(userId: string) {
+        const now = new Date();
+        const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+        const [connectedAccountsCount, refRows] = await Promise.all([
+            this.accountRepo
+                .count({ where: { userId, isArchived: false } })
+                .catch(() => 0),
+            this.userRepo.manager
+                .query(
+                    `SELECT COUNT(*)::int AS cnt FROM "referrals" WHERE "referrer_user_id" = $1 AND "status" IN ('VERIFIED', 'PAID')`,
+                    [userId],
+                )
+                .catch(() => [{ cnt: 0 }]),
+        ]);
+        const verifiedReferrals = Number(refRows?.[0]?.cnt || 0);
+        const hasConnectedBroker = Number(connectedAccountsCount || 0) >= 1;
+        return {
+            monthKey,
+            hasConnectedBroker,
+            connectedAccountsCount: Number(connectedAccountsCount || 0),
+            verifiedReferrals,
+            requiredAccounts: 1,
+            requiredReferrals: 1,
+            eligible: hasConnectedBroker && verifiedReferrals >= 1,
+        };
+    }
+
     /**
      * Retorna o perfil de ranking do usuário autenticado
      */
     async getMyRank(userId: string) {
-        const rank = await this.rankRepo.findOne({ where: { userId } });
+        const [rank, challengeStatus] = await Promise.all([
+            this.rankRepo.findOne({ where: { userId } }),
+            this.getUserMonthlyChallengeStatus(userId),
+        ]);
         if (!rank) {
             const autoRecalcCooldownKey = 'leaderboard:auto_recalc_cooldown';
             let onCooldown = false;
@@ -288,13 +318,15 @@ export class LeaderboardService implements OnModuleInit {
             }
 
             // Calcula instantaneamente (< 5ms via SQL agregado) apenas os dados do usuário atual
-            return this.computeSingleUserPreviewRank(userId);
+            const preview = await this.computeSingleUserPreviewRank(userId);
+            return { ...preview, challengeStatus };
         }
 
         return {
             ...rank,
             isCurrentUser: true,
             qualified: (rank.tradesCount || 0) > 0,
+            challengeStatus,
         };
     }
 
@@ -320,6 +352,9 @@ export class LeaderboardService implements OnModuleInit {
         let totalPnL = 0;
         let maxStreak = 0;
 
+        const fxSql = `CASE UPPER(COALESCE(a.currency, 'USD')) WHEN 'USC' THEN 0.01 WHEN 'CENT' THEN 0.01 WHEN 'MZN' THEN (1.0 / 65.0) WHEN 'EUR' THEN 1.08 WHEN 'GBP' THEN 1.27 ELSE 1.0 END`;
+        const pnlExprSql = `(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) * (${fxSql}))`;
+
         if (accountIds.length > 0) {
             const [aggRows, streakRows] = await Promise.all([
                 this.tradeRepo.query(
@@ -327,12 +362,13 @@ export class LeaderboardService implements OnModuleInit {
                     SELECT
                         COUNT(*)::int AS "tradesCount",
                         COUNT(DISTINCT DATE(t.close_time AT TIME ZONE 'UTC'))::int AS "activeDays",
-                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0)::int AS "wins",
-                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0)::int AS "losses",
-                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0), 0)::float AS "grossProfit",
-                        COALESCE(SUM(ABS(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0))) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0), 0)::float AS "grossLoss",
-                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)), 0)::float AS "totalPnL"
+                        COUNT(*) FILTER (WHERE ${pnlExprSql} > 0)::int AS "wins",
+                        COUNT(*) FILTER (WHERE ${pnlExprSql} < 0)::int AS "losses",
+                        COALESCE(SUM(${pnlExprSql}) FILTER (WHERE ${pnlExprSql} > 0), 0)::float AS "grossProfit",
+                        COALESCE(SUM(ABS(${pnlExprSql})) FILTER (WHERE ${pnlExprSql} < 0), 0)::float AS "grossLoss",
+                        COALESCE(SUM(${pnlExprSql}), 0)::float AS "totalPnL"
                     FROM trades t
+                    INNER JOIN accounts a ON a.id::text = t.account_id
                     WHERE t.account_id = ANY($1)
                       AND t.status = 'CLOSED'
                     `,
@@ -414,13 +450,14 @@ export class LeaderboardService implements OnModuleInit {
             totalPnL: Number(totalPnL.toFixed(2)),
         });
 
+        const uniqueCurrencies = new Set(accounts.map((a) => String(a.currency || 'USD').toUpperCase()));
         return {
             userId,
             rank: 999,
             name: user?.name || user?.username || 'Trader',
             username: user?.username || `trader_${userId.slice(0, 5)}`,
             avatarUrl: user?.avatarUrl || null,
-            currency: accounts[0]?.currency || 'USD',
+            currency: uniqueCurrencies.size > 1 ? 'USD' : (accounts[0]?.currency || 'USD'),
             tier: 'BRONZE',
             tierLevel: tradesCount > 0 ? 'BRONZE' : 'CALIBRANDO',
             winRate,
@@ -493,6 +530,8 @@ export class LeaderboardService implements OnModuleInit {
         const streakByUserId = new Map<string, number>();
 
         if (allValidAccountIds.length > 0) {
+            const fxSql = `CASE UPPER(COALESCE(a.currency, 'USD')) WHEN 'USC' THEN 0.01 WHEN 'CENT' THEN 0.01 WHEN 'MZN' THEN (1.0 / 65.0) WHEN 'EUR' THEN 1.08 WHEN 'GBP' THEN 1.27 ELSE 1.0 END`;
+            const pnlExprSql = `(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) * (${fxSql}))`;
             const [aggRows, streakRows] = await Promise.all([
                 this.tradeRepo.query(
                     `
@@ -500,11 +539,11 @@ export class LeaderboardService implements OnModuleInit {
                         a.user_id AS "userId",
                         COUNT(*)::int AS "tradesCount",
                         COUNT(DISTINCT DATE(t.close_time AT TIME ZONE 'UTC'))::int AS "activeDays",
-                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0)::int AS "wins",
-                        COUNT(*) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0)::int AS "losses",
-                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) > 0), 0)::float AS "grossProfit",
-                        COALESCE(SUM(ABS(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0))) FILTER (WHERE COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0) < 0), 0)::float AS "grossLoss",
-                        COALESCE(SUM(COALESCE(t."netPnl", t.profit + COALESCE(t.commission, 0) + COALESCE(t.swap, 0), 0)), 0)::float AS "totalPnL"
+                        COUNT(*) FILTER (WHERE ${pnlExprSql} > 0)::int AS "wins",
+                        COUNT(*) FILTER (WHERE ${pnlExprSql} < 0)::int AS "losses",
+                        COALESCE(SUM(${pnlExprSql}) FILTER (WHERE ${pnlExprSql} > 0), 0)::float AS "grossProfit",
+                        COALESCE(SUM(ABS(${pnlExprSql})) FILTER (WHERE ${pnlExprSql} < 0), 0)::float AS "grossLoss",
+                        COALESCE(SUM(${pnlExprSql}), 0)::float AS "totalPnL"
                     FROM trades t
                     INNER JOIN accounts a ON a.id::text = t.account_id
                     WHERE t.account_id = ANY($1)
@@ -632,7 +671,8 @@ export class LeaderboardService implements OnModuleInit {
                 totalPnL: Number(totalPnL.toFixed(2)),
             });
 
-            const primaryCurrency = accounts[0]?.currency || 'USD';
+            const userCurrencies = new Set(accounts.map((a) => String(a.currency || 'USD').toUpperCase()));
+            const primaryCurrency = userCurrencies.size > 1 ? 'USD' : (accounts[0]?.currency || 'USD');
 
             realUsersData.push({
                 userId: user.id,

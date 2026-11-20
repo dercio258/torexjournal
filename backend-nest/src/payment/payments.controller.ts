@@ -33,8 +33,6 @@ export class PaymentsController {
                 method = 'M-Pesa';
             } else if (sub.paymentMethod === 'emola') {
                 method = 'e-Mola';
-            } else if (sub.paymentMethod === 'payfast') {
-                method = 'PayFast';
             }
 
             return {

@@ -51,6 +51,118 @@ export const COUNTRIES: CountryDial[] = RAW.split(' ')
 
 export const findCountry = (iso2: string) => COUNTRIES.find((c) => c.iso2 === iso2.toUpperCase());
 
+export const TIMEZONE_TO_ISO2: Record<string, string> = {
+    'Africa/Maputo': 'MZ',
+    'Africa/Luanda': 'AO',
+    'America/Sao_Paulo': 'BR',
+    'America/Fortaleza': 'BR',
+    'America/Recife': 'BR',
+    'America/Manaus': 'BR',
+    'America/Belem': 'BR',
+    'America/Bahia': 'BR',
+    'America/Cuiaba': 'BR',
+    'Europe/Lisbon': 'PT',
+    'Atlantic/Madeira': 'PT',
+    'Atlantic/Azores': 'PT',
+    'Atlantic/Cape_Verde': 'CV',
+    'Africa/Bissau': 'GW',
+    'Africa/Sao_Tome': 'ST',
+    'Africa/Johannesburg': 'ZA',
+    'Africa/Windhoek': 'NA',
+    'Africa/Gaborone': 'BW',
+    'Africa/Harare': 'ZW',
+    'Africa/Lusaka': 'ZM',
+    'Africa/Blantyre': 'MW',
+    'Africa/Dar_es_Salaam': 'TZ',
+    'Africa/Nairobi': 'KE',
+    'Africa/Lagos': 'NG',
+    'Africa/Accra': 'GH',
+    'America/New_York': 'US',
+    'America/Chicago': 'US',
+    'America/Denver': 'US',
+    'America/Los_Angeles': 'US',
+    'America/Toronto': 'CA',
+    'Europe/London': 'GB',
+    'Europe/Madrid': 'ES',
+    'Europe/Paris': 'FR',
+    'Europe/Berlin': 'DE',
+    'Europe/Rome': 'IT',
+    'Europe/Amsterdam': 'NL',
+    'Europe/Zurich': 'CH',
+    'Asia/Dubai': 'AE',
+    'Australia/Sydney': 'AU',
+};
+
+export function inferCountryFromTimezone(tz?: string | null): CountryDial | null {
+    const clean = typeof tz === 'string' ? tz.trim() : '';
+    if (!clean) return null;
+    const iso2 = TIMEZONE_TO_ISO2[clean];
+    if (!iso2) return null;
+    return findCountry(iso2) || null;
+}
+
+const LOCAL_DIGITS_RULES: Record<string, { min: number; max: number }> = {
+    MZ: { min: 9, max: 9 },
+    AO: { min: 9, max: 9 },
+    PT: { min: 9, max: 9 },
+    BR: { min: 10, max: 11 },
+    CV: { min: 7, max: 7 },
+    GW: { min: 7, max: 9 },
+    ST: { min: 7, max: 7 },
+    ZA: { min: 9, max: 9 },
+    US: { min: 10, max: 10 },
+    CA: { min: 10, max: 10 },
+    GB: { min: 9, max: 11 },
+    ES: { min: 9, max: 9 },
+    FR: { min: 9, max: 9 },
+};
+
+export function validatePhoneForCountry(
+    nationalInput: string,
+    country: CountryDial | null,
+): { valid: boolean; e164: string; errorPt?: string; errorEn?: string } {
+    if (!country) {
+        return {
+            valid: false,
+            e164: '',
+            errorPt: 'Selecione o indicativo do país (ex: +258, +55, +351) antes de prosseguir.',
+            errorEn: 'Select your country dial prefix before continuing.',
+        };
+    }
+
+    const digits = String(nationalInput || '').replace(/\D/g, '').replace(/^0+/, '');
+    if (!digits) {
+        return {
+            valid: false,
+            e164: '',
+            errorPt: 'Informe o contacto móvel / celular.',
+            errorEn: 'Enter your mobile phone number.',
+        };
+    }
+
+    const rule = LOCAL_DIGITS_RULES[country.iso2] || { min: 6, max: 12 };
+    if (digits.length < rule.min || digits.length > rule.max || /^(\d)\1{5,}$/.test(digits)) {
+        return {
+            valid: false,
+            e164: `${country.dialCode}${digits}`,
+            errorPt: `Para ${country.name} (${country.dialCode}), insira ${rule.min === rule.max ? `${rule.min}` : `${rule.min}-${rule.max}`} dígitos válidos.`,
+            errorEn: `For ${country.name} (${country.dialCode}), enter ${rule.min === rule.max ? `${rule.min}` : `${rule.min}-${rule.max}`} valid local digits.`,
+        };
+    }
+
+    const e164 = `${country.dialCode}${digits}`;
+    if (!/^\+[1-9]\d{6,14}$/.test(e164)) {
+        return {
+            valid: false,
+            e164,
+            errorPt: 'Número fora do padrão internacional E.164.',
+            errorEn: 'Phone number does not match E.164 international format.',
+        };
+    }
+
+    return { valid: true, e164 };
+}
+
 /** Accent/case-insensitive match on name, ISO code or dial code. */
 export const filterCountries = (query: string) => {
     const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

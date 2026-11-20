@@ -57,12 +57,13 @@ declare global {
     }
 }
 
+const _env = (import.meta as any).env ?? {};
 const ENV_PIXEL_DEFAULTS = {
-    metaPixelId: (import.meta.env.VITE_META_PIXEL_ID as string) || null,
-    ga4MeasurementId: (import.meta.env.VITE_GA4_MEASUREMENT_ID as string) || null,
-    gtmContainerId: (import.meta.env.VITE_GTM_CONTAINER_ID as string) || null,
-    tiktokPixelId: (import.meta.env.VITE_TIKTOK_PIXEL_ID as string) || null,
-    utmifyPixelId: (import.meta.env.VITE_UTMIFY_PIXEL_ID as string) || null,
+    metaPixelId: (_env.VITE_META_PIXEL_ID as string) || null,
+    ga4MeasurementId: (_env.VITE_GA4_MEASUREMENT_ID as string) || null,
+    gtmContainerId: (_env.VITE_GTM_CONTAINER_ID as string) || null,
+    tiktokPixelId: (_env.VITE_TIKTOK_PIXEL_ID as string) || null,
+    utmifyPixelId: (_env.VITE_UTMIFY_PIXEL_ID as string) || null,
 };
 
 let pixelConfig: PublicPixelConfig = {
@@ -80,10 +81,77 @@ let pixelConfig: PublicPixelConfig = {
 let initialized = false;
 let pixelsBootstrapped = false;
 let autoClickListenerInstalled = false;
+const MAX_EVENT_QUEUE = 200;
 let eventQueue: OutgoingEventPayload[] = [];
 let flushTimer: number | null = null;
 let lastPageKey = '';
 let lastPageAt = 0;
+
+const BEHAVIOR_STORAGE_KEY = 'torex_website_behavior_v1';
+
+export interface WebsiteBehaviorSnapshot {
+    pageviews: number;
+    engagedActions: number;
+    firstSeenAt: number;
+    lastActiveAt: number;
+    visitedRoutes: string[];
+}
+
+function loadBehaviorSnapshot(): WebsiteBehaviorSnapshot {
+    const now = Date.now();
+    const fallback: WebsiteBehaviorSnapshot = {
+        pageviews: 0,
+        engagedActions: 0,
+        firstSeenAt: now,
+        lastActiveAt: now,
+        visitedRoutes: [],
+    };
+    if (typeof window === 'undefined') return fallback;
+    try {
+        const raw = window.localStorage.getItem(BEHAVIOR_STORAGE_KEY);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        return {
+            pageviews: Math.max(0, Number(parsed?.pageviews) || 0),
+            engagedActions: Math.max(0, Number(parsed?.engagedActions) || 0),
+            firstSeenAt: Number(parsed?.firstSeenAt) || now,
+            lastActiveAt: Number(parsed?.lastActiveAt) || now,
+            visitedRoutes: Array.isArray(parsed?.visitedRoutes)
+                ? parsed.visitedRoutes.filter((r: unknown): r is string => typeof r === 'string').slice(-15)
+                : [],
+        };
+    } catch {
+        return fallback;
+    }
+}
+
+export function getWebsiteBehaviorSnapshot(): WebsiteBehaviorSnapshot {
+    return loadBehaviorSnapshot();
+}
+
+export function recordWebsiteBehaviorSignal(kind: 'pageview' | 'action', routeOrTag?: string): WebsiteBehaviorSnapshot {
+    const snap = loadBehaviorSnapshot();
+    const now = Date.now();
+    if (kind === 'pageview') {
+        snap.pageviews = Math.min(9999, snap.pageviews + 1);
+        const route = (routeOrTag || '').split('?')[0].slice(0, 64);
+        if (route && !snap.visitedRoutes.includes(route)) {
+            snap.visitedRoutes = [...snap.visitedRoutes, route].slice(-15);
+        }
+    } else {
+        snap.engagedActions = Math.min(9999, snap.engagedActions + 1);
+    }
+    snap.lastActiveAt = now;
+    if (typeof window !== 'undefined') {
+        try {
+            window.localStorage.setItem(BEHAVIOR_STORAGE_KEY, JSON.stringify(snap));
+            window.dispatchEvent(new CustomEvent('torex:behavior-updated', { detail: snap }));
+        } catch {
+            // ignore storage quota errors
+        }
+    }
+    return snap;
+}
 
 function isAdminRoute(pathname?: string): boolean {
     const p = (pathname || (typeof window !== 'undefined' ? window.location.pathname : '')).toLowerCase();
@@ -131,11 +199,19 @@ function extractCurrentContext(overrides?: Partial<OutgoingEventPayload>) {
 
 function enqueueEvent(payload: OutgoingEventPayload) {
     if (typeof window === 'undefined') return;
+    if (payload.eventType === 'pageview') {
+        recordWebsiteBehaviorSignal('pageview', payload.pagePath);
+    } else if (payload.eventType === 'button_click' || payload.eventType === 'conversion') {
+        recordWebsiteBehaviorSignal('action', payload.ctaTag || payload.eventName);
+    }
     if (!pixelConfig.enableFirstPartyTracking) return;
     if (isAdminRoute(payload.pagePath) && (payload.eventType === 'pageview' || payload.eventType === 'button_click')) {
         return;
     }
 
+    if (eventQueue.length >= MAX_EVENT_QUEUE) {
+        eventQueue.shift();
+    }
     eventQueue.push(payload);
     if (eventQueue.length >= 10) {
         void flushEvents(false);

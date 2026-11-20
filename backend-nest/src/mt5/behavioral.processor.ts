@@ -14,6 +14,7 @@ import { AlertEntity, AlertSeverity, AlertType } from '../alerts/alert.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/notification.entity';
 import { Mt5Gateway } from './mt5.gateway';
+import { getQuantInternalHeaders } from '../common/security/security.config';
 
 interface PyTorchBehaviorPrediction {
     tradeId: string;
@@ -375,7 +376,7 @@ export class BehavioralProcessor {
         try {
             const response = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getQuantInternalHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify(payload),
                 signal: AbortSignal.timeout(8000),
             });

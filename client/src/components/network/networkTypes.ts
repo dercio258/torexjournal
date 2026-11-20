@@ -37,7 +37,6 @@ export interface LessonCommentItem {
     user: {
         id: string;
         username: string;
-        name?: string;
         avatarUrl?: string | null;
     };
 }
@@ -46,7 +45,6 @@ export interface DirectConversationSummary {
     partner: {
         id: string;
         username: string;
-        name?: string;
         avatarUrl?: string | null;
     };
     lastMessage: string;
@@ -62,6 +60,36 @@ export interface DirectMessageItem {
     content: string;
     isRead: boolean;
     createdAt: string;
+}
+
+const ALLOWED_EMBED_DOMAINS = [
+    'youtube.com',
+    'youtube-nocookie.com',
+    'youtu.be',
+    'vimeo.com',
+    'loom.com',
+    'drive.google.com',
+    'pandavideo.com.br',
+    'mediadelivery.net',
+    'b-cdn.net',
+    'bunnycdn.com',
+    'wistia.net',
+    'wistia.com',
+    'vturb.com.br',
+    'converteai.net',
+];
+
+function isAllowedEmbedUrl(rawUrl: string): boolean {
+    try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'https:') return false;
+        const host = parsed.hostname.toLowerCase();
+        return ALLOWED_EMBED_DOMAINS.some(
+            (domain) => host === domain || host.endsWith(`.${domain}`),
+        );
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -135,6 +163,10 @@ export function parseClientEmbedPreview(rawInput: string): {
             embedType: 'iframe',
             autoThumbnail: null,
         };
+    }
+
+    if (!isAllowedEmbedUrl(url)) {
+        return { embedUrl: null, embedType: 'iframe', autoThumbnail: null };
     }
 
     return { embedUrl: url, embedType: 'iframe', autoThumbnail: null };

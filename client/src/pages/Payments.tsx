@@ -505,8 +505,8 @@ export const Payments = () => {
                         </h4>
                         <p className="text-xs text-fg-muted mt-0.5 leading-relaxed">
                             {isEn
-                                ? 'All transactions are encrypted and securely processed via certified payment gateways.'
-                                : 'Todas as transações são criptografadas e processadas com segurança por gateways certificados.'}
+                                ? 'All transactions are encrypted and securely processed via certified payment channels.'
+                                : 'Todas as transações são criptografadas e processadas com segurança por canais certificados.'}
                         </p>
                     </div>
                 </div>

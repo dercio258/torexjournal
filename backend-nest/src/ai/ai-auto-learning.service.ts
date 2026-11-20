@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AiMessageMetadata } from './ai-chat.entity';
@@ -10,6 +10,7 @@ import {
 } from './ai-prompt-system.service';
 import { GeminiHandoffSpec } from './ai-router.service';
 import { AiSemanticMemoryService } from './ai-semantic-memory.service';
+import { RedisSecurityService } from '../common/security/redis-security.service';
 
 export interface FeedbackRecordedEventPayload {
     feedbackId?: string;
@@ -36,7 +37,8 @@ export class AiAutoLearningService {
     constructor(
         private readonly privacySanitizer: AiPrivacySanitizerService,
         private readonly semanticMemory: AiSemanticMemoryService,
-        private readonly promptSystem: AiPromptSystemService
+        private readonly promptSystem: AiPromptSystemService,
+        @Optional() private readonly redisSecurity?: RedisSecurityService,
     ) {}
 
     @OnEvent('ai.feedback.recorded', { async: true })
@@ -193,11 +195,18 @@ export class AiAutoLearningService {
 
     @Cron(CronExpression.EVERY_6_HOURS)
     async runScheduledConsolidation(): Promise<void> {
-        const res = await this.semanticMemory.runMaintenanceSweep();
-        if (res.retiredCount > 0) {
-            this.logger.log(
-                `Auto-learning maintenance sweep retired ${res.retiredCount} stale/quarantined memory entries.`
-            );
+        const exec = async () => {
+            const res = await this.semanticMemory.runMaintenanceSweep();
+            if (res.retiredCount > 0) {
+                this.logger.log(
+                    `Auto-learning maintenance sweep retired ${res.retiredCount} stale/quarantined memory entries.`
+                );
+            }
+        };
+        if (this.redisSecurity) {
+            await this.redisSecurity.withLock('cron:ai_auto_learning', 20 * 60_000, exec);
+            return;
         }
+        await exec();
     }
 }

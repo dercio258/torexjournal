@@ -2,7 +2,7 @@
 """
 Script de Diagnóstico e Importação Direta de Extrato Completo no MT5 Server (Windows VPS)
 Uso:
-  python scripts/direct_import_account.py 6371945 " SUA_SENHA " "Deriv-Demo"
+  python scripts/direct_import_account.py <login> "<SUA_SENHA>" "<SERVIDOR>"
 
 O que este script faz:
 1. Conecta e autentica diretamente na conta MT5 informada (usando terminal isolado ou ativo).
@@ -49,11 +49,15 @@ from api_client.client import BackendApiClient
 
 
 def main():
-    login_arg = sys.argv[1].strip() if len(sys.argv) >= 2 else "6371945"
-    password_arg = sys.argv[2].strip() if len(sys.argv) >= 3 else None
-    server_arg = sys.argv[3].strip() if len(sys.argv) >= 4 else "Deriv-Demo"
+    if len(sys.argv) < 2 or not sys.argv[1].strip().isdigit():
+        print("❌ Uso: python scripts/direct_import_account.py <login> [senha] [servidor]")
+        sys.exit(1)
 
-    account_id = int(login_arg) if login_arg.isdigit() else 6371945
+    login_arg = sys.argv[1].strip()
+    password_arg = sys.argv[2].strip() if len(sys.argv) >= 3 else None
+    server_arg = sys.argv[3].strip() if len(sys.argv) >= 4 else ""
+
+    account_id = int(login_arg)
 
     acc_manager = AccountManager()
     proc_manager = MT5ProcessManager()
@@ -62,7 +66,11 @@ def main():
 
     existing_acc = acc_manager.get_account(account_id)
     password = password_arg or (existing_acc.password if existing_acc else None)
-    server = sync_engine._normalize_broker_server(server_arg or (existing_acc.server if existing_acc else "Deriv-Demo"))
+    raw_server = server_arg or (existing_acc.server if existing_acc else "")
+    if not password or not raw_server:
+        logger.error("Senha e servidor são obrigatórios quando a conta não existe no cofre local.")
+        sys.exit(1)
+    server = sync_engine._normalize_broker_server(raw_server)
 
     print("\n" + "=" * 90)
     print(f"🚀 IMPORTAÇÃO DIRETA DE EXTRATO MT5 -> TOREX JOURNAL")

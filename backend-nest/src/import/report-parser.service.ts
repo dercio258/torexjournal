@@ -1,9 +1,40 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import * as zlib from 'zlib';
+
+export const MAX_ZIP_ENTRIES = 64;
+export const MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES = 15 * 1024 * 1024;
+export const MAX_TOTAL_UNCOMPRESSED_BYTES = 25 * 1024 * 1024;
+export const MAX_COMPRESSION_RATIO = 120;
+export const MAX_PDF_STREAMS = 200;
 
 @Injectable()
 export class ReportParserService {
     private readonly logger = new Logger(ReportParserService.name);
+
+    /**
+     * Remove apenas sufixos explícitos de corretoras (.ecn, _pro, .x, XAUUSDm) sem amputar tickers
+     * legítimos terminados em "M" ou "PRO" como IBM, XOM, 3M, US30M, PLATINUM, ETHEREUM ou GPRO.
+     */
+    normalizeBrokerSymbol(rawSymbol: string): string {
+        const clean = String(rawSymbol || '')
+            .replace(/['"]/g, '')
+            .trim();
+        if (!clean) return '';
+
+        const withoutDelimitedSuffix = clean.replace(
+            /(?:[._\-](?:ecn|pro|raw|std|zero|micro|cent|mini|cash|spot|m|x|y|c|i)|#+|\.+)$/i,
+            '',
+        );
+
+        const compactMatch = withoutDelimitedSuffix.match(
+            /^([A-Z]{6})(m|c|pro|ecn|micro)$/,
+        );
+        if (compactMatch) {
+            return compactMatch[1];
+        }
+
+        return withoutDelimitedSuffix;
+    }
 
     parseHtml(content: string): any[] {
         this.logger.log('Parsing HTML Report...');
@@ -124,9 +155,8 @@ export class ReportParserService {
             const isPotentialTicket = !isNaN(ticket) && ticket > 0;
 
             if (isPotentialTicket) {
-                // Remove uncommon broker suffixes from symbol (.x, .y, _ecn, m, etc.)
                 const rawSymbol = cells[headerMap['symbol'] ?? 4];
-                const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
+                const cleanSymbol = this.normalizeBrokerSymbol(rawSymbol);
                 
                 trades.push({
                     ticket: ticket,
@@ -329,10 +359,9 @@ export class ReportParserService {
             const validTypes = ['buy', 'sell', 'buy limit', 'sell limit', 'buy stop', 'sell stop', 'balance', 'credit', 'correction'];
             if (!validTypes.some(v => typeStr.includes(v))) continue;
 
-            // Remove uncommon broker suffixes from symbol (.x, .y, _ecn, m, etc.)
             const symbolIdx = headerMap['symbol'] ?? headerMap['simbolo'] ?? headerMap['ativo'] ?? headerMap['item'] ?? 4;
             const rawSymbol = cols[symbolIdx];
-            const cleanSymbol = rawSymbol ? rawSymbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
+            const cleanSymbol = this.normalizeBrokerSymbol(rawSymbol);
 
             const slCol = headerMap['sl'] ?? headerMap['stoploss'] ?? headerMap['s/l'];
             const tpCol = headerMap['tp'] ?? headerMap['takeprofit'] ?? headerMap['t/p'];
@@ -552,7 +581,7 @@ export class ReportParserService {
                 profit = parseNum(cols[13]);
             }
 
-            const cleanSymbol = symbol ? symbol.replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '') : '';
+            const cleanSymbol = this.normalizeBrokerSymbol(symbol);
 
             trades.push({
                 ticket: !isNaN(ticket) && ticket > 0 ? ticket : rawTicket,
@@ -621,7 +650,10 @@ export class ReportParserService {
                     const xlsxTrades = this.parseCsv(xlsxCsv);
                     if (xlsxTrades.length > 0) return xlsxTrades;
                 }
-            } catch (e) {
+            } catch (e: any) {
+                if (e instanceof BadRequestException || String(e?.message || '').includes('Zip-Bomb')) {
+                    throw e;
+                }
                 this.logger.warn(`Fallback na descompactação XLSX: ${e.message}`);
             }
         }
@@ -633,17 +665,41 @@ export class ReportParserService {
     private extractXlsxAsCsv(zipBuffer: Buffer): string {
         const entries = new Map<string, string>();
         let offset = 0;
+        let entryCount = 0;
+        let totalUncompressedBytes = 0;
 
         while (offset + 30 <= zipBuffer.length) {
             const sig = zipBuffer.readUInt32LE(offset);
             if (sig !== 0x04034b50) break;
 
+            entryCount++;
+            if (entryCount > MAX_ZIP_ENTRIES) {
+                throw new BadRequestException(
+                    `Proteção Zip-Bomb: número máximo de entradas (${MAX_ZIP_ENTRIES}) excedido.`,
+                );
+            }
+
             const compression = zipBuffer.readUInt16LE(offset + 8);
             const compressedSize = zipBuffer.readUInt32LE(offset + 18);
+            const uncompressedSizeHeader = zipBuffer.readUInt32LE(offset + 22);
             const fileNameLen = zipBuffer.readUInt16LE(offset + 26);
             const extraLen = zipBuffer.readUInt16LE(offset + 28);
 
+            if (offset + 30 + fileNameLen + extraLen > zipBuffer.length) {
+                throw new BadRequestException('Proteção Zip-Bomb: cabeçalho ZIP truncado ou inválido.');
+            }
+
             const fileName = zipBuffer.toString('utf8', offset + 30, offset + 30 + fileNameLen);
+            if (fileName.includes('..') || fileName.startsWith('/')) {
+                throw new BadRequestException('Arquivo XLSX inválido (path traversal detetado).');
+            }
+
+            if (uncompressedSizeHeader > MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES) {
+                throw new BadRequestException(
+                    'Proteção Zip-Bomb: entrada excede o tamanho máximo descomprimido permitido.',
+                );
+            }
+
             const dataStart = offset + 30 + fileNameLen + extraLen;
             const dataEnd = dataStart + compressedSize;
             if (dataEnd > zipBuffer.length) break;
@@ -653,11 +709,40 @@ export class ReportParserService {
                 fileName.startsWith('xl/worksheets/sheet')
             ) {
                 const slice = zipBuffer.subarray(dataStart, dataEnd);
-                const rawXml =
-                    compression === 0
-                        ? slice.toString('utf8')
-                        : zlib.inflateRawSync(slice).toString('utf8');
-                entries.set(fileName, rawXml);
+                let inflatedBuf: Buffer;
+                try {
+                    inflatedBuf =
+                        compression === 0
+                            ? slice
+                            : zlib.inflateRawSync(slice, {
+                                  maxOutputLength: MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
+                              });
+                } catch (err: any) {
+                    if (err?.code === 'ERR_BUFFER_TOO_LARGE') {
+                        throw new BadRequestException(
+                            'Proteção Zip-Bomb: conteúdo descomprimido excede o limite seguro.',
+                        );
+                    }
+                    throw err;
+                }
+
+                totalUncompressedBytes += inflatedBuf.length;
+                if (totalUncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                    throw new BadRequestException(
+                        'Proteção Zip-Bomb: volume total descomprimido excede 25 MB.',
+                    );
+                }
+                if (
+                    inflatedBuf.length > 256 * 1024 &&
+                    compressedSize > 0 &&
+                    inflatedBuf.length / compressedSize > MAX_COMPRESSION_RATIO
+                ) {
+                    throw new BadRequestException(
+                        'Proteção Zip-Bomb: taxa de compressão anómala detetada.',
+                    );
+                }
+
+                entries.set(fileName, inflatedBuf.toString('utf8'));
             }
 
             offset = dataEnd;
@@ -730,12 +815,36 @@ export class ReportParserService {
             const rawLatin = buffer.toString('latin1');
             const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
             let sMatch;
+            let streamCount = 0;
+            let totalPdfUncompressed = 0;
             while ((sMatch = streamRegex.exec(rawLatin)) !== null) {
+                streamCount++;
+                if (streamCount > MAX_PDF_STREAMS) {
+                    throw new BadRequestException(
+                        `Proteção Zip-Bomb PDF: número máximo de streams (${MAX_PDF_STREAMS}) excedido.`,
+                    );
+                }
                 try {
                     const subBuf = Buffer.from(sMatch[1], 'latin1');
-                    const inflated = zlib.inflateSync(subBuf).toString('utf8');
-                    extractedChunks.push(inflated);
-                } catch {
+                    const inflatedBuf = zlib.inflateSync(subBuf, {
+                        maxOutputLength: MAX_SINGLE_ENTRY_UNCOMPRESSED_BYTES,
+                    });
+                    totalPdfUncompressed += inflatedBuf.length;
+                    if (totalPdfUncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                        throw new BadRequestException(
+                            'Proteção Zip-Bomb PDF: conteúdo descomprimido excede o limite seguro.',
+                        );
+                    }
+                    extractedChunks.push(inflatedBuf.toString('utf8'));
+                } catch (err: any) {
+                    if (err instanceof BadRequestException) {
+                        throw err;
+                    }
+                    if (err?.code === 'ERR_BUFFER_TOO_LARGE') {
+                        throw new BadRequestException(
+                            'Proteção Zip-Bomb PDF: stream excede o limite seguro.',
+                        );
+                    }
                     // Stream não comprimido com FlateDecode ou binário de imagem
                 }
             }
@@ -770,7 +879,7 @@ export class ReportParserService {
                 const openTime = this.normalizeDate(m[2]);
                 const type = m[3].toLowerCase();
                 const volume = parseFloat(m[4].replace(',', '.')) || 0.01;
-                const symbol = m[5].replace(/(\.x|\.y|[_\-]ecn|m|pro)$/i, '');
+                const symbol = this.normalizeBrokerSymbol(m[5]);
                 const openPrice = parseFloat(m[6].replace(',', '.')) || 0;
                 const closeTime = this.normalizeDate(m[7]);
                 const closePrice = parseFloat(m[8].replace(',', '.')) || 0;

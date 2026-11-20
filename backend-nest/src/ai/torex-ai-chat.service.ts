@@ -15,9 +15,10 @@ import {
     AiChatMessageEntity,
     AiChatSessionEntity,
     AiMessageUserFeedback,
+    AiMetricCard,
 } from './ai-chat.entity';
 import { AiKnowledgeBaseService } from './ai-knowledge-base.service';
-import { AiTradeAnalyzerService } from './ai-trade-analyzer.service';
+import { AiTradeAnalyzerService, TraderPerformanceSnapshot } from './ai-trade-analyzer.service';
 import { AiLlmProviderService } from './ai-llm-provider.service';
 import { AiCreditsService } from './ai-credits.service';
 import {
@@ -27,6 +28,7 @@ import {
 } from './ai-credits.entity';
 import {
     AiPromptSystemService,
+    AnalyticalSubIntent,
     InputInspectionResult,
 } from './ai-prompt-system.service';
 import { AiRouterService } from './ai-router.service';
@@ -72,6 +74,10 @@ const REPLY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
 export class TorexAiChatService implements OnModuleInit {
     private readonly logger = new Logger(TorexAiChatService.name);
     private fallbackReplyStore: AiReplyCacheService | null = null;
+    private readonly jobPresence = new Map<
+        string,
+        { userId: string; away: boolean; lastVisiblePollAt: number; createdAt: number }
+    >();
 
     constructor(
         private readonly dataSource: DataSource,
@@ -469,12 +475,24 @@ export class TorexAiChatService implements OnModuleInit {
         };
     }
 
-    async getJobStatus(userId: string, jobId: string) {
+    async getJobStatus(userId: string, jobId: string, clientVisible = true) {
         const job = await this.jobRepo.findOne({
             where: { id: jobId, userId },
         });
         if (!job) {
             throw new NotFoundException('Processamento não encontrado');
+        }
+
+        if (job.status === 'PROCESSING') {
+            const existingPresence = this.jobPresence.get(jobId);
+            this.jobPresence.set(jobId, {
+                userId,
+                away: !clientVisible,
+                lastVisiblePollAt: clientVisible
+                    ? Date.now()
+                    : existingPresence?.lastVisiblePollAt || 0,
+                createdAt: existingPresence?.createdAt || Date.now(),
+            });
         }
 
         // Auto-recuperação caso tenha ultrapassado 180s sem conclusão.
@@ -534,6 +552,76 @@ export class TorexAiChatService implements OnModuleInit {
             creditsUsed: job.creditsUsed,
             credits,
         };
+    }
+
+    async markJobPresence(userId: string, jobId: string, away: boolean) {
+        const job = await this.jobRepo.findOne({
+            where: { id: jobId, userId },
+        });
+        if (!job) {
+            throw new NotFoundException('Processamento não encontrado');
+        }
+        const prev = this.jobPresence.get(jobId);
+        this.jobPresence.set(jobId, {
+            userId,
+            away: Boolean(away),
+            lastVisiblePollAt: away ? prev?.lastVisiblePollAt || 0 : Date.now(),
+            createdAt: prev?.createdAt || Date.now(),
+        });
+        return { ok: true, jobId, away: Boolean(away) };
+    }
+
+    private pruneStalePresence(now = Date.now()) {
+        for (const [id, entry] of this.jobPresence.entries()) {
+            if (now - entry.createdAt > 30 * 60_000) {
+                this.jobPresence.delete(id);
+            }
+        }
+    }
+
+    private buildStructuredMetricCards(
+        snap: TraderPerformanceSnapshot,
+        subIntent: AnalyticalSubIntent,
+        locale: 'pt' | 'en',
+    ): AiMetricCard[] {
+        const isEn = locale === 'en';
+        const cur = snap.currency || 'USD';
+        const netSign = snap.netPnl > 0 ? '+' : '';
+        const cards: AiMetricCard[] = [
+            {
+                label: isEn ? 'Net P&L' : 'P&L Líquido',
+                value: `${netSign}${snap.netPnl.toFixed(2)} ${cur}`,
+                tone: snap.netPnl > 0 ? 'positive' : snap.netPnl < 0 ? 'negative' : 'neutral',
+                subtext: `${snap.totalTrades} ${isEn ? 'closed trades' : 'trades fechados'}`,
+            },
+            {
+                label: isEn ? 'Win Rate' : 'Win Rate',
+                value: `${snap.winRate.toFixed(1)}%`,
+                tone: snap.winRate >= 50 ? 'positive' : 'neutral',
+                subtext: `${snap.wins}W / ${snap.losses}L`,
+            },
+        ];
+
+        if (subIntent === 'PLAN_DISCIPLINE') {
+            cards.push({
+                label: isEn ? 'Journal Coverage' : 'Cobertura Diário',
+                value: `${snap.journalCoveragePct}%`,
+                tone: snap.journalCoveragePct >= 60 ? 'positive' : 'negative',
+                subtext: `${snap.dailyNotesCount}/${snap.activeDaysCount} ${isEn ? 'days' : 'dias'}`,
+            });
+        } else {
+            cards.push({
+                label: isEn ? 'Payoff / PF' : 'Payoff / PF',
+                value:
+                    snap.losses === 0 && snap.wins > 0
+                        ? '∞'
+                        : `${snap.payoffRatio.toFixed(2)}x · ${snap.profitFactor.toFixed(2)}`,
+                tone: snap.profitFactor >= 1.2 ? 'positive' : snap.profitFactor > 0 ? 'negative' : 'neutral',
+                subtext: isEn ? 'Avg R:R & Profit Factor' : 'Risco/Retorno e PF',
+            });
+        }
+
+        return cards.slice(0, 3);
     }
 
     async deleteSession(userId: string, sessionId: string) {
@@ -909,34 +997,87 @@ export class TorexAiChatService implements OnModuleInit {
             ? AI_SUPPORT_FALLBACK_MESSAGE_EN
             : AI_SUPPORT_FALLBACK_MESSAGE;
 
+        const hasAtomicReserve =
+            typeof (this.aiCreditsService as any)?.reserveCredits === 'function' &&
+            typeof (this.aiCreditsService as any)?.settleReservedCredits === 'function';
+        let reservedAmount = 0;
+        let settled = false;
+        let liveCredits = initialCreditStatus;
+
+        const settleCredits = async (targetCost: number) => {
+            settled = true;
+            const cleanCost = Math.max(0, Math.round(targetCost || 0));
+            if (hasAtomicReserve) {
+                return (this.aiCreditsService as any).settleReservedCredits(
+                    userId,
+                    reservedAmount,
+                    cleanCost,
+                );
+            }
+            if (cleanCost <= 0) {
+                return { creditsUsed: 0, credits: liveCredits };
+            }
+            return this.aiCreditsService.consumeCredits(userId, cleanCost);
+        };
+
         try {
-            // Revalida saldo no instante da execução para evitar condição de corrida entre jobs concorrentes
-            const liveCredits =
-                await this.aiCreditsService.getCreditStatus(userId);
+            // Reserva atómica no início para evitar race condition com requisições paralelas
+            if (hasAtomicReserve) {
+                const reservation = await (this.aiCreditsService as any).reserveCredits(userId, 1);
+                liveCredits = reservation.credits;
+                reservedAmount = reservation.reserved ? reservation.reservedAmount : 0;
+                if (!reservation.reserved || !liveCredits.canInteract) {
+                    settled = true;
+                    const assistantMsg = await this.messageRepo.save(
+                        this.messageRepo.create({
+                            sessionId: session.id,
+                            role: 'assistant',
+                            content: fallbackSupportText,
+                            intent: 'support_fallback',
+                            provider: 'system_guard',
+                            metadata: { creditsUsed: 0, failureReason: 'NO_CREDITS' },
+                        })
+                    );
 
-            // 1. Sem créditos ou sem plano ativo -> mensagem oficial de suporte
-            if (!liveCredits.canInteract || liveCredits.creditsRemaining <= 0) {
-                const assistantMsg = await this.messageRepo.save(
-                    this.messageRepo.create({
-                        sessionId: session.id,
-                        role: 'assistant',
-                        content: fallbackSupportText,
-                        intent: 'support_fallback',
-                        provider: 'system_guard',
-                        metadata: { creditsUsed: 0, failureReason: 'NO_CREDITS' },
-                    })
-                );
+                    await this.sessionRepo.update(
+                        { id: session.id },
+                        { updatedAt: new Date() }
+                    );
 
-                await this.sessionRepo.update(
-                    { id: session.id },
-                    { updatedAt: new Date() }
-                );
+                    return {
+                        assistantMessage: assistantMsg,
+                        creditsUsed: 0,
+                        credits: liveCredits,
+                    };
+                }
+            } else {
+                liveCredits = await this.aiCreditsService.getCreditStatus(userId);
 
-                return {
-                    assistantMessage: assistantMsg,
-                    creditsUsed: 0,
-                    credits: liveCredits,
-                };
+                // 1. Sem créditos ou sem plano ativo -> mensagem oficial de suporte
+                if (!liveCredits.canInteract || liveCredits.creditsRemaining <= 0) {
+                    settled = true;
+                    const assistantMsg = await this.messageRepo.save(
+                        this.messageRepo.create({
+                            sessionId: session.id,
+                            role: 'assistant',
+                            content: fallbackSupportText,
+                            intent: 'support_fallback',
+                            provider: 'system_guard',
+                            metadata: { creditsUsed: 0, failureReason: 'NO_CREDITS' },
+                        })
+                    );
+
+                    await this.sessionRepo.update(
+                        { id: session.id },
+                        { updatedAt: new Date() }
+                    );
+
+                    return {
+                        assistantMessage: assistantMsg,
+                        creditsUsed: 0,
+                        credits: liveCredits,
+                    };
+                }
             }
 
             // 2. Carrega o histórico anterior da sessão para verificar Grill-Me pendente e contexto de conversa
@@ -980,6 +1121,7 @@ export class TorexAiChatService implements OnModuleInit {
                     .get(userId, directCacheKey)
                     .catch(() => null);
                 if (cachedHit) {
+                    const settledRes = await settleCredits(0);
                     const cachedAssistantMsg = await this.messageRepo.save(
                         this.messageRepo.create({
                             sessionId: session.id,
@@ -1004,7 +1146,7 @@ export class TorexAiChatService implements OnModuleInit {
                     return {
                         assistantMessage: cachedAssistantMsg,
                         creditsUsed: 0,
-                        credits: liveCredits,
+                        credits: settledRes.credits,
                     };
                 }
             }
@@ -1025,6 +1167,7 @@ export class TorexAiChatService implements OnModuleInit {
 
             // 3A. Decisão: BLOCK_GUARDRAIL (Abuso, Fora de Escopo ou Especulação sem Fundamento) — 0 créditos
             if (routeDecision.decision === 'BLOCK_GUARDRAIL') {
+                const settledRes = await settleCredits(0);
                 const assistantMsg = await this.messageRepo.save(
                     this.messageRepo.create({
                         sessionId: session.id,
@@ -1063,12 +1206,13 @@ export class TorexAiChatService implements OnModuleInit {
                 return {
                     assistantMessage: assistantMsg,
                     creditsUsed: 0,
-                    credits: liveCredits,
+                    credits: settledRes.credits,
                 };
             }
 
             // 3B. Decisão: CLARIFY_USER (Modo Grill-Me nos bastidores para perguntas incompletas) — 0 créditos
             if (routeDecision.decision === 'CLARIFY_USER') {
+                const settledRes = await settleCredits(0);
                 const assistantMsg = await this.messageRepo.save(
                     this.messageRepo.create({
                         sessionId: session.id,
@@ -1107,7 +1251,7 @@ export class TorexAiChatService implements OnModuleInit {
                 return {
                     assistantMessage: assistantMsg,
                     creditsUsed: 0,
-                    credits: liveCredits,
+                    credits: settledRes.credits,
                 };
             }
 
@@ -1133,13 +1277,12 @@ export class TorexAiChatService implements OnModuleInit {
                     estimatedOrActualTokens =
                         routeDecision.routerTokensUsed ||
                         costCalc.estimatedTokens;
-                    const consumption =
-                        await this.aiCreditsService.consumeCredits(
-                            userId,
-                            costCalc.cost
-                        );
+                    const consumption = await settleCredits(costCalc.cost);
                     creditsUsed = consumption.creditsUsed;
                     updatedCredits = consumption.credits;
+                } else {
+                    const freeRes = await settleCredits(0);
+                    updatedCredits = freeRes.credits;
                 }
 
                 if (!activeGrillMe) {
@@ -1259,6 +1402,7 @@ export class TorexAiChatService implements OnModuleInit {
 
             // 4A. Guardrail ZERO_DATA (0% alucinação para contas sem nenhuma operação)
             if (isAccountEmpty) {
+                const settledRes = await settleCredits(0);
                 const zeroData = this.promptSystem.buildZeroDataResponse({
                     userName,
                     accountLabel: ensuredSnapshot.accountLabel,
@@ -1298,7 +1442,7 @@ export class TorexAiChatService implements OnModuleInit {
                 return {
                     assistantMessage: assistantMsg,
                     creditsUsed: 0,
-                    credits: liveCredits,
+                    credits: settledRes.credits,
                 };
             }
 
@@ -1326,6 +1470,7 @@ export class TorexAiChatService implements OnModuleInit {
             let numericGrounding: (NumericGroundingResult & { retried: boolean }) | null = null;
             let numbersUngrounded = false;
             let analystTruncated = false;
+            let cavemanTokensSaved: number | undefined;
 
             if (dualEngine.anyEnabled) {
                 const cleanHistory = previousMessages.filter(
@@ -1356,6 +1501,7 @@ export class TorexAiChatService implements OnModuleInit {
                             .map((m) => m.content),
                         locale,
                     });
+                cavemanTokensSaved = compiledGeminiPrompt.cavemanTokensSaved;
 
                 const analystHistory = cleanHistory.map((m) => ({
                     role: m.role,
@@ -1367,6 +1513,17 @@ export class TorexAiChatService implements OnModuleInit {
                         userTaskPrompt: compiledGeminiPrompt.userTaskPrompt,
                         history: analystHistory,
                     });
+
+                // 1 retry automático se falhar por oscilação transitória de rede/provedor
+                if (geminiResult?.failed) {
+                    await new Promise((r) => setTimeout(r, 600));
+                    geminiResult =
+                        await this.llmProvider.generateGeminiAnalysis({
+                            systemPrompt: compiledGeminiPrompt.systemPrompt,
+                            userTaskPrompt: compiledGeminiPrompt.userTaskPrompt,
+                            history: analystHistory,
+                        });
+                }
 
                 let verifiedText = this.promptSystem.verifyModelOutput(
                     geminiResult?.text,
@@ -1441,9 +1598,13 @@ export class TorexAiChatService implements OnModuleInit {
                     isQuickGuide: false,
                 });
 
-            const consumption = analystFailureReason
-                ? { creditsUsed: 0, credits: liveCredits }
-                : await this.aiCreditsService.consumeCredits(userId, cost);
+            const consumption = await settleCredits(analystFailureReason ? 0 : cost);
+
+            const structuredMetrics = this.buildStructuredMetricCards(
+                ensuredSnapshot,
+                handoff.subIntent,
+                locale,
+            );
 
             const baseSuggestions =
                 routeDecision.suggestions.length > 0
@@ -1489,12 +1650,13 @@ export class TorexAiChatService implements OnModuleInit {
                     intent: resolvedIntent,
                     provider: providerUsed,
                     metadata: {
-                        metrics: [],
+                        metrics: structuredMetrics,
                         actions: resolvedActions,
                         suggestions: contextualRecs.suggestions,
                         accountLabel: ensuredSnapshot.accountLabel,
                         creditsUsed: consumption.creditsUsed,
                         tokensUsed: totalTokens || estimatedTokens,
+                        cavemanTokensSaved,
                         failureReason: analystFailureReason,
                         analystTruncated,
                         numericGrounding,
@@ -1533,6 +1695,9 @@ export class TorexAiChatService implements OnModuleInit {
                 credits: consumption.credits,
             };
         } catch (err) {
+            if (!settled && reservedAmount > 0) {
+                await settleCredits(0).catch(() => undefined);
+            }
             this.logger.error(
                 `[TorexAiChatService] Falha interna na sessão ${session.id}: ${(err as Error).message}`
             );
@@ -1690,6 +1855,14 @@ export class TorexAiChatService implements OnModuleInit {
                 })
             );
 
+            this.pruneStalePresence();
+            this.jobPresence.set(job.id, {
+                userId: params.userId,
+                away: false,
+                lastVisiblePollAt: Date.now(),
+                createdAt: Date.now(),
+            });
+
             const capturedSession = session;
             setImmediate(() => {
                 void this.runAsyncJob({
@@ -1773,6 +1946,23 @@ export class TorexAiChatService implements OnModuleInit {
                 existingJob.creditsUsed = result.creditsUsed;
                 existingJob.status = 'COMPLETED';
                 await this.jobRepo.save(existingJob);
+
+                const presence = this.jobPresence.get(ctx.jobId);
+                this.jobPresence.delete(ctx.jobId);
+                const userIsAway = Boolean(
+                    presence &&
+                        (presence.away || Date.now() - presence.lastVisiblePollAt > 3500),
+                );
+                if (userIsAway && this.eventEmitter) {
+                    this.eventEmitter.emit('ai.reply.ready_away', {
+                        userId: ctx.userId,
+                        sessionId: ctx.session.id,
+                        jobId: ctx.jobId,
+                        locale,
+                    });
+                }
+            } else {
+                this.jobPresence.delete(ctx.jobId);
             }
         } catch (err) {
             this.logger.error(

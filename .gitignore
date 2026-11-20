@@ -69,10 +69,13 @@ typings/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
+# dotenv environment variables files
 .env
-.env.test
-.env*.local
+.env.*
+!.env.example
+!backend-nest/.env.example
+!client/.env.example
+!mt5-server/.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -120,6 +123,10 @@ backend-nest/test_output.txt
 client/dist/
 client/node_modules/
 client/vite.config.ts.timestamp-*
+backend-nest/crash.log
+backend-nest/start.log
+mt5-server/instances/
+mt5-server/data/
 
 # Python Virtual environments (if any)
 venv/
@@ -155,3 +162,5 @@ __pycache__/
 *.nbi
 *.nbc
 .pytest_cache/
+tmp/
+

@@ -9,9 +9,13 @@ interface PhoneInputProps {
     /** National number (without dial code). */
     value: string;
     onChange: (nationalNumber: string) => void;
-    /** Called on mount with the default country and on every selection. */
-    onCountryChange?: (country: CountryDial) => void;
+    /** Called on mount (unless manual selection required) and on every selection. */
+    onCountryChange?: (country: CountryDial | null) => void;
     defaultCountry?: string;
+    /** Controlled ISO2 code (e.g. from cookie-consented geo-hint). */
+    selectedIso2?: string | null;
+    /** When true and no country is selected yet, forces manual country selection instead of defaulting. */
+    requireManualSelection?: boolean;
     error?: string;
     hint?: React.ReactNode;
     placeholder?: string;
@@ -35,6 +39,8 @@ export const PhoneInput = ({
     onChange,
     onCountryChange,
     defaultCountry = 'BR',
+    selectedIso2,
+    requireManualSelection = false,
     error,
     hint,
     placeholder = '99999-9999',
@@ -45,7 +51,11 @@ export const PhoneInput = ({
     const errorId = `${id}-error`;
     const hintId = `${id}-hint`;
 
-    const [country, setCountry] = useState<CountryDial>(() => findCountry(defaultCountry) ?? COUNTRIES[0]);
+    const [country, setCountry] = useState<CountryDial | null>(() => {
+        if (selectedIso2) return findCountry(selectedIso2) ?? null;
+        if (requireManualSelection) return null;
+        return findCountry(defaultCountry) ?? COUNTRIES[0];
+    });
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [activeIndex, setActiveIndex] = useState(0);
@@ -56,9 +66,23 @@ export const PhoneInput = ({
 
     const results = useMemo(() => filterCountries(query), [query]);
 
-    // Report the default country once so the parent's dial code matches the UI.
+    // Report the default country once when non-manual, and sync when controlled selectedIso2 changes.
     useEffect(() => {
-        onCountryChange?.(country);
+        if (selectedIso2) {
+            const matched = findCountry(selectedIso2) ?? null;
+            setCountry(matched);
+            onCountryChange?.(matched);
+        } else if (selectedIso2 === null && requireManualSelection) {
+            setCountry(null);
+            onCountryChange?.(null);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedIso2, requireManualSelection]);
+
+    useEffect(() => {
+        if (!requireManualSelection && country) {
+            onCountryChange?.(country);
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -135,11 +159,27 @@ export const PhoneInput = ({
                     aria-haspopup="listbox"
                     aria-expanded={open}
                     aria-controls={open ? listId : undefined}
-                    aria-label={getCurrentLocale() === 'en' ? `Country: ${country.name} (${country.dialCode}). Change country` : `País: ${country.name} (${country.dialCode}). Alterar país`}
-                    className="flex min-w-[104px] shrink-0 items-center gap-2 rounded-l-control border-r border-line pl-4 pr-3 text-fg transition-colors hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
+                    aria-label={
+                        country
+                            ? getCurrentLocale() === 'en'
+                                ? `Country: ${country.name} (${country.dialCode}). Change country`
+                                : `País: ${country.name} (${country.dialCode}). Alterar país`
+                            : getCurrentLocale() === 'en'
+                              ? 'Select country dial code'
+                              : 'Selecionar indicativo do país'
+                    }
+                    className="flex min-w-[110px] shrink-0 items-center gap-2 rounded-l-control border-r border-line pl-3.5 pr-3 text-fg transition-colors hover:bg-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60"
                 >
-                    <Flag country={country} />
-                    <span className="font-mono text-sm font-medium">{country.dialCode}</span>
+                    {country ? (
+                        <>
+                            <Flag country={country} />
+                            <span className="font-mono text-sm font-medium">{country.dialCode}</span>
+                        </>
+                    ) : (
+                        <span className="font-mono text-xs font-semibold text-amber-400">
+                            {getCurrentLocale() === 'en' ? 'Prefix' : 'Prefixo'}
+                        </span>
+                    )}
                     <ChevronDown size={14} aria-hidden className={cn('text-fg-subtle transition-transform', open && 'rotate-180')} />
                 </button>
 
@@ -184,13 +224,13 @@ export const PhoneInput = ({
                                 key={c.iso2}
                                 id={`${id}-opt-${c.iso2}`}
                                 role="option"
-                                aria-selected={c.iso2 === country.iso2}
+                                aria-selected={c.iso2 === country?.iso2}
                                 onMouseEnter={() => setActiveIndex(i)}
                                 onClick={() => select(c)}
                                 className={cn(
                                     'flex cursor-pointer items-center gap-3 rounded-lg p-2 text-left transition-colors',
                                     i === activeIndex && 'bg-surface',
-                                    c.iso2 === country.iso2 && 'text-accent-fg'
+                                    c.iso2 === country?.iso2 && 'text-accent-fg'
                                 )}
                             >
                                 <Flag country={c} />

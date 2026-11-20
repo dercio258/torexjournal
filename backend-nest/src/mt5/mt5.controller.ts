@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, UseGuards, Req, Headers, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, HttpCode, Param, Query, UseGuards, Req, Headers, Logger, ForbiddenException, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { randomUUID } from 'crypto';
@@ -7,6 +7,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Mt5Service } from './mt5.service';
 import { Mt5DataDto } from './dto/mt5-data.dto';
 import { Mt5InstanceService } from './mt5-instance.service';
+import { ConfigService } from '@nestjs/config';
+import { CryptoUtil } from '../common/utils/crypto.util';
+import { getMt5CredentialSecret } from '../common/security/security.config';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 
@@ -16,6 +19,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AccountEntity, AccountType } from '../account/account.entity';
 import { Mt5WorkerService, WorkerTask, WorkerTaskType } from './worker/mt5-worker.service';
+import {
+    Mt5ClusterBalancerService,
+    humanizeClientSyncMessage,
+} from './worker/mt5-cluster-balancer.service';
 
 @Controller('mt5')
 export class Mt5Controller {
@@ -27,6 +34,8 @@ export class Mt5Controller {
         private readonly mt5TcpServer: Mt5TcpServer,
         private readonly mt5InstanceService: Mt5InstanceService,
         private readonly mt5WorkerService: Mt5WorkerService,
+        private readonly mt5ClusterBalancer: Mt5ClusterBalancerService,
+        private readonly configService: ConfigService,
         @InjectRepository(AccountEntity)
         private readonly accountRepo: Repository<AccountEntity>,
     ) { }
@@ -37,8 +46,14 @@ export class Mt5Controller {
 
     private sanitizeTaskForClient(task: WorkerTask | null) {
         if (!task) return null;
-        const { credentialToken, ...safeTask } = task;
-        return safeTask;
+        const { credentialToken, targetWorkerId: _w, leaseEpoch: _e, ...safeTask } = task;
+        return {
+            ...safeTask,
+            message: safeTask.message ? humanizeClientSyncMessage(safeTask.message) : safeTask.message,
+            errorMessage: safeTask.errorMessage
+                ? humanizeClientSyncMessage(safeTask.errorMessage)
+                : safeTask.errorMessage,
+        };
     }
 
     @Get('import-history')
@@ -109,7 +124,12 @@ export class Mt5Controller {
             throw new ForbiddenException('Acesso negado: conta MT5 não pertence a este usuário.');
         }
 
-        const success = this.mt5TcpServer.sendCommand(cleanId, body.type, body.payload);
+        const success =
+            this.mt5TcpServer.sendCommand(ownedAccount.id, body.type, body.payload) ||
+            (ownedAccount.mt5Id
+                ? this.mt5TcpServer.sendCommand(String(ownedAccount.mt5Id).trim(), body.type, body.payload)
+                : false) ||
+            this.mt5TcpServer.sendCommand(cleanId, body.type, body.payload);
         if (!success) {
             return { success: false, message: 'MT5 not connected or send failed' };
         }
@@ -218,8 +238,26 @@ export class Mt5Controller {
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
     async connectCloud(@Body() body: { login: string; pass: string; server: string; accountId?: string }, @Req() req) {
-        const cleanLogin = (body.login || '').toString().trim();
-        const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().trim());
+        const cleanLogin = (body.login || '').toString().replace(/[\r\n\0]/g, '').trim();
+        const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().replace(/[\r\n\0]/g, '').trim());
+        const cleanPass = String(body.pass || '').replace(/[\r\n\0]/g, '').trim();
+
+        if (!/^\d{4,16}$/.test(cleanLogin) || !cleanServer || !cleanPass) {
+            throw new BadRequestException('Informe um login MT5 numérico válido (4-16 dígitos), senha e servidor.');
+        }
+
+        // Impede sequestro de conta MT5 já conectada e ativa em outro utilizador
+        const foreignActive = await this.accountRepo.findOne({
+            where: {
+                mt5Id: cleanLogin,
+                broker: cleanServer,
+                isConnected: true,
+                isArchived: false,
+            },
+        });
+        if (foreignActive && foreignActive.userId !== req.user.id) {
+            throw new ConflictException('Esta conta MT5 já está vinculada e ativa em outro utilizador.');
+        }
 
         // 1. Isolamento estrito multi-tenant por (userId, mt5Id):
         // NUNCA busca mt5Id sem userId e NUNCA transfere userId de outra conta!
@@ -250,6 +288,10 @@ export class Mt5Controller {
         const activeUserAccountsCount = await this.accountRepo.count({ where: { userId: req.user.id, isArchived: false } });
 
         let targetAccount: AccountEntity;
+        const encryptedPass = CryptoUtil.encrypt(
+            cleanPass,
+            getMt5CredentialSecret(this.configService),
+        );
         if (!account) {
             const created = this.accountRepo.create({
                 userId: req.user.id,
@@ -265,6 +307,7 @@ export class Mt5Controller {
                 initialBalance: 0,
                 balance: 0,
                 equity: 0,
+                mt5EncryptedPass: encryptedPass,
                 appToken: randomUUID().replace(/-/g, '').toUpperCase()
             });
             targetAccount = await this.accountRepo.save(created);
@@ -279,41 +322,54 @@ export class Mt5Controller {
             if (!account.appToken) {
                 account.appToken = randomUUID().replace(/-/g, '').toUpperCase();
             }
+            account.mt5EncryptedPass = encryptedPass;
+            account.inactivityWarnedAt = null;
+            account.inactivityDisconnectAt = null;
             targetAccount = await this.accountRepo.save(account);
         }
 
-        // 2. Dispatch task for the Python Worker on Windows Server
+        // 2. Balanceador Pair-Stride (K=2) atribui worker saudável com sticky affinity & failover
+        const assignment = await this.mt5ClusterBalancer.assignWorkerForAccount(targetAccount.id);
+
+        // 3. Dispatch task direcionado ao Worker atribuído
         const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
         const task = this.mt5WorkerService.createAccountTask(
             WorkerTaskType.START_ACCOUNT,
             cleanLogin,
             cleanServer,
-            body.pass,
+            cleanPass,
             numId,
-            { userId: req.user.id, accountUuid: targetAccount.id }
+            {
+                userId: req.user.id,
+                accountUuid: targetAccount.id,
+                targetWorkerId: assignment.workerId || undefined,
+                leaseEpoch: assignment.leaseEpoch,
+            },
         );
 
         this.logger.log(
-            `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${targetAccount.id}, TaskID: ${task.id})`
+            `[AUDIT] Usuário ${req.user.id} solicitou conexão MT5 Cloud para ${cleanLogin}@${task.server} (AccountID: ${targetAccount.id}, Worker: ${assignment.workerId || 'AUTO'}, TaskID: ${task.id})`
         );
 
         // 3. Optional local instance startup if running directly on Windows host
         let localInstance = null;
         if (process.platform === 'win32') {
             try {
-                localInstance = await this.mt5InstanceService.startInstance(req.user.id, cleanLogin, body.pass, task.server);
+                localInstance = await this.mt5InstanceService.startInstance(req.user.id, cleanLogin, cleanPass, task.server);
             } catch (e) {
-                this.logger.log(`Mt5InstanceService local não ativo (${e.message}). Tarefa enviada ao MT5 Worker.`);
+                this.logger.log(`Mt5InstanceService local não ativo (${e.message}). Tarefa enviada para fila distribuída.`);
             }
         }
 
+        const { mt5EncryptedPass: _omitPass, ...safeAccount } = targetAccount as any;
+
         return {
             success: true,
-            message: 'Solicitação de conexão enviada com sucesso! O worker está iniciando a sincronização.',
+            message: 'Ligação iniciada! Estamos a conectar a sua conta em segurança.',
             taskId: task.id,
             task: this.sanitizeTaskForClient(task),
             accountId: targetAccount.id,
-            account: targetAccount,
+            account: safeAccount,
             server: task.server,
             instance: localInstance
         };
@@ -347,7 +403,7 @@ export class Mt5Controller {
         }
         const cleanLogin = (account?.mt5Id || '').toString().trim();
         if (!account || !cleanLogin) {
-            return { success: false, message: 'Nenhuma conta MT5 vinculada para sincronizar.' };
+            return { success: false, message: 'Nenhuma conta vinculada para sincronizar.' };
         }
         const numId = parseInt(cleanLogin.replace(/\D/g, ''), 10) || 1;
         const taskType = body.forceFull === false ? WorkerTaskType.SYNC_ACCOUNT : WorkerTaskType.FORCE_FULL_SYNC;
@@ -357,15 +413,29 @@ export class Mt5Controller {
             account.broker || '',
             undefined,
             numId,
-            { userId: req.user.id, accountUuid: account.id }
+            {
+                userId: req.user.id,
+                accountUuid: account.id,
+                targetWorkerId: account.assignedWorkerId || undefined,
+                leaseEpoch: account.mt5LeaseEpoch || 1,
+            },
         );
         return {
             success: true,
-            message: 'Sincronização solicitada ao servidor Windows MT5!',
+            message: 'Sincronização iniciada! Os dados da sua conta estão a ser atualizados.',
             taskId: task.id,
             task: this.sanitizeTaskForClient(task),
             accountId: account.id
         };
+    }
+
+    @Post('cloud/keep-alive')
+    @UseGuards(JwtAuthGuard)
+    async keepCloudAccountAlive(@Body() body: { accountId: string }, @Req() req) {
+        if (!this.isValidUuid(body?.accountId)) {
+            throw new BadRequestException('Informe um accountId válido.');
+        }
+        return this.mt5ClusterBalancer.keepAccountAlive(req.user.id, body.accountId.trim());
     }
 
     @Post('cloud/disconnect')
@@ -394,10 +464,19 @@ export class Mt5Controller {
             acc.broker || '',
             undefined,
             numId,
-            { userId: req.user.id, accountUuid: acc.id }
+            {
+                userId: req.user.id,
+                accountUuid: acc.id,
+                targetWorkerId: acc.assignedWorkerId || undefined,
+                leaseEpoch: acc.mt5LeaseEpoch || 1,
+            },
         );
 
         acc.isConnected = false;
+        acc.assignedWorkerId = null;
+        acc.mt5SyncTier = 'COLD';
+        acc.inactivityWarnedAt = null;
+        acc.inactivityDisconnectAt = null;
         await this.accountRepo.save(acc);
 
         try {

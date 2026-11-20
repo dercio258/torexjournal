@@ -5,7 +5,9 @@ import {
     Injectable,
     NotFoundException,
     forwardRef,
+    Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Post } from './post.entity';
@@ -35,8 +37,23 @@ export class NetworkService {
         @InjectRepository(UserEntity)
         private userRepo: Repository<UserEntity>,
         @Inject(forwardRef(() => NetworkGateway))
-        private networkGateway: NetworkGateway
+        private networkGateway: NetworkGateway,
+        @Optional()
+        private readonly eventEmitter?: EventEmitter2,
     ) {}
+
+    private toPublicCommunityUser(
+        user?: { id?: string; username?: string | null; avatarUrl?: string | null } | null,
+        fallbackId?: string,
+    ): { id: string; username: string; avatarUrl: string | null } {
+        const rawHandle = typeof user?.username === 'string' ? user.username.trim() : '';
+        const safeHandle = rawHandle && !rawHandle.includes('@') ? rawHandle : 'trader';
+        return {
+            id: user?.id || fallbackId || 'deleted',
+            username: safeHandle,
+            avatarUrl: user?.avatarUrl || null,
+        };
+    }
 
     async followUser(followerId: string, followingId: string) {
         if (followerId === followingId) {
@@ -95,12 +112,7 @@ export class NetworkService {
             room: m.room || 'global',
             userId: m.userId,
             createdAt: m.createdAt,
-            user: {
-                id: m.user?.id || m.userId,
-                username: m.user?.username || m.user?.name || 'Trader',
-                name: m.user?.name || m.user?.username || 'Trader',
-                avatarUrl: m.user?.avatarUrl || null,
-            },
+            user: this.toPublicCommunityUser(m.user, m.userId),
         }));
     }
 
@@ -128,18 +140,24 @@ export class NetworkService {
         });
         await this.chatRepo.save(msg);
 
+        const safeUser = this.toPublicCommunityUser(user, userId);
+        if (this.eventEmitter) {
+            this.eventEmitter.emit('network.room.message', {
+                authorId: userId,
+                authorUsername: safeUser.username,
+                room: safeRoom,
+                excerpt: cleanContent.slice(0, 140),
+                onlineUserIds: this.networkGateway?.getOnlineUserIds?.(userId) || [],
+            });
+        }
+
         return {
             id: msg.id,
             content: msg.content,
             room: safeRoom,
             userId,
             createdAt: msg.createdAt,
-            user: {
-                id: user.id,
-                username: user.username || user.name || 'Trader',
-                name: user.name || user.username || 'Trader',
-                avatarUrl: user.avatarUrl || null,
-            },
+            user: safeUser,
         };
     }
 
@@ -192,7 +210,7 @@ export class NetworkService {
 
         const partners = await this.userRepo.find({
             where: { id: In(partnerIds) },
-            select: ['id', 'username', 'name', 'avatarUrl'],
+            select: ['id', 'username', 'avatarUrl'],
         });
         const partnerMap = new Map(partners.map((p) => [p.id, p]));
 
@@ -205,12 +223,7 @@ export class NetworkService {
             .map((entry) => {
                 const p = partnerMap.get(entry.partnerId);
                 return {
-                    partner: {
-                        id: entry.partnerId,
-                        username: p?.username || p?.name || 'trader',
-                        name: p?.name || p?.username || 'Trader',
-                        avatarUrl: p?.avatarUrl || null,
-                    },
+                    partner: this.toPublicCommunityUser(p, entry.partnerId),
                     lastMessage: entry.lastMessage,
                     lastMessageAt: entry.lastMessageAt,
                     lastSenderId: entry.lastSenderId,
@@ -226,7 +239,7 @@ export class NetworkService {
 
         const partner = await this.userRepo.findOne({
             where: { id: partnerId },
-            select: ['id', 'username', 'name', 'avatarUrl'],
+            select: ['id', 'username', 'avatarUrl'],
         });
         if (!partner) {
             throw new NotFoundException('Utilizador não encontrado.');
@@ -248,12 +261,7 @@ export class NetworkService {
         });
 
         return {
-            partner: {
-                id: partner.id,
-                username: partner.username || partner.name || 'trader',
-                name: partner.name || partner.username || 'Trader',
-                avatarUrl: partner.avatarUrl || null,
-            },
+            partner: this.toPublicCommunityUser(partner, partner.id),
             messages: messages.map((m) => ({
                 id: m.id,
                 senderId: m.senderId,
@@ -283,11 +291,11 @@ export class NetworkService {
         const [sender, recipient] = await Promise.all([
             this.userRepo.findOne({
                 where: { id: senderId },
-                select: ['id', 'username', 'name', 'avatarUrl'],
+                select: ['id', 'username', 'avatarUrl'],
             }),
             this.userRepo.findOne({
                 where: { id: recipientId },
-                select: ['id', 'username', 'name', 'avatarUrl'],
+                select: ['id', 'username', 'avatarUrl'],
             }),
         ]);
 
@@ -304,6 +312,8 @@ export class NetworkService {
             })
         );
 
+        const senderPublic = this.toPublicCommunityUser(sender, sender.id);
+        const recipientPublic = this.toPublicCommunityUser(recipient, recipient.id);
         const payload = {
             id: saved.id,
             senderId: saved.senderId,
@@ -311,18 +321,8 @@ export class NetworkService {
             content: saved.content,
             isRead: saved.isRead,
             createdAt: saved.createdAt,
-            sender: {
-                id: sender.id,
-                username: sender.username || sender.name || 'trader',
-                name: sender.name || sender.username || 'Trader',
-                avatarUrl: sender.avatarUrl || null,
-            },
-            recipient: {
-                id: recipient.id,
-                username: recipient.username || recipient.name || 'trader',
-                name: recipient.name || recipient.username || 'Trader',
-                avatarUrl: recipient.avatarUrl || null,
-            },
+            sender: senderPublic,
+            recipient: recipientPublic,
         };
 
         this.networkGateway.broadcastDirectMessage(
@@ -330,6 +330,14 @@ export class NetworkService {
             recipientId,
             payload
         );
+        if (this.eventEmitter) {
+            this.eventEmitter.emit('network.dm.sent', {
+                senderId,
+                senderUsername: senderPublic.username,
+                recipientId,
+                excerpt: content.slice(0, 140),
+            });
+        }
 
         return payload;
     }
@@ -351,13 +359,7 @@ export class NetworkService {
                 postId: c.postId,
                 content: c.content,
                 createdAt: c.createdAt,
-                user: {
-                    id: c.user?.id || c.userId,
-                    username:
-                        c.user?.username || c.user?.name || 'trader',
-                    name: c.user?.name || c.user?.username || 'Trader',
-                    avatarUrl: c.user?.avatarUrl || null,
-                },
+                user: this.toPublicCommunityUser(c.user, c.userId),
             }));
     }
 
@@ -389,12 +391,7 @@ export class NetworkService {
             ...p,
             isLiked: likedPostIds.has(p.id),
             comments: this.mapPostComments(p.comments),
-            user: {
-                id: p.user?.id || p.userId || 'deleted',
-                username: p.user?.username || p.user?.name || 'Trader',
-                name: p.user?.name || p.user?.username || 'Trader',
-                avatarUrl: p.user?.avatarUrl || null,
-            },
+            user: this.toPublicCommunityUser(p.user, p.userId),
         }));
 
         return {
@@ -434,16 +431,23 @@ export class NetworkService {
         const formatted = {
             ...fullPost,
             comments: this.mapPostComments(fullPost?.comments),
-            user: {
-                id: user.id,
-                username: user.username || user.name || 'Trader',
-                name: user.name || user.username || 'Trader',
-                avatarUrl: user.avatarUrl || null,
-            },
+            user: this.toPublicCommunityUser(user, user.id),
             isLiked: false,
         };
 
-        this.networkGateway.broadcastNewPost(formatted);
+        if (visibility === 'public') {
+            this.networkGateway.broadcastNewPost(formatted);
+            if (this.eventEmitter) {
+                this.eventEmitter.emit('network.post.created', {
+                    postId: savedPost.id,
+                    authorId: userId,
+                    authorUsername: formatted.user.username,
+                    excerpt: String(content || '').trim().slice(0, 140),
+                    visibility,
+                    onlineUserIds: this.networkGateway?.getOnlineUserIds?.(userId) || [],
+                });
+            }
+        }
         return formatted;
     }
 
@@ -462,6 +466,9 @@ export class NetworkService {
     async toggleLike(userId: string, postId: number) {
         const post = await this.postRepo.findOne({ where: { id: postId } });
         if (!post) throw new NotFoundException('Publicação não encontrada.');
+        if (post.visibility === 'private' && post.userId !== userId) {
+            throw new ForbiddenException('Publicação privada não acessível.');
+        }
 
         const existing = await this.likeRepo.findOne({
             where: { userId, postId },
@@ -477,12 +484,14 @@ export class NetworkService {
         }
         await this.postRepo.save(post);
 
-        this.networkGateway.broadcastInteraction({
-            type: 'like',
-            postId,
-            likesCount: post.likesCount,
-            userId,
-        });
+        if (post.visibility === 'public') {
+            this.networkGateway.broadcastInteraction({
+                type: 'like',
+                postId,
+                likesCount: post.likesCount,
+                userId,
+            });
+        }
 
         return { liked: !existing, count: post.likesCount };
     }
@@ -500,6 +509,9 @@ export class NetworkService {
         if (!post || !user) {
             throw new NotFoundException('Publicação não encontrada.');
         }
+        if (post.visibility === 'private' && post.userId !== userId) {
+            throw new ForbiddenException('Publicação privada não acessível.');
+        }
 
         const comment = this.commentRepo.create({
             user,
@@ -514,31 +526,41 @@ export class NetworkService {
         post.commentsCount += 1;
         await this.postRepo.save(post);
 
+        const safeCommenter = this.toPublicCommunityUser(user, user.id);
         const formattedComment = {
             id: savedComment.id,
             postId,
             content: savedComment.content,
             createdAt: savedComment.createdAt,
-            user: {
-                id: user.id,
-                username: user.username || user.name || 'Trader',
-                name: user.name || user.username || 'Trader',
-                avatarUrl: user.avatarUrl || null,
-            },
+            user: safeCommenter,
         };
 
-        this.networkGateway.broadcastInteraction({
-            type: 'comment',
-            postId,
-            commentsCount: post.commentsCount,
-            comment: formattedComment,
-        });
+        if (post.visibility === 'public') {
+            this.networkGateway.broadcastInteraction({
+                type: 'comment',
+                postId,
+                commentsCount: post.commentsCount,
+                comment: formattedComment,
+            });
+
+            if (this.eventEmitter) {
+                this.eventEmitter.emit('network.post.commented', {
+                    postId,
+                    postAuthorId: post.userId,
+                    commenterId: userId,
+                    commenterUsername: safeCommenter.username,
+                    excerpt: content.slice(0, 140),
+                    onlineUserIds: this.networkGateway?.getOnlineUserIds?.(userId) || [],
+                });
+            }
+        }
 
         return formattedComment;
     }
 
     async getTrending() {
         const posts = await this.postRepo.find({
+            where: { visibility: 'public' },
             order: { likesCount: 'DESC', createdAt: 'DESC' },
             take: 5,
             relations: ['user'],
@@ -554,12 +576,7 @@ export class NetworkService {
             imageUrl: post.imageUrl,
             tradeData: post.tradeData,
             user: post.user
-                ? {
-                      id: post.user.id,
-                      username: post.user.username,
-                      name: post.user.name,
-                      avatarUrl: post.user.avatarUrl || null,
-                  }
+                ? this.toPublicCommunityUser(post.user, post.user.id)
                 : null,
         }));
     }
@@ -569,7 +586,7 @@ export class NetworkService {
         const candidates = await this.userRepo
             .createQueryBuilder('user')
             .where('user.id != :userId', { userId })
-            .select(['user.id', 'user.username', 'user.avatarUrl', 'user.name', 'user.createdAt'])
+            .select(['user.id', 'user.username', 'user.avatarUrl', 'user.createdAt'])
             .orderBy('user.createdAt', 'DESC')
             .take(48)
             .getMany();
@@ -578,24 +595,19 @@ export class NetworkService {
             const j = Math.floor(Math.random() * (i + 1));
             [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
         }
-        return candidates.slice(0, 6).map(({ id, username, avatarUrl, name }) => ({
-            id,
-            username,
-            avatarUrl,
-            name,
-        }));
+        return candidates.slice(0, 6).map((c) => this.toPublicCommunityUser(c, c.id));
     }
 
     async getUsers(currentUserId: string, query?: string) {
         const qb = this.userRepo
             .createQueryBuilder('user')
             .where('user.id != :currentUserId', { currentUserId })
-            .select(['user.id', 'user.username', 'user.avatarUrl', 'user.name']);
+            .select(['user.id', 'user.username', 'user.avatarUrl']);
 
         if (query) {
             qb.andWhere(
-                '(user.username ILIKE :query OR user.name ILIKE :query)',
-                { query: `%${query}%` }
+                'user.username ILIKE :query',
+                { query: `%${query.replace(/^@+/, '')}%` }
             );
         }
 
@@ -611,7 +623,7 @@ export class NetworkService {
         const followingSet = new Set(followRows.map((f) => f.followingId));
 
         return users.map((u) => ({
-            ...u,
+            ...this.toPublicCommunityUser(u, u.id),
             isFollowing: followingSet.has(u.id),
         }));
     }
@@ -619,7 +631,7 @@ export class NetworkService {
     async getUserProfile(targetUserId: string, currentUserId: string) {
         const user = await this.userRepo.findOne({
             where: { id: targetUserId },
-            select: ['id', 'username', 'name', 'avatarUrl', 'createdAt'],
+            select: ['id', 'username', 'avatarUrl', 'createdAt'],
         });
 
         if (!user) return null;
@@ -628,7 +640,12 @@ export class NetworkService {
             await Promise.all([
                 this.followRepo.count({ where: { followingId: targetUserId } }),
                 this.followRepo.count({ where: { followerId: targetUserId } }),
-                this.postRepo.count({ where: { userId: targetUserId } }),
+                this.postRepo.count({
+                    where:
+                        targetUserId === currentUserId
+                            ? { userId: targetUserId }
+                            : { userId: targetUserId, visibility: 'public' },
+                }),
                 this.followRepo.findOne({
                     where: {
                         followerId: currentUserId,
@@ -638,7 +655,8 @@ export class NetworkService {
             ]);
 
         return {
-            ...user,
+            ...this.toPublicCommunityUser(user, user.id),
+            createdAt: user.createdAt,
             stats: {
                 followers: followersCount,
                 following: followingCount,
@@ -675,12 +693,7 @@ export class NetworkService {
             ...p,
             isLiked: likedSet.has(p.id),
             comments: this.mapPostComments(p.comments),
-            user: {
-                id: p.user?.id || 'deleted',
-                username: p.user?.username || p.user?.name || 'Trader',
-                name: p.user?.name || p.user?.username || 'Trader',
-                avatarUrl: p.user?.avatarUrl || null,
-            },
+            user: this.toPublicCommunityUser(p.user, p.userId),
         }));
     }
 }

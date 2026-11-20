@@ -390,15 +390,19 @@ export const AdminPlans = () => {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-fg-muted mb-1">Preço Mensal (MT)</label>
+                        <label className="block text-sm font-medium text-fg-muted mb-1">Preço Mensal (USD)</label>
                         <input
                             type="number"
+                            step="0.01"
                             value={newPlan.monthlyPrice}
                             onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })}
                             className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
-                            placeholder="2000"
+                            placeholder="19"
                             required
                         />
+                        <p className="text-[11px] text-fg-subtle mt-1">
+                            Equivalente estimado em MZN: {(Number(newPlan.monthlyPrice || 0) * 65).toLocaleString('pt-MZ')} MZN
+                        </p>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>

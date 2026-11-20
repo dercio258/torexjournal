@@ -78,10 +78,16 @@ class BackendApiClient:
             return True
         return False
 
-    def heartbeat(self, heartbeat: WorkerHeartbeat) -> bool:
-        """Envia métricas de telemetria e integridade"""
+    def heartbeat(self, heartbeat: WorkerHeartbeat) -> Optional[Dict[str, Any]]:
+        """Envia métricas de telemetria e recebe diretivas do Load Balancer (evictLogins, isDraining)"""
         res = self._post("/heartbeat", heartbeat.model_dump(mode="json"))
-        return res is not None and res.status_code == 200
+        if res is not None and res.status_code == 200:
+            try:
+                data = res.json()
+                return data if isinstance(data, dict) else {"success": True}
+            except Exception:
+                return {"success": True}
+        return None
 
     def get_tasks(self) -> List[Task]:
         """Consulta tarefas pendentes atribuídas ao worker"""
@@ -132,7 +138,9 @@ class BackendApiClient:
                     return True
                 else:
                     msg = str(data.get("message") or "")
-                    if "account not found" in msg.lower():
+                    if data.get("evict") is True or "stale_worker_lease" in msg.lower():
+                        self.last_error_reason = "STALE_LEASE"
+                    elif "account not found" in msg.lower():
                         self.last_error_reason = "ACCOUNT_NOT_FOUND"
                     else:
                         self.last_error_reason = "REJECTED"
@@ -156,7 +164,9 @@ class BackendApiClient:
                     return True
                 else:
                     msg = str(data.get("message") or "")
-                    if "account not found" in msg.lower():
+                    if data.get("evict") is True or "stale_worker_lease" in msg.lower():
+                        self.last_error_reason = "STALE_LEASE"
+                    elif "account not found" in msg.lower():
                         self.last_error_reason = "ACCOUNT_NOT_FOUND"
                     else:
                         self.last_error_reason = "REJECTED"

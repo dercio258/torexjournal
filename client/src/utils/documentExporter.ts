@@ -1,5 +1,6 @@
 import { formatTradeDateTime, formatTradeMt5Local } from './timezone';
 import { getCurrentLocale, type AppLocale } from '../context/LocaleContext';
+import { escapeHtml } from './sanitizeHtml';
 
 export type DocumentFormat = 'csv' | 'html' | 'excel' | 'pdf';
 
@@ -114,13 +115,30 @@ function formatDateMt5(val: any): string {
     return formatTradeMt5Local(val) || String(val);
 }
 
-function escapeCsvCell(val: any): string {
+export function escapeCsvCell(val: any): string {
     if (val === null || val === undefined) return '';
-    const str = String(val).replace(/"/g, '""');
-    if (str.includes(',') || str.includes(';') || str.includes('"') || str.includes('\n')) {
-        return `"${str}"`;
+    let raw = String(val);
+    const trimmedStart = raw.replace(/^[\s\uFEFF\xA0]+/, '');
+    if (
+        trimmedStart.length > 0 &&
+        /^[=+\-@\t\r]/.test(trimmedStart) &&
+        !/^-\d+(?:\.\d+)?$/.test(trimmedStart.trim())
+    ) {
+        raw = `'${raw}`;
+    } else if (/^[\t\r]/.test(raw)) {
+        raw = `'${raw}`;
     }
-    return str;
+    const escaped = raw.replace(/"/g, '""');
+    if (
+        escaped.includes(',') ||
+        escaped.includes(';') ||
+        escaped.includes('"') ||
+        escaped.includes('\n') ||
+        escaped.includes('\r')
+    ) {
+        return `"${escaped}"`;
+    }
+    return escaped;
 }
 
 function triggerBlobDownload(content: string | Blob, filename: string, mimeType: string) {
@@ -142,15 +160,6 @@ function sanitizeFileSlug(text: string): string {
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '');
-}
-
-function escapeHtml(val: any): string {
-    if (val === null || val === undefined) return '';
-    return String(val)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
 }
 
 function stripHtmlExport(val: any): string {
@@ -566,8 +575,8 @@ export function buildBrandedHtml(
                 ? 'Official Execution Import & Audit Template'
                 : 'Modelo Oficial de Importação e Auditoria'
             : isEn
-            ? `Executive Performance Statement (${options.accountName})`
-            : `Relatório Executivo (${options.accountName})`
+            ? `Executive Performance Statement (${escapeHtml(options.accountName)})`
+            : `Relatório Executivo (${escapeHtml(options.accountName)})`
     }</title>
     ${excelXmlHead}
     <style>
@@ -767,43 +776,43 @@ export function buildBrandedHtml(
                 </div>
             </div>
             <div class="brand-meta">
-                <div>${isEn ? 'Account:' : 'Conta:'} <strong>${options.accountName || (isEn ? 'Consolidated' : 'Consolidado')}</strong> (${options.accountType || 'TRADING'})</div>
-                <div>${isEn ? 'Broker:' : 'Corretora:'} <strong>${options.broker || 'MetaTrader 5'}</strong> • ${isEn ? 'Currency:' : 'Moeda:'} <strong>${currency}</strong></div>
-                <div>${isEn ? 'Period:' : 'Período:'} <strong>${options.periodLabel || (isEn ? 'All-Time History' : 'Todo o Histórico')}</strong></div>
-                <div>${isEn ? 'Issued:' : 'Emitido em:'} <strong>${emittedAt}</strong></div>
+                <div>${isEn ? 'Account:' : 'Conta:'} <strong>${escapeHtml(options.accountName || (isEn ? 'Consolidated' : 'Consolidado'))}</strong> (${escapeHtml(options.accountType || 'TRADING')})</div>
+                <div>${isEn ? 'Broker:' : 'Corretora:'} <strong>${escapeHtml(options.broker || 'MetaTrader 5')}</strong> • ${isEn ? 'Currency:' : 'Moeda:'} <strong>${escapeHtml(currency)}</strong></div>
+                <div>${isEn ? 'Period:' : 'Período:'} <strong>${escapeHtml(options.periodLabel || (isEn ? 'All-Time History' : 'Todo o Histórico'))}</strong></div>
+                <div>${isEn ? 'Issued:' : 'Emitido em:'} <strong>${escapeHtml(emittedAt)}</strong></div>
             </div>
         </div>
 
         <div class="section">
             <div class="account-strip">
                 <div><strong>${isEn ? 'Platform:' : 'Plataforma:'}</strong> Torex Journal Analytics (torexjournal.com)</div>
-                <div><strong>${isEn ? 'Document Format:' : 'Formato do Documento:'}</strong> ${mode.toUpperCase()} ${isEn ? 'Audited Official' : 'Oficial Auditado'}</div>
-                <div><strong>${isEn ? 'Listed Executions:' : 'Total de Operações Listadas:'}</strong> ${options.trades.length} ${isEn ? 'records' : 'registros'}</div>
-                <div><strong>${isEn ? 'Total Volume:' : 'Volume Total:'}</strong> ${totalVolume} ${isEn ? 'lots' : 'lotes'}</div>
+                <div><strong>${isEn ? 'Document Format:' : 'Formato do Documento:'}</strong> ${escapeHtml(mode.toUpperCase())} ${isEn ? 'Audited Official' : 'Oficial Auditado'}</div>
+                <div><strong>${isEn ? 'Listed Executions:' : 'Total de Operações Listadas:'}</strong> ${escapeHtml(String(options.trades.length))} ${isEn ? 'records' : 'registros'}</div>
+                <div><strong>${isEn ? 'Total Volume:' : 'Volume Total:'}</strong> ${escapeHtml(String(totalVolume))} ${isEn ? 'lots' : 'lotes'}</div>
             </div>
 
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-label">${isEn ? 'Total Net P&L' : 'Resultado Líquido Total'}</div>
                     <div class="kpi-val ${netProfit >= 0 ? 'profit-pos' : 'profit-neg'}">
-                        ${netProfit >= 0 ? '+' : ''}${currency} ${netProfit.toFixed(2)}
+                        ${netProfit >= 0 ? '+' : ''}${escapeHtml(currency)} ${netProfit.toFixed(2)}
                     </div>
                     <div class="kpi-sub">${isEn ? 'Gross Win' : 'Ganhos'}: +$${Number(k.grossProfit || 0).toFixed(2)} | ${isEn ? 'Gross Loss' : 'Perdas'}: -$${Number(k.grossLoss || 0).toFixed(2)}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">${isEn ? 'Win Rate' : 'Taxa de Acerto (Win Rate)'}</div>
                     <div class="kpi-val">${Number(k.winRate || 0).toFixed(1)}%</div>
-                    <div class="kpi-sub">Wins: ${k.wins ?? 0} | Losses: ${k.losses ?? 0} (Total: ${k.totalTrades ?? options.trades.length})</div>
+                    <div class="kpi-sub">Wins: ${escapeHtml(String(k.wins ?? 0))} | Losses: ${escapeHtml(String(k.losses ?? 0))} (Total: ${escapeHtml(String(k.totalTrades ?? options.trades.length))})</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">${isEn ? 'Profit Factor' : 'Fator de Lucro (Profit Factor)'}</div>
-                    <div class="kpi-val">${k.profitFactor ?? '0.00'}</div>
-                    <div class="kpi-sub">${isEn ? 'Volume Traded' : 'Volume Negociado'}: ${k.totalVolume ?? totalVolume} ${isEn ? 'lots' : 'lotes'}</div>
+                    <div class="kpi-val">${escapeHtml(String(k.profitFactor ?? '0.00'))}</div>
+                    <div class="kpi-sub">${isEn ? 'Volume Traded' : 'Volume Negociado'}: ${escapeHtml(String(k.totalVolume ?? totalVolume))} ${isEn ? 'lots' : 'lotes'}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-label">${isEn ? 'Max Drawdown' : 'Drawdown Máximo'}</div>
-                    <div class="kpi-val profit-neg">-${currency} ${Number(k.maxDrawdown || 0).toFixed(2)}</div>
-                    <div class="kpi-sub">${isEn ? 'Drawdown' : 'Rebaixamento'}: ${k.maxDrawdownPercent ?? 0}% | ROI: ${k.roi ?? 0}%</div>
+                    <div class="kpi-val profit-neg">-${escapeHtml(currency)} ${Number(k.maxDrawdown || 0).toFixed(2)}</div>
+                    <div class="kpi-sub">${isEn ? 'Drawdown' : 'Rebaixamento'}: ${escapeHtml(String(k.maxDrawdownPercent ?? 0))}% | ROI: ${escapeHtml(String(k.roi ?? 0))}%</div>
                 </div>
             </div>
 
@@ -859,7 +868,7 @@ export function buildBrandedHtml(
                         : 'Relatório Oficial Gerado Automaticamente • Compatível com importação direta em CSV, HTML, Excel e PDF'
                 }
             </div>
-            <div>${isEn ? 'Verified Statement' : 'Autenticidade verificada'} • ${emittedAt}</div>
+            <div>${isEn ? 'Verified Statement' : 'Autenticidade verificada'} • ${escapeHtml(emittedAt)}</div>
         </div>
     </div>
 </body>

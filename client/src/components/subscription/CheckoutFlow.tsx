@@ -94,8 +94,8 @@ export const PlanSummary = ({
                 <ShieldCheck size={18} className="flex-shrink-0 text-indigo-600 dark:text-indigo-400" />
                 <p>
                     {isEn
-                        ? 'Your transaction is secured with end-to-end encryption via Debito.co.mz'
-                        : 'Sua transação é protegida por criptografia de ponta a ponta via Debito.co.mz'}
+                        ? 'Your transaction is secured with end-to-end encryption.'
+                        : 'Sua transação é protegida por criptografia de ponta a ponta.'}
                 </p>
             </div>
         </motion.div>
@@ -103,6 +103,7 @@ export const PlanSummary = ({
 };
 
 export const PaymentMethodBadge = ({ 
+    id,
     label, 
     icon: Icon, 
     img, 
@@ -116,8 +117,7 @@ export const PaymentMethodBadge = ({
     active: boolean; 
     onClick: () => void 
 }) => {
-    // Detect currency based on label
-    const isZar = label.toLowerCase().includes('payfast');
+    const currencyTag = id === 'card' ? 'USD / MZN' : 'MZN';
 
     return (
         <motion.button
@@ -141,7 +141,7 @@ export const PaymentMethodBadge = ({
                     {label}
                 </span>
                 <span className="text-[8px] font-bold text-fg-subtle px-1.5 py-0.5 bg-slate-100 dark:bg-slate-950 border border-line rounded mt-1 inline-block">
-                    {isZar ? 'ZAR' : 'MZN'}
+                    {currencyTag}
                 </span>
             </div>
 
@@ -267,13 +267,11 @@ export const CardPaymentView = ({
     onSubmit, 
     processing, 
     onPhoneChange, 
-    method = 'card',
     isEn = false
 }: { 
     onSubmit: () => void; 
     processing: boolean; 
     onPhoneChange: (v: string) => void; 
-    method?: 'card' | 'payfast';
     isEn?: boolean;
 }) => (
     <motion.div 
@@ -283,18 +281,10 @@ export const CardPaymentView = ({
     >
         <div className="p-6 bg-slate-50 dark:bg-slate-900/20 border border-slate-200 dark:border-slate-800/80 rounded-2xl">
             <p className="text-sm text-fg-muted mb-6 leading-relaxed">
-                {method === 'payfast' ? (
-                    isEn ? (
-                        <>You will be redirected to the <span className="text-fg font-bold">PayFast</span> encrypted checkout to complete payment in <span className="text-indigo-600 dark:text-indigo-400 font-bold">ZAR</span>.</>
-                    ) : (
-                        <>Você será redirecionado para o ambiente de checkout seguro do <span className="text-fg font-bold">PayFast</span> para efetuar o pagamento em <span className="text-indigo-600 dark:text-indigo-400 font-bold">ZAR</span>.</>
-                    )
+                {isEn ? (
+                    <>Proceed with your <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa or Mastercard</span> card payment request for your Torex Journal subscription.</>
                 ) : (
-                    isEn ? (
-                        <>You will be redirected to the secure <span className="text-fg font-bold">Debito.co.mz</span> checkout page to complete your purchase via <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa or Mastercard</span>.</>
-                    ) : (
-                        <>Você será redirecionado para a página segura de pagamento da <span className="text-fg font-bold">Debito.co.mz</span> para concluir sua compra usando <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa ou Mastercard</span>.</>
-                    )
+                    <>Prossiga com a solicitação de pagamento via cartão <span className="text-indigo-600 dark:text-indigo-400 font-bold">Visa ou Mastercard</span> para ativar a sua assinatura.</>
                 )}
             </p>
             
@@ -304,18 +294,10 @@ export const CardPaymentView = ({
             />
             
             <div className="mt-5 flex items-center gap-4 py-3 opacity-60 border-t border-slate-200 dark:border-slate-800/60">
-                {method === 'payfast' ? (
-                    <span className="text-[9px] uppercase font-bold tracking-widest text-fg-subtle">
-                        {isEn ? 'Authenticated PayFast Gateway' : 'Gateway PayFast Autenticado'}
-                    </span>
-                ) : (
-                    <>
-                        <img src="https://paymentsindustryintelligence.com/wp-content/uploads/2021/11/visa-mastercard-logos.jpg" alt="Visa/MC" className="h-5 rounded-sm" />
-                        <span className="text-[9px] uppercase font-bold tracking-widest text-fg-subtle">
-                            {isEn ? 'Verified Card Gateway' : 'Gateway de Cartão Seguro'}
-                        </span>
-                    </>
-                )}
+                <img src="https://paymentsindustryintelligence.com/wp-content/uploads/2021/11/visa-mastercard-logos.jpg" alt="Visa/MC" className="h-5 rounded-sm" />
+                <span className="text-[9px] uppercase font-bold tracking-widest text-fg-subtle">
+                    {isEn ? 'Secure Card Checkout' : 'Pagamento com Cartão Seguro'}
+                </span>
             </div>
         </div>
 
@@ -329,9 +311,7 @@ export const CardPaymentView = ({
             <span className="relative z-10 flex items-center justify-center gap-2">
                 {processing ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
                 {processing
-                    ? isEn ? 'Redirecting...' : 'Redirecionando...'
-                    : method === 'payfast'
-                    ? isEn ? 'Continue to PayFast' : 'Prosseguir para o PayFast'
+                    ? isEn ? 'Processing...' : 'Processando...'
                     : isEn ? 'Pay with Card' : 'Pagar com Cartão'}
             </span>
         </motion.button>
@@ -339,7 +319,7 @@ export const CardPaymentView = ({
 );
 
 export const PollingOverlay = ({ method, total, exchangeRate = 65, isEn = false }: { method: string; total: number; exchangeRate?: number; isEn?: boolean }) => {
-    // We simulate step-by-step connection states for the interactive terminal:
+    const isCard = method === 'card';
     return (
         <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -351,17 +331,27 @@ export const PollingOverlay = ({ method, total, exchangeRate = 65, isEn = false 
                 
                 <div className="relative mb-6">
                     <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-xl">
-                        <Smartphone size={32} className="animate-bounce" />
+                        {isCard ? <CreditCard size={32} /> : <Smartphone size={32} className="animate-bounce" />}
                     </div>
                 </div>
 
                 <div className="w-full text-center space-y-6">
                     <div>
                         <h3 className="text-xl font-black text-fg mb-2 leading-none uppercase tracking-tight">
-                            {isEn ? 'Request Sent' : 'Pedido Enviado'}
+                            {isEn ? 'Request Registered' : 'Pedido Registrado'}
                         </h3>
                         <p className="text-fg-muted text-xs max-w-[280px] leading-relaxed mx-auto">
-                            {isEn ? (
+                            {isCard ? (
+                                isEn ? (
+                                    <>
+                                        Card payment request of <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> registered and awaiting confirmation.
+                                    </>
+                                ) : (
+                                    <>
+                                        Solicitação de pagamento via <span className="text-indigo-600 dark:text-indigo-400 font-bold">Cartão</span> no valor de <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> registrada e aguardando confirmação.
+                                    </>
+                                )
+                            ) : isEn ? (
                                 <>
                                     We dispatched a payment prompt of <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> (~ MT {(total * exchangeRate).toFixed(0)} MZN) to your phone via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
                                 </>
@@ -376,29 +366,33 @@ export const PollingOverlay = ({ method, total, exchangeRate = 65, isEn = false 
                     {/* Step-by-step Interactive Billing Terminal */}
                     <div className="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-900 rounded-2xl p-4 text-left space-y-4 max-w-xs mx-auto shadow-sm">
                         <span className="text-[9px] font-black text-fg-subtle uppercase tracking-widest block border-b border-slate-200 dark:border-slate-900 pb-2">
-                            {isEn ? 'Terminal Status' : 'Status do Terminal'}
+                            {isEn ? 'Payment Status' : 'Estado do Pagamento'}
                         </span>
                         
                         <div className="space-y-3 text-xs">
                             <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-                                <span className="font-semibold">{isEn ? '1. Initializing Connection' : '1. Inicializando Conexão'}</span>
+                                <span className="font-semibold">{isEn ? '1. Subscription Created' : '1. Assinatura Registrada'}</span>
                                 <CheckCircle2 size={14} className="flex-shrink-0" />
                             </div>
                             <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-                                <span className="font-semibold">{isEn ? '2. Creating Transaction' : '2. Criando Transação'}</span>
+                                <span className="font-semibold">{isEn ? '2. Reference Generated' : '2. Referência Gerada'}</span>
                                 <CheckCircle2 size={14} className="flex-shrink-0" />
                             </div>
                             <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400 font-bold">
-                                <span className="font-medium">{isEn ? '3. Awaiting Mobile PIN' : '3. Aguardando PIN no celular'}</span>
+                                <span className="font-medium">
+                                    {isCard
+                                        ? (isEn ? '3. Awaiting Confirmation' : '3. Aguardando Confirmação')
+                                        : (isEn ? '3. Awaiting Mobile PIN' : '3. Aguardando PIN no celular')}
+                                </span>
                                 <Loader2 size={14} className="animate-spin flex-shrink-0" />
                             </div>
                         </div>
                     </div>
 
                     <div className="text-[10px] text-fg-subtle leading-normal max-w-xs mx-auto">
-                        {isEn
-                            ? 'Enter your security PIN on your phone to authorize. Your workspace plan will activate automatically upon approval.'
-                            : 'Insira o seu PIN de segurança no celular para confirmar. Iremos ativar o seu plano assim que a transação for aprovada.'}
+                        {isCard
+                            ? (isEn ? 'Your workspace plan will activate automatically as soon as payment confirmation arrives.' : 'Iremos ativar o seu plano automaticamente assim que a confirmação do pagamento for recebida.')
+                            : (isEn ? 'Enter your security PIN on your phone to authorize. Your workspace plan will activate automatically upon approval.' : 'Insira o seu PIN de segurança no celular para confirmar. Iremos ativar o seu plano assim que a transação for aprovada.')}
                     </div>
                 </div>
             </div>

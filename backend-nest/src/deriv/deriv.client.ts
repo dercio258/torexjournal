@@ -5,49 +5,80 @@ import { filter, map } from 'rxjs/operators';
 
 export class DerivClient {
     private readonly logger = new Logger(DerivClient.name);
-    private ws: WebSocket;
+    private ws: WebSocket | null = null;
     private readonly appId: string;
+    private readonly standardUrl: string;
     private url: string;
     private messageSubject = new Subject<any>();
     private connectionSubject = new Subject<boolean>();
     private isConnected = false;
     private isAuthorized = false;
     private isManuallyClosed = false;
-    private reconnectInterval = 5000;
+    private reconnectInterval = 2000;
     private maxReconnectAttempts = 50;
     private reconnectAttempts = 0;
-    private pingIntervalHandle: any;
+    private pingIntervalHandle: ReturnType<typeof setInterval> | null = null;
+    private reconnectTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    private lastActivityAt = 0;
+    private reconnectUrlResolver?: () => Promise<string | null>;
+
+    setReconnectUrlResolver(resolver?: () => Promise<string | null>) {
+        this.reconnectUrlResolver = resolver;
+    }
 
     constructor(appId?: string) {
         this.appId = appId || process.env.DERIV_APP_ID || '1089';
-        this.url = `wss://ws.binaryws.com/websockets/v3?app_id=${this.appId}`;
+        this.standardUrl = `wss://ws.binaryws.com/websockets/v3?app_id=${this.appId}`;
+        this.url = this.standardUrl;
     }
 
     connect(targetUrl?: string): Promise<void> {
         this.isManuallyClosed = false;
+        if (this.reconnectTimeoutHandle) {
+            clearTimeout(this.reconnectTimeoutHandle);
+            this.reconnectTimeoutHandle = null;
+        }
+
         if (targetUrl) {
             this.url = targetUrl;
         } else if (!this.url) {
-            this.url = `wss://ws.binaryws.com/websockets/v3?app_id=${this.appId}`;
+            this.url = this.standardUrl;
+        }
+
+        if (this.ws) {
+            try {
+                this.ws.removeAllListeners();
+                this.ws.terminate();
+            } catch {
+                // ignore cleanup errors
+            }
+            this.ws = null;
         }
 
         return new Promise((resolve, reject) => {
-            this.ws = new WebSocket(this.url);
+            let settled = false;
+            const socket = new WebSocket(this.url);
+            this.ws = socket;
 
-            this.ws.on('open', () => {
+            socket.on('open', () => {
                 const isOtp = this.url.includes('otp=');
                 this.logger.log(`Connected to Deriv WebSocket (${isOtp ? 'OTP-authenticated gateway' : 'Standard gateway'})`);
                 this.isConnected = true;
+                this.lastActivityAt = Date.now();
                 if (isOtp) {
                     this.isAuthorized = true;
                 }
                 this.reconnectAttempts = 0;
                 this.connectionSubject.next(true);
                 this.startPing();
-                resolve();
+                if (!settled) {
+                    settled = true;
+                    resolve();
+                }
             });
 
-            this.ws.on('message', (data: string) => {
+            socket.on('message', (data: string) => {
+                this.lastActivityAt = Date.now();
                 try {
                     const message = JSON.parse(data);
                     this.messageSubject.next(message);
@@ -56,17 +87,28 @@ export class DerivClient {
                 }
             });
 
-            this.ws.on('close', () => {
+            socket.on('close', () => {
                 this.logger.warn('Disconnected from Deriv WebSocket');
+                const wasConnected = this.isConnected;
                 this.isConnected = false;
                 this.isAuthorized = false;
                 this.stopPing();
+                if (wasConnected) {
+                    this.connectionSubject.next(false);
+                }
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('Deriv WebSocket closed before open'));
+                }
                 this.handleReconnect();
             });
 
-            this.ws.on('error', (err) => {
+            socket.on('error', (err) => {
                 this.logger.error('Deriv WebSocket error', err.stack);
-                if (!this.isConnected) reject(err);
+                if (!this.isConnected && !settled) {
+                    settled = true;
+                    reject(err);
+                }
             });
         });
     }
@@ -74,9 +116,18 @@ export class DerivClient {
     private startPing() {
         this.stopPing();
         this.pingIntervalHandle = setInterval(() => {
-            if (this.isConnected) {
-                this.send({ ping: 1 });
+            if (!this.isConnected || !this.ws) return;
+            // Half-open zombie socket watchdog (75s without traffic)
+            if (this.lastActivityAt > 0 && Date.now() - this.lastActivityAt > 75_000) {
+                this.logger.warn('Deriv WebSocket inactive for >75s; forcing reconnect.');
+                try {
+                    this.ws.terminate();
+                } catch {
+                    // ignore
+                }
+                return;
             }
+            this.send({ ping: 1 });
         }, 30000);
     }
 
@@ -88,17 +139,38 @@ export class DerivClient {
     }
 
     private handleReconnect() {
-        if (this.isManuallyClosed) return;
+        if (this.isManuallyClosed || this.reconnectTimeoutHandle) return;
+
+        // URL OTP é de uso único e expira; em reconexões sempre volta para o gateway padrão
+        if (this.url.includes('otp=')) {
+            this.url = this.standardUrl;
+        }
 
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            const interval = this.reconnectAttempts > 10 ? 15000 : this.reconnectInterval;
-            this.logger.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${interval / 1000}s...`);
-            setTimeout(() => {
+            const expDelay = Math.round(
+                this.reconnectInterval * Math.pow(1.6, Math.min(this.reconnectAttempts - 1, 8)),
+            );
+            const jitter = Math.floor(Math.random() * 600);
+            const delayMs = Math.min(30_000, expDelay) + jitter;
+
+            this.logger.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${(delayMs / 1000).toFixed(1)}s...`);
+            this.reconnectTimeoutHandle = setTimeout(() => {
+                this.reconnectTimeoutHandle = null;
                 if (!this.isConnected && !this.isManuallyClosed) {
-                    this.connect().catch(() => { });
+                    void (async () => {
+                        let freshUrl: string | null = null;
+                        if (this.reconnectUrlResolver) {
+                            try {
+                                freshUrl = await this.reconnectUrlResolver();
+                            } catch {
+                                freshUrl = null;
+                            }
+                        }
+                        await this.connect(freshUrl || undefined).catch(() => {});
+                    })();
                 }
-            }, interval);
+            }, delayMs);
         } else {
             this.logger.error('Max reconnection attempts reached for Deriv WebSocket. Manual intervention may be required.');
         }
@@ -188,9 +260,18 @@ export class DerivClient {
     disconnect() {
         this.isManuallyClosed = true;
         this.stopPing();
+        if (this.reconnectTimeoutHandle) {
+            clearTimeout(this.reconnectTimeoutHandle);
+            this.reconnectTimeoutHandle = null;
+        }
         if (this.ws) {
             this.ws.removeAllListeners();
-            this.ws.close();
+            try {
+                this.ws.close();
+            } catch {
+                // ignore
+            }
+            this.ws = null;
             this.isConnected = false;
             this.isAuthorized = false;
         }
