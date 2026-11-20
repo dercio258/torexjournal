@@ -59,6 +59,7 @@ const SubscriptionSuccess = lazy(() =>
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin').then(m => ({ default: m.AdminLogin })));
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout').then(m => ({ default: m.AdminLayout })));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminMt5Telemetry = lazy(() => import('./pages/admin/AdminMt5Telemetry').then(m => ({ default: m.AdminMt5Telemetry })));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics').then(m => ({ default: m.AdminAnalytics })));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then(m => ({ default: m.AdminUsers })));
 const AdminFinance = lazy(() => import('./pages/admin/AdminFinance').then(m => ({ default: m.AdminFinance })));
@@ -325,6 +326,7 @@ function App() {
                                 }
                             >
                                 <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                                <Route path="/admin/mt5-telemetry" element={<AdminMt5Telemetry />} />
                                 <Route path="/admin/analytics" element={<AdminAnalytics />} />
                                 <Route path="/admin/lessons" element={<AdminLessons />} />
                                 <Route path="/admin/users" element={<AdminUsers />} />

@@ -7,6 +7,7 @@ import {
     forwardRef,
     NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Interval } from '@nestjs/schedule';
@@ -720,10 +721,13 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
     async getClusterOverview() {
         const workers = this.getWorkerInputsFromService();
         const counts = await this.computeAssignedCountsByWorker();
-        const connectedAccounts = await this.accountRepo.find({
-            where: { isArchived: false, isConnected: true },
+        const trackedAccounts = await this.accountRepo.find({
+            where: { isArchived: false, mt5Id: Not(IsNull()) },
             select: [
                 'id',
+                'mt5Id',
+                'isConnected',
+                'lastSeen',
                 'assignedWorkerId',
                 'mt5SyncTier',
                 'mt5LeaseEpoch',
@@ -734,23 +738,87 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         });
 
         const tierSummary = { HOT: 0, WARM: 0, COLD: 0, QUARANTINED: 0, pendingDisconnect: 0 };
-        for (const a of connectedAccounts) {
-            const tier = String(a.mt5SyncTier || 'HOT').toUpperCase();
-            if (tier in tierSummary) {
+        const stateSummary = {
+            CONNECTED: 0,
+            SYNCING: 0,
+            CONNECTING: 0,
+            DISCONNECTED: 0,
+            AUTH_FAILED: 0,
+        };
+        let totalConnectedAccounts = 0;
+
+        const accounts = trackedAccounts.map((acc) => {
+            const rawLogin = String(acc.mt5Id || '').trim();
+            const telemetryId = createHash('sha256')
+                .update(String(acc.id))
+                .digest('hex')
+                .slice(0, 8)
+                .toUpperCase();
+            const last4 = rawLogin.length >= 4 ? rawLogin.slice(-4) : rawLogin.replace(/./g, '•');
+            const accountMask = last4 ? `MT5 ••••${last4}` : 'MT5 ••••';
+
+            const liveTel = this.mt5WorkerService?.getAnonymizedAccountTelemetry?.(
+                rawLogin,
+                Boolean(acc.isConnected),
+            );
+            const connectionState =
+                liveTel?.connectionState || (acc.isConnected ? 'CONNECTED' : 'DISCONNECTED');
+
+            if (connectionState in stateSummary) {
+                (stateSummary as any)[connectionState]++;
+            }
+            if (acc.isConnected || connectionState === 'CONNECTED' || connectionState === 'SYNCING') {
+                totalConnectedAccounts++;
+            }
+
+            const tier = String(acc.mt5SyncTier || 'HOT').toUpperCase();
+            if (acc.isConnected && tier in tierSummary) {
                 (tierSummary as any)[tier]++;
             }
-            if (a.inactivityDisconnectAt) tierSummary.pendingDisconnect++;
-        }
+            if (acc.inactivityDisconnectAt) tierSummary.pendingDisconnect++;
+
+            const fallbackFeedback = acc.inactivityDisconnectAt
+                ? 'Aviso de hibernação 24h ativo (conta sem atividade).'
+                : acc.mt5SyncTier === 'QUARANTINED'
+                  ? 'Sincronização em quarentena temporária por falha de ligação.'
+                  : null;
+
+            return {
+                telemetryId,
+                accountMask,
+                connectionState,
+                syncTier: tier,
+                assignedWorkerId: acc.assignedWorkerId || null,
+                leaseEpoch: Number(acc.mt5LeaseEpoch || 1),
+                pingMs: liveTel?.pingMs ?? null,
+                terminalBuild: liveTel?.terminalBuild ?? null,
+                openPositionsCount: liveTel?.openPositionsCount ?? null,
+                lastSyncAt:
+                    liveTel?.lastSyncAt ||
+                    (acc.lastSeen ? new Date(acc.lastSeen).toISOString() : null),
+                zeroBalanceFlag: Boolean(acc.zeroBalanceSince),
+                inactivityWarnedAt: acc.inactivityWarnedAt
+                    ? new Date(acc.inactivityWarnedAt).toISOString()
+                    : null,
+                inactivityDisconnectAt: acc.inactivityDisconnectAt
+                    ? new Date(acc.inactivityDisconnectAt).toISOString()
+                    : null,
+                feedback: liveTel?.feedback || fallbackFeedback,
+            };
+        });
 
         return {
             stride: this.getPairStride(),
-            totalConnectedAccounts: connectedAccounts.length,
+            totalTrackedAccounts: trackedAccounts.length,
+            totalConnectedAccounts,
             tierSummary,
+            stateSummary,
             workers: workers.map((w) => ({
                 ...w,
                 assignedAccountsCount: counts[w.workerId] || 0,
                 pairBucketsCompleted: Math.floor((counts[w.workerId] || 0) / this.getPairStride()),
             })),
+            accounts,
         };
     }
 

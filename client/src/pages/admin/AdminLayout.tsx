@@ -16,6 +16,7 @@ import {
     ExternalLink,
     CalendarClock,
     ChevronRight,
+    Server,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useTheme } from '../../context/ThemeContext';
@@ -41,6 +42,12 @@ const ADMIN_DOMAINS: NavDomain[] = [
                 label: 'Visão Estrutural',
                 description: 'KPIs, MT5 Auto-Sync & Filas',
                 icon: LayoutDashboard,
+            },
+            {
+                path: '/admin/mt5-telemetry',
+                label: 'Telemetria MT5',
+                description: 'Status anonimizado, workers & feedback',
+                icon: Server,
             },
             {
                 path: '/admin/analytics',

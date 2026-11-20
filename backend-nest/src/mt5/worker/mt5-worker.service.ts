@@ -2264,4 +2264,35 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
 
         return account;
     }
+
+    /**
+     * Retorna apenas telemetria técnica anonimizada de uma conta MT5 para o painel Admin,
+     * sem expor login completo, nome do titular, saldo, equity ou caminhos locais.
+     */
+    public getAnonymizedAccountTelemetry(login: string, fallbackConnected = false) {
+        const cleanLogin = String(login || '').trim();
+        const tel = cleanLogin ? this.accountTelemetry.get(cleanLogin) : undefined;
+        const connectionState: AccountLiveTelemetry['connectionState'] =
+            tel?.connectionState || (fallbackConnected ? 'CONNECTED' : 'DISCONNECTED');
+
+        const rawFeedback = tel?.lastError || tel?.statusMessage || null;
+        const sanitizedFeedback = rawFeedback
+            ? String(rawFeedback)
+                  .replace(/[A-Za-z]:\\[^\s'"]+|\/(?:home|root|var|tmp|Users)\/[^\s'"]+/g, '[path]')
+                  .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
+                  .replace(/\b\d{5,12}\b/g, '••••')
+                  .slice(0, 180)
+            : null;
+
+        return {
+            connectionState,
+            connected: tel ? Boolean(tel.connected) : Boolean(fallbackConnected),
+            lastSyncAt: tel?.lastSyncAt || null,
+            pingMs: typeof tel?.pingMs === 'number' ? tel.pingMs : null,
+            terminalBuild: typeof tel?.terminalBuild === 'number' ? tel.terminalBuild : null,
+            openPositionsCount: typeof tel?.openPositionsCount === 'number' ? tel.openPositionsCount : null,
+            pendingOrdersCount: typeof tel?.pendingOrdersCount === 'number' ? tel.pendingOrdersCount : null,
+            feedback: sanitizedFeedback,
+        };
+    }
 }

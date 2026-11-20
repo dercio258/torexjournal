@@ -228,4 +228,46 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         expect(clean2.toLowerCase()).not.toContain('terminal64');
         expect(clean2).toContain('autenticar na corretora');
     });
+
+    it('returns anonymized MT5 telemetry in getClusterOverview without leaking PII, balances, or full logins', async () => {
+        const { balancer } = createBalancerHarness({
+            accounts: [
+                {
+                    id: '11111111-2222-3333-4444-555555555555',
+                    userId: 'secret-user-99',
+                    mt5Id: '987654321',
+                    broker: 'MetaQuotes-Demo',
+                    balance: 15432.89,
+                    equity: 15600.12,
+                    isConnected: true,
+                    isArchived: false,
+                    assignedWorkerId: 'vps-win-1',
+                    mt5LeaseEpoch: 3,
+                    mt5SyncTier: 'HOT',
+                    zeroBalanceSince: null,
+                    inactivityWarnedAt: null,
+                    inactivityDisconnectAt: null,
+                },
+            ],
+        });
+
+        const overview = await balancer.getClusterOverview();
+        expect(overview.totalTrackedAccounts).toBe(1);
+        expect(overview.totalConnectedAccounts).toBe(1);
+        expect(overview.accounts).toHaveLength(1);
+
+        const row = overview.accounts[0];
+        expect(row.accountMask).toBe('MT5 ••••4321');
+        expect(row.telemetryId).toHaveLength(8);
+        expect(row.assignedWorkerId).toBe('vps-win-1');
+        expect(row.leaseEpoch).toBe(3);
+        expect(row.syncTier).toBe('HOT');
+
+        const serialized = JSON.stringify(overview);
+        expect(serialized).not.toContain('secret-user-99');
+        expect(serialized).not.toContain('987654321');
+        expect(serialized).not.toContain('15432');
+        expect(serialized).not.toContain('15600');
+        expect(serialized).not.toContain('MetaQuotes-Demo');
+    });
 });
