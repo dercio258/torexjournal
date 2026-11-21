@@ -1062,21 +1062,9 @@ export const TorexAi: React.FC = () => {
                     activeSessionIdRef.current = null;
                     setDraftPendingMessages([]);
                     navigate('/torex-ai', { replace: true });
-                } else if (
-                    !messagesBySessionRef.current[normalizedRouteSessionId]?.length
-                ) {
-                    setMessagesBySession((prev) => ({
-                        ...prev,
-                        [normalizedRouteSessionId]: [
-                            {
-                                id: `err-sess-${Date.now()}`,
-                                role: 'assistant',
-                                content: supportFallback,
-                                createdAt: new Date().toISOString(),
-                            },
-                        ],
-                    }));
                 }
+                // Erros transitórios ao carregar sessão nunca devem injetar "Aviso de Conexão"
+                // enquanto uma resposta pode estar em processamento no servidor.
             } finally {
                 if (!cancelled && isMountedRef.current) {
                     setIsLoadingSession(false);
@@ -1155,7 +1143,10 @@ export const TorexAi: React.FC = () => {
                         });
                         if (!isMountedRef.current) return;
 
-                        if (res.data?.status === 'PROCESSING') {
+                        if (
+                            res.data?.status === 'PROCESSING' ||
+                            (res.data?.status !== 'COMPLETED' && !res.data?.assistantMessage)
+                        ) {
                             return;
                         }
 
@@ -1739,6 +1730,55 @@ export const TorexAi: React.FC = () => {
                 }
             }
         } catch (err: any) {
+            // Antes de assumir falha, verifica se o servidor já iniciou o job assíncrono
+            // (ex.: timeout de rede/proxy no POST enquanto o backend já está processando).
+            if (token && err?.message !== 'NO_AUTH_TOKEN') {
+                try {
+                    await new Promise((r) => window.setTimeout(r, 800));
+                    const probe = await api.get(`/ai/chat/sessions/${targetInitialId}`);
+                    const activeJobId = probe.data?.activeJob?.jobId;
+                    const fetchedMsgs: ClientAiMessage[] = Array.isArray(probe.data?.messages)
+                        ? probe.data.messages
+                        : [];
+
+                    if (activeJobId) {
+                        inFlightCreationIdsRef.current.delete(targetInitialId);
+                        if (fetchedMsgs.length > 0) {
+                            setMessagesBySession((prev) => ({
+                                ...prev,
+                                [targetInitialId]: mergeUniqueMessages(
+                                    prev[targetInitialId] || [],
+                                    fetchedMsgs
+                                ),
+                            }));
+                        }
+                        registerPendingJob({
+                            jobId: activeJobId,
+                            sessionId: targetInitialId,
+                            fastGreeting,
+                            questionText: text,
+                        });
+                        return;
+                    }
+
+                    const lastMsg = fetchedMsgs[fetchedMsgs.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant') {
+                        inFlightCreationIdsRef.current.delete(targetInitialId);
+                        setDraftStageInfo(null);
+                        setMessagesBySession((prev) => ({
+                            ...prev,
+                            [targetInitialId]: mergeUniqueMessages(
+                                prev[targetInitialId] || [],
+                                fetchedMsgs
+                            ),
+                        }));
+                        return;
+                    }
+                } catch {
+                    // Prossegue para o tratamento de erro real caso a sessão não exista/não tenha job
+                }
+            }
+
             await new Promise((r) => window.setTimeout(r, 450));
             inFlightCreationIdsRef.current.delete(targetInitialId);
             setDraftStageInfo(null);
