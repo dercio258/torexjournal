@@ -263,6 +263,12 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         expect(row.leaseEpoch).toBe(3);
         expect(row.syncTier).toBe('HOT');
 
+        expect(overview.correlations.onlineWorkersCount).toBe(2);
+        expect(overview.correlations.unassignedCount).toBe(0);
+        const w1 = overview.workers.find((w: any) => w.workerId === 'vps-win-1');
+        expect(w1?.accountTags).toHaveLength(1);
+        expect(w1?.accountTags[0].accountMask).toBe('MT5 ••••4321');
+
         const serialized = JSON.stringify(overview);
         expect(serialized).not.toContain('secret-user-99');
         expect(serialized).not.toContain('987654321');

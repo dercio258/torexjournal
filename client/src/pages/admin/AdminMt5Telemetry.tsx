@@ -28,6 +28,15 @@ import {
 
 type ConnectionState = 'CONNECTED' | 'SYNCING' | 'CONNECTING' | 'DISCONNECTED' | 'AUTH_FAILED';
 
+interface WorkerAccountTag {
+    telemetryId: string;
+    accountMask: string;
+    connectionState: ConnectionState;
+    syncTier: string;
+    leaseEpoch: number;
+    pingMs: number | null;
+}
+
 interface ClusterWorkerNode {
     workerId: string;
     capacity: number;
@@ -40,6 +49,28 @@ interface ClusterWorkerNode {
     activeTerminals?: number;
     assignedAccountsCount: number;
     pairBucketsCompleted: number;
+    connectedCount?: number;
+    alertCount?: number;
+    avgPingMs?: number | null;
+    tierBreakdown?: {
+        HOT: number;
+        WARM: number;
+        COLD: number;
+        QUARANTINED: number;
+    };
+    accountTags?: WorkerAccountTag[];
+}
+
+interface WorkerCorrelationItem {
+    workerId: string;
+    isOnline: boolean;
+    assignedAccountsCount: number;
+    slotUtilizationPct: number;
+    connectedRatePct: number;
+    alertCount: number;
+    avgPingMs: number | null;
+    cpuPercent: number | null;
+    memoryPercent: number | null;
 }
 
 interface AnonymizedMt5Account {
@@ -72,6 +103,13 @@ interface Mt5ClusterOverviewResponse {
     };
     stateSummary: Record<ConnectionState, number>;
     workers: ClusterWorkerNode[];
+    correlations?: {
+        onlineWorkersCount: number;
+        unassignedCount: number;
+        pairStrideBalanceGap: number;
+        avgAccountsPerOnlineWorker: number;
+        workerCorrelation: WorkerCorrelationItem[];
+    };
     accounts: AnonymizedMt5Account[];
 }
 
@@ -368,6 +406,65 @@ export const AdminMt5Telemetry = () => {
                                     </div>
                                 </div>
 
+                                <div className="flex items-center justify-between text-[11px] text-fg-muted">
+                                    <span>
+                                        Conectadas: <strong className="text-fg">{w.connectedCount ?? 0}</strong> · Alertas:{' '}
+                                        <strong className={cn((w.alertCount ?? 0) > 0 ? 'text-danger-fg' : 'text-fg')}>
+                                            {w.alertCount ?? 0}
+                                        </strong>
+                                    </span>
+                                    <span>
+                                        Ping médio: <strong className="text-fg">{w.avgPingMs !== null && w.avgPingMs !== undefined ? `${w.avgPingMs}ms` : '—'}</strong>
+                                    </span>
+                                </div>
+
+                                <div className="space-y-1.5 border-t border-line pt-2.5">
+                                    <div className="flex items-center justify-between text-[11px] text-fg-muted">
+                                        <span>Contas associadas a este servidor</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setWorkerFilter(w.workerId)}
+                                            className="text-accent-fg hover:underline font-medium"
+                                        >
+                                            Filtrar tabela
+                                        </button>
+                                    </div>
+                                    {!w.accountTags?.length ? (
+                                        <div className="text-[11px] text-fg-subtle italic">
+                                            Nenhuma conta alocada neste nó.
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {w.accountTags.map((tag) => {
+                                                const st = STATE_META[tag.connectionState] || STATE_META.DISCONNECTED;
+                                                return (
+                                                    <span
+                                                        key={tag.telemetryId}
+                                                        title={`#${tag.telemetryId} · ${tag.syncTier} · e${tag.leaseEpoch}`}
+                                                        className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-fg"
+                                                    >
+                                                        <span
+                                                            className={cn(
+                                                                'h-1.5 w-1.5 rounded-full',
+                                                                st.tone === 'success'
+                                                                    ? 'bg-emerald-500'
+                                                                    : st.tone === 'info'
+                                                                      ? 'bg-sky-500'
+                                                                      : st.tone === 'warning'
+                                                                        ? 'bg-amber-500'
+                                                                        : st.tone === 'danger'
+                                                                          ? 'bg-rose-500'
+                                                                          : 'bg-fg-subtle',
+                                                            )}
+                                                        />
+                                                        {tag.accountMask}
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="flex items-center justify-between pt-1">
                                     <span className="text-[11px] text-fg-muted">
                                         Terminais ativos: {w.activeTerminals ?? 0}
@@ -385,6 +482,98 @@ export const AdminMt5Telemetry = () => {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                )}
+            </AdminSectionCard>
+
+            {/* Correlações Servidor × Contas */}
+            <AdminSectionCard
+                title={`Correlações Servidor × Contas (Balanceador K=${data?.stride ?? 2})`}
+                subtitle="Relação entre ocupação de slots, saúde de hardware (CPU/RAM), latência e estabilidade das contas por nó"
+                icon={<Activity className="h-4 w-4" />}
+            >
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 mb-4">
+                    <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                        <div className="text-[11px] text-fg-muted">Servidores Online</div>
+                        <div className="text-lg font-bold text-fg mt-0.5">
+                            {data?.correlations?.onlineWorkersCount ?? 0}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                        <div className="text-[11px] text-fg-muted">Média Contas / Servidor</div>
+                        <div className="text-lg font-bold text-fg mt-0.5">
+                            {data?.correlations?.avgAccountsPerOnlineWorker ?? 0}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                        <div className="text-[11px] text-fg-muted">Desvio de Carga (Gap)</div>
+                        <div className="text-lg font-bold text-fg mt-0.5">
+                            {data?.correlations?.pairStrideBalanceGap ?? 0}
+                        </div>
+                    </div>
+                    <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                        <div className="text-[11px] text-fg-muted">Sem Servidor Atribuído</div>
+                        <div className={cn('text-lg font-bold mt-0.5', (data?.correlations?.unassignedCount ?? 0) > 0 ? 'text-amber-500' : 'text-fg')}>
+                            {data?.correlations?.unassignedCount ?? 0}
+                        </div>
+                    </div>
+                </div>
+
+                {!data?.correlations?.workerCorrelation?.length ? (
+                    <p className="text-xs text-fg-muted">Sem dados suficientes de correlação entre servidores.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                            <thead className="border-b border-line bg-surface-2/40 text-[11px] uppercase tracking-wider text-fg-muted">
+                                <tr>
+                                    <th className="px-3 py-2.5 font-semibold">Servidor</th>
+                                    <th className="px-3 py-2.5 font-semibold">Contas</th>
+                                    <th className="px-3 py-2.5 font-semibold">Ocupação Slots</th>
+                                    <th className="px-3 py-2.5 font-semibold">Taxa Conectada</th>
+                                    <th className="px-3 py-2.5 font-semibold">CPU / RAM</th>
+                                    <th className="px-3 py-2.5 font-semibold">Ping Médio</th>
+                                    <th className="px-3 py-2.5 font-semibold">Alertas</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-line">
+                                {data.correlations.workerCorrelation.map((corr) => (
+                                    <tr key={corr.workerId} className="hover:bg-surface-2/30">
+                                        <td className="px-3 py-2.5 font-mono font-semibold text-fg whitespace-nowrap">
+                                            {corr.workerId}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap">{corr.assignedAccountsCount}</td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-1.5 w-20 rounded-full bg-surface-2 overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-accent"
+                                                        style={{ width: `${Math.min(100, corr.slotUtilizationPct)}%` }}
+                                                    />
+                                                </div>
+                                                <span className="font-mono">{corr.slotUtilizationPct}%</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <AdminBadge tone={corr.connectedRatePct >= 80 ? 'success' : corr.connectedRatePct >= 50 ? 'warning' : 'danger'}>
+                                                {corr.connectedRatePct}%
+                                            </AdminBadge>
+                                        </td>
+                                        <td className="px-3 py-2.5 font-mono text-fg-muted whitespace-nowrap">
+                                            {corr.cpuPercent !== null ? `${corr.cpuPercent}%` : '—'} /{' '}
+                                            {corr.memoryPercent !== null ? `${corr.memoryPercent}%` : '—'}
+                                        </td>
+                                        <td className="px-3 py-2.5 font-mono text-fg-muted whitespace-nowrap">
+                                            {corr.avgPingMs !== null ? `${corr.avgPingMs}ms` : '—'}
+                                        </td>
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <AdminBadge tone={corr.alertCount > 0 ? 'danger' : 'neutral'}>
+                                                {corr.alertCount}
+                                            </AdminBadge>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </AdminSectionCard>

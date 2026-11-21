@@ -813,11 +813,102 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             totalConnectedAccounts,
             tierSummary,
             stateSummary,
-            workers: workers.map((w) => ({
-                ...w,
-                assignedAccountsCount: counts[w.workerId] || 0,
-                pairBucketsCompleted: Math.floor((counts[w.workerId] || 0) / this.getPairStride()),
-            })),
+            workers: workers.map((w) => {
+                const wAccounts = accounts.filter((a) => a.assignedWorkerId === w.workerId);
+                const wConnected = wAccounts.filter(
+                    (a) => a.connectionState === 'CONNECTED' || a.connectionState === 'SYNCING',
+                ).length;
+                const wAlerts = wAccounts.filter(
+                    (a) => a.connectionState === 'DISCONNECTED' || a.connectionState === 'AUTH_FAILED',
+                ).length;
+                const pings = wAccounts
+                    .map((a) => a.pingMs)
+                    .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
+                const avgPingMs =
+                    pings.length > 0
+                        ? Math.round(pings.reduce((acc, v) => acc + v, 0) / pings.length)
+                        : null;
+                const wTiers = { HOT: 0, WARM: 0, COLD: 0, QUARANTINED: 0 };
+                for (const a of wAccounts) {
+                    if (a.syncTier in wTiers) {
+                        (wTiers as any)[a.syncTier]++;
+                    }
+                }
+                const assignedCount = counts[w.workerId] ?? wAccounts.length;
+                return {
+                    ...w,
+                    assignedAccountsCount: assignedCount,
+                    pairBucketsCompleted: Math.floor(assignedCount / this.getPairStride()),
+                    connectedCount: wConnected,
+                    alertCount: wAlerts,
+                    avgPingMs,
+                    tierBreakdown: wTiers,
+                    accountTags: wAccounts.map((a) => ({
+                        telemetryId: a.telemetryId,
+                        accountMask: a.accountMask,
+                        connectionState: a.connectionState,
+                        syncTier: a.syncTier,
+                        leaseEpoch: a.leaseEpoch,
+                        pingMs: a.pingMs,
+                    })),
+                };
+            }),
+            correlations: (() => {
+                const onlineWorkers = workers.filter((w) => w.isOnline);
+                const onlineCounts = onlineWorkers.map(
+                    (w) => counts[w.workerId] ?? accounts.filter((a) => a.assignedWorkerId === w.workerId).length,
+                );
+                const maxLoad = onlineCounts.length ? Math.max(...onlineCounts) : 0;
+                const minLoad = onlineCounts.length ? Math.min(...onlineCounts) : 0;
+                const unassignedCount = accounts.filter((a) => !a.assignedWorkerId).length;
+                const avgAccountsPerOnlineWorker =
+                    onlineWorkers.length > 0
+                        ? Number(
+                              (
+                                  onlineCounts.reduce((acc, v) => acc + v, 0) / onlineWorkers.length
+                              ).toFixed(2),
+                          )
+                        : 0;
+
+                const workerCorrelation = workers.map((w) => {
+                    const wAccounts = accounts.filter((a) => a.assignedWorkerId === w.workerId);
+                    const assigned = counts[w.workerId] ?? wAccounts.length;
+                    const connected = wAccounts.filter(
+                        (a) => a.connectionState === 'CONNECTED' || a.connectionState === 'SYNCING',
+                    ).length;
+                    const alerts = wAccounts.filter(
+                        (a) => a.connectionState === 'DISCONNECTED' || a.connectionState === 'AUTH_FAILED',
+                    ).length;
+                    const pings = wAccounts
+                        .map((a) => a.pingMs)
+                        .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
+                    const avgPingMs =
+                        pings.length > 0
+                            ? Math.round(pings.reduce((acc, v) => acc + v, 0) / pings.length)
+                            : null;
+                    const capacity = Math.max(1, Number(w.capacity || 1));
+                    return {
+                        workerId: w.workerId,
+                        isOnline: w.isOnline,
+                        assignedAccountsCount: assigned,
+                        slotUtilizationPct: Math.round((assigned / capacity) * 100),
+                        connectedRatePct: assigned > 0 ? Math.round((connected / assigned) * 100) : 100,
+                        alertCount: alerts,
+                        avgPingMs,
+                        cpuPercent: typeof w.cpuPercent === 'number' ? Number(w.cpuPercent.toFixed(1)) : null,
+                        memoryPercent:
+                            typeof w.memoryPercent === 'number' ? Number(w.memoryPercent.toFixed(1)) : null,
+                    };
+                });
+
+                return {
+                    onlineWorkersCount: onlineWorkers.length,
+                    unassignedCount,
+                    pairStrideBalanceGap: Math.max(0, maxLoad - minLoad),
+                    avgAccountsPerOnlineWorker,
+                    workerCorrelation,
+                };
+            })(),
             accounts,
         };
     }
