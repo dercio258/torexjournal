@@ -1951,7 +1951,7 @@ export class TorexAiChatService implements OnModuleInit {
                 this.jobPresence.delete(ctx.jobId);
                 const userIsAway = Boolean(
                     presence &&
-                        (presence.away || Date.now() - presence.lastVisiblePollAt > 3500),
+                        (presence.away || Date.now() - presence.lastVisiblePollAt > 15_000),
                 );
                 if (userIsAway && this.eventEmitter) {
                     this.eventEmitter.emit('ai.reply.ready_away', {
