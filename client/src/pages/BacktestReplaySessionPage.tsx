@@ -25,11 +25,15 @@ import {
     syncSessionToBackendRedisPostgres,
 } from '../services/historicalBatchCache';
 import { useAccount } from '../context/AccountContext';
+import { useAuth } from '../context/AuthContext';
 import { getCurrentLocale } from '../context/LocaleContext';
 import { ReplayTerminalSkeleton } from '../components/ui/Skeleton';
 import { MobileBottomDock } from '../components/MobileBottomDock';
+import { FeatureUpgradeGateCard } from '../components/subscription/FeatureUpgradeGateCard';
+import { canUseReplayOfflineMode, isBasicPlanTier } from '../lib/planGate';
 import { BarChart3, FolderKanban, Layers, LayoutDashboard, Monitor } from 'lucide-react';
 import { useReplaySessionStore } from '../store/useReplaySessionStore';
+import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
 import api from '../api';
 
 export const BacktestReplaySessionPage: React.FC = () => {
@@ -37,6 +41,10 @@ export const BacktestReplaySessionPage: React.FC = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { selectedAccountId } = useAccount();
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
+    const isOnline = useOfflineSyncStore((s) => s.isOnline);
+    const canReplayOffline = canUseReplayOfflineMode(user?.tier);
     const [, setIsFullscreen] = useState(false);
     const [isMobileViewport, setIsMobileViewport] = useState<boolean>(() =>
         typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false,
@@ -120,13 +128,13 @@ export const BacktestReplaySessionPage: React.FC = () => {
     }, [sessionId]);
 
     useEffect(() => {
-        if (!needsInitialPersist) return;
+        if (!needsInitialPersist || isBasic) return;
         const alreadyStored = getBacktestSessionById(session.id);
         if (!alreadyStored) {
             const all = loadBacktestSessions();
             saveBacktestSessions([session, ...all]);
         }
-    }, [needsInitialPersist, session]);
+    }, [needsInitialPersist, session, isBasic]);
 
     const isHydratingRef = useRef<boolean>(true);
     const [resolvedSession, setResolvedSession] = useState<BacktestReplaySession | null>(null);
@@ -187,6 +195,7 @@ export const BacktestReplaySessionPage: React.FC = () => {
     // Resolves max(revision, updatedAtMs) across Local Vault, Workspace Store, Encrypted IndexedDB, and Redis/PostgreSQL
     // BEFORE mounting KLineChartProTerminal so auto-save never overwrites newer state.
     useEffect(() => {
+        if (isBasic) return;
         let active = true;
         isHydratingRef.current = true;
         setResolvedSession(null);
@@ -363,7 +372,7 @@ export const BacktestReplaySessionPage: React.FC = () => {
         return () => {
             active = false;
         };
-    }, [session.id]);
+    }, [session.id, isBasic]);
 
     const handleSessionStateSync = useCallback(
         async (payload: SessionStateSyncPayload): Promise<boolean> => {
@@ -485,6 +494,7 @@ export const BacktestReplaySessionPage: React.FC = () => {
 
     // Guaranteed flush on beforeunload, pagehide, visibilitychange (tab hidden), and unmount
     useEffect(() => {
+        if (isBasic) return;
         const accountParam = selectedAccountId !== 'all' ? selectedAccountId : undefined;
 
         const handleUnload = () => {
@@ -510,7 +520,7 @@ export const BacktestReplaySessionPage: React.FC = () => {
             if (!isHydratingRef.current) flushSessionBeforeUnload(latestVaultRef.current, accountParam);
             useReplaySessionStore.getState().clearSessionMemory();
         };
-    }, [selectedAccountId]);
+    }, [selectedAccountId, isBasic]);
 
     const handleSaveReplaySessionToBackend = useCallback(
         async (sessionPayload: any) => {
@@ -532,6 +542,65 @@ export const BacktestReplaySessionPage: React.FC = () => {
         },
         [session.id, session.name, session.strategyName, selectedAccountId]
     );
+
+    if (isBasic) {
+        return (
+            <div className="min-h-screen bg-canvas flex items-center justify-center px-4 py-8">
+                <FeatureUpgradeGateCard
+                    featureKey="trade_replay_terminal"
+                    title="Trade Replay disponível nos Planos Pro e Premium"
+                    titleEn="Trade Replay Requires Pro or Premium Plan"
+                    description="No plano Básico não é possível abrir sessões no terminal de Trade Replay nem executar simulações. Atualize para o Plano Pro ou Premium para acessar."
+                    descriptionEn="On the Basic plan you cannot open Trade Replay sessions or run simulations. Upgrade to Pro or Premium to access."
+                    bullets={[
+                        'Plano Pro: 10 sessões automáticas de backteste / mês',
+                        'Plano Premium: 100 sessões automáticas de backteste / mês',
+                        'Estratégias e playbooks ilimitados',
+                        'Diário visual candle a candle com captura de screenshots',
+                    ]}
+                    bulletsEn={[
+                        'Pro Plan: 10 automated backtesting runs / month',
+                        'Premium Plan: 100 automated backtesting runs / month',
+                        'Unlimited strategies & playbooks',
+                        'Candle-by-candle Replay Journal with screenshots',
+                    ]}
+                    onBack={() => navigate('/dashboard')}
+                    backLabel="Voltar à Dashboard"
+                    backLabelEn="Back to Dashboard"
+                />
+            </div>
+        );
+    }
+
+    if (!isOnline && !canReplayOffline) {
+        return (
+            <div className="min-h-screen bg-canvas flex items-center justify-center px-4 py-8">
+                <FeatureUpgradeGateCard
+                    requiredPlan="PREMIUM"
+                    featureKey="replay_offline_mode"
+                    title="Modo Offline no Trade Replay exclusivo do Plano Premium"
+                    titleEn="Offline Trade Replay Requires Premium Plan"
+                    description="No plano Pro o Modo Offline está ativo nas demais secções, mas o terminal de Trade Replay Offline é exclusivo do plano Premium."
+                    descriptionEn="On the Pro plan Offline Mode is active in all other sections, while Offline Trade Replay is exclusive to the Premium plan."
+                    bullets={[
+                        'Plano Pro: Modo Offline completo exceto Trade Replay',
+                        'Plano Premium: Modo Offline integral até no Trade Replay',
+                        'Cache histórico local e cofre encriptado de sessões offline',
+                        '100 sessões automáticas de Backteste / mês',
+                    ]}
+                    bulletsEn={[
+                        'Pro Plan: Offline Mode in all sections except Trade Replay',
+                        'Premium Plan: Full Offline Mode including Trade Replay',
+                        'Local historical candle cache & encrypted offline sessions',
+                        '100 automated Backtesting runs / month',
+                    ]}
+                    onBack={() => navigate('/dashboard')}
+                    backLabel="Voltar à Dashboard"
+                    backLabelEn="Back to Dashboard"
+                />
+            </div>
+        );
+    }
 
     if (isMobileViewport) {
         const isEn = getCurrentLocale() === 'en';

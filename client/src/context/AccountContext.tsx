@@ -46,6 +46,7 @@ export interface TradingAccount {
     zeroBalanceSince?: string | null;
     inactivityDisconnectAt?: string | null;
     appToken: string;
+    appTokenMasked?: string;
     userId: string;
     isPrimary: boolean;
     isArchived: boolean;
@@ -98,6 +99,7 @@ interface AccountContextType {
     restoreAccount: (id: string) => Promise<void>;
     deleteAccount: (id: string, force?: boolean) => Promise<void>;
     regenerateToken: (id: string) => Promise<string>;
+    revealToken: (id: string) => Promise<string>;
     getTransactions: (accountId: string) => Promise<AccountTransaction[]>;
     addTransaction: (accountId: string, data: { type: string; amount: number; description?: string; date?: string }) => Promise<AccountTransaction>;
     // Manager Modal Controls
@@ -131,10 +133,11 @@ function writeCachedAccounts(list: TradingAccount[]) {
             localStorage.removeItem(ACCOUNTS_CACHE_KEY);
             return;
         }
-        localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify(list));
+        const sanitized = list.map((acc) => ({ ...acc, appToken: '' }));
+        localStorage.setItem(ACCOUNTS_CACHE_KEY, JSON.stringify(sanitized));
         const userScope = getCurrentUserScope();
         if (userScope && userScope !== 'anon') {
-            void upsertAccountsInIDB(userScope, list);
+            void upsertAccountsInIDB(userScope, sanitized);
         }
     } catch {
         // ignore storage quota errors
@@ -429,6 +432,11 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return res.data.token;
     };
 
+    const revealToken = async (id: string): Promise<string> => {
+        const res = await api.post(`/accounts/${id}/token/reveal`);
+        return String(res.data?.token || '');
+    };
+
     const getTransactions = async (accountId: string) => {
         const res = await api.get(`/accounts/${accountId}/transactions`);
         return res.data;
@@ -482,6 +490,7 @@ export const AccountProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 restoreAccount,
                 deleteAccount,
                 regenerateToken,
+                revealToken,
                 getTransactions,
                 addTransaction,
                 isManagerOpen,

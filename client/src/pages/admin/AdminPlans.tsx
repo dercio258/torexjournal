@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Edit, Check, Gift, Sparkles, Power, Users, Clock, ShieldCheck, CreditCard, Plus } from 'lucide-react';
+import { Edit, Check, Gift, Sparkles, Power, Users, Clock, ShieldCheck, CreditCard, Plus, TrendingUp, Lock, BarChart3, RefreshCw } from 'lucide-react';
 import {
     AdminBadge,
     AdminBanner,
@@ -23,6 +23,50 @@ export const AdminPlans = () => {
         tier: string;
         totalTrialsGranted: number;
     } | null>(null);
+    const [conversionInsights, setConversionInsights] = useState<{
+        windowDays: number;
+        funnel: {
+            totalUsers: number;
+            trialUsedUsers: number;
+            activeTrialSubs: number;
+            activePaidSubs: number;
+            estimatedMrrUsd: number;
+            totalTrialsActivated: number;
+            totalTrialsConverted: number;
+            trialToPaidRatePct: number;
+            recurringRenewedUsers: number;
+            paidUsersTotal: number;
+            renewalRatePct: number;
+            expiringSoonTotal: number;
+            expiringSoonPaid: number;
+            expiringSoonTrial: number;
+            trialStartEvents: number;
+            checkoutStartEvents: number;
+            purchaseEvents: number;
+        };
+        trialBreakdown: Array<{
+            tier: string;
+            trialDays: number;
+            activated: number;
+            convertedToPaid: number;
+            conversionRatePct: number;
+        }>;
+        modalBehavior: {
+            pricingModalOpens: number;
+            renewalModalImpressions: number;
+            renewalModalClicks: number;
+            renewalModalDismisses: number;
+            renewalBannerClicks: number;
+            headerExpiryClicks: number;
+            renewalCtrPct: number;
+        };
+        lockedFeatureDemand: Array<{
+            feature: string;
+            clicks: number;
+            uniqueUsers: number;
+        }>;
+    } | null>(null);
+    const [isLoadingInsights, setIsLoadingInsights] = useState(false);
     const [isTogglingTrial, setIsTogglingTrial] = useState(false);
     const [banner, setBanner] = useState<{ tone: 'success' | 'warning' | 'danger' | 'info'; message: string } | null>(null);
 
@@ -33,9 +77,19 @@ export const AdminPlans = () => {
         description: '',
         features: '', // comma separated string for input
         monthlyPrice: '',
-        annualDiscountPercent: '20',
+        annualMonthlyPrice: '',
+        compareAtPrice: '',
+        promoDiscountPercent: '25',
+        monthlyDiscountPercent: '20',
+        quarterlyDiscountPercent: '5',
+        annualDiscountPercent: '25',
+        biennialDiscountPercent: '29',
+        usdToMznRate: '74',
+        monthlyPriceMzn: '',
+        maxTradingAccounts: '1',
+        monthlyBacktestsLimit: '0',
         trialDays: '0',
-        aiDailyCredits: '100'
+        aiDailyCredits: '0'
     });
     const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -43,7 +97,20 @@ export const AdminPlans = () => {
     useEffect(() => {
         fetchPlans();
         fetchTrialCampaign();
+        fetchConversionInsights();
     }, []);
+
+    const fetchConversionInsights = async () => {
+        setIsLoadingInsights(true);
+        try {
+            const { data } = await api.get('/admin/subscription-conversion-insights?days=30');
+            setConversionInsights(data);
+        } catch (error) {
+            console.error('Failed to load conversion insights:', error);
+        } finally {
+            setIsLoadingInsights(false);
+        }
+    };
 
     const fetchPlans = async () => {
         try {
@@ -101,10 +168,20 @@ export const AdminPlans = () => {
                 description: newPlan.description,
                 features: newPlan.features.split(',').map((f: string) => f.trim()).filter((f: string) => f),
                 monthlyPrice: parseFloat(newPlan.monthlyPrice),
-                annualDiscountPercent: parseInt(newPlan.annualDiscountPercent),
+                annualMonthlyPrice: newPlan.annualMonthlyPrice ? parseFloat(newPlan.annualMonthlyPrice) : null,
+                compareAtPrice: newPlan.compareAtPrice ? parseFloat(newPlan.compareAtPrice) : null,
+                promoDiscountPercent: parseInt(newPlan.promoDiscountPercent) || 0,
+                monthlyDiscountPercent: parseInt(newPlan.monthlyDiscountPercent) || 20,
+                quarterlyDiscountPercent: parseInt(newPlan.quarterlyDiscountPercent) || 0,
+                annualDiscountPercent: parseInt(newPlan.annualDiscountPercent) || 25,
+                biennialDiscountPercent: parseInt(newPlan.biennialDiscountPercent) || 29,
+                usdToMznRate: parseFloat(newPlan.usdToMznRate) || 74,
+                monthlyPriceMzn: newPlan.monthlyPriceMzn ? parseFloat(newPlan.monthlyPriceMzn) : null,
+                maxTradingAccounts: parseInt(newPlan.maxTradingAccounts) || 1,
+                monthlyBacktestsLimit: parseInt(newPlan.monthlyBacktestsLimit) || 0,
                 trialEnabled: parseInt(newPlan.trialDays) > 0,
-                trialDays: parseInt(newPlan.trialDays),
-                aiDailyCredits: parseInt(newPlan.aiDailyCredits) || 100,
+                trialDays: parseInt(newPlan.trialDays) || 0,
+                aiDailyCredits: Math.max(0, parseInt(newPlan.aiDailyCredits) || 0),
                 isActive: true
             };
 
@@ -118,7 +195,25 @@ export const AdminPlans = () => {
 
             setIsModalOpen(false);
             setEditingPlanId(null);
-            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
+            setNewPlan({
+                tier: '',
+                description: '',
+                features: '',
+                monthlyPrice: '',
+                annualMonthlyPrice: '',
+                compareAtPrice: '',
+                promoDiscountPercent: '25',
+                monthlyDiscountPercent: '20',
+                quarterlyDiscountPercent: '5',
+                annualDiscountPercent: '25',
+                biennialDiscountPercent: '29',
+                usdToMznRate: '74',
+                monthlyPriceMzn: '',
+                maxTradingAccounts: '1',
+                monthlyBacktestsLimit: '0',
+                trialDays: '0',
+                aiDailyCredits: '0',
+            });
             fetchPlans();
         } catch (error: any) {
             console.error(error);
@@ -133,15 +228,25 @@ export const AdminPlans = () => {
 
     const openEditModal = (plan: any) => {
         const defaultCredits =
-            plan.tier === 'PREMIUM' ? 20000 : plan.tier === 'PRO' ? 2000 : 100;
+            plan.tier === 'PREMIUM' ? 4000 : plan.tier === 'PRO' ? 1500 : 0;
         setEditingPlanId(plan.id);
         setNewPlan({
             tier: plan.tier,
             description: plan.description || '',
             features: plan.features?.join(', ') || '',
-            monthlyPrice: plan.monthlyPrice.toString(),
-            annualDiscountPercent: plan.annualDiscountPercent.toString(),
-            trialDays: plan.trialDays.toString(),
+            monthlyPrice: plan.monthlyPrice?.toString() || '',
+            annualMonthlyPrice: plan.annualMonthlyPrice?.toString() || '',
+            compareAtPrice: plan.compareAtPrice?.toString() || '',
+            promoDiscountPercent: (plan.promoDiscountPercent ?? 25).toString(),
+            monthlyDiscountPercent: (plan.monthlyDiscountPercent ?? 20).toString(),
+            quarterlyDiscountPercent: (plan.quarterlyDiscountPercent ?? 5).toString(),
+            annualDiscountPercent: (plan.annualDiscountPercent ?? 25).toString(),
+            biennialDiscountPercent: (plan.biennialDiscountPercent ?? 29).toString(),
+            usdToMznRate: (plan.usdToMznRate ?? 74).toString(),
+            monthlyPriceMzn: plan.monthlyPriceMzn?.toString() || '',
+            maxTradingAccounts: (plan.maxTradingAccounts ?? (plan.tier === 'BASIC' ? 1 : -1)).toString(),
+            monthlyBacktestsLimit: (plan.monthlyBacktestsLimit ?? (plan.tier === 'PREMIUM' ? 100 : plan.tier === 'PRO' ? 10 : 0)).toString(),
+            trialDays: (plan.trialDays ?? 0).toString(),
             aiDailyCredits: (plan.aiDailyCredits ?? defaultCredits).toString()
         });
         setIsModalOpen(true);
@@ -191,28 +296,28 @@ export const AdminPlans = () => {
                     tone="info"
                 />
                 <AdminStatCard
-                    label="Campanha Trial"
-                    value={trialCampaign?.active ? 'Ativa' : 'Pausada'}
-                    hint={`${trialCampaign?.trialDays || 30} dias Premium`}
+                    label="Política de Trials"
+                    value="30d / 14d / 7d"
+                    hint="Básico · Pro · Premium (1x)"
                     icon={<Gift className="h-4 w-4" />}
                     tone={trialCampaign?.active ? 'accent' : 'default'}
                 />
                 <AdminStatCard
                     label="Trials Concedidos"
                     value={trialCampaign?.totalTrialsGranted ?? 0}
-                    hint="Total de onboarding"
+                    hint="Histórico total na base"
                     icon={<Users className="h-4 w-4" />}
                     tone="warning"
                 />
                 <AdminStatCard
-                    label="Plano do Trial"
-                    value={trialCampaign?.tier || 'PREMIUM'}
-                    hint="Tier automático"
-                    icon={<ShieldCheck className="h-4 w-4" />}
+                    label="Conversão Trial → Pago"
+                    value={`${conversionInsights?.funnel?.trialToPaidRatePct ?? 0}%`}
+                    hint={`${conversionInsights?.funnel?.totalTrialsConverted ?? 0} de ${conversionInsights?.funnel?.totalTrialsActivated ?? 0} nos últimos 30d`}
+                    icon={<TrendingUp className="h-4 w-4" />}
                 />
             </div>
 
-            {/* CARD INSTITUCIONAL: CAMPANHA DE PERÍODO DE TESTE (TRIAL 30 DIAS) */}
+            {/* CARD INSTITUCIONAL: ESTRUTURA DE TRIAL POR TIER */}
             <div className="bg-surface border border-line rounded-2xl p-6 sm:p-7 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-80 h-80 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
 
@@ -223,36 +328,35 @@ export const AdminPlans = () => {
                                 <Gift size={18} />
                             </div>
                             <span className="text-xs font-bold uppercase tracking-widest text-fg-muted">
-                                Campanha Global de Onboarding
+                                Política Escalonada de Trials
                             </span>
                             <AdminBadge tone={trialCampaign?.active ? 'success' : 'neutral'} dot>
-                                {trialCampaign?.active ? 'Campanha Ativa' : 'Pausada'}
+                                {trialCampaign?.active ? 'Auto-Onboarding Ativo' : 'Seleção no Modal de Planos'}
                             </AdminBadge>
                         </div>
 
                         <h2 className="text-xl sm:text-2xl font-bold text-fg tracking-tight">
-                            Período de Teste Gratuito (Trial de 30 Dias Premium)
+                            Período de Teste Gratuito por Plano (Básico 30d · Pro 14d · Premium 7d)
                         </h2>
 
                         <p className="text-xs sm:text-sm text-fg-muted leading-relaxed">
-                            Quando ativada, qualquer novo trader que acessar o sistema sem um plano ativo recebe
-                            automaticamente <strong className="text-fg font-semibold">30 dias de Plano Premium grátis</strong> de forma instantânea, com disparo de e-mail formal de boas-vindas. Usuários que já usufruíram do teste uma vez são bloqueados de receber novamente.
+                            Cada nova conta elegível pode ativar <strong className="text-fg font-semibold">1 único período gratuito</strong> escolhendo no seletor do plano: <strong className="text-fg">Básico (30 dias)</strong>, <strong className="text-fg">Pro (14 dias)</strong> ou <strong className="text-fg">Premium (7 dias)</strong>. A elegibilidade é validada no backend com trava transacional para impedir reutilização.
                         </p>
 
                         <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-fg-muted">
                             <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
                                 <ShieldCheck size={14} className="text-accent-fg" />
-                                <span>Plano Concedido: <strong className="text-fg">PREMIUM (PRO)</strong></span>
+                                <span>Básico: <strong className="text-fg">30 dias</strong> · Pro: <strong className="text-fg">14 dias</strong> · Premium: <strong className="text-fg">7 dias</strong></span>
                             </div>
 
                             <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
                                 <Clock size={14} className="text-amber-500" />
-                                <span>Duração: <strong className="text-fg">{trialCampaign?.trialDays || 30} Dias</strong></span>
+                                <span>Alertas de Renovação: <strong className="text-fg">Últimos 5 dias</strong></span>
                             </div>
 
                             <div className="flex items-center gap-1.5 bg-surface-2 px-3 py-1.5 rounded-xl border border-line">
                                 <Users size={14} className="text-sky-500" />
-                                <span>Total Beneficiados: <strong className="text-accent-fg font-bold">{trialCampaign?.totalTrialsGranted ?? 0} traders</strong></span>
+                                <span>Contas com Trial Usado: <strong className="text-accent-fg font-bold">{conversionInsights?.funnel?.trialUsedUsers ?? trialCampaign?.totalTrialsGranted ?? 0}</strong></span>
                             </div>
                         </div>
                     </div>
@@ -265,12 +369,10 @@ export const AdminPlans = () => {
                             isLoading={isTogglingTrial}
                             icon={trialCampaign?.active ? <Power size={16} /> : <Sparkles size={16} />}
                         >
-                            {trialCampaign?.active ? 'Pausar Período de Teste' : 'Ativar Período de Teste (30 Dias)'}
+                            {trialCampaign?.active ? 'Pausar Auto-Trial Global' : 'Ativar Auto-Trial Global'}
                         </Button>
                         <span className="text-[11px] text-fg-subtle text-center lg:text-right">
-                            {trialCampaign?.active
-                                ? 'Novos usuários recebem 30 dias automaticamente'
-                                : 'Novos trials suspensos até nova ativação'}
+                            O seletor de trial no modal permanece exclusivo para 1ª ativação por conta.
                         </span>
                     </div>
                 </div>
@@ -305,18 +407,22 @@ export const AdminPlans = () => {
                             )}
 
                             <div className="flex justify-between text-sm pt-2 border-t border-line">
-                                <span className="text-fg-muted">Preço Mensal</span>
-                                <span className="text-fg font-medium">$ {plan.monthlyPrice} USD</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-fg-muted">Preço Anual (Equiv.)</span>
-                                <span className="text-accent-fg font-medium">
-                                    $ {(Number(plan.monthlyPrice) * 12 * (1 - Number(plan.annualDiscountPercent) / 100)).toFixed(2)} USD
+                                <span className="text-fg-muted">Preço Base / Mensal (BF)</span>
+                                <span className="text-fg font-medium">
+                                    $ {plan.monthlyPrice} → $ {(Number(plan.monthlyPrice) * (1 - Number(plan.monthlyDiscountPercent ?? 20) / 100)).toFixed(2)} USD (-{plan.monthlyDiscountPercent ?? 20}%)
                                 </span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-fg-muted">Desconto Anual</span>
-                                <span className="text-accent-fg font-medium">{plan.annualDiscountPercent}%</span>
+                                <span className="text-fg-muted">Descontos (Trim / Anual / Bi)</span>
+                                <span className="text-accent-fg font-medium">
+                                    -{plan.quarterlyDiscountPercent ?? 5}% / -{plan.annualDiscountPercent ?? 25}% / -{plan.biennialDiscountPercent ?? 29}%
+                                </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-fg-muted">Câmbio DB (MZN)</span>
+                                <span className="text-fg font-mono text-xs">
+                                    1 USD = {plan.usdToMznRate ?? 74} MZN ({plan.monthlyPriceMzn ?? Math.round(Number(plan.monthlyPrice) * (1 - Number(plan.monthlyDiscountPercent ?? 20) / 100) * 74)} MZN/mês)
+                                </span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-fg-muted">Dias de Teste</span>
@@ -347,6 +453,193 @@ export const AdminPlans = () => {
                         </Button>
                     </Card>
                 ))}
+            </div>
+
+            {/* TELEMETRIA DE CONVERSÃO, TRIALS, RENOVAÇÃO & GATES PRO */}
+            <div className="bg-surface border border-line rounded-2xl p-6 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                            <BarChart3 size={18} className="text-accent-fg" />
+                            <h2 className="text-lg font-bold text-fg">
+                                Comportamento de Conversão, Trials &amp; Renovação (30d)
+                            </h2>
+                        </div>
+                        <p className="text-xs text-fg-muted">
+                            Acompanhamento em tempo real de trials por tier, renovações, interação nos alertas de vencimento (5 dias) e cliques em recursos bloqueados.
+                        </p>
+                    </div>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={fetchConversionInsights}
+                        isLoading={isLoadingInsights}
+                        icon={<RefreshCw size={13} />}
+                    >
+                        Atualizar Telemetria
+                    </Button>
+                </div>
+
+                {conversionInsights && (
+                    <>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+                                    Conversão Trial → Pago
+                                </span>
+                                <div className="text-2xl font-bold text-emerald-400 tabular-nums">
+                                    {conversionInsights.funnel.trialToPaidRatePct}%
+                                </div>
+                                <p className="text-[11px] text-fg-subtle">
+                                    {conversionInsights.funnel.totalTrialsConverted} convertidos de {conversionInsights.funnel.totalTrialsActivated} trials (30d)
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+                                    Taxa de Renovação
+                                </span>
+                                <div className="text-2xl font-bold text-fg tabular-nums">
+                                    {conversionInsights.funnel.renewalRatePct}%
+                                </div>
+                                <p className="text-[11px] text-fg-subtle">
+                                    {conversionInsights.funnel.recurringRenewedUsers} de {conversionInsights.funnel.paidUsersTotal} pagantes recorrentes
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
+                                    MRR Pago Estimado
+                                </span>
+                                <div className="text-2xl font-bold text-accent-fg tabular-nums font-mono">
+                                    ${conversionInsights.funnel.estimatedMrrUsd.toFixed(2)}
+                                </div>
+                                <p className="text-[11px] text-fg-subtle">
+                                    {conversionInsights.funnel.activePaidSubs} assinaturas pagas · {conversionInsights.funnel.activeTrialSubs} em trial
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-1">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">
+                                    Expiram em até 5 dias
+                                </span>
+                                <div className="text-2xl font-bold text-amber-300 tabular-nums">
+                                    {conversionInsights.funnel.expiringSoonTotal}
+                                </div>
+                                <p className="text-[11px] text-fg-subtle">
+                                    {conversionInsights.funnel.expiringSoonTrial} trials · {conversionInsights.funnel.expiringSoonPaid} pagos
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            {/* Tabela Breakdown Trials por Tier */}
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-3">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-fg-muted">
+                                    Performance de Trial por Plano
+                                </h3>
+                                <div className="space-y-2">
+                                    {conversionInsights.trialBreakdown.map((row) => (
+                                        <div
+                                            key={row.tier}
+                                            className="flex items-center justify-between rounded-lg border border-line-subtle bg-surface px-3 py-2 text-xs"
+                                        >
+                                            <div>
+                                                <div className="font-bold text-fg">
+                                                    {row.tier} <span className="text-[10px] font-normal text-fg-muted">({row.trialDays}d)</span>
+                                                </div>
+                                                <div className="text-[11px] text-fg-subtle">
+                                                    {row.activated} ativados · {row.convertedToPaid} pagos
+                                                </div>
+                                            </div>
+                                            <span className="font-mono font-bold text-emerald-400">
+                                                {row.conversionRatePct}%
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Funil de Modais e Alertas de Renovação */}
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-fg-muted">
+                                        Modais de Renovação (5d) &amp; Funil
+                                    </h3>
+                                    <span className="text-[11px] font-bold text-accent-fg">
+                                        CTR {conversionInsights.modalBehavior.renewalCtrPct}%
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Impressões Modal 5d</div>
+                                        <div className="font-bold text-fg text-base tabular-nums">
+                                            {conversionInsights.modalBehavior.renewalModalImpressions}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Cliques Renovar Modal</div>
+                                        <div className="font-bold text-emerald-400 text-base tabular-nums">
+                                            {conversionInsights.modalBehavior.renewalModalClicks}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Cliques Card Dashboard</div>
+                                        <div className="font-bold text-fg text-base tabular-nums">
+                                            {conversionInsights.modalBehavior.renewalBannerClicks}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Cliques Pill Header</div>
+                                        <div className="font-bold text-fg text-base tabular-nums">
+                                            {conversionInsights.modalBehavior.headerExpiryClicks}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Checkouts Iniciados</div>
+                                        <div className="font-bold text-fg text-base tabular-nums">
+                                            {conversionInsights.funnel.checkoutStartEvents}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg bg-surface border border-line-subtle p-2.5">
+                                        <div className="text-fg-subtle text-[10px]">Compras Confirmadas</div>
+                                        <div className="font-bold text-accent-fg text-base tabular-nums">
+                                            {conversionInsights.funnel.purchaseEvents}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Demanda por Cadeados / Recursos PRO */}
+                            <div className="rounded-xl border border-line bg-canvas-subtle p-4 space-y-3">
+                                <div className="flex items-center gap-1.5">
+                                    <Lock size={13} className="text-amber-400" />
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-fg-muted">
+                                        Gatilhos de Upgrade (Cadeados)
+                                    </h3>
+                                </div>
+                                {conversionInsights.lockedFeatureDemand.length === 0 ? (
+                                    <p className="text-xs text-fg-subtle py-4 text-center">
+                                        Ainda sem cliques registados em cadeados nos últimos 30 dias.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                        {conversionInsights.lockedFeatureDemand.map((item) => (
+                                            <div
+                                                key={item.feature}
+                                                className="flex items-center justify-between rounded-lg border border-line-subtle bg-surface px-3 py-1.5 text-xs"
+                                            >
+                                                <span className="font-mono text-[11px] text-fg truncate max-w-[160px]" title={item.feature}>
+                                                    {item.feature}
+                                                </span>
+                                                <span className="text-[11px] font-semibold text-amber-400 tabular-nums shrink-0">
+                                                    {item.clicks} cliques ({item.uniqueUsers} u.)
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
 
             <Modal
@@ -389,30 +682,123 @@ export const AdminPlans = () => {
                             placeholder="Ex: Acesso VIP, Sinais Diários, Suporte 24h"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-fg-muted mb-1">Preço Mensal (USD)</label>
-                        <input
-                            type="number"
-                            step="0.01"
-                            value={newPlan.monthlyPrice}
-                            onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })}
-                            className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
-                            placeholder="19"
-                            required
-                        />
-                        <p className="text-[11px] text-fg-subtle mt-1">
-                            Equivalente estimado em MZN: {(Number(newPlan.monthlyPrice || 0) * 65).toLocaleString('pt-MZ')} MZN
-                        </p>
-                    </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-fg-muted mb-1">Desc. Anual (%)</label>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Preço Mensal (USD)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={newPlan.monthlyPrice}
+                                onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="Ex: 2.69 / 13.49 / 40.49"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Preço Anual/mês (USD)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={newPlan.annualMonthlyPrice}
+                                onChange={(e) => setNewPlan({ ...newPlan, annualMonthlyPrice: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="Ex: 1.99 / 9.99 / 29.99"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Preço Antigo (USD)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={newPlan.compareAtPrice}
+                                onChange={(e) => setNewPlan({ ...newPlan, compareAtPrice: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="Ex: 10 / 29 / 49.99"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Desconto Badge (%)</label>
+                            <input
+                                type="number"
+                                value={newPlan.promoDiscountPercent}
+                                onChange={(e) => setNewPlan({ ...newPlan, promoDiscountPercent: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="35 / 51 / 59"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Câmbio DB (MZN por $1)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={newPlan.usdToMznRate}
+                                onChange={(e) => setNewPlan({ ...newPlan, usdToMznRate: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="74"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                        <div>
+                            <label className="block text-xs font-medium text-fg-muted mb-1">BF Mensal (%)</label>
+                            <input
+                                type="number"
+                                value={newPlan.monthlyDiscountPercent}
+                                onChange={(e) => setNewPlan({ ...newPlan, monthlyDiscountPercent: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-fg-muted mb-1">Trimestre (%)</label>
+                            <input
+                                type="number"
+                                value={newPlan.quarterlyDiscountPercent}
+                                onChange={(e) => setNewPlan({ ...newPlan, quarterlyDiscountPercent: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-fg-muted mb-1">Anual (%)</label>
                             <input
                                 type="number"
                                 value={newPlan.annualDiscountPercent}
                                 onChange={(e) => setNewPlan({ ...newPlan, annualDiscountPercent: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-fg-muted mb-1">Bianual (%)</label>
+                            <input
+                                type="number"
+                                value={newPlan.biennialDiscountPercent}
+                                onChange={(e) => setNewPlan({ ...newPlan, biennialDiscountPercent: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg focus:outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Contas Trading</label>
+                            <input
+                                type="number"
+                                value={newPlan.maxTradingAccounts}
+                                onChange={(e) => setNewPlan({ ...newPlan, maxTradingAccounts: e.target.value })}
                                 className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
-                                placeholder="20"
+                                placeholder="1 ou -1 (ilimitado)"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-fg-muted mb-1">Backtests / mês</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={newPlan.monthlyBacktestsLimit}
+                                onChange={(e) => setNewPlan({ ...newPlan, monthlyBacktestsLimit: e.target.value })}
+                                className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="0 / 10 / 100"
                             />
                         </div>
                         <div>
@@ -429,7 +815,7 @@ export const AdminPlans = () => {
 
                     <div>
                         <label className="block text-sm font-medium text-fg-muted mb-1">
-                            Créditos Diários de IA (reseta a cada dia)
+                            Créditos AI Mensais
                         </label>
                         <input
                             type="number"
@@ -437,7 +823,7 @@ export const AdminPlans = () => {
                             value={newPlan.aiDailyCredits}
                             onChange={(e) => setNewPlan({ ...newPlan, aiDailyCredits: e.target.value })}
                             className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
-                            placeholder="Ex: 100 (BASIC), 2000 (PRO), 20000 (PREMIUM)"
+                            placeholder="Ex: 0 (BASIC), 1500 (PRO), 4000 (PREMIUM)"
                             required
                         />
                     </div>

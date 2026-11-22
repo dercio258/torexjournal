@@ -25,10 +25,13 @@ export class PushCopyAiService {
 
         const rawModel =
             (this.configService?.get<string>('GEMINI_MODEL') || process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
+        const lowerRawModel = rawModel.toLowerCase();
         const model =
-            rawModel.toLowerCase() === 'gemini-3.8-flash' || rawModel.toLowerCase() === 'gemini-3.1-flash-lite'
+            lowerRawModel === 'gemini-3.8-flash' || lowerRawModel === 'gemini-3.1-flash-lite'
                 ? 'gemini-2.5-flash'
-                : rawModel;
+                : lowerRawModel === 'gemini-2.5-flash-lite'
+                  ? 'gemini-3.5-flash-lite'
+                  : rawModel;
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
         try {

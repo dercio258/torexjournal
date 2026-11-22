@@ -15,10 +15,12 @@ export enum PlanTier {
 
 export const AI_DAILY_CREDITS_BY_TIER: Record<PlanTier, number> = {
     [PlanTier.FREE]: 0,
-    [PlanTier.BASIC]: 100,
-    [PlanTier.PRO]: 2000,
-    [PlanTier.PREMIUM]: 20000,
+    [PlanTier.BASIC]: 0,
+    [PlanTier.PRO]: 1500,
+    [PlanTier.PREMIUM]: 4000,
 };
+
+export const AI_MONTHLY_CREDITS_BY_TIER = AI_DAILY_CREDITS_BY_TIER;
 
 const TIER_RANK: Record<PlanTier, number> = {
     [PlanTier.FREE]: 0,
@@ -42,7 +44,7 @@ export function resolvePlanTierFromString(rawTier?: string | null): PlanTier {
 }
 
 export function resolveDefaultDailyCredits(rawTier?: string | null, configuredCredits?: number | null): number {
-    if (typeof configuredCredits === 'number' && configuredCredits > 0) {
+    if (typeof configuredCredits === 'number' && configuredCredits >= 0) {
         return configuredCredits;
     }
     const tier = resolvePlanTierFromString(rawTier);

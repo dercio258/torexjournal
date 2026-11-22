@@ -14,10 +14,15 @@ import {
     Edit3, 
     Award, 
     AlertCircle, 
-    KeyRound
+    KeyRound,
+    Lock
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { isBasicPlanTier, isRestrictedBasicBrokerName, openWorkspacePlansModal } from '../../lib/planGate';
 
 export const AccountManagerModal: React.FC = () => {
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const {
@@ -142,6 +147,16 @@ export const AccountManagerModal: React.FC = () => {
 
         try {
             const isPropFirm = formData.type === 'prop_firm' || formData.type === 'challenge' || formData.type === 'funded';
+            if (isBasic && (isPropFirm || isRestrictedBasicBrokerName(formData.broker))) {
+                setErrorMessage(
+                    isEn
+                        ? 'Prop firm accounts (FTMO, FundedNext, FundingPips, etc.) and Deriv require the Pro or Premium plan.'
+                        : 'Contas de Mesas Proprietárias (Prop Firms) e Deriv estão disponíveis apenas no Plano Pro ou Premium.'
+                );
+                openWorkspacePlansModal('account_propfirm_or_deriv', { broker: formData.broker, type: formData.type });
+                setIsSubmitting(false);
+                return;
+            }
             const propFirmRules = isPropFirm ? {
                 profitTarget: Number(formData.profitTarget) || 0,
                 dailyLossLimit: Number(formData.dailyLossLimit) || 0,
@@ -511,16 +526,37 @@ export const AccountManagerModal: React.FC = () => {
                                 </label>
                                 <select
                                     value={formData.type}
-                                    onChange={e => setFormData({ ...formData, type: e.target.value as AccountType })}
+                                    onChange={e => {
+                                        const nextType = e.target.value as AccountType;
+                                        if (isBasic && (nextType === 'prop_firm' || nextType === 'challenge' || nextType === 'funded')) {
+                                            openWorkspacePlansModal('account_propfirm_type', { type: nextType });
+                                            return;
+                                        }
+                                        setFormData({ ...formData, type: nextType });
+                                    }}
                                     className="w-full px-3.5 py-2.5 rounded-xl bg-canvas border border-line text-fg text-sm focus:border-emerald-500/60 focus:outline-none"
                                 >
                                     <option value="live">{isEn ? 'Live Capital' : 'Live (Real)'}</option>
                                     <option value="demo">Demo</option>
-                                    <option value="prop_firm">Prop Firm</option>
-                                    <option value="challenge">{isEn ? 'Evaluation Challenge' : 'Challenge (Desafio)'}</option>
-                                    <option value="funded">Funded</option>
+                                    <option value="prop_firm">{isBasic ? '🔒 Prop Firm (PRO)' : 'Prop Firm'}</option>
+                                    <option value="challenge">{isBasic ? (isEn ? '🔒 Evaluation Challenge (PRO)' : '🔒 Challenge / Desafio (PRO)') : (isEn ? 'Evaluation Challenge' : 'Challenge (Desafio)')}</option>
+                                    <option value="funded">{isBasic ? '🔒 Funded (PRO)' : 'Funded'}</option>
                                     <option value="custom">{isEn ? 'Custom' : 'Personalizada'}</option>
                                 </select>
+                                {isBasic && (
+                                    <button
+                                        type="button"
+                                        onClick={() => openWorkspacePlansModal('account_propfirm_type')}
+                                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:underline cursor-pointer"
+                                    >
+                                        <Lock size={11} />
+                                        <span>
+                                            {isEn
+                                                ? 'Prop Firms & Deriv sync require Pro or Premium'
+                                                : 'Mesas Proprietárias & Deriv disponíveis no Plano Pro'}
+                                        </span>
+                                    </button>
+                                )}
                             </div>
 
                             <div>

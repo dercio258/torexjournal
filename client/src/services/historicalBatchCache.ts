@@ -29,6 +29,7 @@ import {
     getCurrentUserScope,
     saveMediaOutboxItem,
 } from './offlineDb';
+import { canUseReplayOfflineMode, getStoredUserPlanTier } from '../lib/planGate';
 
 const DB_NAME = 'torex_historical_ohlcv_batches_v1';
 const DB_VERSION = 3;
@@ -298,6 +299,13 @@ export async function saveEncryptedSessionToIDB(
     payload: SessionVaultData
 ): Promise<{ ok: boolean; digestHex: string }> {
     if (!sessionId) return { ok: false, digestHex: '' };
+    if (
+        typeof navigator !== 'undefined' &&
+        !navigator.onLine &&
+        !canUseReplayOfflineMode(getStoredUserPlanTier())
+    ) {
+        return { ok: false, digestHex: '' };
+    }
     const vaultKey = getScopedVaultSessionKey(sessionId);
     const db = await openBatchDatabase();
     const key = await deriveSessionCryptoKey(vaultKey);
@@ -352,6 +360,13 @@ export async function loadEncryptedSessionFromIDB(
     sessionId: string
 ): Promise<{ data: SessionVaultData | null; digestHex: string; updatedAt: number | null }> {
     if (!sessionId) return { data: null, digestHex: '', updatedAt: null };
+    if (
+        typeof navigator !== 'undefined' &&
+        !navigator.onLine &&
+        !canUseReplayOfflineMode(getStoredUserPlanTier())
+    ) {
+        return { data: null, digestHex: '', updatedAt: null };
+    }
     const db = await openBatchDatabase();
     if (!db || !window.crypto?.subtle) {
         return { data: null, digestHex: '', updatedAt: null };
@@ -486,6 +501,9 @@ async function enqueuePendingSessionSync(
     accountId?: string
 ): Promise<number> {
     if (!payload?.sessionId) return 0;
+    if (!canUseReplayOfflineMode(getStoredUserPlanTier())) {
+        return 0;
+    }
     const db = await openBatchDatabase();
     if (!db || !db.objectStoreNames.contains(STORE_SYNC_OUTBOX)) return 0;
 
@@ -1137,6 +1155,13 @@ export async function getMergedCandlesFromIDB(
     latestTs: number | null;
     source: string;
 }> {
+    if (
+        typeof navigator !== 'undefined' &&
+        !navigator.onLine &&
+        !canUseReplayOfflineMode(getStoredUserPlanTier())
+    ) {
+        return { candles: [], batchCount: 0, earliestTs: null, latestTs: null, source: 'TradingView' };
+    }
     const db = await openBatchDatabase();
     if (!db) {
         return { candles: [], batchCount: 0, earliestTs: null, latestTs: null, source: 'TradingView' };

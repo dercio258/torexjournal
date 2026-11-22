@@ -80,16 +80,20 @@ export class AiService {
                 const configuredModel = (
                     this.configService.get<string>('GEMINI_MODEL') || ''
                 ).trim();
+                const remappedConfigured =
+                    configuredModel.toLowerCase() === 'gemini-2.5-flash-lite'
+                        ? 'gemini-3.5-flash-lite'
+                        : configuredModel;
                 const safeConfiguredModel =
-                    configuredModel.toLowerCase().startsWith('gemini') &&
-                    configuredModel.toLowerCase() !== 'gemini-3.8-flash' &&
-                    configuredModel.toLowerCase() !== 'gemini-3.1-flash-lite'
-                        ? configuredModel
+                    remappedConfigured.toLowerCase().startsWith('gemini') &&
+                    remappedConfigured.toLowerCase() !== 'gemini-3.8-flash' &&
+                    remappedConfigured.toLowerCase() !== 'gemini-3.1-flash-lite'
+                        ? remappedConfigured
                         : 'gemini-2.5-flash';
                 const candidates = [
                     safeConfiguredModel,
                     'gemini-2.5-flash',
-                    'gemini-2.5-flash-lite',
+                    'gemini-3.5-flash-lite',
                 ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
                 let response: any = null;

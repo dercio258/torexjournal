@@ -1,4 +1,4 @@
-import { Controller, Get, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Request, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReferralService } from './referral.service';
@@ -10,7 +10,7 @@ export class ReferralController {
 
     @Get('me')
     @Throttle({ default: { limit: 30, ttl: 60000 } })
-    async getMyReferralSummary(@Request() req) {
-        return this.referralService.getMySummary(req.user.id);
+    async getMyReferralSummary(@Request() req, @Query('context') context?: string) {
+        return this.referralService.getMySummary(req.user.id, context);
     }
 }

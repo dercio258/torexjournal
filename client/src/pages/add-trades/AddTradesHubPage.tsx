@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, ChevronRight, FileSpreadsheet, Monitor, Search, X } from 'lucide-react';
+import { ArrowRight, ChevronRight, FileSpreadsheet, Lock, Monitor, Search, X } from 'lucide-react';
 import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../../components/ui/BrokerLogo';
 import { DerivIcon, Mt5Icon } from './icons';
+import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
+import { isBasicPlanTier, openWorkspacePlansModal } from '../../lib/planGate';
 
 type CategoryFilter = 'ALL' | 'POPULAR' | 'Prop Firm' | 'Forex / ECN';
 
@@ -17,6 +19,8 @@ const getCategoryShort = (isEn: boolean): Record<string, string> => ({
 
 export const AddTradesHubPage = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const CATEGORY_SHORT = getCategoryShort(isEn);
@@ -28,6 +32,8 @@ export const AddTradesHubPage = () => {
             to: '/add-trades/deriv-sync',
             title: 'Deriv',
             tag: isEn ? 'Auto-Sync' : 'Automático',
+            requiresPro: true,
+            gateKey: 'add_trades_deriv',
             description: isEn ? 'Link your account via API token.' : 'Vincule sua conta com chave de acesso.',
             icon: (
                 <div className="w-10 h-10 rounded-xl bg-canvas-subtle border border-line flex items-center justify-center shrink-0 p-2">
@@ -39,6 +45,8 @@ export const AddTradesHubPage = () => {
             to: '/add-trades/mt5-sync',
             title: 'MetaTrader 5',
             tag: isEn ? 'Auto-Sync' : 'Automático',
+            requiresPro: true,
+            gateKey: 'add_trades_mt5_sync',
             description: isEn
                 ? 'Connect via account login, investor password & server.'
                 : 'Entre com login, senha e servidor da corretora.',
@@ -102,6 +110,10 @@ export const AddTradesHubPage = () => {
     }, [search, category]);
 
     const handleSelectBroker = (group: Mt5BrokerGroup, chosenServer?: string) => {
+        if (isBasic) {
+            openWorkspacePlansModal('brokers_propfirms_directory', { broker: group.broker });
+            return;
+        }
         const server = chosenServer || group.servers[0]?.name || '';
         const params = new URLSearchParams();
         params.set('broker', group.broker);
@@ -114,34 +126,70 @@ export const AddTradesHubPage = () => {
         <div className="space-y-4">
             {/* Primary Connection Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                {options.map((opt) => (
-                    <Link
-                        key={opt.to}
-                        to={opt.to}
-                        className="group rounded-xl border border-line bg-surface hover:bg-surface-2 hover:border-line-strong p-4 transition-all flex items-start gap-3.5"
-                    >
-                        {opt.icon}
+                {options.map((opt) => {
+                    const isLocked = Boolean((opt as any).requiresPro && isBasic);
+                    if (isLocked) {
+                        return (
+                            <button
+                                key={opt.to}
+                                type="button"
+                                onClick={() => openWorkspacePlansModal((opt as any).gateKey || 'add_trades_locked')}
+                                className="group text-left rounded-xl border border-amber-500/30 bg-surface/90 hover:bg-surface-2 hover:border-amber-500/50 p-4 transition-all flex items-start gap-3.5 cursor-pointer"
+                            >
+                                <div className="opacity-75">{opt.icon}</div>
 
-                        <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex flex-wrap items-center justify-between gap-1.5">
-                                <h2 className="text-sm font-bold text-fg group-hover:text-accent-fg transition-colors">
-                                    {opt.title}
-                                </h2>
-                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-canvas-subtle border border-line-subtle text-fg-subtle">
-                                    {opt.tag}
-                                </span>
+                                <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                        <h2 className="text-sm font-bold text-fg group-hover:text-amber-300 transition-colors flex items-center gap-1.5">
+                                            <span>{opt.title}</span>
+                                        </h2>
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                                            <Lock size={10} />
+                                            PRO
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-fg-muted leading-snug">
+                                        {opt.description}
+                                    </p>
+                                </div>
+
+                                <Lock
+                                    size={14}
+                                    className="text-amber-400 shrink-0 mt-1"
+                                />
+                            </button>
+                        );
+                    }
+
+                    return (
+                        <Link
+                            key={opt.to}
+                            to={opt.to}
+                            className="group rounded-xl border border-line bg-surface hover:bg-surface-2 hover:border-line-strong p-4 transition-all flex items-start gap-3.5"
+                        >
+                            {opt.icon}
+
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                    <h2 className="text-sm font-bold text-fg group-hover:text-accent-fg transition-colors">
+                                        {opt.title}
+                                    </h2>
+                                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-canvas-subtle border border-line-subtle text-fg-subtle">
+                                        {opt.tag}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-fg-muted leading-snug">
+                                    {opt.description}
+                                </p>
                             </div>
-                            <p className="text-xs text-fg-muted leading-snug">
-                                {opt.description}
-                            </p>
-                        </div>
 
-                        <ChevronRight
-                            size={15}
-                            className="text-fg-subtle group-hover:text-accent-fg group-hover:translate-x-0.5 transition-all shrink-0 mt-1"
-                        />
-                    </Link>
-                ))}
+                            <ChevronRight
+                                size={15}
+                                className="text-fg-subtle group-hover:text-accent-fg group-hover:translate-x-0.5 transition-all shrink-0 mt-1"
+                            />
+                        </Link>
+                    );
+                })}
             </div>
 
             {/* Brokers & Prop Firms Directory */}
@@ -217,10 +265,13 @@ export const AddTradesHubPage = () => {
                             <button
                                 type="button"
                                 onClick={() =>
-                                    navigate(`/add-trades/mt5-sync?server=${encodeURIComponent(search.trim())}`)
+                                    isBasic
+                                        ? openWorkspacePlansModal('mt5_custom_server', { server: search.trim() })
+                                        : navigate(`/add-trades/mt5-sync?server=${encodeURIComponent(search.trim())}`)
                                 }
                                 className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-accent/15 text-accent-fg border border-accent/30 text-xs font-semibold hover:bg-accent/25 transition-colors"
                             >
+                                {isBasic && <Lock size={12} />}
                                 {isEn ? `Use "${search.trim()}" on MetaTrader 5` : `Usar "${search.trim()}" no MetaTrader 5`}
                                 <ArrowRight size={13} />
                             </button>
@@ -258,10 +309,17 @@ export const AddTradesHubPage = () => {
                                                 </span>
                                             </div>
                                         </div>
-                                        <ChevronRight
-                                            size={14}
-                                            className="text-fg-subtle group-hover:text-accent-fg group-hover:translate-x-0.5 transition-all shrink-0"
-                                        />
+                                        {isBasic ? (
+                                            <span className="inline-flex items-center gap-1 text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
+                                                <Lock size={10} />
+                                                PRO
+                                            </span>
+                                        ) : (
+                                            <ChevronRight
+                                                size={14}
+                                                className="text-fg-subtle group-hover:text-accent-fg group-hover:translate-x-0.5 transition-all shrink-0"
+                                            />
+                                        )}
                                     </button>
 
                                     {matchingServers.length > 0 && (

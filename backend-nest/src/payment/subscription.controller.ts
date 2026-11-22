@@ -68,6 +68,36 @@ export class SubscriptionController {
     }
 
     @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 15, ttl: 60000 } })
+    @Post('prepare-trial-share')
+    async prepareTrialShare(
+        @Request() req,
+        @Body() body: { tier?: string; channel?: string },
+    ) {
+        return this.subscriptionService.recordTrialShareIntent(
+            req.user.id,
+            body?.tier,
+            body?.channel,
+        );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
+    @Post('activate-basic-trial')
+    async activateBasicTrial(@Request() req) {
+        return this.subscriptionService.activateTrial(req.user.id, 'BASIC', { verifyShareGate: true });
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
+    @Post('activate-trial')
+    async activateTrial(@Request() req, @Body() body: { tier?: string }) {
+        return this.subscriptionService.activateTrial(req.user.id, body?.tier || 'BASIC', {
+            verifyShareGate: true,
+        });
+    }
+
+    @UseGuards(JwtAuthGuard)
     @Throttle({ default: { limit: 10, ttl: 60000 } })
     @Post('renew')
     async renewAuto(@Request() req) {

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query, Optional } from '@nestjs/common';
 import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { DashboardService } from './dashboard.service';
 import { JournalService } from './journal.service';
@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 import { SessionService } from './session.service';
+import { WeeklyReportService } from './weekly-report.service';
 
 @Controller('dashboard')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -14,7 +15,8 @@ export class DashboardController {
     constructor(
         private readonly dashboardService: DashboardService,
         private readonly journalService: JournalService,
-        private readonly sessionService: SessionService
+        private readonly sessionService: SessionService,
+        @Optional() private readonly weeklyReportService?: WeeklyReportService,
     ) { }
 
     private resolveAccountId(req: any, queryAccountId?: string): string | undefined {
@@ -338,7 +340,20 @@ export class DashboardController {
         );
     }
 
+    @Post('report/email')
+    async sendReportEmail(
+        @Req() req,
+        @Body() body: { frequency?: string; accountId?: string },
+        @Query('accountId') queryAccountId?: string,
+    ) {
+        const accountId = this.resolveAccountId(req, queryAccountId || body?.accountId);
+        const userId = req.user.id || req.user.userId;
+        const frequency = String(body?.frequency || '').toUpperCase() === 'WEEKLY' ? 'WEEKLY' : 'MONTHLY';
+        return this.weeklyReportService?.sendReportEmailOnDemand(userId, frequency, accountId);
+    }
+
     @Post('backtest/simulate')
+    @RequirePlan(PlanTier.PRO)
     async simulateBacktest(
         @Req() req,
         @Body() body: any,
@@ -350,7 +365,7 @@ export class DashboardController {
     }
 
     @Post('backtest/save')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async saveBacktest(
         @Req() req,
         @Body() body: any,
@@ -362,7 +377,7 @@ export class DashboardController {
     }
 
     @Post('backtest/screenshot')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true }))
     async uploadBacktestScreenshot(
         @Req() req,
@@ -374,7 +389,7 @@ export class DashboardController {
     }
 
     @Post('backtest/screenshot/delete')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async deleteBacktestScreenshot(
         @Req() req,
         @Body() body: { url?: string }
@@ -384,7 +399,7 @@ export class DashboardController {
     }
 
     @Post('backtest/session-sync')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async syncReplaySession(
         @Req() req,
         @Body() body: any,
@@ -396,7 +411,7 @@ export class DashboardController {
     }
 
     @Get('backtest/session/:sessionId')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async getReplaySession(
         @Req() req,
         @Param('sessionId') sessionId: string,
@@ -412,7 +427,7 @@ export class DashboardController {
     }
 
     @Delete('backtest/session/:sessionId')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async deleteReplaySession(
         @Req() req,
         @Param('sessionId') sessionId: string
@@ -422,14 +437,14 @@ export class DashboardController {
     }
 
     @Get('backtest/strategies')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async getBacktestStrategies(@Req() req) {
         const userId = req.user.id || req.user.userId;
         return this.dashboardService.getBacktestStrategies(userId);
     }
 
     @Post('backtest/strategy-sync')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async syncBacktestStrategy(
         @Req() req,
         @Body() body: any
@@ -439,7 +454,7 @@ export class DashboardController {
     }
 
     @Delete('backtest/strategy/:strategyId')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async deleteBacktestStrategy(
         @Req() req,
         @Param('strategyId') strategyId: string
@@ -449,7 +464,7 @@ export class DashboardController {
     }
 
     @Get('backtest/history')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async getBacktestHistory(
         @Req() req,
         @Query('accountId') queryAccountId?: string,
@@ -462,7 +477,7 @@ export class DashboardController {
     }
 
     @Get('backtest/hypotheses')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async getBacktestHypotheses(
         @Req() req,
         @Query('accountId') queryAccountId?: string
@@ -473,7 +488,7 @@ export class DashboardController {
     }
 
     @Post('backtest/hypotheses')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async saveBacktestHypothesis(@Req() req, @Body() body: any) {
         const userId = req.user.id || req.user.userId;
         const resolvedAccountId = this.resolveAccountId(req, body?.accountId);
@@ -484,7 +499,7 @@ export class DashboardController {
     }
 
     @Delete('backtest/hypotheses/:id')
-    @RequirePlan(PlanTier.FREE)
+    @RequirePlan(PlanTier.PRO)
     async deleteBacktestHypothesis(@Req() req, @Param('id') id: string) {
         const userId = req.user.id || req.user.userId;
         return this.dashboardService.deleteBacktestHypothesisById(userId, id);

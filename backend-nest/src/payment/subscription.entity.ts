@@ -22,7 +22,9 @@ export enum SubscriptionStatus {
 
 export enum SubscriptionCycle {
     MONTHLY = 'MONTHLY',
+    QUARTERLY = 'QUARTERLY',
     YEARLY = 'YEARLY',
+    BIENNIAL = 'BIENNIAL',
 }
 
 @Entity('subscriptions')

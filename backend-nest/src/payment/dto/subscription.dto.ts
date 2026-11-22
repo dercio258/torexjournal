@@ -6,7 +6,7 @@ export class SubscribeMobileDto {
     tier: string;
 
     @IsString()
-    @IsIn(['MONTHLY', 'YEARLY'])
+    @IsIn(['MONTHLY', 'QUARTERLY', 'YEARLY', 'BIENNIAL'])
     cycle: string;
 
     @IsString()
@@ -32,7 +32,7 @@ export class SubscribeCardDto {
     tier: string;
 
     @IsString()
-    @IsIn(['MONTHLY', 'YEARLY'])
+    @IsIn(['MONTHLY', 'QUARTERLY', 'YEARLY', 'BIENNIAL'])
     cycle: string;
 
     @IsOptional()
@@ -68,6 +68,6 @@ export class RedeemReferralCreditsDto {
     tier: string;
 
     @IsString()
-    @IsIn(['MONTHLY', 'YEARLY'])
+    @IsIn(['MONTHLY', 'QUARTERLY', 'YEARLY', 'BIENNIAL'])
     cycle: string;
 }

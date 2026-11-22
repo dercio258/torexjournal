@@ -5,6 +5,7 @@ import { AccountType } from '../../account/account.entity';
 describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Notifications)', () => {
     function createBalancerHarness(options?: {
         accounts?: any[];
+        workers?: any[];
         positionsCountByAccount?: Record<string, number>;
         locale?: 'pt' | 'en';
     }) {
@@ -57,7 +58,7 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
             }),
         };
 
-        const workersState: any[] = [];
+        const workersState: any[] = options?.workers ? [...options.workers] : [];
         const mt5WorkerService: any = {
             getWorkerStatus: jest.fn(() => workersState),
             deriveNumericAccountId: jest.fn((login: string) => Number(login) || 1),
@@ -231,6 +232,10 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
 
     it('returns anonymized MT5 telemetry in getClusterOverview without leaking PII, balances, or full logins', async () => {
         const { balancer } = createBalancerHarness({
+            workers: [
+                { workerId: 'vps-win-1', capacity: 10, isOnline: true, cpuPercent: 32, memoryPercent: 48 },
+                { workerId: 'vps-win-2', capacity: 10, isOnline: true, cpuPercent: 18, memoryPercent: 35 },
+            ],
             accounts: [
                 {
                     id: '11111111-2222-3333-4444-555555555555',

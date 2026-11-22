@@ -6,7 +6,7 @@ import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('integrations/deriv')
 @UseGuards(JwtAuthGuard, PlanGuard)
-@RequirePlan(PlanTier.BASIC)
+@RequirePlan(PlanTier.PRO)
 export class DerivController {
     constructor(private readonly derivService: DerivService) { }
 

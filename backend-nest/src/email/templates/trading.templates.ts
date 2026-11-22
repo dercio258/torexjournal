@@ -16,7 +16,7 @@ import { EmailAccentTone, EmailTemplateDefinition, EmailTemplatePayloadMap } fro
 import { buildAppUrl, escapeHtml, formatCurrency, formatInstitutionalDate } from './utils';
 
 export const tradingTemplates: {
-    [K in 'MT5_STATUS' | 'TRADE_IMPORTED' | 'WEEKLY_SUMMARY']: EmailTemplateDefinition<
+    [K in 'MT5_STATUS' | 'TRADE_IMPORTED' | 'WEEKLY_SUMMARY' | 'MONTHLY_SUMMARY']: EmailTemplateDefinition<
         EmailTemplatePayloadMap[K]
     >;
 } = {
@@ -224,6 +224,83 @@ export const tradingTemplates: {
                 ${renderGreeting(data.userName)}
                 <p class="body-p">
                     Apresentamos a síntese quantitativa das operações encerradas na sua conta entre <strong>${escapeHtml(startStr)}</strong> e <strong>${escapeHtml(endStr)}</strong>:
+                </p>
+                ${renderMetricStrip([
+                    {
+                        label: 'Resultado Líquido',
+                        value: formatCurrency(pnl, currency, { showPlusSign: true }),
+                        tone: pnl >= 0 ? 'positive' : 'negative',
+                    },
+                    {
+                        label: 'Taxa de Acerto',
+                        value: `${winRate.toFixed(1)}%`,
+                    },
+                    {
+                        label: 'Operações',
+                        value: String(data.totalTrades || 0),
+                    },
+                ])}
+                ${lessonsHtml}
+                <p class="body-p">
+                    Revise a distribuição completa por ativo, expectativa matemática e aderência ao plano operacional na seção de relatórios.
+                </p>
+                ${renderActionButton('Abrir Relatório Completo', reportsUrl, 'slate')}
+            `;
+        },
+    },
+
+    MONTHLY_SUMMARY: {
+        category: 'Relatório Mensal',
+        tone: 'slate',
+        subject: (data) =>
+            data.subject ||
+            `Relatório mensal de performance (${formatInstitutionalDate(data.period?.start)} a ${formatInstitutionalDate(data.period?.end)}) — Torex Journal`,
+        preheader: (data) =>
+            `Resumo mensal: ${data.totalTrades} operações, ${Number(data.winRate || 0).toFixed(1)}% de acerto e resultado de ${formatCurrency(data.totalPnL || 0, data.currency || 'USD', { showPlusSign: true })}.`,
+        renderBody: (data) => {
+            const reportsUrl = buildAppUrl('/reports');
+            const currency = data.currency || 'USD';
+            const pnl = Number(data.totalPnL || 0);
+            const winRate = Number(data.winRate || 0);
+            const startStr = formatInstitutionalDate(data.period?.start);
+            const endStr = formatInstitutionalDate(data.period?.end);
+
+            const lessonsHtml =
+                data.topLessons && data.topLessons.length > 0
+                    ? `
+                    <div style="margin: 22px 0; padding: 16px 18px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px;">
+                        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #475569; margin-bottom: 10px;">
+                            Observações Recorrentes no Diário
+                        </div>
+                        <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            ${data.topLessons
+                                .slice(0, 5)
+                                .map((item, idx) => {
+                                    const borderTop =
+                                        idx > 0 ? 'border-top: 1px solid #E2E8F0;' : '';
+                                    return `
+                                        <tr>
+                                            <td style="padding: 8px 10px 8px 0; ${borderTop} width: 38px; vertical-align: top; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 12px; font-weight: 700; color: #0F172A;">
+                                                ${escapeHtml(String(item.count))}x
+                                            </td>
+                                            <td style="padding: 8px 0; ${borderTop} font-size: 13px; line-height: 1.5; color: #334155;">
+                                                ${escapeHtml(item.lesson)}
+                                            </td>
+                                        </tr>
+                                    `;
+                                })
+                                .join('')}
+                        </table>
+                    </div>
+                `
+                    : '';
+
+            return `
+                ${renderStatusEyebrow(`Período: ${startStr} — ${endStr}`, 'slate')}
+                ${renderHeading('Consolidado mensal de performance')}
+                ${renderGreeting(data.userName)}
+                <p class="body-p">
+                    Apresentamos a síntese mensal das operações encerradas na sua conta entre <strong>${escapeHtml(startStr)}</strong> e <strong>${escapeHtml(endStr)}</strong>:
                 </p>
                 ${renderMetricStrip([
                     {

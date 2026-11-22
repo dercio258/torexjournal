@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomInt } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UserEntity } from './user.entity';
+import { maskEmailAddress, maskPhoneNumber } from '../common/security/payload-envelope.util';
 
 export interface AuthGuardUserSnapshot {
     id: string;
@@ -469,19 +470,15 @@ export class UsersService implements OnModuleInit {
         return snapshot;
     }
 
-    private sanitizeToken(raw: string): string {
-        return String(raw || 'user').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48) || 'user';
-    }
-
     toSafeProfileResponse(user?: UserEntity | null) {
         if (!user) return null;
         return {
             id: user.id,
             name: user.name,
             username: user.username,
-            email: user.email,
+            email: maskEmailAddress(user.email),
             avatarUrl: user.avatarUrl || null,
-            whatsapp: user.whatsapp,
+            whatsapp: maskPhoneNumber(user.whatsapp),
             dailyLossLimit: user.dailyLossLimit,
             twoFactorEnabled: user.twoFactorEnabled,
             onboardingCompleted: user.onboardingCompleted,
@@ -580,9 +577,12 @@ export class UsersService implements OnModuleInit {
             throw new BadRequestException('Formato inválido. Envie uma imagem JPG, PNG, WEBP ou GIF válida.');
         }
 
-        const safeUser = this.sanitizeToken(userId);
-        const randomSuffix = randomBytes(8).toString('hex');
-        const filename = `avatar_${safeUser}_${Date.now()}_${randomSuffix}.${ext}`;
+        const opaqueOwnerTag = createHash('sha256')
+            .update(`torex-avatar:${userId}`)
+            .digest('hex')
+            .slice(0, 12);
+        const randomSuffix = randomBytes(12).toString('hex');
+        const filename = `av_${opaqueOwnerTag}_${randomSuffix}.${ext}`;
 
         const avatarsDir = path.join(process.cwd(), 'uploads', 'avatars');
         await fs.promises.mkdir(avatarsDir, { recursive: true });
@@ -684,7 +684,7 @@ export class UsersService implements OnModuleInit {
         const saved = await this.findOneById(userId);
         return {
             success: true,
-            whatsapp: saved?.whatsapp || cleanWhatsapp,
+            whatsapp: maskPhoneNumber(saved?.whatsapp || cleanWhatsapp),
             user: this.toSafeProfileResponse(saved),
         };
     }

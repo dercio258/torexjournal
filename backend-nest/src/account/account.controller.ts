@@ -1,26 +1,39 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AccountService } from './account.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
+import { maskSecretToken } from '../common/security/payload-envelope.util';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 
 @Controller(['account', 'accounts'])
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.BASIC)
 export class AccountController {
     constructor(private readonly accountService: AccountService) { }
 
+    private sanitizeAccount<T extends Record<string, any>>(acc: T): T & { appTokenMasked: string } {
+        if (!acc) return acc as any;
+        return {
+            ...acc,
+            appTokenMasked: maskSecretToken(acc.appToken),
+            appToken: '',
+        };
+    }
+
     /**
-     * Retorna todas as contas ativas do usuário
+     * Retorna todas as contas ativas do usuário (com token EA mascarado)
      */
     @Get()
     async getAccounts(
         @Request() req,
         @Query('includeArchived') includeArchived?: string
     ) {
-        return this.accountService.findAllByUser(req.user.id, includeArchived === 'true');
+        const accounts = await this.accountService.findAllByUser(req.user.id, includeArchived === 'true');
+        return accounts.map((acc) => this.sanitizeAccount(acc));
     }
 
     /**
@@ -28,7 +41,14 @@ export class AccountController {
      */
     @Get('summary/consolidated')
     async getConsolidatedSummary(@Request() req) {
-        return this.accountService.getConsolidatedSummary(req.user.id);
+        const summary = await this.accountService.getConsolidatedSummary(req.user.id);
+        if (summary && Array.isArray(summary.accounts)) {
+            return {
+                ...summary,
+                accounts: summary.accounts.map((acc) => this.sanitizeAccount(acc)),
+            };
+        }
+        return summary;
     }
 
     /**
@@ -36,7 +56,8 @@ export class AccountController {
      */
     @Get('primary')
     async getPrimaryAccount(@Request() req) {
-        return this.accountService.findOneByUserId(req.user.id);
+        const account = await this.accountService.findOneByUserId(req.user.id);
+        return this.sanitizeAccount(account);
     }
 
     /**
@@ -44,7 +65,8 @@ export class AccountController {
      */
     @Get(':id')
     async getAccount(@Request() req, @Param('id') id: string) {
-        return this.accountService.findOneByIdAndUser(id, req.user.id);
+        const account = await this.accountService.findOneByIdAndUser(id, req.user.id);
+        return this.sanitizeAccount(account);
     }
 
     /**
@@ -54,7 +76,8 @@ export class AccountController {
     @UseGuards(PlanGuard)
     @RequirePlan(PlanTier.BASIC)
     async createAccount(@Request() req, @Body() dto: CreateAccountDto) {
-        return this.accountService.createAccount(req.user.id, dto);
+        const account = await this.accountService.createAccount(req.user.id, dto);
+        return this.sanitizeAccount(account);
     }
 
     /**
@@ -68,7 +91,8 @@ export class AccountController {
         @Param('id') id: string,
         @Body() dto: UpdateAccountDto
     ) {
-        return this.accountService.updateAccount(id, req.user.id, dto);
+        const account = await this.accountService.updateAccount(id, req.user.id, dto);
+        return this.sanitizeAccount(account);
     }
 
     /**
@@ -123,6 +147,17 @@ export class AccountController {
     @RequirePlan(PlanTier.BASIC)
     async regenerateToken(@Request() req, @Param('id') id: string) {
         return this.accountService.regenerateAppToken(id, req.user.id);
+    }
+
+    /**
+     * Revela sob demanda o token de conexão EA desta conta
+     */
+    @Post(':id/token/reveal')
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @UseGuards(PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
+    async revealToken(@Request() req, @Param('id') id: string) {
+        return this.accountService.revealAppToken(id, req.user.id);
     }
 
     /**

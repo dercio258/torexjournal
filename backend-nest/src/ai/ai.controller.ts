@@ -15,6 +15,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 import { AiService } from './ai.service';
 import { TorexAiChatService } from './torex-ai-chat.service';
 import { AiCreditsService } from './ai-credits.service';
@@ -25,7 +27,8 @@ import { ProfileFactType } from './ai-profile-extractor';
 const PROFILE_FACT_TYPES: ProfileFactType[] = ['NAME', 'EXPERIENCE', 'STYLE', 'MARKETS', 'GOAL'];
 
 @Controller('ai')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.BASIC)
 export class AiController {
     constructor(
         private readonly aiService: AiService,

@@ -17,9 +17,20 @@ import { Queue } from 'bull';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ReferralService } from '../users/referral.service';
 
+export const TRIAL_DAYS_BY_TIER = {
+    BASIC: 30,
+    PRO: 14,
+    PREMIUM: 7,
+} as const;
+
+export const DEFAULT_USD_TO_MZN_RATE = 74;
+
+export type TrialPlanTier = keyof typeof TRIAL_DAYS_BY_TIER;
+
 @Injectable()
 export class SubscriptionService implements OnModuleInit {
     private readonly logger = new Logger(SubscriptionService.name);
+    private readonly trialShareIntentMemory = new Map<string, number>();
 
     constructor(
         private configService: ConfigService,
@@ -40,90 +51,196 @@ export class SubscriptionService implements OnModuleInit {
 
     async onModuleInit() {
         try {
-            await this.planConfigRepo.manager.query(
-                `ALTER TABLE "subscription_plan_configs" ADD COLUMN IF NOT EXISTS "aiDailyCredits" integer`
-            );
+            await this.planConfigRepo.manager.query(`
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'subscriptions_cycle_enum') THEN
+                        IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'QUARTERLY' AND enumtypid = 'subscriptions_cycle_enum'::regtype) THEN
+                            ALTER TYPE "subscriptions_cycle_enum" ADD VALUE 'QUARTERLY';
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'BIENNIAL' AND enumtypid = 'subscriptions_cycle_enum'::regtype) THEN
+                            ALTER TYPE "subscriptions_cycle_enum" ADD VALUE 'BIENNIAL';
+                        END IF;
+                    END IF;
+                END
+                $$;
+            `);
+            await this.planConfigRepo.manager.query(`
+                ALTER TABLE "subscription_plan_configs"
+                    ADD COLUMN IF NOT EXISTS "aiDailyCredits" integer,
+                    ADD COLUMN IF NOT EXISTS "annualMonthlyPrice" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "compareAtPrice" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "promoDiscountPercent" integer DEFAULT 35,
+                    ADD COLUMN IF NOT EXISTS "monthlyPriceMzn" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "quarterlyPriceMzn" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "annualPriceMzn" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "biennialPriceMzn" decimal(10,2),
+                    ADD COLUMN IF NOT EXISTS "usdToMznRate" decimal(10,2) DEFAULT 74,
+                    ADD COLUMN IF NOT EXISTS "monthlyDiscountPercent" integer DEFAULT 20,
+                    ADD COLUMN IF NOT EXISTS "quarterlyDiscountPercent" integer DEFAULT 5,
+                    ADD COLUMN IF NOT EXISTS "biennialDiscountPercent" integer DEFAULT 29,
+                    ADD COLUMN IF NOT EXISTS "maxTradingAccounts" integer DEFAULT 1,
+                    ADD COLUMN IF NOT EXISTS "monthlyBacktestsLimit" integer DEFAULT 0
+            `);
         } catch (err: any) {
             this.logger.warn(`SubscriptionPlanConfig DDL check warning: ${err?.message || err}`);
         }
         await this.seedDefaultPlans();
     }
 
-    async seedDefaultPlans() {
-        const basicEnvPrice = Number(this.configService.get<number>('PLANO_BASICO_PRICE', 9));
-        const proEnvPrice = Number(
-            this.configService.get<number>('PLANO_PRO_PRICE') ??
-            this.configService.get<number>('PLANO_PREMIUN_PRICE', 19)
+    private computeCyclePricingSnapshot(params: {
+        baseMonthlyUsd: number;
+        monthlyDiscountPercent: number;
+        quarterlyDiscountPercent: number;
+        annualDiscountPercent: number;
+        biennialDiscountPercent: number;
+        usdToMznRate: number;
+    }) {
+        const rate = params.usdToMznRate > 0 ? params.usdToMznRate : DEFAULT_USD_TO_MZN_RATE;
+        const discountedMonthlyUsd = Number(
+            (params.baseMonthlyUsd * (1 - params.monthlyDiscountPercent / 100)).toFixed(2),
         );
-        const premiumEnvPrice = Number(
-            this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proEnvPrice * 2, 39))
+        const quarterlyPerMonthUsd = Number(
+            (params.baseMonthlyUsd * (1 - params.quarterlyDiscountPercent / 100)).toFixed(2),
+        );
+        const annualMonthlyPrice = Number(
+            (params.baseMonthlyUsd * (1 - params.annualDiscountPercent / 100)).toFixed(2),
+        );
+        const biennialPerMonthUsd = Number(
+            (params.baseMonthlyUsd * (1 - params.biennialDiscountPercent / 100)).toFixed(2),
         );
 
+        return {
+            annualMonthlyPrice,
+            monthlyPriceMzn: Number((discountedMonthlyUsd * rate).toFixed(2)),
+            quarterlyPriceMzn: Number((quarterlyPerMonthUsd * 3 * rate).toFixed(2)),
+            annualPriceMzn: Number((annualMonthlyPrice * 12 * rate).toFixed(2)),
+            biennialPriceMzn: Number((biennialPerMonthUsd * 24 * rate).toFixed(2)),
+        };
+    }
+
+    async seedDefaultPlans() {
         const defaultConfigs: Array<{
             tier: string;
             description: string;
             features: string[];
-            defaultPrice: number;
-            envKey?: string;
+            monthlyPrice: number;
+            compareAtPrice: number;
+            promoDiscountPercent: number;
+            monthlyDiscountPercent: number;
+            quarterlyDiscountPercent: number;
+            annualDiscountPercent: number;
+            biennialDiscountPercent: number;
+            usdToMznRate: number;
+            maxTradingAccounts: number;
+            monthlyBacktestsLimit: number;
             aiDailyCredits: number;
         }> = [
             {
                 tier: 'BASIC',
                 description: 'Para quem está começando no trading',
                 features: [
-                    '100 Créditos de IA / dia (Torex AI)',
-                    'Painel de Performance',
-                    'Diário & Calendário',
-                    'Importação Manual (CSV / HTML)',
-                    'Acesso à Network (Leitura)',
-                    'Gestão Emocional',
+                    '1 Conta de Trading ativa',
+                    '0 Créditos AI / mês',
+                    'Torex AI',
+                    'Diário Automatizado',
+                    'Comunidade',
+                    'Relatórios operacionais no site (visualizar e baixar)',
                 ],
-                defaultPrice: basicEnvPrice,
-                envKey: 'PLANO_BASICO_PRICE',
-                aiDailyCredits: 100,
+                monthlyPrice: 2.99,
+                compareAtPrice: 2.99,
+                promoDiscountPercent: 25,
+                monthlyDiscountPercent: 20,
+                quarterlyDiscountPercent: 5,
+                annualDiscountPercent: 25,
+                biennialDiscountPercent: 29,
+                usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                maxTradingAccounts: 1,
+                monthlyBacktestsLimit: 0,
+                aiDailyCredits: 0,
             },
             {
                 tier: 'PRO',
-                description: 'Para traders consistentes em evolução',
+                description: 'Para traders ativos e consistentes',
                 features: [
-                    '2.000 Créditos de IA / dia (Torex AI Pro)',
-                    'Tudo do Plano Básico',
-                    'Auto-Sync (MT4, MT5, Deriv)',
-                    'Backtest & Replay Ilimitado',
-                    'Relatórios Executivos',
-                    'Interação na Network (Postar/Comentar)',
+                    'Contas de Trading ilimitadas',
+                    '1.500 Créditos AI / mês',
+                    '10 Sessões de Backtest / mês',
+                    'Teste de Estratégias ilimitado',
+                    'Trade Replay',
+                    'Mentor Mode',
+                    'Relatório operacional mensal por e-mail',
+                    'Modo Offline (exceto Trade Replay)',
                 ],
-                defaultPrice: proEnvPrice,
-                envKey: 'PLANO_PRO_PRICE',
-                aiDailyCredits: 2000,
+                monthlyPrice: 19.99,
+                compareAtPrice: 19.99,
+                promoDiscountPercent: 35,
+                monthlyDiscountPercent: 20,
+                quarterlyDiscountPercent: 9,
+                annualDiscountPercent: 35,
+                biennialDiscountPercent: 44,
+                usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                maxTradingAccounts: -1,
+                monthlyBacktestsLimit: 10,
+                aiDailyCredits: 1500,
             },
             {
                 tier: 'PREMIUM',
-                description: 'Performance institucional máxima com IA intensiva',
+                description: 'Performance máxima com IA e backtesting intensivo',
                 features: [
-                    '20.000 Créditos de IA / dia (Torex AI Ultra)',
-                    'Tudo do Plano Pro',
-                    'Coaching Avançado de IA & Alertas em Tempo Real',
-                    'Gestão Multi-Contas & Prop Firm',
-                    'Calendário Econômico Completo',
-                    'Suporte Prioritário VIP',
+                    'Contas de Trading ilimitadas',
+                    '4.000 Créditos AI / mês',
+                    '100 Automated Backtesting Runs / month',
+                    'Mentor Mode: unlimited invites',
+                    'Relatório operacional semanal por e-mail',
+                    'Priority Support',
+                    'Modo Offline completo (incluindo Trade Replay)',
                 ],
-                defaultPrice: premiumEnvPrice,
-                envKey: 'PLANO_PREMIUM_PRICE',
-                aiDailyCredits: 20000,
+                monthlyPrice: 39.99,
+                compareAtPrice: 39.99,
+                promoDiscountPercent: 49,
+                monthlyDiscountPercent: 20,
+                quarterlyDiscountPercent: 19,
+                annualDiscountPercent: 49,
+                biennialDiscountPercent: 51,
+                usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                maxTradingAccounts: -1,
+                monthlyBacktestsLimit: 100,
+                aiDailyCredits: 4000,
             },
         ];
 
         for (const cfg of defaultConfigs) {
+            const snap = this.computeCyclePricingSnapshot({
+                baseMonthlyUsd: cfg.monthlyPrice,
+                monthlyDiscountPercent: cfg.monthlyDiscountPercent,
+                quarterlyDiscountPercent: cfg.quarterlyDiscountPercent,
+                annualDiscountPercent: cfg.annualDiscountPercent,
+                biennialDiscountPercent: cfg.biennialDiscountPercent,
+                usdToMznRate: cfg.usdToMznRate,
+            });
             const exists = await this.planConfigRepo.findOne({ where: { tier: cfg.tier } });
             if (!exists) {
-                this.logger.log(`Seeding missing plan tier: ${cfg.tier} (${cfg.aiDailyCredits} AI credits/day)`);
+                this.logger.log(`Seeding missing plan tier: ${cfg.tier} (${cfg.aiDailyCredits} AI credits/month, 1 USD=${cfg.usdToMznRate} MZN)`);
                 await this.planConfigRepo.save({
                     tier: cfg.tier,
                     description: cfg.description,
                     features: cfg.features,
-                    monthlyPrice: cfg.defaultPrice,
-                    annualDiscountPercent: 20,
+                    monthlyPrice: cfg.monthlyPrice,
+                    annualMonthlyPrice: snap.annualMonthlyPrice,
+                    compareAtPrice: cfg.compareAtPrice,
+                    promoDiscountPercent: cfg.promoDiscountPercent,
+                    monthlyPriceMzn: snap.monthlyPriceMzn,
+                    quarterlyPriceMzn: snap.quarterlyPriceMzn,
+                    annualPriceMzn: snap.annualPriceMzn,
+                    biennialPriceMzn: snap.biennialPriceMzn,
+                    usdToMznRate: cfg.usdToMznRate,
+                    monthlyDiscountPercent: cfg.monthlyDiscountPercent,
+                    quarterlyDiscountPercent: cfg.quarterlyDiscountPercent,
+                    annualDiscountPercent: cfg.annualDiscountPercent,
+                    biennialDiscountPercent: cfg.biennialDiscountPercent,
+                    maxTradingAccounts: cfg.maxTradingAccounts,
+                    monthlyBacktestsLimit: cfg.monthlyBacktestsLimit,
                     trialEnabled: false,
                     trialDays: 0,
                     trialPrice: 0,
@@ -133,17 +250,41 @@ export class SubscriptionService implements OnModuleInit {
             } else {
                 let updated = false;
                 if (!exists.isActive) {
-                    this.logger.log(`Re-activating existing plan tier: ${cfg.tier}`);
                     exists.isActive = true;
                     updated = true;
                 }
-                if (!exists.aiDailyCredits || exists.aiDailyCredits <= 0) {
+                const needsMigration =
+                    Number(exists.usdToMznRate || 0) !== cfg.usdToMznRate ||
+                    Number(exists.monthlyPrice) !== cfg.monthlyPrice ||
+                    Number(exists.quarterlyDiscountPercent ?? -1) !== cfg.quarterlyDiscountPercent ||
+                    Number(exists.annualDiscountPercent ?? -1) !== cfg.annualDiscountPercent ||
+                    Number(exists.biennialDiscountPercent ?? -1) !== cfg.biennialDiscountPercent ||
+                    exists.quarterlyPriceMzn === null ||
+                    exists.quarterlyPriceMzn === undefined ||
+                    exists.annualPriceMzn === null ||
+                    exists.annualPriceMzn === undefined ||
+                    exists.biennialPriceMzn === null ||
+                    exists.biennialPriceMzn === undefined;
+
+                if (needsMigration) {
+                    exists.description = cfg.description;
+                    exists.features = cfg.features;
+                    exists.monthlyPrice = cfg.monthlyPrice;
+                    exists.annualMonthlyPrice = snap.annualMonthlyPrice;
+                    exists.compareAtPrice = cfg.compareAtPrice;
+                    exists.promoDiscountPercent = cfg.promoDiscountPercent;
+                    exists.monthlyPriceMzn = snap.monthlyPriceMzn;
+                    exists.quarterlyPriceMzn = snap.quarterlyPriceMzn;
+                    exists.annualPriceMzn = snap.annualPriceMzn;
+                    exists.biennialPriceMzn = snap.biennialPriceMzn;
+                    exists.usdToMznRate = cfg.usdToMznRate;
+                    exists.monthlyDiscountPercent = cfg.monthlyDiscountPercent;
+                    exists.quarterlyDiscountPercent = cfg.quarterlyDiscountPercent;
+                    exists.annualDiscountPercent = cfg.annualDiscountPercent;
+                    exists.biennialDiscountPercent = cfg.biennialDiscountPercent;
+                    exists.maxTradingAccounts = cfg.maxTradingAccounts;
+                    exists.monthlyBacktestsLimit = cfg.monthlyBacktestsLimit;
                     exists.aiDailyCredits = cfg.aiDailyCredits;
-                    updated = true;
-                }
-                const rawEnvVal = cfg.envKey ? this.configService.get(cfg.envKey) : undefined;
-                if (rawEnvVal !== undefined && rawEnvVal !== '' && Number(exists.monthlyPrice) !== Number(rawEnvVal)) {
-                    exists.monthlyPrice = Number(rawEnvVal);
                     updated = true;
                 }
                 if (updated) {
@@ -165,7 +306,32 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     async getActivePlans() {
-        return this.planConfigRepo.find({ where: { isActive: true } });
+        const plans = await this.planConfigRepo.find({ where: { isActive: true } });
+        return plans.map((p) => ({
+            id: p.id,
+            tier: p.tier,
+            description: p.description,
+            features: p.features,
+            monthlyPrice: Number(p.monthlyPrice),
+            annualMonthlyPrice:
+                p.annualMonthlyPrice !== null && p.annualMonthlyPrice !== undefined
+                    ? Number(p.annualMonthlyPrice)
+                    : null,
+            compareAtPrice:
+                p.compareAtPrice !== null && p.compareAtPrice !== undefined
+                    ? Number(p.compareAtPrice)
+                    : null,
+            promoDiscountPercent: Number(p.promoDiscountPercent ?? 0),
+            monthlyDiscountPercent: Number(p.monthlyDiscountPercent ?? 20),
+            quarterlyDiscountPercent: Number(p.quarterlyDiscountPercent ?? 5),
+            annualDiscountPercent: Number(p.annualDiscountPercent ?? 25),
+            biennialDiscountPercent: Number(p.biennialDiscountPercent ?? 29),
+            maxTradingAccounts: Number(p.maxTradingAccounts ?? 1),
+            monthlyBacktestsLimit: Number(p.monthlyBacktestsLimit ?? 0),
+            aiDailyCredits: Number(p.aiDailyCredits ?? 0),
+            trialEnabled: Boolean(p.trialEnabled),
+            trialDays: Number(p.trialDays ?? 0),
+        }));
     }
 
     async createPlanConfig(data: Partial<SubscriptionPlanConfig>) {
@@ -178,28 +344,68 @@ export class SubscriptionService implements OnModuleInit {
 
     // --- Subscription Creation ---
 
-    getUsdToMznRate(): number {
-        const raw =
+    getUsdToMznRate(config?: SubscriptionPlanConfig): number {
+        const envRaw =
             this.configService.get<string | number>('USD_TO_MZN_RATE') ??
-            this.configService.get<string | number>('EXCHANGE_RATE_USD_MZN') ??
-            65;
-        const parsed = Number(raw);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : 65;
+            this.configService.get<string | number>('EXCHANGE_RATE_USD_MZN');
+        const envParsed = Number(envRaw);
+        if (envRaw !== undefined && envRaw !== null && Number.isFinite(envParsed) && envParsed > 0) {
+            return envParsed;
+        }
+        const dbRate = Number(config?.usdToMznRate || 0);
+        return Number.isFinite(dbRate) && dbRate > 0 ? dbRate : DEFAULT_USD_TO_MZN_RATE;
     }
 
     getAmountUsd(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
-        const monthlyPrice = Number(config.monthlyPrice);
-        const discount = Number(config.annualDiscountPercent || 0);
-        const total =
-            cycle === SubscriptionCycle.MONTHLY
-                ? monthlyPrice
-                : monthlyPrice * 12 * (1 - discount / 100);
-        return Number(total.toFixed(2));
+        const baseMonthly = Number(config.monthlyPrice);
+        if (cycle === SubscriptionCycle.MONTHLY) {
+            const disc = Math.max(0, Number(config.monthlyDiscountPercent || 0));
+            return Number((baseMonthly * (1 - disc / 100)).toFixed(2));
+        }
+        if (cycle === SubscriptionCycle.QUARTERLY) {
+            const disc = Math.max(0, Number(config.quarterlyDiscountPercent || 0));
+            const perMo = Number((baseMonthly * (1 - disc / 100)).toFixed(2));
+            return Number((perMo * 3).toFixed(2));
+        }
+        if (cycle === SubscriptionCycle.BIENNIAL) {
+            const disc = Math.max(0, Number(config.biennialDiscountPercent || 0));
+            const perMo = Number((baseMonthly * (1 - disc / 100)).toFixed(2));
+            return Number((perMo * 24).toFixed(2));
+        }
+        const annualDisc = Math.max(0, Number(config.annualDiscountPercent || 0));
+        if (annualDisc > 0) {
+            const perMo = Number((baseMonthly * (1 - annualDisc / 100)).toFixed(2));
+            return Number((perMo * 12).toFixed(2));
+        }
+        const explicitAnnualMonthly = Number(config.annualMonthlyPrice || 0);
+        if (explicitAnnualMonthly > 0) {
+            return Number((explicitAnnualMonthly * 12).toFixed(2));
+        }
+        return Number((baseMonthly * 12).toFixed(2));
     }
 
     getAmountMzn(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
+        const envRaw =
+            this.configService.get<string | number>('USD_TO_MZN_RATE') ??
+            this.configService.get<string | number>('EXCHANGE_RATE_USD_MZN');
+        const hasEnvRate =
+            envRaw !== undefined && envRaw !== null && Number.isFinite(Number(envRaw)) && Number(envRaw) > 0;
+
+        if (!hasEnvRate) {
+            const storedByCycle: Record<SubscriptionCycle, number | null | undefined> = {
+                [SubscriptionCycle.MONTHLY]: config.monthlyPriceMzn,
+                [SubscriptionCycle.QUARTERLY]: config.quarterlyPriceMzn,
+                [SubscriptionCycle.YEARLY]: config.annualPriceMzn,
+                [SubscriptionCycle.BIENNIAL]: config.biennialPriceMzn,
+            };
+            const explicitCycleMzn = Number(storedByCycle[cycle] || 0);
+            if (explicitCycleMzn > 0) {
+                return Number(explicitCycleMzn.toFixed(2));
+            }
+        }
+
         const usd = this.getAmountUsd(config, cycle);
-        return Number((usd * this.getUsdToMznRate()).toFixed(2));
+        return Number((usd * this.getUsdToMznRate(config)).toFixed(2));
     }
 
     private getAmount(config: SubscriptionPlanConfig, cycle: SubscriptionCycle): number {
@@ -294,7 +500,7 @@ export class SubscriptionService implements OnModuleInit {
             }
         }
         const netUsd = Math.max(0, Number((baseUsd - appliedCreditUsd).toFixed(2)));
-        const amount = Number((netUsd * this.getUsdToMznRate()).toFixed(2));
+        const amount = Number((netUsd * this.getUsdToMznRate(config)).toFixed(2));
         const reference = this.generateReference();
 
         try {
@@ -418,7 +624,7 @@ export class SubscriptionService implements OnModuleInit {
             }
         }
         const amountUsd = Math.max(0, Number((baseUsd - appliedCreditUsd).toFixed(2)));
-        const amountMzn = Number((amountUsd * this.getUsdToMznRate()).toFixed(2));
+        const amountMzn = Number((amountUsd * this.getUsdToMznRate(config)).toFixed(2));
         const reference = this.generateReference();
 
         try {
@@ -692,8 +898,12 @@ export class SubscriptionService implements OnModuleInit {
     private async activateSubscription(subscription: Subscription, reference: string) {
         const now = new Date();
         const expiry = new Date(now);
-        if (subscription.cycle === SubscriptionCycle.YEARLY) {
+        if (subscription.cycle === SubscriptionCycle.BIENNIAL) {
+            expiry.setFullYear(now.getFullYear() + 2);
+        } else if (subscription.cycle === SubscriptionCycle.YEARLY) {
             expiry.setFullYear(now.getFullYear() + 1);
+        } else if (subscription.cycle === SubscriptionCycle.QUARTERLY) {
+            expiry.setMonth(now.getMonth() + 3);
         } else {
             expiry.setMonth(now.getMonth() + 1);
         }
@@ -770,7 +980,14 @@ export class SubscriptionService implements OnModuleInit {
                 {
                     userName: user.name || undefined,
                     plan: subscription.planConfig?.tier || 'Profissional',
-                    cycle: subscription.cycle === SubscriptionCycle.YEARLY ? 'Anual' : 'Mensal',
+                    cycle:
+                        subscription.cycle === SubscriptionCycle.BIENNIAL
+                            ? 'Bianual'
+                            : subscription.cycle === SubscriptionCycle.YEARLY
+                              ? 'Anual'
+                              : subscription.cycle === SubscriptionCycle.QUARTERLY
+                                ? 'Trimestral'
+                                : 'Mensal',
                     reference,
                     expiryDate: expiry.toISOString(),
                 },
@@ -788,22 +1005,21 @@ export class SubscriptionService implements OnModuleInit {
         );
 
         const isNonTrialPaid =
-            !['trial', 'free_trial', 'referral_credits'].includes(
+            !['trial', 'free_trial', 'referral_credits', 'admin_manual'].includes(
                 String(subscription.paymentMethod || '').toLowerCase(),
             ) && Number(subscription.planConfig?.monthlyPrice || 0) > 0;
         if (isNonTrialPaid) {
             await this.referralService
                 ?.unlockPendingCreditsOnPaidPlan(subscription.userId)
                 .catch(() => {});
+            await this.referralService
+                ?.processPaidConversion(subscription.userId)
+                .catch(() => {});
         }
-        await this.referralService?.processPaidConversion(subscription.userId).catch(() => {});
 
-        const monthly = Number(subscription.planConfig?.monthlyPrice || 0);
-        const discount = Number(subscription.planConfig?.annualDiscountPercent || 0);
-        const revenue =
-            subscription.cycle === SubscriptionCycle.YEARLY
-                ? Number((monthly * 12 * (1 - discount / 100)).toFixed(2))
-                : monthly;
+        const revenue = subscription.planConfig
+            ? this.getAmountUsd(subscription.planConfig, subscription.cycle)
+            : 0;
 
         void this.analyticsService?.recordAuthOrBillingConversion({
             eventName: 'purchase',
@@ -848,6 +1064,324 @@ export class SubscriptionService implements OnModuleInit {
         return { found: true, status: subscription.status };
     }
 
+    async isEligibleForBasicTrial(userId: string): Promise<boolean> {
+        if (!userId) return false;
+        const user = await this.userRepo.findOne({
+            where: { id: userId },
+            select: ['id', 'hasUsedTrial', 'isBlocked'],
+        });
+        if (!user || user.isBlocked || user.hasUsedTrial) {
+            return false;
+        }
+        const existingSubCount = await this.subscriptionRepo.count({
+            where: { userId },
+        });
+        return existingSubCount === 0;
+    }
+
+    async recordTrialShareIntent(
+        userId: string,
+        tier?: string,
+        channel?: string,
+    ): Promise<{ recorded: boolean; unlockAfterSeconds: number; startedAt: string }> {
+        const now = Date.now();
+        this.trialShareIntentMemory.set(userId, now);
+        try {
+            await this.cacheManager?.set?.(
+                `trial_share_intent:${userId}`,
+                JSON.stringify({ startedAt: now, tier: tier || 'BASIC', channel: channel || 'social' }),
+                3600 * 1000,
+            );
+        } catch {
+            // fallback to in-memory map
+        }
+        return {
+            recorded: true,
+            unlockAfterSeconds: 30,
+            startedAt: new Date(now).toISOString(),
+        };
+    }
+
+    async activateBasicTrial(userId: string, options?: { verifyShareGate?: boolean }): Promise<{
+        success: boolean;
+        tier: string;
+        trialDays: number;
+        expiresAt: Date;
+    }> {
+        return this.activateTrial(userId, 'BASIC', options);
+    }
+
+    async activateTrial(
+        userId: string,
+        requestedTier: string = 'BASIC',
+        options?: { verifyShareGate?: boolean },
+    ): Promise<{
+        success: boolean;
+        tier: string;
+        trialDays: number;
+        expiresAt: Date;
+    }> {
+        const normalizedTier = String(requestedTier || 'BASIC').trim().toUpperCase() as TrialPlanTier;
+        if (!(normalizedTier in TRIAL_DAYS_BY_TIER)) {
+            throw new BadRequestException('Plano inválido para avaliação gratuita.');
+        }
+
+        if (options?.verifyShareGate) {
+            let startedAt = this.trialShareIntentMemory.get(userId) ?? null;
+            if (!startedAt) {
+                try {
+                    const cached = await this.cacheManager?.get?.<string>(`trial_share_intent:${userId}`);
+                    if (cached) {
+                        const parsed = JSON.parse(cached);
+                        if (parsed?.startedAt) startedAt = Number(parsed.startedAt);
+                    }
+                } catch {
+                    startedAt = null;
+                }
+            }
+
+            if (!startedAt || !Number.isFinite(startedAt)) {
+                throw new BadRequestException({
+                    code: 'TRIAL_SHARE_REQUIRED',
+                    message: 'Partilhe o seu link de convite com amigos antes de ativar o período gratuito.',
+                });
+            }
+
+            const elapsedMs = Date.now() - startedAt;
+            if (elapsedMs < 28_000) {
+                const remainingSeconds = Math.max(1, Math.ceil((30_000 - elapsedMs) / 1000));
+                throw new BadRequestException({
+                    code: 'TRIAL_SHARE_COOLDOWN',
+                    remainingSeconds,
+                    message: `Aguarde ${remainingSeconds}s após a partilha para liberar o botão do teste gratuito.`,
+                });
+            }
+        }
+
+        const trialDays = TRIAL_DAYS_BY_TIER[normalizedTier];
+        const now = new Date();
+        const expiryDate = new Date(now);
+        expiryDate.setDate(expiryDate.getDate() + trialDays);
+
+        const txResult = await this.userRepo.manager.transaction(async (manager) => {
+            const user = await manager.findOne(UserEntity, {
+                where: { id: userId },
+                lock: { mode: 'pessimistic_write' },
+            });
+
+            if (!user || user.isBlocked) {
+                throw new ForbiddenException({
+                    code: 'TRIAL_NOT_ELIGIBLE',
+                    message: 'Período de avaliação indisponível para esta conta.',
+                });
+            }
+
+            if (user.hasUsedTrial) {
+                throw new ForbiddenException({
+                    code: 'TRIAL_NOT_ELIGIBLE',
+                    message: 'Esta conta já utilizou o período de avaliação gratuito.',
+                });
+            }
+
+            const existingSubs = await manager.count(Subscription, {
+                where: { userId },
+            });
+            if (existingSubs > 0) {
+                throw new ForbiddenException({
+                    code: 'TRIAL_NOT_ELIGIBLE',
+                    message: 'Período de avaliação exclusivo para novas contas sem histórico de assinatura.',
+                });
+            }
+
+            let targetPlan = await manager.findOne(SubscriptionPlanConfig, {
+                where: { tier: normalizedTier },
+            });
+            if (!targetPlan) {
+                const defaultsByTier: Record<TrialPlanTier, {
+                    description: string;
+                    features: string[];
+                    monthlyPrice: number;
+                    annualMonthlyPrice: number;
+                    compareAtPrice: number;
+                    promoDiscountPercent: number;
+                    monthlyPriceMzn: number | null;
+                    quarterlyPriceMzn: number | null;
+                    annualPriceMzn: number | null;
+                    biennialPriceMzn: number | null;
+                    usdToMznRate: number;
+                    monthlyDiscountPercent: number;
+                    quarterlyDiscountPercent: number;
+                    annualDiscountPercent: number;
+                    biennialDiscountPercent: number;
+                    maxTradingAccounts: number;
+                    monthlyBacktestsLimit: number;
+                    aiDailyCredits: number;
+                }> = {
+                    BASIC: {
+                        description: 'Para quem está começando no trading',
+                        features: [
+                            '1 Conta de Trading ativa',
+                            '0 Créditos AI / mês',
+                            'Torex AI',
+                            'Diário Automatizado',
+                            'Comunidade',
+                            'Relatórios operacionais no site (visualizar e baixar)',
+                        ],
+                        monthlyPrice: 2.99,
+                        annualMonthlyPrice: 2.24,
+                        compareAtPrice: 2.99,
+                        promoDiscountPercent: 25,
+                        monthlyPriceMzn: 176.86,
+                        quarterlyPriceMzn: 630.48,
+                        annualPriceMzn: 1989.12,
+                        biennialPriceMzn: 3765.12,
+                        usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                        monthlyDiscountPercent: 20,
+                        quarterlyDiscountPercent: 5,
+                        annualDiscountPercent: 25,
+                        biennialDiscountPercent: 29,
+                        maxTradingAccounts: 1,
+                        monthlyBacktestsLimit: 0,
+                        aiDailyCredits: 0,
+                    },
+                    PRO: {
+                        description: 'O favorito dos traders consistentes',
+                        features: [
+                            'Contas de Trading ilimitadas',
+                            '1.500 Créditos AI / mês',
+                            '10 sessões de Backteste / mês',
+                            'Estratégias ilimitadas',
+                            'Trade Replay & Mentor Mode',
+                            'Relatório operacional mensal por e-mail',
+                            'Modo Offline (exceto Trade Replay)',
+                        ],
+                        monthlyPrice: 19.99,
+                        annualMonthlyPrice: 12.99,
+                        compareAtPrice: 19.99,
+                        promoDiscountPercent: 35,
+                        monthlyPriceMzn: 1183.26,
+                        quarterlyPriceMzn: 4038.18,
+                        annualPriceMzn: 11535.12,
+                        biennialPriceMzn: 19873.44,
+                        usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                        monthlyDiscountPercent: 20,
+                        quarterlyDiscountPercent: 9,
+                        annualDiscountPercent: 35,
+                        biennialDiscountPercent: 44,
+                        maxTradingAccounts: 999,
+                        monthlyBacktestsLimit: 10,
+                        aiDailyCredits: 1500,
+                    },
+                    PREMIUM: {
+                        description: 'Performance institucional sem limites',
+                        features: [
+                            'Contas de Trading ilimitadas',
+                            '4.000 Créditos AI / mês',
+                            '100 sessões automáticas de Backteste / mês',
+                            'Mentor Mode: convites ilimitados',
+                            'Relatório operacional semanal por e-mail',
+                            'Suporte prioritário',
+                            'Modo Offline completo (incluindo Trade Replay)',
+                        ],
+                        monthlyPrice: 39.99,
+                        annualMonthlyPrice: 20.39,
+                        compareAtPrice: 39.99,
+                        promoDiscountPercent: 49,
+                        monthlyPriceMzn: 2367.26,
+                        quarterlyPriceMzn: 7190.58,
+                        annualPriceMzn: 18106.32,
+                        biennialPriceMzn: 34791.84,
+                        usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
+                        monthlyDiscountPercent: 20,
+                        quarterlyDiscountPercent: 19,
+                        annualDiscountPercent: 49,
+                        biennialDiscountPercent: 51,
+                        maxTradingAccounts: 999,
+                        monthlyBacktestsLimit: 100,
+                        aiDailyCredits: 4000,
+                    },
+                };
+                const cfg = defaultsByTier[normalizedTier];
+                targetPlan = await manager.save(
+                    SubscriptionPlanConfig,
+                    manager.create(SubscriptionPlanConfig, {
+                        tier: normalizedTier,
+                        ...cfg,
+                        trialEnabled: false,
+                        trialDays: 0,
+                        trialPrice: 0,
+                        isActive: true,
+                    }),
+                );
+            }
+
+            const sub = manager.create(Subscription, {
+                userId: user.id,
+                planConfigId: targetPlan.id,
+                planConfig: targetPlan,
+                status: SubscriptionStatus.ACTIVE,
+                cycle: SubscriptionCycle.MONTHLY,
+                paymentMethod: 'TRIAL',
+                paymentReference: `TRIAL_${normalizedTier}_${trialDays}D_${Date.now()}_${randomBytes(3).toString('hex').toUpperCase()}`,
+                currentPeriodEnd: expiryDate,
+            });
+            await manager.save(Subscription, sub);
+
+            user.hasUsedTrial = true;
+            user.trialUsedAt = now;
+            await manager.save(UserEntity, user);
+
+            return {
+                subId: sub.id,
+                email: user.email,
+                userName: user.name || user.username || undefined,
+                visitorId: user.visitorId,
+                attributionData: user.attributionData,
+            };
+        });
+
+        await this.invalidateUserPlanCaches(userId);
+        this.trialShareIntentMemory.delete(userId);
+        await this.cacheManager?.del?.(`trial_share_intent:${userId}`).catch?.(() => {});
+        await this.scheduleSubscriptionLifecycleJobs(txResult.subId, expiryDate);
+
+        if (txResult.email) {
+            await this.emailProducer
+                .enqueue(
+                    txResult.email,
+                    'TRIAL_WELCOME',
+                    {
+                        userName: txResult.userName,
+                        plan: normalizedTier,
+                        days: trialDays,
+                        expiryDate: expiryDate.toISOString(),
+                    },
+                    { jobId: `trial-welcome:${txResult.subId}` },
+                )
+                .catch(() => {});
+        }
+
+        void this.analyticsService?.recordAuthOrBillingConversion({
+            eventName: 'trial_start',
+            userId,
+            email: txResult.email,
+            visitorId: txResult.visitorId,
+            attributionData: txResult.attributionData,
+            metadata: {
+                subscriptionId: txResult.subId,
+                plan: normalizedTier,
+                trialDays,
+            },
+        });
+
+        return {
+            success: true,
+            tier: normalizedTier,
+            trialDays,
+            expiresAt: expiryDate,
+        };
+    }
+
     async getSubscriptionStatus(userId: string) {
         const sub = await this.subscriptionRepo.findOne({
             where: { userId, status: SubscriptionStatus.ACTIVE },
@@ -862,12 +1396,13 @@ export class SubscriptionService implements OnModuleInit {
 
             if (daysLeft <= 0) {
                 this.logger.log(`Subscription ${sub.id} for user ${userId} has expired (checked on access, background job will update status).`);
-                
+
                 return {
                     hasActive: false,
                     isExpired: true,
-                    tier: sub.planConfig.tier,
-                    id: sub.id
+                    tier: sub.planConfig?.tier || 'BASIC',
+                    isTrial: sub.paymentMethod === 'TRIAL',
+                    trialEligible: false,
                 };
             }
 
@@ -888,11 +1423,14 @@ export class SubscriptionService implements OnModuleInit {
 
             return {
                 hasActive: true,
-                tier: sub.planConfig.tier,
+                tier: sub.planConfig?.tier || 'BASIC',
+                isTrial: sub.paymentMethod === 'TRIAL',
+                cycle: sub.cycle,
+                currentPeriodEnd: sub.currentPeriodEnd,
                 daysLeft,
                 expiryDate: sub.currentPeriodEnd,
-                id: sub.id,
-                showWarning
+                showWarning,
+                trialEligible: false,
             };
         }
 
@@ -907,14 +1445,16 @@ export class SubscriptionService implements OnModuleInit {
             return {
                 hasActive: false,
                 isExpired: true,
-                tier: expiredSub.planConfig.tier,
-                id: expiredSub.id
+                tier: expiredSub.planConfig?.tier || 'BASIC',
+                trialEligible: false,
             };
         }
 
+        const trialEligible = await this.isEligibleForBasicTrial(userId);
         return {
             hasActive: false,
-            isExpired: false
+            isExpired: false,
+            trialEligible,
         };
     }
 
@@ -1043,6 +1583,29 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     async updatePlanConfig(id: string, data: Partial<SubscriptionPlanConfig>) {
+        const existing = await this.planConfigRepo.findOne({ where: { id } });
+        if (existing) {
+            const merged = { ...existing, ...data };
+            const baseMonthly = Number(merged.monthlyPrice || existing.monthlyPrice || 0);
+            const rate = Number(merged.usdToMznRate || existing.usdToMznRate || DEFAULT_USD_TO_MZN_RATE);
+            const snap = this.computeCyclePricingSnapshot({
+                baseMonthlyUsd: baseMonthly,
+                monthlyDiscountPercent: Number(merged.monthlyDiscountPercent ?? 20),
+                quarterlyDiscountPercent: Number(merged.quarterlyDiscountPercent ?? 0),
+                annualDiscountPercent: Number(merged.annualDiscountPercent ?? 0),
+                biennialDiscountPercent: Number(merged.biennialDiscountPercent ?? 0),
+                usdToMznRate: rate,
+            });
+            data = {
+                ...data,
+                usdToMznRate: rate,
+                annualMonthlyPrice: data.annualMonthlyPrice ?? snap.annualMonthlyPrice,
+                monthlyPriceMzn: data.monthlyPriceMzn ?? snap.monthlyPriceMzn,
+                quarterlyPriceMzn: data.quarterlyPriceMzn ?? snap.quarterlyPriceMzn,
+                annualPriceMzn: data.annualPriceMzn ?? snap.annualPriceMzn,
+                biennialPriceMzn: data.biennialPriceMzn ?? snap.biennialPriceMzn,
+            };
+        }
         await this.planConfigRepo.update(id, data);
         return this.planConfigRepo.findOne({ where: { id } });
     }
@@ -1112,7 +1675,11 @@ export class SubscriptionService implements OnModuleInit {
                     'pc.id',
                     'pc.tier',
                     'pc.monthlyPrice',
+                    'pc.monthlyDiscountPercent',
+                    'pc.quarterlyDiscountPercent',
                     'pc.annualDiscountPercent',
+                    'pc.biennialDiscountPercent',
+                    'pc.usdToMznRate',
                 ])
                 .orderBy('s.createdAt', 'ASC')
                 .getMany(),
@@ -1126,19 +1693,21 @@ export class SubscriptionService implements OnModuleInit {
         const activeSubs = subscriptions.filter(s => s.status === SubscriptionStatus.ACTIVE);
         const activeSubscribers = activeSubs.length;
 
-        const usdToMzn = this.getUsdToMznRate();
         let estimatedMonthlyRevenueMZN = 0;
 
         for (const sub of activeSubs) {
-            const priceUsd = sub.planConfig ? Number(sub.planConfig.monthlyPrice) : 0;
-            let subMonthlyRevenueUsd = 0;
-            if (sub.cycle === SubscriptionCycle.YEARLY) {
-                const discount = priceUsd * 12 * (1 - (sub.planConfig?.annualDiscountPercent || 0) / 100);
-                subMonthlyRevenueUsd = discount / 12;
-            } else {
-                subMonthlyRevenueUsd = priceUsd;
-            }
-            const subMonthlyRevenueMzn = subMonthlyRevenueUsd * usdToMzn;
+            if (!sub.planConfig) continue;
+            const cycleUsd = this.getAmountUsd(sub.planConfig, sub.cycle);
+            const months =
+                sub.cycle === SubscriptionCycle.BIENNIAL
+                    ? 24
+                    : sub.cycle === SubscriptionCycle.YEARLY
+                      ? 12
+                      : sub.cycle === SubscriptionCycle.QUARTERLY
+                        ? 3
+                        : 1;
+            const subMonthlyRevenueUsd = cycleUsd / months;
+            const subMonthlyRevenueMzn = subMonthlyRevenueUsd * this.getUsdToMznRate(sub.planConfig);
             estimatedMonthlyRevenueMZN += subMonthlyRevenueMzn;
         }
 
@@ -1405,6 +1974,8 @@ export class SubscriptionService implements OnModuleInit {
 
         // Invalidate cache immediately and schedule trial lifecycle jobs
         await this.invalidateUserPlanCaches(userId);
+        this.trialShareIntentMemory.delete(userId);
+        await this.cacheManager?.del?.(`trial_share_intent:${userId}`).catch?.(() => {});
         await this.scheduleSubscriptionLifecycleJobs(txResult.subId, expiryDate);
 
         this.logger.log(`[SubscriptionService] Trial granted to user ${txResult.email} for ${trialDays} days (until ${expiryDate.toISOString()})`);
@@ -1655,5 +2226,205 @@ export class SubscriptionService implements OnModuleInit {
         }
 
         throw new Error('Ação inválida especificada');
+    }
+
+    async getSubscriptionConversionInsights(days: number = 30) {
+        const windowDays = Math.min(365, Math.max(1, Math.round(Number(days) || 30)));
+        const now = new Date();
+        const since = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
+        const fiveDaysAhead = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+
+        const allSubs = await this.subscriptionRepo.find({
+            relations: ['planConfig'],
+            order: { createdAt: 'DESC' },
+        });
+
+        const totalUsers = await this.userRepo.count();
+        const trialUsedUsers = await this.userRepo.count({ where: { hasUsedTrial: true } });
+
+        const trialUserSetByTier: Record<TrialPlanTier, Set<string>> = {
+            BASIC: new Set<string>(),
+            PRO: new Set<string>(),
+            PREMIUM: new Set<string>(),
+        };
+        const paidUsersSet = new Set<string>();
+        const userPaidSubCounts = new Map<string, number>();
+
+        let activePaidSubs = 0;
+        let activeTrialSubs = 0;
+        let expiringSoonPaid = 0;
+        let expiringSoonTrial = 0;
+        let estimatedMrrUsd = 0;
+
+        for (const sub of allSubs) {
+            const tierRaw = String(sub.planConfig?.tier || 'BASIC').trim().toUpperCase();
+            const tierKey: TrialPlanTier =
+                tierRaw === 'PREMIUM' ? 'PREMIUM' : tierRaw === 'PRO' ? 'PRO' : 'BASIC';
+            const isTrial = sub.paymentMethod === 'TRIAL';
+            const isPaid = !isTrial && sub.paymentMethod !== 'ADMIN_MANUAL' && sub.status !== SubscriptionStatus.APPROVAL_PENDING;
+            const endAt = sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd) : null;
+            const isCurrentlyValid = sub.status === SubscriptionStatus.ACTIVE && (!endAt || endAt > now);
+
+            if (isTrial && sub.createdAt && new Date(sub.createdAt) >= since) {
+                trialUserSetByTier[tierKey].add(sub.userId);
+            }
+
+            if (isPaid) {
+                paidUsersSet.add(sub.userId);
+                userPaidSubCounts.set(sub.userId, (userPaidSubCounts.get(sub.userId) || 0) + 1);
+            }
+
+            if (isCurrentlyValid) {
+                if (isTrial) {
+                    activeTrialSubs += 1;
+                    if (endAt && endAt <= fiveDaysAhead) expiringSoonTrial += 1;
+                } else {
+                    activePaidSubs += 1;
+                    if (endAt && endAt <= fiveDaysAhead) expiringSoonPaid += 1;
+                    if (sub.planConfig) {
+                        const months =
+                            sub.cycle === SubscriptionCycle.BIENNIAL
+                                ? 24
+                                : sub.cycle === SubscriptionCycle.YEARLY
+                                  ? 12
+                                  : sub.cycle === SubscriptionCycle.QUARTERLY
+                                    ? 3
+                                    : 1;
+                        const monthlyVal = this.getAmountUsd(sub.planConfig, sub.cycle) / months;
+                        if (Number.isFinite(monthlyVal)) estimatedMrrUsd += monthlyVal;
+                    }
+                }
+            }
+        }
+
+        const trialBreakdown = (Object.keys(TRIAL_DAYS_BY_TIER) as TrialPlanTier[]).map((tier) => {
+            const activatedUsers = trialUserSetByTier[tier];
+            let convertedUsers = 0;
+            for (const uid of activatedUsers) {
+                if (paidUsersSet.has(uid)) convertedUsers += 1;
+            }
+            const activated = activatedUsers.size;
+            return {
+                tier,
+                trialDays: TRIAL_DAYS_BY_TIER[tier],
+                activated,
+                convertedToPaid: convertedUsers,
+                conversionRatePct: activated > 0 ? Math.round((convertedUsers / activated) * 1000) / 10 : 0,
+            };
+        });
+
+        const totalTrialsActivated = trialBreakdown.reduce((acc, row) => acc + row.activated, 0);
+        const totalTrialsConverted = trialBreakdown.reduce((acc, row) => acc + row.convertedToPaid, 0);
+        let recurringRenewedUsers = 0;
+        for (const count of userPaidSubCounts.values()) {
+            if (count >= 2) recurringRenewedUsers += 1;
+        }
+        const paidUsersTotal = paidUsersSet.size;
+
+        let pricingModalOpens = 0;
+        let renewalModalImpressions = 0;
+        let renewalModalClicks = 0;
+        let renewalModalDismisses = 0;
+        let renewalBannerClicks = 0;
+        let headerExpiryClicks = 0;
+        let trialStartEvents = 0;
+        let checkoutStartEvents = 0;
+        let purchaseEvents = 0;
+        let lockedFeatureDemand: Array<{ feature: string; clicks: number; uniqueUsers: number }> = [];
+
+        try {
+            const aggRows = await this.subscriptionRepo.manager.query(
+                `
+                SELECT
+                    COUNT(*) FILTER (WHERE cta_tag = 'pricing_modal_open' OR cta_tag = 'plan_upgrade_cta' OR cta_tag LIKE 'upgrade_lock_%')::int AS pricing_modal_opens,
+                    COUNT(*) FILTER (WHERE cta_tag = 'renewal_modal_impression')::int AS renewal_impressions,
+                    COUNT(*) FILTER (WHERE cta_tag = 'renewal_modal_cta_click')::int AS renewal_clicks,
+                    COUNT(*) FILTER (WHERE cta_tag = 'renewal_modal_dismiss')::int AS renewal_dismisses,
+                    COUNT(*) FILTER (WHERE cta_tag = 'dashboard_renewal_banner_cta')::int AS banner_clicks,
+                    COUNT(*) FILTER (WHERE cta_tag = 'header_expiry_pill')::int AS header_clicks,
+                    COUNT(*) FILTER (WHERE event_name = 'trial_start')::int AS trial_starts,
+                    COUNT(*) FILTER (WHERE event_name = 'checkout_started')::int AS checkout_starts,
+                    COUNT(*) FILTER (WHERE event_name = 'purchase')::int AS purchases
+                FROM tracking_events
+                WHERE created_at >= $1
+                `,
+                [since.toISOString()],
+            );
+            const row = aggRows?.[0] || {};
+            pricingModalOpens = Number(row.pricing_modal_opens || 0);
+            renewalModalImpressions = Number(row.renewal_impressions || 0);
+            renewalModalClicks = Number(row.renewal_clicks || 0);
+            renewalModalDismisses = Number(row.renewal_dismisses || 0);
+            renewalBannerClicks = Number(row.banner_clicks || 0);
+            headerExpiryClicks = Number(row.header_clicks || 0);
+            trialStartEvents = Number(row.trial_starts || 0);
+            checkoutStartEvents = Number(row.checkout_starts || 0);
+            purchaseEvents = Number(row.purchases || 0);
+
+            const lockRows = await this.subscriptionRepo.manager.query(
+                `
+                SELECT
+                    REPLACE(cta_tag, 'upgrade_lock_', '') AS feature,
+                    COUNT(*)::int AS clicks,
+                    COUNT(DISTINCT COALESCE(user_id::text, visitor_id))::int AS unique_users
+                FROM tracking_events
+                WHERE created_at >= $1
+                  AND cta_tag LIKE 'upgrade_lock_%'
+                GROUP BY feature
+                ORDER BY clicks DESC
+                LIMIT 15
+                `,
+                [since.toISOString()],
+            );
+            lockedFeatureDemand = (lockRows || []).map((r: any) => ({
+                feature: String(r.feature || 'unknown'),
+                clicks: Number(r.clicks || 0),
+                uniqueUsers: Number(r.unique_users || 0),
+            }));
+        } catch (err: any) {
+            this.logger.warn(`Conversion insights tracking query fallback: ${err?.message || err}`);
+        }
+
+        return {
+            windowDays,
+            generatedAt: now.toISOString(),
+            funnel: {
+                totalUsers,
+                trialUsedUsers,
+                activeTrialSubs,
+                activePaidSubs,
+                estimatedMrrUsd: Math.round(estimatedMrrUsd * 100) / 100,
+                totalTrialsActivated,
+                totalTrialsConverted,
+                trialToPaidRatePct:
+                    totalTrialsActivated > 0
+                        ? Math.round((totalTrialsConverted / totalTrialsActivated) * 1000) / 10
+                        : 0,
+                recurringRenewedUsers,
+                paidUsersTotal,
+                renewalRatePct:
+                    paidUsersTotal > 0 ? Math.round((recurringRenewedUsers / paidUsersTotal) * 1000) / 10 : 0,
+                expiringSoonTotal: expiringSoonPaid + expiringSoonTrial,
+                expiringSoonPaid,
+                expiringSoonTrial,
+                trialStartEvents,
+                checkoutStartEvents,
+                purchaseEvents,
+            },
+            trialBreakdown,
+            modalBehavior: {
+                pricingModalOpens,
+                renewalModalImpressions,
+                renewalModalClicks,
+                renewalModalDismisses,
+                renewalBannerClicks,
+                headerExpiryClicks,
+                renewalCtrPct:
+                    renewalModalImpressions > 0
+                        ? Math.round(((renewalModalClicks + renewalBannerClicks) / renewalModalImpressions) * 1000) / 10
+                        : 0,
+            },
+            lockedFeatureDemand,
+        };
     }
 }

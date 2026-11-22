@@ -29,15 +29,22 @@ export class PaymentService {
             ? Number(premiumPlan.monthlyPrice)
             : Number(this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proPrice * 2, 39)));
 
+        const rateFromEnv =
+            this.configService.get<number>('EXCHANGE_RATE') ??
+            this.configService.get<number>('EXCHANGE') ??
+            this.configService.get<number>('EXCENCHE');
+        const rateFromDb = Number(basicPlan?.usdToMznRate || 0);
+        const exchangeRate = Number.isFinite(Number(rateFromEnv)) && Number(rateFromEnv) > 0
+            ? Number(rateFromEnv)
+            : rateFromDb > 0
+              ? rateFromDb
+              : 74;
+
         return {
             basicoPrice,
             proPrice,
             premiumPrice,
-            exchangeRate: Number(
-                this.configService.get<number>('EXCHANGE_RATE') ??
-                    this.configService.get<number>('EXCHANGE') ??
-                    this.configService.get<number>('EXCENCHE', 65),
-            ),
+            exchangeRate,
         };
     }
 }

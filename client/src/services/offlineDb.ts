@@ -1,3 +1,10 @@
+import {
+    canUseGeneralOfflineMode,
+    canUseReplayOfflineMode,
+    getStoredUserPlanTier,
+    openWorkspacePlansModal,
+} from '../lib/planGate';
+
 const DB_NAME = 'torex_offline_db_v1';
 const DB_VERSION = 2;
 
@@ -572,6 +579,18 @@ export async function patchTradeInIDB(
 }
 
 export async function saveMediaOutboxItem(item: MediaOutboxItem): Promise<void> {
+    const tier = getStoredUserPlanTier();
+    const isReplayMedia = Boolean(item.targetEndpoint?.includes('/backtest/'));
+    const allowed = isReplayMedia ? canUseReplayOfflineMode(tier) : canUseGeneralOfflineMode(tier);
+    if (!allowed) {
+        openWorkspacePlansModal(isReplayMedia ? 'offline_replay_premium_only' : 'offline_mode_pro_only');
+        throw new Error(
+            isReplayMedia
+                ? 'Modo Offline no Trade Replay disponível apenas no Plano Premium.'
+                : 'Modo Offline disponível a partir do Plano Pro.',
+        );
+    }
+
     const db = await openOfflineDatabase();
     if (!db) return;
 
@@ -728,6 +747,18 @@ export interface EnqueueMutationInput {
 }
 
 export async function enqueueSyncMutation(input: EnqueueMutationInput): Promise<SyncOutboxItem> {
+    const tier = getStoredUserPlanTier();
+    const isReplayMut = Boolean(input.url?.includes('/backtest/')) || input.entityType === 'backtest_session';
+    const allowed = isReplayMut ? canUseReplayOfflineMode(tier) : canUseGeneralOfflineMode(tier);
+    if (!allowed) {
+        openWorkspacePlansModal(isReplayMut ? 'offline_replay_premium_only' : 'offline_mode_pro_only');
+        throw new Error(
+            isReplayMut
+                ? 'Modo Offline no Trade Replay disponível apenas no Plano Premium.'
+                : 'Modo Offline disponível a partir do Plano Pro.',
+        );
+    }
+
     const userScope = input.userScope || getCurrentUserScope();
     const now = Date.now();
     const clientUpdatedAt = input.clientUpdatedAt || new Date(now).toISOString();

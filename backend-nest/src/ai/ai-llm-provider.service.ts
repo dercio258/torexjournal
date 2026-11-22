@@ -62,7 +62,7 @@ function extractGeminiText(data: any): string {
 export class AiLlmProviderService {
     private static readonly GEMINI_FALLBACK_MODELS = [
         'gemini-2.5-flash',
-        'gemini-2.5-flash-lite',
+        'gemini-3.5-flash-lite',
     ] as const;
 
     private static readonly LEGACY_INVALID_GEMINI_MODELS = new Set([
@@ -165,10 +165,14 @@ export class AiLlmProviderService {
 
         const isDeprecatedOrUnknown =
             AiLlmProviderService.LEGACY_INVALID_GEMINI_MODELS.has(configuredModel.toLowerCase());
+        const normalizedConfiguredModel =
+            configuredModel.toLowerCase() === 'gemini-2.5-flash-lite'
+                ? 'gemini-3.5-flash-lite'
+                : configuredModel;
 
         let model =
-            configuredModel.toLowerCase().startsWith('gemini') && !isDeprecatedOrUnknown
-                ? configuredModel
+            normalizedConfiguredModel.toLowerCase().startsWith('gemini') && !isDeprecatedOrUnknown
+                ? normalizedConfiguredModel
                 : defaultModel;
 
         if (this.retiredGeminiModels.has(model)) {
@@ -483,7 +487,7 @@ export class AiLlmProviderService {
                 arr.indexOf(m) === idx &&
                 !this.retiredGeminiModels.has(m)
         );
-        const queue = candidates.length > 0 ? candidates : ['gemini-2.5-flash-lite'];
+        const queue = candidates.length > 0 ? candidates : ['gemini-3.5-flash-lite'];
 
         for (let i = 0; i < queue.length; i++) {
             const candidateModel = queue[i];

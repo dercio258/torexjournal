@@ -16,7 +16,7 @@ export const REPLAY_LIMITS: Record<PlanTier, { maxDays: number; maxBars: number 
 
 @Controller('tradingview')
 @UseGuards(JwtAuthGuard, PlanGuard)
-@RequirePlan(PlanTier.FREE)
+@RequirePlan(PlanTier.PRO)
 export class TradingViewController {
     constructor(
         private readonly tvService: TradingViewService,

@@ -19,6 +19,8 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { cn } from '../lib/cn';
+import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
+import { BasicPlanSimpleUpgradeCard } from './subscription/BasicPlanSimpleUpgradeCard';
 
 const DevelopmentModal = ({
     featureName,
@@ -100,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const isEn = locale === 'en';
     const [devFeature, setDevFeature] = useState<string | null>(null);
 
-    const isBasic = user?.tier === 'BASIC';
+    const isBasic = isBasicPlanTier(user?.tier);
 
     const links = isEn
         ? [
@@ -109,8 +111,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               { to: '/trades', icon: <CandlestickChart size={15} />, label: 'Trades' },
               { to: '/journal', icon: <BookOpen size={15} />, label: 'Journal' },
               { to: '/reports', icon: <TrendingUp size={15} />, label: 'Reports' },
-              { to: '/backtesting', icon: <FlaskConical size={15} />, label: 'Backtesting' },
-              { to: '/calendar', icon: <CalendarDays size={15} />, label: 'Economic Calendar' },
+              { to: '/backtesting', icon: <FlaskConical size={15} />, label: 'Backtesting', requiresPremium: true },
+              { to: '/calendar', icon: <CalendarDays size={15} />, label: 'Economic Calendar', requiresPremium: true },
               { to: '/leaderboard', icon: <Trophy size={15} />, label: 'Leaderboard' },
               { to: '/network', icon: <Users size={15} />, label: 'Community & Desk' },
           ]
@@ -120,8 +122,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               { to: '/trades', icon: <CandlestickChart size={15} />, label: 'Trades' },
               { to: '/journal', icon: <BookOpen size={15} />, label: 'Diário' },
               { to: '/reports', icon: <TrendingUp size={15} />, label: 'Relatórios' },
-              { to: '/backtesting', icon: <FlaskConical size={15} />, label: 'Backtesting' },
-              { to: '/calendar', icon: <CalendarDays size={15} />, label: 'Calendário Econ.' },
+              { to: '/backtesting', icon: <FlaskConical size={15} />, label: 'Backtesting', requiresPremium: true },
+              { to: '/calendar', icon: <CalendarDays size={15} />, label: 'Calendário Econ.', requiresPremium: true },
               { to: '/leaderboard', icon: <Trophy size={15} />, label: 'Leaderboard' },
               { to: '/network', icon: <Users size={15} />, label: 'Comunidade & Aulas' },
           ];
@@ -167,7 +169,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
             <NavLink
                 to={to}
-                onClick={onClose}
+                onClick={(e) => {
+                    if (requiresPremium && isBasic && to.startsWith('/calendar')) {
+                        e.preventDefault();
+                        openWorkspacePlansModal('sidebar_economic_calendar');
+                    }
+                    if (onClose) onClose();
+                }}
                 title={collapsed ? label : undefined}
                 className={({ isActive }) =>
                     cn(
@@ -198,10 +206,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </span>
                             {!collapsed && <span className="truncate">{label}</span>}
                         </div>
-                        {!collapsed && requiresPremium && isBasic && (
-                            <span className="text-[9px] bg-purple/15 text-purple-light px-1.5 py-0.5 rounded border border-purple/25 font-bold shrink-0 ml-1 uppercase">
-                                PRO
-                            </span>
+                        {requiresPremium && isBasic && (
+                            collapsed ? (
+                                <Lock size={10} className="text-amber-400 shrink-0 ml-0.5" />
+                            ) : (
+                                <span className="inline-flex items-center gap-1 text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold shrink-0 ml-1 uppercase">
+                                    <Lock size={9} />
+                                    PRO
+                                </span>
+                            )
                         )}
                     </>
                 )}
@@ -271,6 +284,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <NavItem key={link.to} {...link} />
                     ))}
                 </nav>
+
+                {!collapsed && isBasic && (
+                    <div className="px-2.5 pb-2.5 shrink-0">
+                        <BasicPlanSimpleUpgradeCard compact />
+                    </div>
+                )}
 
                 {/* Rodapé discreto para expandir/recolher rapidamente */}
                 {onToggleCollapse && (

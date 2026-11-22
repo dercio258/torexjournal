@@ -1,14 +1,17 @@
 import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { EconomicCalendarService } from './economic-calendar.service';
 import { QueryEventsDto } from './dto/query-events.dto';
-import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PlanGuard, RequirePlan } from '../payment/plan.guard';
+import { PlanTier } from '../payment/plan-permission.service';
 
 @Controller('economic-calendar')
+@UseGuards(JwtAuthGuard, PlanGuard)
+@RequirePlan(PlanTier.PRO)
 export class EconomicCalendarController {
     constructor(private readonly calendarService: EconomicCalendarService) {}
 
     @Get('events')
-    @UseGuards(OptionalJwtAuthGuard)
     async getEvents(
         @Query() query: QueryEventsDto,
         @Req() req: any
@@ -19,7 +22,6 @@ export class EconomicCalendarController {
     }
 
     @Get('today')
-    @UseGuards(OptionalJwtAuthGuard)
     async getTodayEvents(
         @Query('accountId') queryAccountId: string,
         @Req() req: any

@@ -2,9 +2,12 @@ import { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router-dom';
 import { BookOpen, FolderKanban, Layers, LayoutGrid, Lightbulb, Plus, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { BacktestWorkspaceProvider, useBacktestWorkspace } from './BacktestWorkspaceContext';
 import { QuickSessionModal } from '../../components/backtesting/QuickSessionModal';
+import { FeatureUpgradeGateCard } from '../../components/subscription/FeatureUpgradeGateCard';
+import { isBasicPlanTier } from '../../lib/planGate';
 
 const Nav = () => {
     const { locale } = useLocale();
@@ -146,11 +149,44 @@ const SubHeader = () => {
 };
 
 /** Shell for every /backtesting page except the full-screen replay terminal. */
-export const BacktestingLayout = () => (
-    <BacktestWorkspaceProvider>
-        <div className="w-full space-y-3 pb-8">
-            <SubHeader />
-            <Outlet />
-        </div>
-    </BacktestWorkspaceProvider>
-);
+export const BacktestingLayout = () => {
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const isBasic = isBasicPlanTier(user?.tier);
+
+    if (isBasic) {
+        return (
+            <FeatureUpgradeGateCard
+                featureKey="backtesting_workspace"
+                title="Backtesting & Trade Replay exclusivos dos Planos Pro e Premium"
+                titleEn="Backtesting & Trade Replay Require Pro or Premium"
+                description="No plano Básico não é possível criar sessões de backteste nem abrir o terminal de Trade Replay. Atualize seu plano para desbloquear backtesting institucional completo."
+                descriptionEn="Basic plan accounts cannot create backtest sessions or open the Trade Replay terminal. Upgrade your plan to unlock institutional backtesting."
+                bullets={[
+                    'Plano Pro: 10 sessões de backteste/mês + Trade Replay',
+                    'Plano Premium: 100 sessões automáticas/mês + prioridade',
+                    'Teste de estratégias e playbooks ilimitados',
+                    'Analytics, diário visual candle a candle e hipóteses',
+                ]}
+                bulletsEn={[
+                    'Pro Plan: 10 backtesting runs / month + Trade Replay',
+                    'Premium Plan: 100 automated runs / month + priority',
+                    'Test unlimited strategies & playbooks',
+                    'Candle-by-candle Replay Journal & Analytics',
+                ]}
+                onBack={() => navigate('/dashboard')}
+                backLabel="Voltar à Dashboard"
+                backLabelEn="Back to Dashboard"
+            />
+        );
+    }
+
+    return (
+        <BacktestWorkspaceProvider>
+            <div className="w-full space-y-3 pb-8">
+                <SubHeader />
+                <Outlet />
+            </div>
+        </BacktestWorkspaceProvider>
+    );
+};

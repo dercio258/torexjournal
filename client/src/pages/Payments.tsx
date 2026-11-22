@@ -367,7 +367,7 @@ export const Payments = () => {
                     <div className="pt-3 border-t border-line-subtle">
                         <button
                             type="button"
-                            onClick={() => navigate('/pricing')}
+                            onClick={() => navigate('/dashboard?plans=1')}
                             className="w-full h-8 inline-flex items-center justify-center gap-1.5 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg transition-colors"
                         >
                             <span>{isEn ? 'Change Plan' : 'Alterar Plano'}</span>

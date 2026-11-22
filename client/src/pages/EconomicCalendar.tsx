@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Calendar, Search, RefreshCw,
     X, Info
 } from 'lucide-react';
 import { useAccount } from '../context/AccountContext';
+import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { CalendarSkeleton } from '../components/ui/Skeleton';
+import { FeatureUpgradeGateCard } from '../components/subscription/FeatureUpgradeGateCard';
+import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
 import api from '../api';
 
 interface EconomicEvent {
@@ -72,9 +76,13 @@ const IMPACT = {
 const impactOf = (raw?: string | null) => IMPACT[(raw || 'MEDIUM').toUpperCase() as keyof typeof IMPACT] ?? IMPACT.MEDIUM;
 
 const EconomicCalendar: React.FC = () => {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
     const { selectedAccountId } = useAccount();
     const { locale } = useLocale();
     const isEn = locale === 'en';
+    const hasPromptedUpgradeRef = useRef(false);
 
     const [loading, setLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -155,12 +163,20 @@ const EconomicCalendar: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        if (isBasic) {
+            setLoading(false);
+            if (!hasPromptedUpgradeRef.current) {
+                hasPromptedUpgradeRef.current = true;
+                openWorkspacePlansModal('economic_calendar_page');
+            }
+            return;
+        }
         fetchCalendar(false);
         const intervalId = window.setInterval(() => {
             fetchCalendar(false);
         }, 10 * 60 * 1000);
         return () => window.clearInterval(intervalId);
-    }, [fetchCalendar]);
+    }, [fetchCalendar, isBasic]);
 
     const availableCurrencies = useMemo(() => {
         const set = new Set<string>();
@@ -254,6 +270,33 @@ const EconomicCalendar: React.FC = () => {
         setSelectedEvent(evt);
         setIsDetailModalOpen(true);
     };
+
+    if (isBasic) {
+        return (
+            <FeatureUpgradeGateCard
+                featureKey="economic_calendar"
+                title="Calendário Econômico Institucional exclusivo Pro & Premium"
+                titleEn="Economic Calendar Requires Pro or Premium"
+                description="Acompanhe notícias macroeconômicas de alto impacto sincronizadas com os ativos das suas contas no Plano Pro ou Premium."
+                descriptionEn="Track high-impact macroeconomic releases filtered by your trading account currencies with Pro or Premium."
+                bullets={[
+                    'Sincronização contínua MT5 com impacto Real vs Previsão',
+                    'Alertas automáticos de moedas relevantes para sua conta',
+                    'Backtesting completo & Trade Replay integrados',
+                    '1.500 Créditos AI / mês no Plano Pro',
+                ]}
+                bulletsEn={[
+                    'Real-time MT5 calendar sync with Actual vs Forecast comparison',
+                    'Currency relevance matching for your portfolio',
+                    'Full Backtesting & Trade Replay suite',
+                    '1,500 monthly AI credits on Pro',
+                ]}
+                onBack={() => navigate('/dashboard')}
+                backLabel="Voltar à Dashboard"
+                backLabelEn="Back to Dashboard"
+            />
+        );
+    }
 
     return (
         <div className="w-full space-y-3 pb-10 animate-in fade-in duration-300">

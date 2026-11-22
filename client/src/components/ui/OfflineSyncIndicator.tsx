@@ -3,18 +3,29 @@ import {
     AlertTriangle,
     CheckCircle2,
     CloudUpload,
+    Crown,
+    Lock,
     RefreshCw,
     RotateCcw,
     Trash2,
     Wifi,
     WifiOff,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { useOfflineSyncStore } from '../../store/useOfflineSyncStore';
+import {
+    canUseGeneralOfflineMode,
+    canUseReplayOfflineMode,
+    openWorkspacePlansModal,
+} from '../../lib/planGate';
 
 export const OfflineSyncIndicator: React.FC = () => {
+    const { user } = useAuth();
     const { locale } = useLocale();
     const isEn = locale === 'en';
+    const allowGeneralOffline = canUseGeneralOfflineMode(user?.tier);
+    const allowReplayOffline = canUseReplayOfflineMode(user?.tier);
 
     const {
         isOnline,
@@ -59,16 +70,64 @@ export const OfflineSyncIndicator: React.FC = () => {
         totalPending === 0 &&
         failedMutations.length === 0;
 
-    const shouldRender =
-        !isOnline ||
-        isSyncing ||
-        totalPending > 0 ||
-        failedMutations.length > 0 ||
-        syncStatus === 'paused_auth' ||
-        showJustSynced;
+    const shouldRender = !allowGeneralOffline
+        ? !isOnline
+        : !isOnline ||
+          isSyncing ||
+          totalPending > 0 ||
+          failedMutations.length > 0 ||
+          syncStatus === 'paused_auth' ||
+          showJustSynced;
 
     if (!shouldRender) {
         return null;
+    }
+
+    if (!allowGeneralOffline) {
+        return (
+            <div ref={wrapperRef} className="relative">
+                <button
+                    type="button"
+                    onClick={() => setOpen((prev) => !prev)}
+                    className="h-7 px-2 rounded-lg border border-amber-500/40 bg-amber-500/15 text-amber-400 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer focus:outline-none"
+                    title={
+                        isEn
+                            ? 'Offline Mode requires Pro or Premium plan'
+                            : 'Modo Offline disponível nos planos Pro e Premium'
+                    }
+                >
+                    <Lock size={11} className="shrink-0" />
+                    <span className="hidden xs:inline whitespace-nowrap">
+                        {isEn ? 'Offline (PRO)' : 'Offline (PRO)'}
+                    </span>
+                </button>
+
+                {open && (
+                    <div className="absolute right-0 mt-2 w-72 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up p-3.5 space-y-2.5 text-xs">
+                        <div className="flex items-center gap-2 font-bold text-fg">
+                            <Lock size={14} className="text-amber-400 shrink-0" />
+                            <span>{isEn ? 'Offline Mode Locked' : 'Modo Offline Bloqueado'}</span>
+                        </div>
+                        <p className="text-[11px] text-fg-muted leading-relaxed">
+                            {isEn
+                                ? 'Basic plan operates online only. Upgrade to Pro for offline access in all sections except Trade Replay, or Premium for full offline mode including Trade Replay.'
+                                : 'O pacote Básico opera apenas online. Atualize para o Pro (Offline em todas as secções exceto Trade Replay) ou Premium (Offline completo até no Replay).'}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setOpen(false);
+                                openWorkspacePlansModal('offline_indicator_basic');
+                            }}
+                            className="w-full py-2 px-3 rounded-lg bg-accent hover:bg-accent-hover text-accent-on text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                            <Crown size={13} />
+                            <span>{isEn ? 'Upgrade Plan' : 'Atualizar Plano'}</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
     }
 
     let badgeClasses =
@@ -180,6 +239,29 @@ export const OfflineSyncIndicator: React.FC = () => {
                                     ? 'Local IndexedDB outbox tracks pending edits and screenshots.'
                                     : 'A fila local no IndexedDB gerencia edições e imagens pendentes.'}
                         </p>
+                        <div className="rounded-lg border border-line-subtle bg-canvas-subtle px-2.5 py-1.5 text-[10px] font-medium text-fg-muted flex items-center justify-between gap-2">
+                            <span>
+                                {allowReplayOffline
+                                    ? isEn
+                                        ? 'Premium: Full offline (incl. Trade Replay)'
+                                        : 'Premium: Offline completo (incl. Replay)'
+                                    : isEn
+                                      ? 'Pro: Offline everywhere except Replay'
+                                      : 'Pro: Offline em tudo exceto Replay'}
+                            </span>
+                            {!allowReplayOffline && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setOpen(false);
+                                        openWorkspacePlansModal('offline_replay_scope');
+                                    }}
+                                    className="text-accent-fg font-bold hover:underline shrink-0 cursor-pointer"
+                                >
+                                    Premium
+                                </button>
+                            )}
+                        </div>
 
                         <div className="grid grid-cols-2 gap-2">
                             <div className="p-2 rounded-lg bg-canvas border border-line">

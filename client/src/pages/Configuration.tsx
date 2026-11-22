@@ -9,6 +9,8 @@ import {
     Trash2,
     AlertCircle,
     X,
+    Eye,
+    EyeOff,
 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { AiMemoryCard } from '../components/ai/AiMemoryCard';
@@ -79,6 +81,11 @@ export const Configuration = () => {
     const [isEditingWhatsapp, setIsEditingWhatsapp] = useState(false);
     const [whatsappInput, setWhatsappInput] = useState('');
     const [isSavingWhatsapp, setIsSavingWhatsapp] = useState(false);
+
+    // Ephemeral unmasked PII reveal state (never persisted to storage)
+    const [isSensitiveRevealed, setIsSensitiveRevealed] = useState(false);
+    const [isLoadingSensitive, setIsLoadingSensitive] = useState(false);
+    const [sensitiveData, setSensitiveData] = useState<{ email: string; whatsapp: string } | null>(null);
 
     // Feedback banners
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -225,11 +232,52 @@ export const Configuration = () => {
         }
     };
 
+    const fetchSensitiveProfile = async (): Promise<{ email: string; whatsapp: string } | null> => {
+        setIsLoadingSensitive(true);
+        try {
+            const res = await api.get('/auth/profile/sensitive');
+            const next = {
+                email: String(res.data?.email || ''),
+                whatsapp: String(res.data?.whatsapp || ''),
+            };
+            setSensitiveData(next);
+            return next;
+        } catch (err: any) {
+            notifyError(
+                err?.response?.data?.message ||
+                    (isEn
+                        ? 'Could not load complete personal details right now.'
+                        : 'Não foi possível revelar os dados completos agora.')
+            );
+            return null;
+        } finally {
+            setIsLoadingSensitive(false);
+        }
+    };
+
+    const handleToggleSensitiveReveal = async () => {
+        if (isSensitiveRevealed) {
+            setIsSensitiveRevealed(false);
+            setSensitiveData(null);
+            return;
+        }
+        const loaded = await fetchSensitiveProfile();
+        if (loaded) {
+            setIsSensitiveRevealed(true);
+        }
+    };
+
     const handleSaveWhatsapp = async () => {
         setIsSavingWhatsapp(true);
         try {
-            await updateUserContactOfflineAware({ whatsapp: whatsappInput.trim() });
-            setUser((prev) => (prev ? { ...prev, whatsapp: whatsappInput.trim() } : prev));
+            const res = await updateUserContactOfflineAware({ whatsapp: whatsappInput.trim() });
+            const nextWhatsapp = res?.data?.whatsapp ?? whatsappInput.trim();
+            setUser((prev) => (prev ? { ...prev, whatsapp: nextWhatsapp } : prev));
+            if (res?.data?.whatsapp) {
+                updateUser({ whatsapp: res.data.whatsapp });
+            }
+            setSensitiveData(null);
+            setIsSensitiveRevealed(false);
             setIsEditingWhatsapp(false);
             notifySuccess(isEn ? 'Mobile contact updated successfully!' : 'Contacto móvel atualizado com sucesso!');
         } catch (err: any) {
@@ -495,6 +543,37 @@ export const Configuration = () => {
                             </div>
                         </div>
 
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] uppercase font-bold text-fg-subtle">
+                                {isEn ? 'Personal Contact Details' : 'Dados Pessoais'}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={isLoadingSensitive}
+                                onClick={() => void handleToggleSensitiveReveal()}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-accent-fg hover:underline disabled:opacity-50 cursor-pointer"
+                            >
+                                {isSensitiveRevealed ? (
+                                    <EyeOff className="w-3.5 h-3.5" />
+                                ) : (
+                                    <Eye className="w-3.5 h-3.5" />
+                                )}
+                                <span>
+                                    {isLoadingSensitive
+                                        ? isEn
+                                            ? 'Loading...'
+                                            : 'Carregando...'
+                                        : isSensitiveRevealed
+                                          ? isEn
+                                              ? 'Hide sensitive data'
+                                              : 'Ocultar dados'
+                                          : isEn
+                                            ? 'Show full details'
+                                            : 'Mostrar dados completos'}
+                                </span>
+                            </button>
+                        </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                             <div>
                                 <label className="text-[10px] uppercase font-bold text-fg-subtle mb-1 block">
@@ -512,7 +591,11 @@ export const Configuration = () => {
                                 </label>
                                 <input
                                     disabled
-                                    value={user?.email || ''}
+                                    value={
+                                        isSensitiveRevealed && sensitiveData
+                                            ? sensitiveData.email
+                                            : user?.email || ''
+                                    }
                                     className="w-full h-9 bg-canvas-subtle border border-line rounded-lg px-3 text-xs sm:text-sm text-fg-muted focus:outline-none"
                                 />
                             </div>
@@ -525,7 +608,13 @@ export const Configuration = () => {
                             <div className="flex gap-2">
                                 <input
                                     disabled={!isEditingWhatsapp}
-                                    value={isEditingWhatsapp ? whatsappInput : user?.whatsapp || ''}
+                                    value={
+                                        isEditingWhatsapp
+                                            ? whatsappInput
+                                            : isSensitiveRevealed && sensitiveData
+                                              ? sensitiveData.whatsapp
+                                              : user?.whatsapp || ''
+                                    }
                                     onChange={(e) => setWhatsappInput(e.target.value)}
                                     className={`flex-1 h-9 bg-canvas-subtle border rounded-lg px-3 text-xs sm:text-sm focus:outline-none ${
                                         isEditingWhatsapp
@@ -549,7 +638,7 @@ export const Configuration = () => {
                                             disabled={isSavingWhatsapp}
                                             onClick={() => {
                                                 setIsEditingWhatsapp(false);
-                                                setWhatsappInput(user?.whatsapp || '');
+                                                setWhatsappInput('');
                                             }}
                                             className="h-9 px-3 bg-surface-2 hover:bg-surface-3 border border-line text-fg-muted hover:text-fg text-xs font-semibold rounded-lg transition-colors"
                                         >
@@ -559,11 +648,14 @@ export const Configuration = () => {
                                 ) : (
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setWhatsappInput(user?.whatsapp || '');
+                                        disabled={isLoadingSensitive}
+                                        onClick={async () => {
+                                            const revealed = sensitiveData ?? (await fetchSensitiveProfile());
+                                            if (!revealed) return;
+                                            setWhatsappInput(revealed.whatsapp || '');
                                             setIsEditingWhatsapp(true);
                                         }}
-                                        className="h-9 px-3.5 bg-surface-2 hover:bg-surface-3 border border-line text-fg text-xs font-semibold rounded-lg transition-colors"
+                                        className="h-9 px-3.5 bg-surface-2 hover:bg-surface-3 border border-line text-fg text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
                                     >
                                         {isEn ? 'Edit' : 'Editar'}
                                     </button>

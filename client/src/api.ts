@@ -21,6 +21,16 @@ import {
 } from './services/offlineDb';
 import { useOfflineSyncStore } from './store/useOfflineSyncStore';
 import { isAdminApiUrl } from './lib/adminAuth';
+import {
+    canUseGeneralOfflineMode,
+    canUseReplayOfflineMode,
+    getStoredUserPlanTier,
+} from './lib/planGate';
+import {
+    decryptJsonEnvelope,
+    getClientKemPublicKeyHeader,
+    isEncryptedEnvelope,
+} from './lib/payloadCrypto';
 
 const api = axios.create({
     baseURL: '/api',
@@ -33,6 +43,8 @@ const SKIP_CACHE_PREFIXES = [
     '/health',
     '/admin',
     '/auth/2fa',
+    '/auth/profile/sensitive',
+    '/auth/app-token',
     '/ai/chat/jobs',
     '/payment',
     '/mt5/cloud',
@@ -40,6 +52,9 @@ const SKIP_CACHE_PREFIXES = [
 
 function shouldSkipOfflineCache(urlPath: string, config?: any): boolean {
     if (config?._skipOfflineCache) return true;
+    if (urlPath.endsWith('/token/reveal') || urlPath.endsWith('/token/regenerate')) {
+        return true;
+    }
     return SKIP_CACHE_PREFIXES.some((prefix) => urlPath.startsWith(prefix));
 }
 
@@ -594,7 +609,7 @@ async function persistEntitiesFromResponse(
     }
 }
 
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
     const isAdminRequest = isAdminApiUrl(config.url);
     const token = isAdminRequest
         ? localStorage.getItem('adminToken')
@@ -608,11 +623,20 @@ api.interceptors.request.use((config) => {
             config.headers['x-account-id'] = accountId;
         }
     }
+    const kemHeader = await getClientKemPublicKeyHeader();
+    if (kemHeader) {
+        config.headers['X-Torex-Kem'] = kemHeader;
+    }
     return config;
 });
 
 api.interceptors.response.use(
-    (response) => response,
+    async (response) => {
+        if (isEncryptedEnvelope(response?.data)) {
+            response.data = await decryptJsonEnvelope(response.data);
+        }
+        return response;
+    },
     (error) => {
         if (error.response?.status === 401) {
             if ((error.config as any)?._isSyncEngineRequest) {
@@ -695,6 +719,17 @@ api.get = async function offlineAwareGet<
     );
 
     if (shouldSkipOfflineCache(urlPath, config)) {
+        return rawGet<T, R, D>(url, config);
+    }
+
+    const currentTier = getStoredUserPlanTier();
+    const isReplayOfflineRoute =
+        urlPath.includes('/backtest/') || urlPath.includes('/tradingview/');
+    const canUseOfflineForRoute = isReplayOfflineRoute
+        ? canUseReplayOfflineMode(currentTier)
+        : canUseGeneralOfflineMode(currentTier);
+
+    if (!canUseOfflineForRoute) {
         return rawGet<T, R, D>(url, config);
     }
 

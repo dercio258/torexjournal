@@ -30,7 +30,7 @@ export const PlanRequiredOverlay = () => {
                         <Button
                             variant="gradient"
                             className="w-full py-6 text-lg group"
-                            onClick={() => navigate('/pricing')}
+                            onClick={() => navigate('/dashboard?plans=1')}
                         >
                             {isEn ? 'Choose Your Plan' : 'Escolher meu Plano'}
                             <Rocket className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
@@ -39,7 +39,7 @@ export const PlanRequiredOverlay = () => {
                         <Button
                             variant="secondary"
                             className="w-full py-6 border-line-strong text-fg/80 hover:bg-surface-2"
-                            onClick={() => navigate('/pricing')}
+                            onClick={() => navigate('/dashboard?plans=1')}
                         >
                             {isEn ? 'View Available Plans' : 'Ver Planos Disponíveis'}
                             <ArrowRight className="w-5 h-5 ml-2" />

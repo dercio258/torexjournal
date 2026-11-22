@@ -11,11 +11,16 @@ import {
     useDashboardFilters,
 } from '../context/DashboardFilterContext';
 import { DashboardSessionBucket } from '../hooks/useDashboard';
+import { useSubscriptionStatus } from '../hooks/useDashboard';
+import { trackButtonClick } from '../lib/tracking';
+import { normalizePlanTier, openWorkspacePlansModal } from '../lib/planGate';
+import { BasicPlanSimpleUpgradeCard } from './subscription/BasicPlanSimpleUpgradeCard';
 import {
     Menu,
     Sun,
     Moon,
     Bell,
+    Clock,
     ChevronDown,
     Check,
     Briefcase,
@@ -56,6 +61,7 @@ const getSessionOptions = (isEn: boolean): { key: DashboardSessionBucket; label:
 
 export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapsed = false }) => {
     const { user, logout } = useAuth();
+    const { data: subStatus } = useSubscriptionStatus();
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const sessionOptions = useMemo(() => getSessionOptions(isEn), [isEn]);
@@ -240,10 +246,38 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
         setOpenPopover(prev => (prev === target ? null : target));
     };
 
+    const normalizedTier = normalizePlanTier(user?.tier);
+    const avatarRingClass =
+        normalizedTier === 'BASIC' || normalizedTier === 'FREE'
+            ? openPopover === 'user'
+                ? 'ring-yellow-300 shadow-glow scale-[1.02]'
+                : 'ring-yellow-400 hover:ring-yellow-300'
+            : normalizedTier === 'PRO'
+              ? openPopover === 'user'
+                  ? 'ring-red-400 shadow-glow scale-[1.02]'
+                  : 'ring-red-500 hover:ring-red-400'
+              : openPopover === 'user'
+                ? 'ring-accent-hover shadow-glow scale-[1.02]'
+                : 'ring-accent/80 hover:ring-accent';
+
+    const popoverAvatarRingClass =
+        normalizedTier === 'BASIC' || normalizedTier === 'FREE'
+            ? 'ring-yellow-400'
+            : normalizedTier === 'PRO'
+              ? 'ring-red-500'
+              : 'ring-accent/80';
+
+    const tierLabelColorClass =
+        normalizedTier === 'BASIC' || normalizedTier === 'FREE'
+            ? 'text-yellow-400'
+            : normalizedTier === 'PRO'
+              ? 'text-red-400'
+              : 'text-accent-fg';
+
     return (
-        <header className="sticky top-0 z-30 w-full h-12 bg-canvas/95 backdrop-blur-xl border-b border-line-subtle flex items-center justify-between px-3 sm:px-5 transition-colors duration-200">
+        <header className="sticky top-0 z-30 w-full h-12 bg-canvas/95 backdrop-blur-xl border-b border-line-subtle flex items-center justify-between gap-1.5 px-2.5 sm:px-5 transition-colors duration-200">
             {/* LADO ESQUERDO: Hamburger Mobile + Título Limpo da Página */}
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 mr-1">
                 <button
                     type="button"
                     onClick={onOpenSidebar}
@@ -256,20 +290,20 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                     <Menu size={15} />
                 </button>
 
-                <h1 className="text-[13px] sm:text-sm font-semibold text-fg tracking-tight truncate">
+                <h1 className="text-xs sm:text-sm font-semibold text-fg tracking-tight truncate max-w-[82px] xs:max-w-[125px] sm:max-w-none">
                     {getPageTitle()}
                 </h1>
             </div>
 
             {/* LADO DIREITO: Filters · Date Range · Conta/Número · Utilitários · Avatar */}
-            <div ref={headerControlsRef} className="flex items-center gap-1.5 sm:gap-2">
+            <div ref={headerControlsRef} className="flex items-center gap-1 sm:gap-2 shrink-0">
                 {/* 1. FILTERS POPOVER (Visível no Dashboard e Relatórios) */}
                 {showAnalyticsFilters && (
                     <div className="relative">
                         <button
                             type="button"
                             onClick={() => togglePopover('filters')}
-                            className={`h-8 px-2.5 rounded-lg border text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none ${
+                            className={`h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg border text-[11px] sm:text-[11.5px] font-medium flex items-center gap-1 sm:gap-1.5 transition-all cursor-pointer focus:outline-none ${
                                 openPopover === 'filters' || hasActiveFilters
                                     ? 'bg-surface-2 border-accent/45 text-fg shadow-xs'
                                     : 'bg-surface/80 hover:bg-surface-2 border-line hover:border-line-strong text-fg-muted hover:text-fg'
@@ -277,15 +311,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                             title={isEn ? 'Filter operational metrics' : 'Filtrar métricas operacionais'}
                         >
                             <Filter size={13} className={hasActiveFilters ? 'text-accent-fg' : 'text-fg-subtle'} />
-                            <span className="hidden xs:inline">{isEn ? 'Filters' : 'Filtros'}</span>
+                            <span className="hidden md:inline">{isEn ? 'Filters' : 'Filtros'}</span>
                             {activeFilterCount > 0 && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-accent/15 text-accent-fg text-[10px] font-bold leading-none tabular-nums">
+                                <span className="px-1 py-0.5 rounded-full bg-accent/15 text-accent-fg text-[9.5px] font-bold leading-none tabular-nums">
                                     {activeFilterCount}
                                 </span>
                             )}
                             <ChevronDown
                                 size={13}
-                                className={`text-fg-subtle transition-transform duration-150 ${
+                                className={`hidden sm:block text-fg-subtle transition-transform duration-150 ${
                                     openPopover === 'filters' ? 'rotate-180 text-accent-fg' : ''
                                 }`}
                             />
@@ -482,7 +516,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                         <button
                             type="button"
                             onClick={() => togglePopover('date')}
-                            className={`h-8 px-2.5 rounded-lg border text-[11.5px] font-medium flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none ${
+                            className={`h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg border text-[11px] sm:text-[11.5px] font-medium flex items-center gap-1 sm:gap-1.5 transition-all cursor-pointer focus:outline-none ${
                                 openPopover === 'date' || dateRange.preset !== 'all'
                                     ? 'bg-surface-2 border-accent/45 text-fg shadow-xs'
                                     : 'bg-surface/80 hover:bg-surface-2 border-line hover:border-line-strong text-fg-muted hover:text-fg'
@@ -493,12 +527,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                                 size={13}
                                 className={dateRange.preset !== 'all' ? 'text-accent-fg' : 'text-fg-subtle'}
                             />
-                            <span className="truncate max-w-[92px] sm:max-w-[130px] tabular-nums">
+                            <span className="hidden sm:inline truncate max-w-[130px] tabular-nums">
                                 {dateRange.preset === 'all' ? (isEn ? 'Timeframe' : 'Período') : dateRange.label}
                             </span>
                             <ChevronDown
                                 size={13}
-                                className={`text-fg-subtle transition-transform duration-150 ${
+                                className={`hidden sm:block text-fg-subtle transition-transform duration-150 ${
                                     openPopover === 'date' ? 'rotate-180 text-accent-fg' : ''
                                 }`}
                             />
@@ -588,7 +622,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                     <button
                         type="button"
                         onClick={() => togglePopover('account')}
-                        className={`h-8 px-2.5 rounded-lg border transition-all duration-150 group flex items-center gap-2 focus:outline-none cursor-pointer ${
+                        className={`h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg border transition-all duration-150 group flex items-center gap-1 sm:gap-2 max-w-[96px] xs:max-w-[120px] sm:max-w-none focus:outline-none cursor-pointer ${
                             openPopover === 'account'
                                 ? 'bg-surface-2 border-accent/50 shadow-xs'
                                 : 'bg-surface/80 hover:bg-surface-2 border-line hover:border-line-strong'
@@ -596,7 +630,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                         title={isEn ? 'Switch Trading Account' : 'Alternar Conta de Trading'}
                     >
                         <div className="flex flex-col text-left min-w-0">
-                            <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
                                 {!isConsolidated && selectedAccount ? (
                                     <span
                                         className={`w-1.5 h-1.5 rounded-full shrink-0 ${getTypeTone(selectedAccount.type).dotClass}`}
@@ -604,21 +638,21 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                                 ) : (
                                     <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-purple" />
                                 )}
-                                <span className="text-[11px] sm:text-xs font-bold text-fg uppercase tracking-tight max-w-[95px] sm:max-w-[150px] truncate leading-none">
+                                <span className="text-[10px] sm:text-xs font-bold text-fg uppercase tracking-tight max-w-[62px] xs:max-w-[82px] sm:max-w-[150px] truncate leading-none">
                                     {isConsolidated
                                         ? isEn
-                                            ? 'All Accounts'
-                                            : 'Todas as Contas'
-                                        : selectedAccount?.name || (isEn ? 'Primary Account' : 'Conta Principal')}
+                                            ? 'All'
+                                            : 'Todas'
+                                        : selectedAccount?.name || (isEn ? 'Primary' : 'Principal')}
                                 </span>
                             </div>
-                            <span className="text-[10px] font-mono tabular-nums text-fg-muted leading-none mt-1 truncate max-w-[110px] sm:max-w-[160px]">
+                            <span className="hidden sm:block text-[10px] font-mono tabular-nums text-fg-muted leading-none mt-1 truncate max-w-[160px]">
                                 {accountNumberSubtitle}
                             </span>
                         </div>
 
                         <ChevronDown
-                            size={13}
+                            size={12}
                             className={`text-fg-subtle transition-transform duration-150 shrink-0 ${
                                 openPopover === 'account' ? 'rotate-180 text-accent-fg' : 'group-hover:text-fg-muted'
                             }`}
@@ -765,6 +799,50 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                     )}
                 </div>
 
+                {/* 3.4 BADGE DE EXPIRAÇÃO PRÓXIMA (<= 5 DIAS) */}
+                {subStatus?.hasActive && typeof subStatus.daysLeft === 'number' && subStatus.daysLeft <= 5 && (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            trackButtonClick({
+                                ctaTag: 'header_expiry_pill',
+                                intent: 'renewal',
+                                label: `Header Expiry Pill (${subStatus.daysLeft}d)`,
+                                metadata: {
+                                    daysLeft: subStatus.daysLeft,
+                                    tier: subStatus.tier,
+                                    isTrial: Boolean(subStatus.isTrial),
+                                },
+                            });
+                            openWorkspacePlansModal('header_expiry_pill', {
+                                daysLeft: subStatus.daysLeft,
+                                tier: subStatus.tier,
+                            });
+                        }}
+                        title={
+                            isEn
+                                ? `Your ${subStatus.tier}${subStatus.isTrial ? ' trial' : ' plan'} expires in ${subStatus.daysLeft} day(s). Click to renew now and avoid interruptions.`
+                                : `O seu plano ${subStatus.tier}${subStatus.isTrial ? ' (Teste)' : ''} expira em ${subStatus.daysLeft} dia(s). Clique para renovar e manter acesso contínuo.`
+                        }
+                        className={`hidden sm:inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border text-[11px] font-bold transition-all cursor-pointer shrink-0 ${
+                            subStatus.daysLeft <= 2
+                                ? 'bg-danger/15 border-danger/35 text-danger-fg hover:bg-danger/25'
+                                : 'bg-amber-500/15 border-amber-500/35 text-amber-400 hover:bg-amber-500/25'
+                        }`}
+                    >
+                        <Clock size={12} />
+                        <span className="tabular-nums">
+                            {subStatus.daysLeft === 0
+                                ? isEn
+                                    ? 'Expires today'
+                                    : 'Expira hoje'
+                                : isEn
+                                  ? `Renews in ${subStatus.daysLeft}d`
+                                  : `Expira em ${subStatus.daysLeft}d`}
+                        </span>
+                    </button>
+                )}
+
                 {/* 3.5 INDICADOR OFFLINE & FILA DE SINCRONIZAÇÃO */}
                 <OfflineSyncIndicator />
 
@@ -797,17 +875,13 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                     </NavLink>
                 </div>
 
-                {/* 5. AVATAR CIRCULAR REFINADO COM ANEL EMERALD/ACCENT */}
+                {/* 5. AVATAR CIRCULAR COM ANEL POR PLANO (BASIC=AMARELO, PRO=VERMELHO, PREMIUM=EMERALD) */}
                 <div className="relative pl-0.5">
                     <button
                         type="button"
                         onClick={() => togglePopover('user')}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center bg-surface-2 text-fg font-bold text-[11px] overflow-hidden transition-all duration-200 cursor-pointer focus:outline-none ring-[1.5px] ring-offset-2 ring-offset-canvas ${
-                            openPopover === 'user'
-                                ? 'ring-accent-hover shadow-glow scale-[1.02]'
-                                : 'ring-accent/80 hover:ring-accent'
-                        }`}
-                        title={isEn ? `${displayName}'s Profile` : `Perfil de ${displayName}`}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center bg-surface-2 text-fg font-bold text-[11px] overflow-hidden transition-all duration-200 cursor-pointer focus:outline-none ring-2 ring-offset-2 ring-offset-canvas ${avatarRingClass}`}
+                        title={isEn ? `${displayName}'s Profile (${normalizedTier})` : `Perfil de ${displayName} (${normalizedTier})`}
                     >
                         {user?.avatarUrl ? (
                             <img src={user.avatarUrl} alt={displayName} className="w-full h-full object-cover" />
@@ -818,9 +892,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
 
                     {openPopover === 'user' && (
                         <div className="absolute right-0 mt-2 w-64 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up">
-                            <div className="p-3.5 border-b border-line bg-canvas-subtle">
+                            <div className="p-3.5 border-b border-line bg-canvas-subtle space-y-2.5">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-surface-2 text-fg font-bold text-sm flex items-center justify-center ring-2 ring-accent/80 ring-offset-2 ring-offset-canvas-subtle shrink-0 overflow-hidden">
+                                    <div className={`w-10 h-10 rounded-full bg-surface-2 text-fg font-bold text-sm flex items-center justify-center ring-2 ${popoverAvatarRingClass} ring-offset-2 ring-offset-canvas-subtle shrink-0 overflow-hidden`}>
                                         {user?.avatarUrl ? (
                                             <img
                                                 src={user.avatarUrl}
@@ -838,11 +912,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, isSidebarCollapse
                                         <p className="text-xs text-fg-subtle truncate leading-tight mt-0.5">
                                             {user?.email || userSubtitle}
                                         </p>
-                                        <p className="text-[11px] font-medium text-accent-fg mt-1">
+                                        <p className={`text-[11px] font-bold mt-1 ${tierLabelColorClass}`}>
                                             {isEn ? `${user?.tier || 'PRO'} Plan` : `Plano ${user?.tier || 'PRO'}`}
                                         </p>
                                     </div>
                                 </div>
+                                <BasicPlanSimpleUpgradeCard compact />
                             </div>
 
                             <div className="p-1.5 space-y-0.5">

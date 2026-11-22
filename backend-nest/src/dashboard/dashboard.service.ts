@@ -19,6 +19,7 @@ import {
 import { DailyNoteEntity, TradeNoteEntity } from './journal-notes.entity';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
 import { getQuantInternalHeaders } from '../common/security/security.config';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 @Injectable()
 export class DashboardService {
@@ -53,6 +54,8 @@ export class DashboardService {
         @Optional()
         @InjectRepository(BacktestHypothesisEntity)
         private hypothesisRepo?: Repository<BacktestHypothesisEntity>,
+        @Optional()
+        private readonly planPermissionService?: PlanPermissionService,
     ) { }
 
     private isValidUuid(id?: string): boolean {
@@ -2719,17 +2722,25 @@ export class DashboardService {
     }
 
     async getWeeklySummary(userId: string, accountId?: string) {
+        return this.getPeriodSummary(userId, 7, accountId);
+    }
+
+    async getMonthlySummary(userId: string, accountId?: string) {
+        return this.getPeriodSummary(userId, 30, accountId);
+    }
+
+    private async getPeriodSummary(userId: string, days: number, accountId?: string) {
         const { accountIds } = await this.validateUserAccount(userId, accountId);
         if (accountIds.length === 0) return null;
 
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        const periodStart = new Date();
+        periodStart.setDate(periodStart.getDate() - days);
 
         const trades = await this.tradeRepo.find({
             where: {
                 accountId: In(accountIds),
                 status: 'CLOSED',
-                closeTime: MoreThanOrEqual(oneWeekAgo)
+                closeTime: MoreThanOrEqual(periodStart)
             }
         });
 
@@ -2755,7 +2766,7 @@ export class DashboardService {
             totalTrades: trades.length,
             topLessons,
             period: {
-                start: oneWeekAgo.toISOString(),
+                start: periodStart.toISOString(),
                 end: new Date().toISOString()
             }
         };
@@ -3178,7 +3189,52 @@ export class DashboardService {
         return reportPayload;
     }
 
+    private async assertMonthlyBacktestRunQuota(userId: string): Promise<void> {
+        if (!this.planPermissionService) return;
+        const plan = await this.planPermissionService.getUserPlan(userId);
+        if (plan === PlanTier.FREE || plan === PlanTier.BASIC) {
+            throw new ForbiddenException({
+                statusCode: 403,
+                code: 'UPGRADE_REQUIRED',
+                requiredPlan: PlanTier.PRO,
+                currentPlan: plan,
+                feature: 'backtesting',
+                message: 'Backtesting e Trade Replay requerem o plano Pro ou Premium.',
+            });
+        }
+
+        const monthlyLimit = plan === PlanTier.PRO ? 10 : plan === PlanTier.PREMIUM ? 100 : null;
+        if (!monthlyLimit) return;
+
+        const now = new Date();
+        const monthStartUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+        const usedRunsThisMonth = await this.backtestRepo.count({
+            where: {
+                userId,
+                mode: Not('STRATEGY_DEFINITION'),
+                createdAt: MoreThanOrEqual(monthStartUtc),
+            },
+        });
+
+        if (usedRunsThisMonth >= monthlyLimit) {
+            throw new ForbiddenException({
+                statusCode: 403,
+                code: 'BACKTEST_MONTHLY_QUOTA_EXCEEDED',
+                requiredPlan: PlanTier.PREMIUM,
+                currentPlan: plan,
+                monthlyLimit,
+                usedRunsThisMonth,
+                feature: 'backtesting',
+                message:
+                    plan === PlanTier.PRO
+                        ? `Você atingiu o limite de ${monthlyLimit} sessões de backteste este mês no plano Pro. Faça upgrade para o plano Premium para liberar até 100 sessões/mês.`
+                        : `Você atingiu o limite de ${monthlyLimit} sessões de backteste este mês no plano Premium.`,
+            });
+        }
+    }
+
     async simulateBacktest(userId: string, accountId: string, config: any) {
+        await this.assertMonthlyBacktestRunQuota(userId);
         const { accounts, targetAccount, isConsolidated } = await this.validateUserAccount(userId, accountId);
         const mode = config?.mode || 'ACCOUNT_HISTORY';
 
@@ -3805,6 +3861,10 @@ export class DashboardService {
                 )
                 .orderBy('bs.updated_at', 'DESC')
                 .getOne();
+        }
+
+        if (!existing) {
+            await this.assertMonthlyBacktestRunQuota(userId);
         }
 
         // Phase 3 Monotonic Revision Guard: reject strictly older out-of-order sync requests

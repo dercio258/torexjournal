@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -11,6 +11,7 @@ import { TechnicalJournal } from '../dashboard/technical-journal.entity';
 import { UserEntity } from '../users/user.entity';
 import { AlertsModule } from '../alerts/alerts.module';
 import { Subscription } from '../payment/subscription.entity';
+import { PaymentModule } from '../payment/payment.module';
 import { BullModule } from '@nestjs/bull';
 import { BroadcastNotificationEntity } from './broadcast-notification.entity';
 import { BroadcastingService } from './broadcast.service';
@@ -47,6 +48,7 @@ import { PushNotificationsController } from './push/push-notifications.controlle
         }),
         AlertsModule,
         EmailModule,
+        forwardRef(() => PaymentModule),
         BullModule.registerQueue({
             name: 'push-queue',
             defaultJobOptions: {

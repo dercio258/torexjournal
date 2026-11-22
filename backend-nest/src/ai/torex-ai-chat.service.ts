@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ForbiddenException,
     Injectable,
     Logger,
     NotFoundException,
@@ -495,12 +496,12 @@ export class TorexAiChatService implements OnModuleInit {
             });
         }
 
-        // Auto-recuperação caso tenha ultrapassado 180s sem conclusão.
-        // Análises encadeadas (router + analista + fallback) podem passar de 90s; um guarda
-        // curto demais gravava o aviso de suporte enquanto a resposta real ainda estava a ser gerada.
+        // Auto-recuperação caso tenha ultrapassado 210s sem conclusão.
+        // Análises encadeadas (router + analista + contingência Qwen) podem exigir tempo adicional;
+        // um guarda curto demais gravava o aviso de suporte enquanto a resposta real ainda estava a ser gerada.
         if (
             job.status === 'PROCESSING' &&
-            Date.now() - new Date(job.createdAt).getTime() > 180_000
+            Date.now() - new Date(job.createdAt).getTime() > 210_000
         ) {
             const fallbackMsg = await this.messageRepo.save(
                 this.messageRepo.create({
@@ -1774,11 +1775,31 @@ export class TorexAiChatService implements OnModuleInit {
         return this.sessionRepo.save(created);
     }
 
+    private async requireInteractionCredits(userId: string): Promise<AiCreditStatusDto> {
+        if (typeof (this.aiCreditsService as any)?.assertCanInteract === 'function') {
+            return this.aiCreditsService.assertCanInteract(userId);
+        }
+        const status = await this.aiCreditsService.getCreditStatus(userId);
+        if (status.dailyLimit <= 0 || status.creditsRemaining <= 0) {
+            throw new ForbiddenException({
+                statusCode: 403,
+                code:
+                    status.dailyLimit <= 0
+                        ? 'NO_ACTIVE_PLAN_FOR_AI'
+                        : 'INSUFFICIENT_AI_CREDITS',
+                message:
+                    'Você não possui créditos AI disponíveis. Convide amigos ou faça upgrade do seu plano para continuar.',
+                credits: status,
+            });
+        }
+        return status;
+    }
+
     /**
      * Modo Assíncrono Persistente:
-     * 1. Cria/carrega a sessão e salva imediatamente a mensagem do utilizador no PostgreSQL.
-     * 2. Regista um job persistente vinculado ao `session.id` exato.
-     * 3. Dispara o processamento em background garantindo gravação no chat correto mesmo se o utilizador trocar de aba/conversa.
+     * 1. Valida créditos obrigatoriamente antes de criar sessão/mensagem/job.
+     * 2. Evita jobs duplicados se o mesmo chat já possuir um processamento ativo.
+     * 3. Cria/carrega a sessão, salva a mensagem do utilizador no PostgreSQL e dispara em background.
      */
     async enqueueMessage(params: {
         userId: string;
@@ -1799,9 +1820,7 @@ export class TorexAiChatService implements OnModuleInit {
         }
 
         try {
-            const creditStatus = await this.aiCreditsService.getCreditStatus(
-                params.userId
-            );
+            const creditStatus = await this.requireInteractionCredits(params.userId);
             const maxChars = creditStatus.maxMessageChars || 50;
             const displayInspection = this.promptSystem.inspectAndClassifyInput(
                 rawTrimmed,
@@ -1824,6 +1843,43 @@ export class TorexAiChatService implements OnModuleInit {
                     : this.promptSystem.inspectAndClassifyInput(routingText, maxChars, locale);
             const routingQuestion =
                 inspection.sanitizedQuestion || routingText.slice(0, maxChars);
+
+            if (
+                params.sessionId &&
+                this.isValidSessionUuid(params.sessionId) &&
+                typeof (this.jobRepo as any)?.findOne === 'function'
+            ) {
+                const normalizedSid = params.sessionId.trim().toLowerCase();
+                const existingActive = await this.jobRepo.findOne({
+                    where: {
+                        userId: params.userId,
+                        sessionId: normalizedSid,
+                        status: 'PROCESSING',
+                    },
+                    order: { createdAt: 'DESC' },
+                });
+                if (
+                    existingActive &&
+                    Date.now() - new Date(existingActive.createdAt).getTime() < 210_000
+                ) {
+                    const [existingSession, existingUserMsg] = await Promise.all([
+                        this.sessionRepo.findOne({ where: { id: normalizedSid, userId: params.userId } }),
+                        existingActive.userMessageId
+                            ? this.messageRepo.findOne({ where: { id: existingActive.userMessageId } })
+                            : Promise.resolve(null),
+                    ]);
+                    if (existingSession) {
+                        return {
+                            async: true as const,
+                            jobId: existingActive.id,
+                            status: 'PROCESSING' as const,
+                            session: existingSession,
+                            userMessage: existingUserMsg,
+                            credits: creditStatus,
+                        };
+                    }
+                }
+            }
 
             const session = await this.resolveOrCreateSessionForMessage({
                 userId: params.userId,
@@ -1892,6 +1948,9 @@ export class TorexAiChatService implements OnModuleInit {
                 credits: creditStatus,
             };
         } catch (err) {
+            if (err instanceof ForbiddenException || err instanceof BadRequestException) {
+                throw err;
+            }
             this.logger.error(
                 `[TorexAiChatService] Erro ao enfileirar mensagem assíncrona: ${(err as Error).message}`
             );
@@ -2020,7 +2079,7 @@ export class TorexAiChatService implements OnModuleInit {
         }
 
         try {
-            const creditStatus = await this.aiCreditsService.getCreditStatus(
+            const creditStatus = await this.requireInteractionCredits(
                 params.userId
             );
             const maxChars = creditStatus.maxMessageChars || 50;
@@ -2093,6 +2152,9 @@ export class TorexAiChatService implements OnModuleInit {
                 credits: result.credits,
             };
         } catch (err) {
+            if (err instanceof ForbiddenException || err instanceof BadRequestException) {
+                throw err;
+            }
             this.logger.error(
                 `[TorexAiChatService] Erro ao processar mensagem síncrona: ${(err as Error).message}`
             );

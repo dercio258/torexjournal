@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
     AlertCircle,
     CheckCircle2,
@@ -11,8 +11,11 @@ import {
 } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { Button } from '../../components/ui/Button';
+import { FeatureUpgradeGateCard } from '../../components/subscription/FeatureUpgradeGateCard';
+import { isBasicPlanTier } from '../../lib/planGate';
 import { pullAccountHistoryInBatchesAndBuildUnifiedSession } from '../../services/historicalBatchCache';
 import { DerivIcon } from './icons';
 
@@ -28,6 +31,9 @@ interface DerivStatus {
 }
 
 export const DerivSyncPage = () => {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
     const { selectedAccountId, refreshAccounts } = useAccount();
     const { locale } = useLocale();
     const isEn = locale === 'en';
@@ -53,8 +59,10 @@ export const DerivSyncPage = () => {
     };
 
     useEffect(() => {
-        fetchDerivStatus();
-    }, []);
+        if (!isBasic) {
+            fetchDerivStatus();
+        }
+    }, [isBasic]);
 
     const handleConnect = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -153,6 +161,31 @@ export const DerivSyncPage = () => {
             setIsLoading(false);
         }
     };
+
+    if (isBasic) {
+        return (
+            <FeatureUpgradeGateCard
+                featureKey="deriv_sync"
+                title="Conexão automática Deriv exclusiva do Plano Pro"
+                titleEn="Automated Deriv Sync Requires Pro Plan"
+                description="No plano Básico pode registar seus trades manualmente, importar ficheiros (CSV/XLSX/HTML) ou utilizar o Conector PC (EA). Atualize para o Plano Pro ou Premium para sincronizar contas Deriv em tempo real."
+                descriptionEn="On the Basic plan you can add trades manually, upload files, or use the Desktop EA Bridge. Upgrade to Pro or Premium for real-time Deriv API sync."
+                bullets={[
+                    'Sincronização em tempo real via Token API da Deriv',
+                    'Captura automática de índices sintéticos e Forex',
+                    '1.500 Créditos AI mensais + Backtesting + Trade Replay',
+                    'Contas de trading ilimitadas',
+                ]}
+                bulletsEn={[
+                    'Real-time Deriv API token synchronization',
+                    'Automatic synthetic indices and FX ingestion',
+                    '1,500 monthly AI credits + Backtesting + Trade Replay',
+                    'Unlimited trading accounts',
+                ]}
+                onBack={() => navigate('/add-trades')}
+            />
+        );
+    }
 
     return (
         <div className="rounded-2xl border border-line bg-surface p-5 sm:p-8 space-y-6 animate-fade-in-up">

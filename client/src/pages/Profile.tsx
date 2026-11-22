@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAccount, TradingAccount, AccountType } from '../context/AccountContext';
 import { useLocale } from '../context/LocaleContext';
@@ -38,6 +38,7 @@ export const Profile: React.FC = () => {
         restoreAccount,
         deleteAccount,
         regenerateToken,
+        revealToken,
         canCreateAccount,
         isLoading: isLoadingAccounts,
     } = useAccount();
@@ -45,6 +46,9 @@ export const Profile: React.FC = () => {
     const [showArchived, setShowArchived] = useState(false);
     const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
     const [visibleTokenId, setVisibleTokenId] = useState<string | null>(null);
+    const [revealedTokens, setRevealedTokens] = useState<Record<string, string>>({});
+    const [revealingTokenId, setRevealingTokenId] = useState<string | null>(null);
+    const tokenAutoHideRef = useRef<Record<string, number>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -82,8 +86,56 @@ export const Profile: React.FC = () => {
         }).format(val || 0);
     };
 
-    const handleCopyToken = (accountId: string, token: string) => {
-        navigator.clipboard.writeText(token);
+    const clearTokenFromState = (accountId: string) => {
+        if (tokenAutoHideRef.current[accountId]) {
+            window.clearTimeout(tokenAutoHideRef.current[accountId]);
+            delete tokenAutoHideRef.current[accountId];
+        }
+        setVisibleTokenId((prev) => (prev === accountId ? null : prev));
+        setRevealedTokens((prev) => {
+            if (!(accountId in prev)) return prev;
+            const next = { ...prev };
+            delete next[accountId];
+            return next;
+        });
+    };
+
+    const revealWithAutoHide = async (
+        accountId: string,
+        preloadedToken?: string
+    ): Promise<string | null> => {
+        try {
+            let token = preloadedToken ?? revealedTokens[accountId];
+            if (!token) {
+                setRevealingTokenId(accountId);
+                token = await revealToken(accountId);
+            }
+            if (!token) return null;
+            setRevealedTokens((prev) => ({ ...prev, [accountId]: token! }));
+            setVisibleTokenId(accountId);
+            if (tokenAutoHideRef.current[accountId]) {
+                window.clearTimeout(tokenAutoHideRef.current[accountId]);
+            }
+            tokenAutoHideRef.current[accountId] = window.setTimeout(() => {
+                clearTokenFromState(accountId);
+            }, 30000);
+            return token;
+        } catch (err: any) {
+            setErrorMessage(
+                err.response?.data?.message ||
+                    (isEn ? 'Failed to reveal EA token' : 'Erro ao revelar token EA')
+            );
+            setTimeout(() => setErrorMessage(null), 4000);
+            return null;
+        } finally {
+            setRevealingTokenId((prev) => (prev === accountId ? null : prev));
+        }
+    };
+
+    const handleCopyToken = async (accountId: string) => {
+        const token = revealedTokens[accountId] || (await revealWithAutoHide(accountId));
+        if (!token) return;
+        await navigator.clipboard.writeText(token);
         setCopiedTokenId(accountId);
         setTimeout(() => setCopiedTokenId(null), 2500);
     };
@@ -97,7 +149,10 @@ export const Profile: React.FC = () => {
             )
         ) {
             try {
-                await regenerateToken(accountId);
+                const newToken = await regenerateToken(accountId);
+                if (newToken) {
+                    await revealWithAutoHide(accountId, newToken);
+                }
                 setSuccessMessage(isEn ? 'EA token regenerated successfully!' : 'Token EA regenerado com sucesso!');
                 setTimeout(() => setSuccessMessage(null), 3500);
             } catch (err: any) {
@@ -647,26 +702,40 @@ export const Profile: React.FC = () => {
                                                     {isEn ? 'EA Token (MT5)' : 'Token EA (MT5)'}
                                                 </span>
                                                 <button
-                                                    onClick={() =>
-                                                        setVisibleTokenId(isTokenVisible ? null : account.id)
-                                                    }
-                                                    className="text-[10px] text-accent-fg hover:underline font-medium"
+                                                    type="button"
+                                                    disabled={revealingTokenId === account.id}
+                                                    onClick={() => {
+                                                        if (isTokenVisible) {
+                                                            clearTokenFromState(account.id);
+                                                        } else {
+                                                            void revealWithAutoHide(account.id);
+                                                        }
+                                                    }}
+                                                    className="text-[10px] text-accent-fg hover:underline font-medium disabled:opacity-50"
                                                 >
-                                                    {isTokenVisible ? (isEn ? 'Hide' : 'Ocultar') : (isEn ? 'Show' : 'Mostrar')}
+                                                    {revealingTokenId === account.id
+                                                        ? '...'
+                                                        : isTokenVisible
+                                                          ? isEn
+                                                              ? 'Hide'
+                                                              : 'Ocultar'
+                                                          : isEn
+                                                            ? 'Show'
+                                                            : 'Mostrar'}
                                                 </button>
                                             </div>
                                             <div className="flex items-center justify-between gap-2">
                                                 <code className="text-[10px] font-mono text-fg truncate select-all">
-                                                    {isTokenVisible
-                                                        ? account.appToken
-                                                        : '••••••••••••••••••••••••'}
+                                                    {isTokenVisible && revealedTokens[account.id]
+                                                        ? revealedTokens[account.id]
+                                                        : account.appTokenMasked || '••••••••••••••••••••••••'}
                                                 </code>
                                                 <div className="flex items-center gap-1 shrink-0">
                                                     <button
-                                                        onClick={() =>
-                                                            handleCopyToken(account.id, account.appToken)
-                                                        }
-                                                        className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg border border-line-subtle transition-colors"
+                                                        type="button"
+                                                        disabled={revealingTokenId === account.id}
+                                                        onClick={() => void handleCopyToken(account.id)}
+                                                        className="p-1 rounded bg-surface-2 hover:bg-surface-3 text-fg-muted hover:text-fg border border-line-subtle transition-colors disabled:opacity-50"
                                                         title={isEn ? 'Copy MT5 Token' : 'Copiar Token MT5'}
                                                     >
                                                         {copiedTokenId === account.id ? (

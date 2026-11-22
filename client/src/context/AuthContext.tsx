@@ -10,6 +10,7 @@ import {
 import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
 import { queryClient } from '../lib/queryClient';
 import { clearBacktestTransientClientState } from '../services/backtestWorkspaceStore';
+import { maskEmailClient } from '../lib/payloadCrypto';
 
 function decodeJwtSubject(jwtToken: string): string | null {
     try {
@@ -34,10 +35,9 @@ export interface AuthUser {
     is_connected?: boolean;
     tier?: 'FREE' | 'BASIC' | 'PRO' | 'PREMIUM';
     onboardingCompleted?: boolean;
-    hasUsedTrial?: boolean;
-    trialUsedAt?: string;
     trialJustGranted?: boolean;
     trialDays?: number;
+    trialEligible?: boolean;
     whatsapp?: string | null;
     preferredMpesa?: string | null;
     preferredEmola?: string | null;
@@ -86,8 +86,9 @@ function writeCachedUser(user: AuthUser | null) {
             localStorage.removeItem(USER_CACHE_KEY);
             return;
         }
-        // Never persist ephemeral celebration flags across reloads
-        const { trialJustGranted: _ephemeral, ...persistable } = user;
+        const persistable: AuthUser = { ...user };
+        delete persistable.trialJustGranted;
+        delete persistable.trialDays;
         localStorage.setItem(USER_CACHE_KEY, JSON.stringify(persistable));
         if (persistable.id) {
             rememberUserScope(persistable.id);
@@ -265,8 +266,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         localStorage.setItem('token', newToken);
         if (email) {
-            localStorage.setItem('userEmail', email);
-            setUserEmail(email);
+            const maskedEmail = maskEmailClient(email);
+            localStorage.setItem('userEmail', maskedEmail);
+            setUserEmail(maskedEmail);
         }
         if (previousToken !== newToken) {
             setIsLoading(readCachedUser() === null);

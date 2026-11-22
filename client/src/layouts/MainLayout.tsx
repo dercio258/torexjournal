@@ -1,10 +1,10 @@
 import { useState, useEffect, Suspense } from 'react';
-import { Outlet, useLocation, Navigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from '../components/Sidebar';
 import { MobileBottomDock } from '../components/MobileBottomDock';
 import { useAuth } from '../context/AuthContext';
 import { DashboardFilterProvider } from '../context/DashboardFilterContext';
-import { PlanRequiredOverlay } from '../components/subscription/PlanRequiredOverlay';
+import { WorkspacePricingModal } from '../components/subscription/WorkspacePricingModal';
 import { OnboardingSurvey } from '../components/onboarding/OnboardingSurvey';
 import { AccountManagerModal } from '../components/account/AccountManagerModal';
 import { Header } from '../components/Header';
@@ -13,11 +13,11 @@ import { RouteSkeletonResolver } from '../components/ui/Skeleton';
 export const MainLayout = () => {
     const { user, isLoading } = useAuth();
     const location = useLocation();
-    const isPaymentsPage = location.pathname === '/payments' || location.pathname === '/pricing';
+    const navigate = useNavigate();
     const isBacktestPage = location.pathname.includes('/replay/');
     const isTorexAiPage = location.pathname.startsWith('/torex-ai');
-    const hasNoPlan = !isLoading && user && (!user.tier || user.tier === 'FREE') && !isPaymentsPage;
     const showOnboarding = !isLoading && user && user.onboardingCompleted === false;
+    const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isDesktopCollapsed, setIsDesktopCollapsed] = useState<boolean>(() => {
         try {
@@ -61,15 +61,39 @@ export const MainLayout = () => {
         return () => window.removeEventListener('cossa:backtest-fullscreen', handler);
     }, []);
 
-    // Se o usuário já utilizou o período de teste e não possui plano ativo, redirecionar para a página de preços
-    if (hasNoPlan && user?.hasUsedTrial && location.pathname !== '/pricing' && location.pathname !== '/payments') {
-        return <Navigate to="/pricing" replace />;
-    }
+    // Open centered plans modal via ?plans=1 query param or custom event
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('plans') === '1') {
+            setIsPlansModalOpen(true);
+        }
+    }, [location.search]);
+
+    useEffect(() => {
+        const openHandler = () => setIsPlansModalOpen(true);
+        window.addEventListener('torex:open-plans-modal', openHandler);
+        return () => window.removeEventListener('torex:open-plans-modal', openHandler);
+    }, []);
+
+    const handleClosePlansModal = () => {
+        setIsPlansModalOpen(false);
+        const params = new URLSearchParams(location.search);
+        if (params.has('plans')) {
+            params.delete('plans');
+            const cleanSearch = params.toString();
+            navigate(`${location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}`, { replace: true });
+        }
+    };
 
     return (
         <DashboardFilterProvider>
             <div className="flex h-screen overflow-hidden bg-canvas font-sans text-fg transition-colors duration-200 selection:bg-accent/20">
-                {hasNoPlan && <PlanRequiredOverlay />}
+                <WorkspacePricingModal
+                    isOpen={isPlansModalOpen}
+                    dismissible={true}
+                    onClose={handleClosePlansModal}
+                    trialEligible={Boolean(user?.trialEligible)}
+                />
                 {showOnboarding && <OnboardingSurvey onComplete={() => {}} />}
                 <AccountManagerModal />
 
@@ -125,7 +149,7 @@ export const MainLayout = () => {
                         >
                             {isLoading && !user ? (
                                 <RouteSkeletonResolver />
-                            ) : hasNoPlan ? null : (
+                            ) : (
                                 <Suspense fallback={<RouteSkeletonResolver />}>
                                     <Outlet />
                                 </Suspense>

@@ -202,52 +202,14 @@ export class ReferralService implements OnModuleInit {
             };
         }
 
-        const dayStart = new Date(Date.now() - 86_400_000);
-        const recentVerifiedCount = await this.referralRepo.count({
-            where: {
-                referrerUserId: referrer.id,
-                createdAt: MoreThanOrEqual(dayStart),
-            },
-        });
-
-        const existingSuccessCount = await this.referralRepo.count({
-            where: {
-                referrerUserId: referrer.id,
-                status: In(['VERIFIED', 'PAID']),
-            },
-        });
-        const totalVerifiedAfter = existingSuccessCount + 1;
-
-        // Regra oficial:
-        // - 1+ indicado verificado -> +50 créditos IA extras/dia durante 30 dias
-        // - A cada 3 indicados verificados -> $10.00 para ativar próximos planos (liberado se afiliado tiver assinatura paga; retido em garantia anti-fraude se gratuito)
-        const baseMs = Math.max(
-            Date.now(),
-            referrer.referralAiBonusUntil ? new Date(referrer.referralAiBonusUntil).getTime() : 0,
-        );
-        const nextAiBonusUntil = new Date(baseMs + INVITE_AI_BONUS_DAYS * 86_400_000);
-
-        const hitsMilestone3 = totalVerifiedAfter % PLAN_CREDIT_MILESTONE_TARGET === 0;
-        const milestoneRewardUsd =
-            hitsMilestone3 && recentVerifiedCount < DAILY_REWARD_CAP
-                ? this.getVerifyCreditUsd()
-                : 0;
-
-        const isPaidReferrer = milestoneRewardUsd > 0
-            ? await this.hasActivePaidSubscription(referrer.id)
-            : false;
-
-        const creditedNowUsd = isPaidReferrer ? milestoneRewardUsd : 0;
-        const pendingNowUsd = isPaidReferrer ? 0 : milestoneRewardUsd;
-        const unlocksBoostNow =
-            !referrer.referralTierBoost && totalVerifiedAfter >= PLAN_CREDIT_MILESTONE_TARGET;
-
+        // Regra estrita de afiliados (fora do fluxo de trial):
+        // O vínculo é apenas registado no cadastro; aprovação, bônus de IA e créditos de plano só ocorrem quando o convidado paga qualquer plano.
         const refRow = this.referralRepo.create({
             referrerUserId: referrer.id,
             referredUserId,
-            status: 'VERIFIED',
-            rewardCreditsUsd: creditedNowUsd,
-            tierBoostAwarded: unlocksBoostNow,
+            status: 'REGISTERED',
+            rewardCreditsUsd: 0,
+            tierBoostAwarded: false,
             verifiedAt: new Date(),
         });
         await this.referralRepo.save(refRow);
@@ -257,29 +219,16 @@ export class ReferralService implements OnModuleInit {
             { referredByUserId: referrer.id },
         );
 
-        const nextCredits = Number((Number(referrer.referralCreditsUsd || 0) + creditedNowUsd).toFixed(2));
-        const nextPending = Number((Number(referrer.referralPendingCreditsUsd || 0) + pendingNowUsd).toFixed(2));
-
-        await this.userRepo.update(
-            { id: referrer.id },
-            {
-                referralCreditsUsd: nextCredits,
-                referralPendingCreditsUsd: nextPending,
-                referralAiBonusUntil: nextAiBonusUntil,
-                ...(unlocksBoostNow ? { referralTierBoost: true } : {}),
-            },
-        );
-
         this.logger.log(
-            `Referral attributed: referrer=${referrer.id} referred=${referredUserId} aiBonusUntil=${nextAiBonusUntil.toISOString()} +$${creditedNowUsd} (pending=+$${pendingNowUsd})`,
+            `Referral registered (awaiting paid plan): referrer=${referrer.id} referred=${referredUserId}`,
         );
 
         return {
             attributed: true,
-            creditedUsd: creditedNowUsd,
-            pendingCreditsAddedUsd: pendingNowUsd,
-            aiDailyBonusUnlocked: true,
-            tierBoostUnlocked: unlocksBoostNow,
+            creditedUsd: 0,
+            pendingCreditsAddedUsd: 0,
+            aiDailyBonusUnlocked: false,
+            tierBoostUnlocked: false,
         };
     }
 
@@ -363,60 +312,76 @@ export class ReferralService implements OnModuleInit {
                 status: 'PAID',
             },
         });
-        const totalVerifiedOrPaid = await this.referralRepo.count({
+        const dayStart = new Date(Date.now() - 86_400_000);
+        const recentPaidCount = await this.referralRepo.count({
             where: {
                 referrerUserId: referrer.id,
-                status: In(['VERIFIED', 'PAID']),
+                status: 'PAID',
+                paidAt: MoreThanOrEqual(dayStart),
             },
         });
+        const totalPaidAfter = priorPaidCount + 1;
 
         const paidReferrer = await this.hasActivePaidSubscription(referrer.id);
+        const hitsMilestone3 = totalPaidAfter % PLAN_CREDIT_MILESTONE_TARGET === 0;
+        const milestoneRewardUsd =
+            hitsMilestone3 && recentPaidCount < DAILY_REWARD_CAP
+                ? this.getPaidCreditUsd()
+                : 0;
+
+        const creditedDirectUsd = paidReferrer ? milestoneRewardUsd : 0;
+        const pendingAddedUsd = paidReferrer ? 0 : milestoneRewardUsd;
         const unlocksBoostNow =
             !referrer.referralTierBoost &&
-            (priorPaidCount + 1 >= TIER_BOOST_PAID_TARGET || totalVerifiedOrPaid >= PLAN_CREDIT_MILESTONE_TARGET);
+            (totalPaidAfter >= TIER_BOOST_PAID_TARGET || totalPaidAfter >= PLAN_CREDIT_MILESTONE_TARGET);
 
         refRow.status = 'PAID';
         refRow.paidAt = new Date();
+        refRow.rewardCreditsUsd = milestoneRewardUsd;
         if (unlocksBoostNow) {
             refRow.tierBoostAwarded = true;
         }
         await this.referralRepo.save(refRow);
 
-        // Quando um convidado converte e o afiliado já atingiu o marco de 3 sem ter liberado antes, garante atualização
         const baseMs = Math.max(
             Date.now(),
             referrer.referralAiBonusUntil ? new Date(referrer.referralAiBonusUntil).getTime() : 0,
         );
         const renewedBonusUntil = new Date(baseMs + INVITE_AI_BONUS_DAYS * 86_400_000);
+        const nextCredits = Number((Number(referrer.referralCreditsUsd || 0) + creditedDirectUsd).toFixed(2));
+        const nextPending = Number((Number(referrer.referralPendingCreditsUsd || 0) + pendingAddedUsd).toFixed(2));
 
         await this.userRepo.update(
             { id: referrer.id },
             {
+                referralCreditsUsd: nextCredits,
+                referralPendingCreditsUsd: nextPending,
                 referralAiBonusUntil: renewedBonusUntil,
                 ...(unlocksBoostNow ? { referralTierBoost: true } : {}),
             },
         );
 
-        let unlockedOnPaidCheck = 0;
-        if (paidReferrer) {
+        let unlockedPendingUsd = 0;
+        if (paidReferrer && nextPending > 0) {
             const res = await this.unlockPendingCreditsOnPaidPlan(referrer.id);
-            unlockedOnPaidCheck = res.unlockedUsd;
+            unlockedPendingUsd = res.unlockedUsd;
         }
 
+        const totalCreditedNow = Number((creditedDirectUsd + unlockedPendingUsd).toFixed(2));
+
         this.logger.log(
-            `Referral paid conversion: referrer=${referrer.id} referred=${referredUserId} boost=${unlocksBoostNow} unlocked=$${unlockedOnPaidCheck}`,
+            `Referral paid conversion approved: referrer=${referrer.id} referred=${referredUserId} boost=${unlocksBoostNow} credited=$${totalCreditedNow} pending=+$${pendingAddedUsd}`,
         );
 
         return {
             awarded: true,
-            creditedUsd: unlockedOnPaidCheck,
-            pendingCreditsAddedUsd: 0,
+            creditedUsd: totalCreditedNow,
+            pendingCreditsAddedUsd: pendingAddedUsd,
             tierBoostUnlocked: unlocksBoostNow,
         };
     }
 
-    async getMySummary(userId: string) {
-        const referralCode = await this.ensureReferralCode(userId);
+    async getMySummary(userId: string, context?: string) {
         const [user, hasPaidSubscription] = await Promise.all([
             this.userRepo.findOne({
                 where: { id: userId },
@@ -431,6 +396,10 @@ export class ReferralService implements OnModuleInit {
             }),
             this.hasActivePaidSubscription(userId),
         ]);
+
+        const isTrialContext = String(context || '').trim().toLowerCase() === 'trial';
+        const affiliateApproved = isTrialContext || hasPaidSubscription;
+        const referralCode = affiliateApproved ? await this.ensureReferralCode(userId) : '';
 
         const rows = await this.referralRepo.find({
             where: { referrerUserId: userId },
@@ -448,10 +417,8 @@ export class ReferralService implements OnModuleInit {
                 : [];
         const usernameMap = new Map(referredUsers.map((u) => [u.id, u.username || 'trader']));
 
-        const verifiedOrPaidCount = rows.filter(
-            (r) => r.status === 'VERIFIED' || r.status === 'PAID',
-        ).length;
         const paidCount = rows.filter((r) => r.status === 'PAID').length;
+        const pendingPaymentCount = rows.filter((r) => r.status !== 'PAID').length;
 
         const aiBonusExpiresAt = user?.referralAiBonusUntil
             ? new Date(user.referralAiBonusUntil)
@@ -461,9 +428,13 @@ export class ReferralService implements OnModuleInit {
         );
 
         const frontendBase = resolveFrontendUrl();
-        const shareUrl = `${frontendBase}/register?ref=${encodeURIComponent(referralCode)}`;
+        const shareUrl =
+            affiliateApproved && referralCode
+                ? `${frontendBase}/register?ref=${encodeURIComponent(referralCode)}`
+                : '';
 
         return {
+            affiliateApproved,
             referralCode,
             shareUrl,
             creditsUsd: Number(user?.referralCreditsUsd || 0),
@@ -477,6 +448,7 @@ export class ReferralService implements OnModuleInit {
                 invite1DurationDays: INVITE_AI_BONUS_DAYS,
                 invite3PlanCreditUsd: PLAN_CREDIT_MILESTONE_USD,
                 requiresPaidPlanForFull10Usd: true,
+                requiresPaidPlanApproval: true,
                 perVerifiedUsd: this.getVerifyCreditUsd(),
                 perPaidUsd: this.getPaidCreditUsd(),
                 tierBoostVerifiedTarget: PLAN_CREDIT_MILESTONE_TARGET,
@@ -484,8 +456,9 @@ export class ReferralService implements OnModuleInit {
             },
             counts: {
                 total: rows.length,
-                verified: verifiedOrPaidCount,
+                verified: paidCount,
                 paid: paidCount,
+                pendingPayment: pendingPaymentCount,
             },
             referrals: rows.map((r) => ({
                 id: r.id,

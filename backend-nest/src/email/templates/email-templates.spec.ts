@@ -116,6 +116,17 @@ describe('Institutional Email Templates Registry (18 Situations)', () => {
             ],
             period: { start: '2026-11-02', end: '2026-11-08' },
         },
+        MONTHLY_SUMMARY: {
+            userName: 'Carlos Silva',
+            totalPnL: 3412.8,
+            currency: 'USD',
+            winRate: 64.5,
+            totalTrades: 62,
+            topLessons: [
+                { lesson: 'Respeitar limite de perda diário em dias de notícia', count: 5 },
+            ],
+            period: { start: '2026-10-22', end: '2026-11-21' },
+        },
         SYSTEM_ALERT: {
             userName: 'Carlos Silva',
             title: 'Limite Diário de Perda Atingido',
@@ -134,8 +145,8 @@ describe('Institutional Email Templates Registry (18 Situations)', () => {
 
     const allTemplateNames = Object.keys(EmailTemplateRegistry) as EmailTemplateName[];
 
-    it('registers all 18 institutional templates', () => {
-        expect(allTemplateNames).toHaveLength(18);
+    it('registers all 19 institutional templates', () => {
+        expect(allTemplateNames).toHaveLength(19);
     });
 
     it.each(allTemplateNames)(

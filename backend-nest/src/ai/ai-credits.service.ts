@@ -9,7 +9,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import {
-    AI_SUPPORT_FALLBACK_MESSAGE,
     AiCreditStatusDto,
     AiUserCreditEntity,
 } from './ai-credits.entity';
@@ -85,22 +84,33 @@ export class AiCreditsService implements OnModuleInit {
         return `${year}-${month}-${day}`;
     }
 
-    getNextResetIso(now = new Date()): string {
-        const nextMidnight = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate() + 1,
-            0,
-            0,
-            0,
-            0
+    private isMonthlyCycleExpired(lastResetDate?: string | null, now = new Date()): boolean {
+        if (!lastResetDate || !/^\d{4}-\d{2}-\d{2}$/.test(lastResetDate)) {
+            return true;
+        }
+        const [y, m, d] = lastResetDate.split('-').map(Number);
+        const startMs = Date.UTC(y, m - 1, d);
+        const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+        const diffDays = Math.floor((todayMs - startMs) / 86_400_000);
+        return diffDays >= 30;
+    }
+
+    getNextResetIso(now = new Date(), lastResetDate?: string | null): string {
+        if (lastResetDate && /^\d{4}-\d{2}-\d{2}$/.test(lastResetDate)) {
+            const [y, m, d] = lastResetDate.split('-').map(Number);
+            const nextMonthly = new Date(Date.UTC(y, m - 1, d + 30));
+            return nextMonthly.toISOString();
+        }
+        const nextMonthly = new Date(
+            Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() + 30)
         );
-        return nextMidnight.toISOString();
+        return nextMonthly.toISOString();
     }
 
     /**
-     * Recarga automática à meia-noite para todos os registros existentes.
-     * Usuários que interagirem após a virada do dia também passam por verificação lazy em getCreditStatus().
+     * Regra de negócio mensal: ao completar 1 mês (30 dias) do ciclo,
+     * todos os créditos restantes do mês anterior são removidos e o saldo é reiniciado
+     * para a cota mensal do plano ativo (sem acumular créditos não usados).
      */
     @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
     async handleDailyCreditsReset() {
@@ -115,22 +125,22 @@ export class AiCreditsService implements OnModuleInit {
                         credits_remaining = daily_limit,
                         last_reset_date = $1,
                         updated_at = now()
-                    WHERE last_reset_date <> $1
+                    WHERE (CURRENT_DATE - TO_DATE(last_reset_date, 'YYYY-MM-DD')) >= 30
                     `,
                     [todayKey]
                 );
                 this.logger.log(
-                    `[AiCreditsService] Créditos diários de IA resetados para o dia ${todayKey}.`
+                    `[AiCreditsService] Ciclo mensal (30 dias) processado em ${todayKey}: créditos expirados removidos e cotas mensais renovadas.`
                 );
             } catch (err) {
                 this.logger.error(
-                    `[AiCreditsService] Falha no reset diário de créditos: ${(err as Error).message}`
+                    `[AiCreditsService] Falha no reset mensal de créditos: ${(err as Error).message}`
                 );
             }
         };
 
         if (this.redisSecurity) {
-            await this.redisSecurity.withLock('cron:ai_daily_credits_reset', 10 * 60_000, exec);
+            await this.redisSecurity.withLock('cron:ai_monthly_credits_reset', 10 * 60_000, exec);
             return;
         }
         await exec();
@@ -144,19 +154,18 @@ export class AiCreditsService implements OnModuleInit {
             creditsUsedToday: Math.max(0, Number(entity.creditsUsedToday || 0)),
             totalCreditsUsed: Math.max(0, Number(entity.totalCreditsUsed || 0)),
             lastResetDate: entity.lastResetDate,
-            nextResetAt: this.getNextResetIso(now),
-            canInteract:
-                Number(entity.dailyLimit || 0) > 0 &&
-                Number(entity.creditsRemaining || 0) > 0,
+            nextResetAt: this.getNextResetIso(now, entity.lastResetDate),
+            canInteract: Number(entity.creditsRemaining || 0) > 0,
             maxMessageChars: this.resolveMaxMessageChars(entity.planTier),
         };
     }
 
     /**
-     * Sincroniza o saldo de créditos do usuário com seu plano ativo e aplica o reset diário se mudou o dia.
-     * - Plano BASIC: 100 créditos/dia (50 chars/msg)
-     * - Plano PRO: 2.000 créditos/dia (250 chars/msg)
-     * - Plano PREMIUM: 20.000 créditos/dia (1000 chars/msg)
+     * Sincroniza o saldo mensal de créditos do usuário com seu plano ativo e aplica
+     * expiração/renovação automática ao completar 30 dias (regra interna do backend).
+     * - Plano BASIC: 0 créditos/mês (50 chars/msg)
+     * - Plano PRO: 1.500 créditos/mês (250 chars/msg)
+     * - Plano PREMIUM: 4.000 créditos/mês (1000 chars/msg)
      */
     async getCreditStatus(userId: string): Promise<AiCreditStatusDto> {
         const now = new Date();
@@ -183,8 +192,8 @@ export class AiCreditsService implements OnModuleInit {
 
         let needsSave = false;
 
-        // 1. Virada de dia: reseta o saldo integralmente para a cota diária do plano atual
-        if (record.lastResetDate !== todayKey) {
+        // 1. Fim do ciclo mensal (30 dias): remove créditos restantes do mês anterior e aplica a nova cota mensal
+        if (this.isMonthlyCycleExpired(record.lastResetDate, now)) {
             record.planTier = targetTier;
             record.dailyLimit = targetLimit;
             record.creditsUsedToday = 0;
@@ -195,7 +204,7 @@ export class AiCreditsService implements OnModuleInit {
             record.planTier !== targetTier ||
             Number(record.dailyLimit) !== targetLimit
         ) {
-            // 2. Mudança/ativação/upgrade de plano no mesmo dia: ajusta o limite imediatamente descontando o que já usou hoje
+            // 2. Mudança/ativação/upgrade de plano no mesmo mês: ajusta o limite mantendo o consumo do ciclo atual
             record.planTier = targetTier;
             record.dailyLimit = targetLimit;
             record.creditsRemaining = Math.max(
@@ -225,7 +234,8 @@ export class AiCreditsService implements OnModuleInit {
                     status.dailyLimit <= 0
                         ? 'NO_ACTIVE_PLAN_FOR_AI'
                         : 'INSUFFICIENT_AI_CREDITS',
-                message: AI_SUPPORT_FALLBACK_MESSAGE,
+                message:
+                    'Você não possui créditos AI disponíveis. Convide amigos ou faça upgrade do seu plano para continuar.',
                 credits: status,
             });
         }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Award, Check, Copy, Gift, Lock, Share2, Sparkles, TrendingUp, Users } from 'lucide-react';
 import api from '../../api';
 import { useLocale } from '../../context/LocaleContext';
+import { openWorkspacePlansModal } from '../../lib/planGate';
 
 interface ReferralItem {
     id: string;
@@ -15,6 +16,7 @@ interface ReferralItem {
 }
 
 interface ReferralSummaryResponse {
+    affiliateApproved?: boolean;
     referralCode: string;
     shareUrl: string;
     creditsUsd: number;
@@ -28,6 +30,7 @@ interface ReferralSummaryResponse {
         invite1DurationDays?: number;
         invite3PlanCreditUsd?: number;
         requiresPaidPlanForFull10Usd?: boolean;
+        requiresPaidPlanApproval?: boolean;
         perVerifiedUsd: number;
         perPaidUsd: number;
         tierBoostVerifiedTarget: number;
@@ -37,6 +40,7 @@ interface ReferralSummaryResponse {
         total: number;
         verified: number;
         paid: number;
+        pendingPayment?: number;
     };
     referrals: ReferralItem[];
 }
@@ -99,7 +103,8 @@ export const ReferralProgramCard: React.FC = () => {
     const aiBonusDaily = data?.rules.invite1AiDailyBonus ?? 50;
     const aiBonusDays = data?.rules.invite1DurationDays ?? 30;
     const milestoneUsd = data?.rules.invite3PlanCreditUsd ?? 10;
-    const verifiedCount = data?.counts.verified ?? 0;
+    const verifiedCount = data?.counts.paid ?? data?.counts.verified ?? 0;
+    const isAffiliateApproved = Boolean(data?.affiliateApproved ?? data?.hasPaidSubscription);
     const remainderTowardNext10 = verifiedCount > 0 && verifiedCount % target3 === 0 ? target3 : verifiedCount % target3;
     const milestoneProgressPct = Math.min(100, Math.round((remainderTowardNext10 / target3) * 100));
     const pendingCreditsUsd = Number(data?.pendingCreditsUsd || 0);
@@ -133,13 +138,13 @@ export const ReferralProgramCard: React.FC = () => {
                         </h3>
                         <p className="text-xs text-fg-muted mt-0.5 leading-relaxed">
                             {isEn
-                                ? `Invite 1 friend: unlock +${aiBonusDaily} extra daily AI credits for ${aiBonusDays} days. Invite ${target3} friends: earn $${milestoneUsd} USD to activate next plans (paid plan required to unlock full $${milestoneUsd} anti-fraud credit).`
-                                : `Convide 1 trader: receba +${aiBonusDaily} créditos IA diários extras durante 1 mês (${aiBonusDays} dias). Convide ${target3} pessoas: receba $${milestoneUsd} USD para ativar os próximos planos (requer assinatura paga ativa para liberar os $${milestoneUsd} completos contra fraudes).`}
+                                ? `Invite 1 friend who registers and pays any plan: unlock +${aiBonusDaily} extra daily AI credits for ${aiBonusDays} days. Invite ${target3} paid friends: earn $${milestoneUsd} USD to activate next plans (both you and your invited friends must hold a paid plan).`
+                                : `Convide 1 amigo que se registe e pague qualquer plano: desbloqueie +${aiBonusDaily} créditos IA diários extras durante 1 mês (${aiBonusDays} dias). Convide ${target3} pagantes: ganhe $${milestoneUsd} USD para ativar os próximos planos.`}
                         </p>
                     </div>
                 </div>
 
-                {data && (
+                {data && isAffiliateApproved && (
                     <button
                         type="button"
                         onClick={handleNativeShare}
@@ -161,6 +166,31 @@ export const ReferralProgramCard: React.FC = () => {
                 <p className="text-xs text-fg-subtle">
                     {isEn ? 'Unable to load affiliate status right now.' : 'Não foi possível carregar os dados de afiliados.'}
                 </p>
+            ) : !isAffiliateApproved ? (
+                <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-4 space-y-3">
+                    <div className="flex items-start gap-2.5 text-xs text-amber-200">
+                        <Lock size={15} className="shrink-0 mt-0.5 text-amber-400" />
+                        <div className="space-y-1">
+                            <strong className="block font-bold text-amber-300">
+                                {isEn
+                                    ? 'Affiliate Program Requires a Paid Subscription'
+                                    : 'Afiliação Disponível Apenas Após Plano Pago'}
+                            </strong>
+                            <p className="text-[11px] text-fg-muted leading-relaxed">
+                                {isEn
+                                    ? 'Outside the trial welcome step, affiliate links and commission credits are approved strictly once you subscribe to any paid plan and your invited friends register and pay any plan.'
+                                    : 'Nesta secção a afiliação só é aprovada quando você possui qualquer plano pago ativo, e os indicados só contabilizam após se registarem e efetuarem o pagamento de um plano.'}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => openWorkspacePlansModal('profile_affiliate_requires_paid')}
+                        className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-accent hover:bg-accent-hover text-accent-on text-xs font-bold cursor-pointer transition-colors"
+                    >
+                        <span>{isEn ? 'Subscribe to Unlock Affiliate' : 'Assinar Plano para Liberar Afiliação'}</span>
+                    </button>
+                </div>
             ) : (
                 <>
                     {pendingCreditsUsd > 0 && !data.hasPaidSubscription && (
@@ -302,11 +332,11 @@ export const ReferralProgramCard: React.FC = () => {
                                                 >
                                                     {item.status === 'PAID'
                                                         ? isEn
-                                                            ? 'Paid Plan'
-                                                            : 'Assinante Pago'
+                                                            ? 'Paid Plan (Approved)'
+                                                            : 'Plano Pago (Aprovado)'
                                                         : isEn
-                                                          ? 'Verified'
-                                                          : 'Conta Verificada'}
+                                                          ? 'Registered · Awaiting Payment'
+                                                          : 'Registado · Aguarda Pagamento'}
                                                 </span>
                                             </td>
                                             <td className="py-2 px-3 font-mono text-emerald-400">

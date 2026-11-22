@@ -110,6 +110,13 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
                 }
             }
 
+            if (this.planPermissionService) {
+                const tier = await this.planPermissionService.getUserPlan(userId);
+                if (tier === PlanTier.FREE) {
+                    return null;
+                }
+            }
+
             return userId;
         } catch {
             return null;

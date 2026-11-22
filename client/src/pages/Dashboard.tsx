@@ -35,6 +35,8 @@ import { ConsolidatedDashboardView } from '../components/dashboard/ConsolidatedD
 import { PlanModal } from '../components/dashboard/PlanModal';
 import { IdleAccountWarningBanner } from '../components/dashboard/IdleAccountWarningBanner';
 import { DashboardAppInstallCard } from '../components/pwa/DashboardAppInstallCard';
+import { PlanRenewalBannerCard } from '../components/subscription/PlanRenewalBannerCard';
+import { BasicPlanSimpleUpgradeCard } from '../components/subscription/BasicPlanSimpleUpgradeCard';
 import { TrialCelebrationModal } from '../components/subscription/TrialCelebrationModal';
 import { DashboardSkeleton } from '../components/ui/Skeleton';
 import { DashboardEn } from './DashboardEn';
@@ -254,6 +256,19 @@ const DashboardPt = () => {
             </div>
 
             <DashboardAppInstallCard locale="pt" />
+
+            {subStatus?.hasActive && typeof subStatus.daysLeft === 'number' && subStatus.daysLeft <= 5 && (
+                <PlanRenewalBannerCard
+                    daysLeft={subStatus.daysLeft}
+                    tier={subStatus.tier}
+                    isTrial={Boolean(subStatus.isTrial)}
+                    expiryDate={subStatus.expiryDate || subStatus.currentPeriodEnd}
+                    onRenewClick={() => setShowRenewalModal(true)}
+                    locale="pt"
+                />
+            )}
+
+            <BasicPlanSimpleUpgradeCard locale="pt" />
 
             {isConsolidated ? (
                 <ConsolidatedDashboardView stats={currentStats} />

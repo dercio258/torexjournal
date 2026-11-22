@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -9,6 +9,7 @@ import { EconomicCalendarService } from './economic-calendar.service';
 import { EconomicCalendarController } from './economic-calendar.controller';
 import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { getJwtSecret } from '../common/security/security.config';
+import { PaymentModule } from '../payment/payment.module';
 
 @Module({
     imports: [
@@ -18,6 +19,7 @@ import { getJwtSecret } from '../common/security/security.config';
             AccountEntity
         ]),
         ConfigModule,
+        forwardRef(() => PaymentModule),
         JwtModule.registerAsync({
             imports: [ConfigModule],
             useFactory: async (configService: ConfigService) => ({

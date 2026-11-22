@@ -621,6 +621,10 @@ export const TorexAi: React.FC = () => {
     >({});
 
     const [inputText, setInputText] = useState<string>('');
+    const [isNoCreditsModalOpen, setIsNoCreditsModalOpen] = useState<boolean>(false);
+    const [copiedReferralLink, setCopiedReferralLink] = useState<boolean>(false);
+    const [affiliateApproved, setAffiliateApproved] = useState<boolean>(false);
+    const [affiliateShareUrl, setAffiliateShareUrl] = useState<string>('');
     const [isSubmittingSend, setIsSubmittingSend] = useState<boolean>(false);
     const [draftStageInfo, setDraftStageInfo] = useState<{
         stages: string[];
@@ -664,6 +668,7 @@ export const TorexAi: React.FC = () => {
             : null
     );
     const pollingInFlightRef = useRef<Set<string>>(new Set());
+    const poll404CountRef = useRef<Record<string, number>>({});
     const inFlightCreationIdsRef = useRef<Set<string>>(new Set());
     const localUnsyncedIdsRef = useRef<Set<string>>(new Set());
     const messagesBySessionRef = useRef<Record<string, ClientAiMessage[]>>({});
@@ -688,6 +693,25 @@ export const TorexAi: React.FC = () => {
     useEffect(() => {
         tokenRef.current = token;
     }, [token]);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        let active = true;
+        api.get('/referrals/me')
+            .then((res) => {
+                if (!active || !res.data) return;
+                setAffiliateApproved(Boolean(res.data.affiliateApproved));
+                setAffiliateShareUrl(String(res.data.shareUrl || ''));
+            })
+            .catch(() => {
+                if (!active) return;
+                setAffiliateApproved(false);
+                setAffiliateShareUrl('');
+            });
+        return () => {
+            active = false;
+        };
+    }, [user?.id, user?.tier]);
 
     const persistLastActiveSessionId = useCallback(
         (id: string | null) => {
@@ -780,6 +804,10 @@ export const TorexAi: React.FC = () => {
             draftStageInfo ||
             activePendingJob ||
             activeTypingState
+    );
+
+    const hasNoAiCredits = Boolean(
+        credits && (!credits.canInteract || credits.creditsRemaining <= 0 || credits.dailyLimit <= 0)
     );
 
     // Limite dinâmico silencioso por mensagem de acordo com o plano ativo (50 / 250 / 1000)
@@ -1142,6 +1170,7 @@ export const TorexAi: React.FC = () => {
                             params: { visible: isVisible ? '1' : '0' },
                         });
                         if (!isMountedRef.current) return;
+                        delete poll404CountRef.current[job.jobId];
 
                         if (
                             res.data?.status === 'PROCESSING' ||
@@ -1160,13 +1189,29 @@ export const TorexAi: React.FC = () => {
 
                         const targetSessionId: string =
                             res.data?.sessionId || job.sessionId;
-                        const assistantMsg: ClientAiMessage =
-                            res.data?.assistantMessage || {
-                                id: `fb-job-${Date.now()}`,
-                                role: 'assistant',
-                                content: supportFallback,
-                                createdAt: new Date().toISOString(),
-                            };
+                        let resolvedAssistant: ClientAiMessage | null =
+                            res.data?.assistantMessage || null;
+                        if (!resolvedAssistant) {
+                            try {
+                                const sessProbe = await api.get(`/ai/chat/sessions/${targetSessionId}`);
+                                const sessMsgs: ClientAiMessage[] = Array.isArray(sessProbe.data?.messages)
+                                    ? sessProbe.data.messages
+                                    : [];
+                                const lastAssistant = [...sessMsgs]
+                                    .reverse()
+                                    .find((m) => m.role === 'assistant' && !isClientOnlyFallbackId(m.id));
+                                if (lastAssistant) resolvedAssistant = lastAssistant;
+                            } catch {
+                                // ignore recovery lookup errors
+                            }
+                        }
+
+                        const assistantMsg: ClientAiMessage = resolvedAssistant || {
+                            id: `fb-job-${Date.now()}`,
+                            role: 'assistant',
+                            content: supportFallback,
+                            createdAt: new Date().toISOString(),
+                        };
 
                         if (res.data?.credits) {
                             setCredits(res.data.credits as ClientAiCreditStatus);
@@ -1209,11 +1254,51 @@ export const TorexAi: React.FC = () => {
                         }
                     } catch (err: any) {
                         if (!isMountedRef.current) return;
-                        // Falhas transitórias de polling (rede, 502, reinício) NÃO encerram o processamento:
-                        // o job continua no servidor, que tem o seu próprio guarda de timeout e sempre grava
-                        // uma resposta. Só desistimos se o job não existir mais (404) ou após o limite duro.
-                        const jobGone = err?.response?.status === 404;
-                        if (jobGone || Date.now() - job.startedAt > POLL_GIVE_UP_MS) {
+                        // Falhas transitórias ou 404 isolado NÃO encerram imediatamente o processamento:
+                        // tentamos confirmar 3 vezes ou recuperar a resposta diretamente da sessão.
+                        const status = err?.response?.status;
+                        let confirmedGone = false;
+                        if (status === 404) {
+                            const strikes = (poll404CountRef.current[job.jobId] || 0) + 1;
+                            poll404CountRef.current[job.jobId] = strikes;
+                            confirmedGone = strikes >= 3;
+                        }
+                        const timedOut = Date.now() - job.startedAt > POLL_GIVE_UP_MS;
+                        if (confirmedGone || timedOut) {
+                            try {
+                                const sessProbe = await api.get(`/ai/chat/sessions/${job.sessionId}`);
+                                const activeJobId = sessProbe.data?.activeJob?.jobId;
+                                if (activeJobId && !timedOut) {
+                                    delete poll404CountRef.current[job.jobId];
+                                    return;
+                                }
+                                const fetchedMsgs: ClientAiMessage[] = Array.isArray(sessProbe.data?.messages)
+                                    ? sessProbe.data.messages
+                                    : [];
+                                const recovered = [...fetchedMsgs]
+                                    .reverse()
+                                    .find((m) => m.role === 'assistant' && !isClientOnlyFallbackId(m.id));
+                                if (recovered) {
+                                    delete poll404CountRef.current[job.jobId];
+                                    setMessagesBySession((prev) => ({
+                                        ...prev,
+                                        [job.sessionId]: mergeUniqueMessages(
+                                            prev[job.sessionId] || [],
+                                            fetchedMsgs
+                                        ),
+                                    }));
+                                    setPendingJobsBySession((prev) => {
+                                        const clone = { ...prev };
+                                        delete clone[job.sessionId];
+                                        return clone;
+                                    });
+                                    return;
+                                }
+                            } catch {
+                                // prossegue para fallback apenas após falha justificada
+                            }
+
+                            delete poll404CountRef.current[job.jobId];
                             const fallbackMsg: ClientAiMessage = {
                                 id: `net-fb-${Date.now()}`,
                                 role: 'assistant',
@@ -1567,11 +1652,32 @@ export const TorexAi: React.FC = () => {
         const text = rawCandidate.slice(0, maxInputChars);
         if (!text) return;
 
+        let activeCredits = credits;
+        if (!activeCredits && token) {
+            try {
+                const credRes = await api.get('/ai/credits');
+                if (credRes.data) {
+                    activeCredits = credRes.data as ClientAiCreditStatus;
+                    setCredits(activeCredits);
+                }
+            } catch {
+                // Backend pre-flight validation enforces credits if fetch fails
+            }
+        }
+        if (
+            activeCredits &&
+            (!activeCredits.canInteract || activeCredits.creditsRemaining <= 0 || activeCredits.dailyLimit <= 0)
+        ) {
+            setIsNoCreditsModalOpen(true);
+            return;
+        }
+
         const originSessionId = activeSessionId;
         const wasImplicitNew = !originSessionId;
         const targetInitialId =
             originSessionId || generateClientSessionUuid();
         const fastGreeting = isGreetingPrompt(text);
+        const sendStartedAt = Date.now();
 
         setInputText('');
         setIsSubmittingSend(true);
@@ -1730,20 +1836,76 @@ export const TorexAi: React.FC = () => {
                 }
             }
         } catch (err: any) {
-            // Antes de assumir falha, verifica se o servidor já iniciou o job assíncrono
-            // (ex.: timeout de rede/proxy no POST enquanto o backend já está processando).
-            if (token && err?.message !== 'NO_AUTH_TOKEN') {
-                try {
-                    await new Promise((r) => window.setTimeout(r, 800));
-                    const probe = await api.get(`/ai/chat/sessions/${targetInitialId}`);
-                    const activeJobId = probe.data?.activeJob?.jobId;
-                    const fetchedMsgs: ClientAiMessage[] = Array.isArray(probe.data?.messages)
-                        ? probe.data.messages
-                        : [];
+            const errStatus = err?.response?.status;
+            const errCode = err?.response?.data?.code;
+            if (err?.response?.data?.credits) {
+                setCredits(err.response.data.credits as ClientAiCreditStatus);
+            }
 
-                    if (activeJobId) {
-                        inFlightCreationIdsRef.current.delete(targetInitialId);
-                        if (fetchedMsgs.length > 0) {
+            // Sem créditos ou sem plano elegível -> limpa mensagem otimista e abre modal de convite/upgrade (nunca fallback)
+            if (
+                errStatus === 403 &&
+                (errCode === 'INSUFFICIENT_AI_CREDITS' ||
+                    errCode === 'NO_ACTIVE_PLAN_FOR_AI' ||
+                    errCode === 'SUBSCRIPTION_REQUIRED')
+            ) {
+                inFlightCreationIdsRef.current.delete(targetInitialId);
+                setDraftStageInfo(null);
+                setMessagesBySession((prev) => ({
+                    ...prev,
+                    [targetInitialId]: (prev[targetInitialId] || []).filter(
+                        (m) => m.id !== optimisticUserMsg.id
+                    ),
+                }));
+                setInputText(text);
+                setIsNoCreditsModalOpen(true);
+                return;
+            }
+
+            // Em erros transitórios de rede/gateway (ou sem código terminal do backend),
+            // sonda a sessão assincronamente aguardando o backend enquanto o spinner permanece visível.
+            const shouldProbeAsync =
+                token &&
+                err?.message !== 'NO_AUTH_TOKEN' &&
+                (!errStatus || errStatus === 502 || errStatus === 504 || errStatus === 408);
+
+            if (shouldProbeAsync) {
+                const probeDelays = [1500, 2500, 3000, 3500, 4000];
+                for (const delayMs of probeDelays) {
+                    if (!isMountedRef.current) return;
+                    try {
+                        await new Promise((r) => window.setTimeout(r, delayMs));
+                        const probe = await api.get(`/ai/chat/sessions/${targetInitialId}`);
+                        const activeJobId = probe.data?.activeJob?.jobId;
+                        const fetchedMsgs: ClientAiMessage[] = Array.isArray(probe.data?.messages)
+                            ? probe.data.messages
+                            : [];
+
+                        if (activeJobId) {
+                            inFlightCreationIdsRef.current.delete(targetInitialId);
+                            setDraftStageInfo(null);
+                            if (fetchedMsgs.length > 0) {
+                                setMessagesBySession((prev) => ({
+                                    ...prev,
+                                    [targetInitialId]: mergeUniqueMessages(
+                                        prev[targetInitialId] || [],
+                                        fetchedMsgs
+                                    ),
+                                }));
+                            }
+                            registerPendingJob({
+                                jobId: activeJobId,
+                                sessionId: targetInitialId,
+                                fastGreeting,
+                                questionText: text,
+                            });
+                            return;
+                        }
+
+                        const lastMsg = fetchedMsgs[fetchedMsgs.length - 1];
+                        if (lastMsg && lastMsg.role === 'assistant') {
+                            inFlightCreationIdsRef.current.delete(targetInitialId);
+                            setDraftStageInfo(null);
                             setMessagesBySession((prev) => ({
                                 ...prev,
                                 [targetInitialId]: mergeUniqueMessages(
@@ -1751,41 +1913,21 @@ export const TorexAi: React.FC = () => {
                                     fetchedMsgs
                                 ),
                             }));
+                            return;
                         }
-                        registerPendingJob({
-                            jobId: activeJobId,
-                            sessionId: targetInitialId,
-                            fastGreeting,
-                            questionText: text,
-                        });
-                        return;
+                    } catch {
+                        // Continua a sondar até esgotar as tentativas assíncronas
                     }
-
-                    const lastMsg = fetchedMsgs[fetchedMsgs.length - 1];
-                    if (lastMsg && lastMsg.role === 'assistant') {
-                        inFlightCreationIdsRef.current.delete(targetInitialId);
-                        setDraftStageInfo(null);
-                        setMessagesBySession((prev) => ({
-                            ...prev,
-                            [targetInitialId]: mergeUniqueMessages(
-                                prev[targetInitialId] || [],
-                                fetchedMsgs
-                            ),
-                        }));
-                        return;
-                    }
-                } catch {
-                    // Prossegue para o tratamento de erro real caso a sessão não exista/não tenha job
                 }
             }
 
-            await new Promise((r) => window.setTimeout(r, 450));
+            // Só exibe fallback se o erro persistir após o tempo mínimo assíncrono de espera pelo backend
+            const remainingGraceMs = Math.max(450, 2500 - (Date.now() - sendStartedAt));
+            await new Promise((r) => window.setTimeout(r, remainingGraceMs));
+            if (!isMountedRef.current) return;
+
             inFlightCreationIdsRef.current.delete(targetInitialId);
             setDraftStageInfo(null);
-
-            if (err?.response?.data?.credits) {
-                setCredits(err.response.data.credits as ClientAiCreditStatus);
-            }
 
             if (wasImplicitNew) {
                 localUnsyncedIdsRef.current.add(targetInitialId);
@@ -2222,22 +2364,28 @@ export const TorexAi: React.FC = () => {
                             </span>
                         </div>
                         <p className="text-[11px] text-fg-muted leading-relaxed">
-                            {isEn
-                                ? 'Invite 1 verified friend to unlock +50 daily AI credits for 1 month (3 friends = $10 plan credit).'
-                                : 'Convide 1 amigo verificado para desbloquear +50 créditos IA/dia por 1 mês (3 amigos = $10 em planos).'}
+                            {affiliateApproved
+                                ? isEn
+                                    ? 'Invite 1 friend who subscribes & pays to unlock +50 daily AI credits for 1 month (3 paid friends = $10 credit).'
+                                    : 'Convide 1 amigo que assine e pague um plano para desbloquear +50 créditos IA/dia por 1 mês (3 pagantes = $10).'
+                                : isEn
+                                  ? 'Activate any paid plan to unlock affiliate invites (+50 AI/day per paid friend).'
+                                  : 'Assine qualquer plano pago para aprovar sua afiliação e ganhar créditos por convidados pagantes.'}
                         </p>
                         <div className="flex items-center gap-1.5 pt-0.5">
+                            {affiliateApproved && (
+                                <Link
+                                    to="/profile"
+                                    className="flex-1 text-center py-1.5 px-2 rounded-lg bg-accent text-accent-on text-[11px] font-semibold hover:opacity-90 transition-opacity"
+                                >
+                                    {isEn ? 'Invite Friend' : 'Convidar Amigo'}
+                                </Link>
+                            )}
                             <Link
-                                to="/profile"
-                                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-accent text-accent-on text-[11px] font-semibold hover:opacity-90 transition-opacity"
+                                to="/dashboard?plans=1"
+                                className={`${affiliateApproved ? 'py-1.5 px-2.5 bg-surface border border-line text-fg hover:bg-surface-2' : 'flex-1 text-center py-1.5 px-2 bg-accent text-accent-on hover:opacity-90'} rounded-lg text-[11px] font-semibold transition-colors`}
                             >
-                                {isEn ? 'Invite Friend' : 'Convidar Amigo'}
-                            </Link>
-                            <Link
-                                to="/pricing"
-                                className="py-1.5 px-2.5 rounded-lg bg-surface border border-line text-fg text-[11px] font-semibold hover:bg-surface-2 transition-colors"
-                            >
-                                {isEn ? 'Plans' : 'Planos'}
+                                {isEn ? 'View Plans' : 'Ver Planos'}
                             </Link>
                         </div>
                     </div>
@@ -2252,6 +2400,10 @@ export const TorexAi: React.FC = () => {
             ? isEn
                 ? 'Available online only...'
                 : 'Disponível apenas online...'
+            : hasNoAiCredits
+            ? isEn
+                ? '0 AI credits — invite friends or upgrade your plan to send prompts...'
+                : 'Sem créditos AI — convide amigos ou faça upgrade para enviar perguntas...'
             : variant === 'hero'
             ? isEn
                 ? 'Ask about your executions, expectancy, risk leaks, or workflow...'
@@ -2264,6 +2416,10 @@ export const TorexAi: React.FC = () => {
             <form
                 onSubmit={(e) => {
                     e.preventDefault();
+                    if (hasNoAiCredits) {
+                        setIsNoCreditsModalOpen(true);
+                        return;
+                    }
                     void handleSendPrompt();
                 }}
                 className={`w-full rounded-2xl bg-surface border border-line focus-within:border-accent/55 focus-within:shadow-focus-accent transition-all ${
@@ -2276,6 +2432,12 @@ export const TorexAi: React.FC = () => {
                     value={inputText}
                     disabled={!isOnline}
                     maxLength={maxInputChars}
+                    onFocus={() => {
+                        if (hasNoAiCredits) {
+                            inputRef.current?.blur();
+                            setIsNoCreditsModalOpen(true);
+                        }
+                    }}
                     onChange={(e) =>
                         setInputText(e.target.value.slice(0, maxInputChars))
                     }
@@ -3376,6 +3538,77 @@ export const TorexAi: React.FC = () => {
                     </>
                 )}
             </div>
+
+            {isNoCreditsModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-2xl space-y-4">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent">
+                                    <Sparkles className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-fg">
+                                        {isEn ? 'Out of AI Credits' : 'Sem Créditos AI'}
+                                    </h3>
+                                    <p className="text-xs text-fg-muted">
+                                        {isEn
+                                            ? 'Your account has 0 AI credits available right now.'
+                                            : 'Você está sem créditos AI disponíveis no momento.'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsNoCreditsModalOpen(false)}
+                                className="rounded-lg p-1 text-fg-subtle hover:bg-surface-2 hover:text-fg"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+
+                        <p className="text-xs leading-relaxed text-fg-muted">
+                            {affiliateApproved
+                                ? isEn
+                                    ? 'Copy your affiliate invite link (friends count once they register and pay any plan) or upgrade to Pro / Premium for monthly credits.'
+                                    : 'Copie o seu link de afiliado (válido para amigos que se registem e paguem qualquer plano) ou atualize para o plano Pro / Premium.'
+                                : isEn
+                                  ? 'Subscribe to Pro or Premium to unlock monthly AI credits and qualify for the paid affiliate program.'
+                                  : 'Assine o plano Pro ou Premium para liberar créditos mensais de IA e aprovar o seu programa de afiliados.'}
+                        </p>
+
+                        <div className="flex flex-col gap-2 pt-1">
+                            {affiliateApproved && affiliateShareUrl && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        void navigator.clipboard?.writeText(affiliateShareUrl);
+                                        setCopiedReferralLink(true);
+                                        window.setTimeout(() => setCopiedReferralLink(false), 2500);
+                                    }}
+                                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-xs font-bold text-accent-on hover:bg-accent-hover transition-colors cursor-pointer"
+                                >
+                                    <Copy className="h-4 w-4" />
+                                    {copiedReferralLink
+                                        ? isEn
+                                            ? 'Link copied!'
+                                            : 'Link copiado!'
+                                        : isEn
+                                          ? 'Copy link to earn credits'
+                                          : 'Copiar link para ganhar créditos'}
+                                </button>
+                            )}
+                            <Link
+                                to="/dashboard?plans=1"
+                                onClick={() => setIsNoCreditsModalOpen(false)}
+                                className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors ${affiliateApproved ? 'border border-line bg-surface-2 text-fg hover:border-accent/40' : 'bg-accent font-bold text-accent-on hover:bg-accent-hover'}`}
+                            >
+                                {isEn ? 'View Plans' : 'Ver Planos'}
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

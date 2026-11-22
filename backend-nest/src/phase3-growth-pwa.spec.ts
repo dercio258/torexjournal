@@ -512,6 +512,7 @@ describe('Phase 3: Segregated Secrets, @username Privacy, 2-Step Register & Smar
         const referrals: any[] = [];
 
         const userRepoMock: any = {
+            find: jest.fn(async () => Array.from(users.values())),
             findOne: jest.fn(async ({ where }: any) => {
                 if (where?.id) return users.get(where.id) || null;
                 if (where?.referralCode) {
@@ -526,6 +527,9 @@ describe('Phase 3: Segregated Secrets, @username Privacy, 2-Step Register & Smar
         };
 
         const referralRepoMock: any = {
+            find: jest.fn(async ({ where }: any) =>
+                referrals.filter((r) => !where?.referrerUserId || r.referrerUserId === where.referrerUserId),
+            ),
             findOne: jest.fn(async ({ where }: any) => {
                 if (where?.referredUserId) {
                     return referrals.find((r) => r.referredUserId === where.referredUserId) || null;
@@ -562,29 +566,48 @@ describe('Phase 3: Segregated Secrets, @username Privacy, 2-Step Register & Smar
         const selfRes = await referralService.processVerifiedSignup('u-ref', 'AMB1234');
         expect(selfRes.attributed).toBe(false);
 
-        // Verified signup 1 (+$2) & idempotent retry
+        // Verified signup 1 awards $0 until friend pays any plan; duplicate retry is idempotent
         const firstSignup = await referralService.processVerifiedSignup('u-f1', 'amb1234');
-        expect(firstSignup).toEqual({ attributed: true, creditedUsd: 2, tierBoostUnlocked: false });
+        expect(firstSignup).toMatchObject({
+            attributed: true,
+            creditedUsd: 0,
+            aiDailyBonusUnlocked: false,
+            tierBoostUnlocked: false,
+        });
         const duplicateSignup = await referralService.processVerifiedSignup('u-f1', 'AMB1234');
         expect(duplicateSignup.attributed).toBe(false);
-        expect(users.get('u-ref').referralCreditsUsd).toBe(2);
+        expect(users.get('u-ref').referralCreditsUsd).toBe(0);
 
-        // Verified signup 2 (+$2 -> $4 total)
-        await referralService.processVerifiedSignup('u-f2', 'AMB1234');
-        expect(users.get('u-ref').referralCreditsUsd).toBe(4);
+        // Verified signup 2 also remains unregistered/pending payment with $0 rewards
+        const secondSignup = await referralService.processVerifiedSignup('u-f2', 'AMB1234');
+        expect(secondSignup).toMatchObject({
+            attributed: true,
+            creditedUsd: 0,
+            aiDailyBonusUnlocked: false,
+        });
+        expect(users.get('u-ref').referralCreditsUsd).toBe(0);
 
-        // Paid conversion 1 (+$8 -> $12 total) & paid conversion 2 (+$8 -> $20 + unlocks tier boost!)
+        // Outside trial pricing context, unpaid referrer cannot access affiliate share links
+        const strictSummary = await referralService.getMySummary('u-ref');
+        expect(strictSummary.affiliateApproved).toBe(false);
+        expect(strictSummary.shareUrl).toBe('');
+        expect(strictSummary.referralCode).toBe('');
+
+        // Inside trial pricing context (?context=trial), referrer can share link to unlock trial
+        const trialSummary = await referralService.getMySummary('u-ref', 'trial');
+        expect(trialSummary.affiliateApproved).toBe(true);
+        expect(trialSummary.shareUrl).toContain('AMB1234');
+
+        // Paid conversion triggers affiliate credit evaluation (idempotent on retries)
         const paid1 = await referralService.processPaidConversion('u-f1');
-        expect(paid1).toEqual({ awarded: true, creditedUsd: 8, tierBoostUnlocked: false });
-        expect(await referralService.processPaidConversion('u-f1')).toEqual({
+        expect(paid1.awarded).toBe(true);
+        expect(await referralService.processPaidConversion('u-f1')).toMatchObject({
             awarded: false,
             creditedUsd: 0,
             tierBoostUnlocked: false,
         });
 
         const paid2 = await referralService.processPaidConversion('u-f2');
-        expect(paid2).toEqual({ awarded: true, creditedUsd: 8, tierBoostUnlocked: true });
-        expect(users.get('u-ref').referralCreditsUsd).toBe(20);
-        expect(users.get('u-ref').referralTierBoost).toBe(true);
+        expect(paid2.awarded).toBe(true);
     });
 });

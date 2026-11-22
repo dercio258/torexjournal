@@ -7,6 +7,7 @@ import {
     FlaskConical,
     Gift,
     LayoutDashboard,
+    Lock,
     Plus,
     Sparkles,
     Trophy,
@@ -14,8 +15,10 @@ import {
     Users,
     X,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { cn } from '../lib/cn';
+import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
 
 const CandlestickHighlightIcon: React.FC<{ className?: string; size?: number }> = ({
     className,
@@ -43,8 +46,10 @@ const CandlestickHighlightIcon: React.FC<{ className?: string; size?: number }> 
 
 export const MobileBottomDock: React.FC = () => {
     const location = useLocation();
+    const { user } = useAuth();
     const { locale } = useLocale();
     const isEn = locale === 'en';
+    const isBasic = isBasicPlanTier(user?.tier);
     const [moreOpen, setMoreOpen] = useState(false);
 
     useEffect(() => {
@@ -85,10 +90,12 @@ export const MobileBottomDock: React.FC = () => {
             active: path.startsWith('/reports'),
         },
         {
-            to: '/economic-calendar',
+            to: '/calendar',
             label: isEn ? 'Calendar' : 'Calendário Econ.',
             icon: CalendarDays,
-            active: path.startsWith('/economic-calendar'),
+            active: path.startsWith('/calendar'),
+            lockedForBasic: true,
+            gateKey: 'mobile_economic_calendar',
         },
         {
             to: '/add-trades',
@@ -178,17 +185,30 @@ export const MobileBottomDock: React.FC = () => {
                         <div className="grid grid-cols-3 gap-2">
                             {moreSecondaryLinks.map((item) => {
                                 const Icon = item.icon;
+                                const isLocked = Boolean((item as any).lockedForBasic && isBasic);
                                 return (
                                     <Link
                                         key={item.to}
                                         to={item.to}
+                                        onClick={(e) => {
+                                            if (isLocked) {
+                                                e.preventDefault();
+                                                setMoreOpen(false);
+                                                openWorkspacePlansModal((item as any).gateKey || 'mobile_locked_tool');
+                                            }
+                                        }}
                                         className={cn(
-                                            'flex flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-center transition-colors',
+                                            'relative flex flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-center transition-colors',
                                             item.active
                                                 ? 'border-accent/45 bg-accent/15 text-accent-fg'
                                                 : 'border-line/60 bg-canvas-subtle/75 text-fg-muted hover:text-fg hover:bg-surface-2',
                                         )}
                                     >
+                                        {isLocked && (
+                                            <span className="absolute top-1.5 right-1.5 text-amber-400">
+                                                <Lock size={10} />
+                                            </span>
+                                        )}
                                         <Icon size={17} />
                                         <span className="text-[10.5px] font-semibold leading-tight line-clamp-1">
                                             {item.label}
@@ -210,10 +230,13 @@ export const MobileBottomDock: React.FC = () => {
                     <Link
                         to={slot1.to}
                         className={cn(
-                            'flex flex-col items-center justify-center gap-0.5 py-1 rounded-xl transition-colors',
+                            'relative flex flex-col items-center justify-center gap-0.5 py-1 rounded-xl transition-colors',
                             slot1.active ? 'text-accent-fg bg-accent/10' : 'text-fg-muted hover:text-fg',
                         )}
                     >
+                        {slot1.to.startsWith('/backtesting') && isBasic && (
+                            <Lock size={9} className="absolute top-1 right-2 text-amber-400" />
+                        )}
                         <slot1.icon size={17} />
                         <span className="text-[10px] font-semibold leading-none tracking-tight truncate max-w-full px-0.5">
                             {slot1.label}

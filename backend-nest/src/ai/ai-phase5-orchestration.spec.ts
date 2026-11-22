@@ -707,11 +707,11 @@ describe('Phase 5 — Credential Resilience, Qwen PLATFORM_DOC RAG & Architectur
                     },
                 }));
             }
-            if (url.includes('gemini-2.5-flash-lite:generateContent')) {
+            if (url.includes('gemini-3.5-flash-lite:generateContent')) {
                 return of({
                     data: {
                         candidates: [
-                            { content: { parts: [{ text: 'Análise via gemini-2.5-flash-lite.' }] } },
+                            { content: { parts: [{ text: 'Análise via gemini-3.5-flash-lite.' }] } },
                         ],
                     },
                 } as any);
@@ -763,15 +763,15 @@ describe('Phase 5 — Credential Resilience, Qwen PLATFORM_DOC RAG & Architectur
             'https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1/chat/completions'
         );
 
-        // 3) Gemini 503 (gemini-2.5-flash) cai para gemini-2.5-flash-lite usando header x-goog-api-key (sem ?key= na URL)
+        // 3) Gemini 503 (gemini-2.5-flash) cai para gemini-3.5-flash-lite usando header x-goog-api-key (sem ?key= na URL)
         const analystRes = await llmProvider.generateGeminiAnalysis({
             systemPrompt: 'sys',
             userTaskPrompt: 'analyze',
             history: [],
         });
         expect(analystRes?.providerUsed).toBe('llm:gemini');
-        expect(analystRes?.modelUsed).toBe('gemini-2.5-flash-lite');
-        expect(analystRes?.text).toBe('Análise via gemini-2.5-flash-lite.');
+        expect(analystRes?.modelUsed).toBe('gemini-3.5-flash-lite');
+        expect(analystRes?.text).toBe('Análise via gemini-3.5-flash-lite.');
         expect(llmProvider.getDualEngineStatus().geminiModel).toBe('gemini-2.5-flash');
         const geminiCall = httpPost.mock.calls.find((c) => String(c[0]).includes('generativelanguage.googleapis.com'));
         expect(geminiCall?.[0]).not.toContain('key=');

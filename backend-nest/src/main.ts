@@ -22,6 +22,7 @@ import {
   isRequestHttps,
   validateDomainSecretsOnBoot,
 } from './common/security/security.config';
+import { encryptJsonEnvelopeForClient } from './common/security/payload-envelope.util';
 import { randomUUID } from 'crypto';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
@@ -137,6 +138,39 @@ async function bootstrap() {
     if (cleanPath.startsWith('/uploads')) {
       reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
       reply.header('Cross-Origin-Resource-Policy', 'same-site');
+    }
+
+    if (cleanPath.startsWith('/api') && (req.headers?.authorization || req.headers?.['x-torex-kem'])) {
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      reply.header('Pragma', 'no-cache');
+    }
+
+    if (
+      cleanPath.startsWith('/api') &&
+      !cleanPath.startsWith('/api/health') &&
+      !cleanPath.startsWith('/api/webhook') &&
+      !cleanPath.startsWith('/api/mt5-worker')
+    ) {
+      const clientKem = req.headers?.['x-torex-kem'];
+      const statusCode = reply.statusCode || 200;
+      const contentType = String(reply.getHeader('content-type') || '');
+      if (
+        typeof clientKem === 'string' &&
+        clientKem.length >= 80 &&
+        statusCode >= 200 &&
+        statusCode < 300 &&
+        statusCode !== 204 &&
+        typeof payload === 'string' &&
+        payload.length > 0 &&
+        contentType.includes('application/json')
+      ) {
+        const encrypted = encryptJsonEnvelopeForClient(payload, clientKem);
+        if (encrypted) {
+          reply.header('X-Torex-Enc', 'ecdh-p256-aes256gcm-v1');
+          done(null, encrypted);
+          return;
+        }
+      }
     }
 
     done(null, payload);

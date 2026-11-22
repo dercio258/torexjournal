@@ -430,7 +430,8 @@ export class Mt5Controller {
     }
 
     @Post('cloud/keep-alive')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @RequirePlan(PlanTier.BASIC)
     async keepCloudAccountAlive(@Body() body: { accountId: string }, @Req() req) {
         if (!this.isValidUuid(body?.accountId)) {
             throw new BadRequestException('Informe um accountId válido.');

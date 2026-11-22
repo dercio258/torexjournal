@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Activity,
     AlertTriangle,
@@ -21,10 +21,13 @@ import {
 } from 'lucide-react';
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
+import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { MT5_BROKERS_CATALOG } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../../components/ui/BrokerLogo';
 import { Button } from '../../components/ui/Button';
+import { FeatureUpgradeGateCard } from '../../components/subscription/FeatureUpgradeGateCard';
+import { isBasicPlanTier } from '../../lib/planGate';
 import { pullAccountHistoryInBatchesAndBuildUnifiedSession } from '../../services/historicalBatchCache';
 import { formatTradeDateTime } from '../../utils/timezone';
 import { Mt5ServerModal } from './Mt5ServerModal';
@@ -40,6 +43,9 @@ function cleanBackendMessage(raw?: string | null, isEn = false): string {
 }
 
 export const Mt5SyncPage = () => {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const isBasic = isBasicPlanTier(user?.tier);
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const [searchParams] = useSearchParams();
@@ -123,6 +129,7 @@ export const Mt5SyncPage = () => {
     };
 
     useEffect(() => {
+        if (isBasic) return;
         if (validSelectedAccountId && !initialServerParam) {
             const selAcc = accounts.find((a) => a.id === validSelectedAccountId);
             if (selAcc?.mt5Id) {
@@ -138,7 +145,7 @@ export const Mt5SyncPage = () => {
             clearInterval(interval);
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         };
-    }, [selectedAccountId]);
+    }, [selectedAccountId, isBasic]);
 
     const startTaskPolling = (taskId: string, targetLogin: string) => {
         setActiveTaskId(taskId);
@@ -376,6 +383,31 @@ export const Mt5SyncPage = () => {
     const showConnectionForm = !isAccConnected || showFormOverride;
 
     const headerTitle = matchedBroker?.broker || selectedBrokerLabel || 'MetaTrader 5';
+
+    if (isBasic) {
+        return (
+            <FeatureUpgradeGateCard
+                featureKey="mt5_sync"
+                title="Sincronização MetaTrader 5 & Mesas Prop exclusiva do Plano Pro"
+                titleEn="MT5 Auto-Sync & Prop Firms Require Pro Plan"
+                description="No plano Básico pode importar trades manualmente, enviar ficheiros CSV/XLSX/HTML ou utilizar o Conector PC (EA). Faça upgrade para o Plano Pro ou Premium para conectar corretoras e Mesas Prop automaticamente."
+                descriptionEn="On the Basic plan you can add trades manually, upload statement files, or use the Desktop EA Bridge. Upgrade to Pro or Premium to auto-sync MT5 brokers & Prop Firms."
+                bullets={[
+                    'Conexão automática MetaTrader 5 em servidor dedicado',
+                    'Catálogo completo de Corretoras & Mesas Proprietárias',
+                    '1.500 Créditos AI mensais + Backtesting + Trade Replay',
+                    'Contas de trading ilimitadas',
+                ]}
+                bulletsEn={[
+                    'Dedicated MetaTrader 5 cloud auto-synchronization',
+                    'Full Brokers & Prop Firms server directory',
+                    '1,500 monthly AI credits + Backtesting + Trade Replay',
+                    'Unlimited trading accounts',
+                ]}
+                onBack={() => navigate('/add-trades')}
+            />
+        );
+    }
 
     return (
         <div className="space-y-5 animate-fade-in-up">

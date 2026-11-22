@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Download,
     Printer,
@@ -15,7 +16,10 @@ import {
     RotateCcw,
     Share2,
     Sparkles,
+    Mail,
+    Lock,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 import { useLocale } from '../context/LocaleContext';
 import { useDashboardFilters } from '../context/DashboardFilterContext';
@@ -82,10 +86,13 @@ function resolveSessionBucket(tag?: string | null): 'asia' | 'london' | 'overlap
 }
 
 export const Reports = () => {
+    const navigate = useNavigate();
+    const { user } = useAuth();
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const ct = useChartTheme();
     const { selectedAccountId, selectedAccount, isConsolidated } = useAccount();
+    const normalizedTier = String(user?.tier || 'BASIC').toUpperCase();
     const {
         dateRange,
         queryDates,
@@ -101,6 +108,11 @@ export const Reports = () => {
     const [rawReportData, setReportData] = useState<any>(null);
     const [executionChartMode, setExecutionChartMode] = useState<'executions' | 'cumulative'>('executions');
     const [showShareModal, setShowShareModal] = useState(false);
+    const [sendingEmailReport, setSendingEmailReport] = useState(false);
+    const [emailReportFeedback, setEmailReportFeedback] = useState<{
+        type: 'success' | 'error';
+        text: string;
+    } | null>(null);
 
     // Trade ledger search and pagination
     const [searchTerm, setSearchTerm] = useState('');
@@ -138,6 +150,47 @@ export const Reports = () => {
             console.error('Falha ao carregar relatório:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleSendEmailReport = async () => {
+        if (normalizedTier !== 'PRO' && normalizedTier !== 'PREMIUM') {
+            navigate('/dashboard?plans=1');
+            return;
+        }
+        const frequency = normalizedTier === 'PREMIUM' ? 'WEEKLY' : 'MONTHLY';
+        setSendingEmailReport(true);
+        setEmailReportFeedback(null);
+        try {
+            await api.post('/dashboard/report/email', {
+                frequency,
+                ...(selectedAccountId && selectedAccountId !== 'all'
+                    ? { accountId: selectedAccountId }
+                    : {}),
+            });
+            setEmailReportFeedback({
+                type: 'success',
+                text:
+                    frequency === 'WEEKLY'
+                        ? isEn
+                            ? 'Weekly operational report sent to your email.'
+                            : 'Relatório operacional semanal enviado para o seu e-mail.'
+                        : isEn
+                          ? 'Monthly operational report sent to your email.'
+                          : 'Relatório operacional mensal enviado para o seu e-mail.',
+            });
+        } catch (err: any) {
+            setEmailReportFeedback({
+                type: 'error',
+                text:
+                    err?.response?.data?.message ||
+                    (isEn
+                        ? 'Unable to dispatch email report right now.'
+                        : 'Não foi possível enviar o relatório por e-mail agora.'),
+            });
+        } finally {
+            setSendingEmailReport(false);
+            window.setTimeout(() => setEmailReportFeedback(null), 5000);
         }
     };
 
@@ -730,9 +783,73 @@ export const Reports = () => {
                             >
                                 <Share2 size={12} className="text-accent-fg" /> {isEn ? 'Share Card' : 'Partilhar Card'}
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleSendEmailReport()}
+                                disabled={sendingEmailReport}
+                                title={
+                                    normalizedTier === 'PREMIUM'
+                                        ? isEn
+                                            ? 'Send weekly operational report via email (Premium)'
+                                            : 'Enviar relatório operacional semanal por e-mail (Premium)'
+                                        : normalizedTier === 'PRO'
+                                          ? isEn
+                                              ? 'Send monthly operational report via email (Pro)'
+                                              : 'Enviar relatório operacional mensal por e-mail (Pro)'
+                                          : isEn
+                                            ? 'Basic includes website view & download. Upgrade to Pro (Monthly Email) or Premium (Weekly Email).'
+                                            : 'No plano Básico pode ver e baixar no site. Upgrade para Pro (Mensal por e-mail) ou Premium (Semanal por e-mail).'
+                                }
+                                className="h-8 px-2.5 rounded-lg bg-surface hover:bg-surface-2 text-fg border border-line font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
+                            >
+                                {normalizedTier === 'PREMIUM' ? (
+                                    <>
+                                        <Mail size={12} className="text-emerald-400" />
+                                        <span>
+                                            {sendingEmailReport
+                                                ? isEn
+                                                    ? 'Sending...'
+                                                    : 'Enviando...'
+                                                : isEn
+                                                  ? 'Weekly Email'
+                                                  : 'E-mail Semanal'}
+                                        </span>
+                                    </>
+                                ) : normalizedTier === 'PRO' ? (
+                                    <>
+                                        <Mail size={12} className="text-accent-fg" />
+                                        <span>
+                                            {sendingEmailReport
+                                                ? isEn
+                                                    ? 'Sending...'
+                                                    : 'Enviando...'
+                                                : isEn
+                                                  ? 'Monthly Email'
+                                                  : 'E-mail Mensal'}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Lock size={12} className="text-amber-400" />
+                                        <span>{isEn ? 'Email Report (Pro+)' : 'E-mail (Pro/Premium)'}</span>
+                                    </>
+                                )}
+                            </button>
                         </div>
                     </div>
                 </div>
+
+                {emailReportFeedback && (
+                    <div
+                        className={`print:hidden px-3 py-2 rounded-lg text-xs font-medium border ${
+                            emailReportFeedback.type === 'success'
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                : 'bg-danger/10 border-danger/30 text-danger-fg'
+                        }`}
+                    >
+                        {emailReportFeedback.text}
+                    </div>
+                )}
 
                 {/* Primary KPIs 4-Card Grid */}
                 {loading ? (

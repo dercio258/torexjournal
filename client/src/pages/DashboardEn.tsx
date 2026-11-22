@@ -33,6 +33,8 @@ import { IdleAccountWarningBanner } from '../components/dashboard/IdleAccountWar
 import { TrialCelebrationModal } from '../components/subscription/TrialCelebrationModal';
 import { DashboardSkeleton } from '../components/ui/Skeleton';
 import { DashboardAppInstallCard } from '../components/pwa/DashboardAppInstallCard';
+import { PlanRenewalBannerCard } from '../components/subscription/PlanRenewalBannerCard';
+import { BasicPlanSimpleUpgradeCard } from '../components/subscription/BasicPlanSimpleUpgradeCard';
 import api from '../api';
 
 /**
@@ -212,6 +214,19 @@ export const DashboardEn = () => {
             </div>
 
             <DashboardAppInstallCard locale="en" />
+
+            {subStatus?.hasActive && typeof subStatus.daysLeft === 'number' && subStatus.daysLeft <= 5 && (
+                <PlanRenewalBannerCard
+                    daysLeft={subStatus.daysLeft}
+                    tier={subStatus.tier}
+                    isTrial={Boolean(subStatus.isTrial)}
+                    expiryDate={subStatus.expiryDate || subStatus.currentPeriodEnd}
+                    onRenewClick={() => setShowRenewalModal(true)}
+                    locale="en"
+                />
+            )}
+
+            <BasicPlanSimpleUpgradeCard locale="en" />
 
             {isConsolidated ? (
                 <ConsolidatedDashboardView stats={currentStats} locale="en" />

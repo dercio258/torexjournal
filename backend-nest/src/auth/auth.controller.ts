@@ -22,10 +22,11 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { GoogleOauthGuard } from './google-oauth.guard';
 import { GithubOauthGuard } from './github-oauth.guard';
 import { Throttle } from '@nestjs/throttler';
-import { PlanPermissionService } from '../payment/plan-permission.service';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 import { SubscriptionService } from '../payment/subscription.service';
 import { ConfigService } from '@nestjs/config';
 import { extractTrustedClientIp } from '../common/security/security.config';
+import { maskEmailAddress, maskPhoneNumber } from '../common/security/payload-envelope.util';
 import {
     LoginDto,
     RefreshTokenDto,
@@ -168,56 +169,67 @@ export class AuthController {
             const user = await this.usersService.findOneById(req.user.id);
             if (!user) return null;
 
-            // Fetch account status
+            const planTier = await this.planPermissionService.getUserPlan(user.id);
+            const hasActivePlan = planTier !== PlanTier.FREE;
+
             let isConnected = false;
-            try {
-                const account = await this.accountService.findOneByUserId(user.id);
-                isConnected = account.isConnected;
-            } catch (e) {
-                // Account might not exist yet or error
-                isConnected = false;
+            if (hasActivePlan) {
+                try {
+                    const account = await this.accountService.findOneByUserId(user.id);
+                    isConnected = account.isConnected;
+                } catch (e) {
+                    isConnected = false;
+                }
             }
 
-            // Check and automatically grant trial if eligible and campaign is active
-            const trialResult = await this.subscriptionService.claimOrCheckTrialForUser(user.id);
+            const subscription = hasActivePlan
+                ? await this.planPermissionService.getFullUserSubscription(user.id)
+                : null;
+            const trialEligible = hasActivePlan
+                ? false
+                : await this.subscriptionService.isEligibleForBasicTrial(user.id);
 
-            const planTier = await this.planPermissionService.getUserPlan(user.id);
-            const subscription = await this.planPermissionService.getFullUserSubscription(user.id);
-
-            // Map only safe user fields and backend apiToken to frontend token expectation
+            // Strict zero-data isolation when user has no active plan (FREE / expired)
+            // Also strips raw EA tokens, internal subscription IDs, and trial timestamps
             return {
                 id: user.id,
                 name: user.name,
                 username: user.username,
-                email: user.email,
-                avatarUrl: user.avatarUrl,
-                whatsapp: user.whatsapp,
-                createdAt: user.createdAt,
-                twoFactorEnabled: user.twoFactorEnabled,
-                isTwoFactorConfirmed: user.isTwoFactorConfirmed,
-                onboardingCompleted: user.onboardingCompleted,
-                dailyLossLimit: user.dailyLossLimit,
-                token: user.apiToken,
-                is_connected: isConnected,
+                email: maskEmailAddress(user.email),
+                avatarUrl: hasActivePlan ? user.avatarUrl : null,
+                whatsapp: hasActivePlan ? maskPhoneNumber(user.whatsapp) : null,
+                twoFactorEnabled: Boolean(user.twoFactorEnabled),
+                onboardingCompleted: hasActivePlan ? Boolean(user.onboardingCompleted) : true,
+                dailyLossLimit: hasActivePlan ? user.dailyLossLimit : null,
+                is_connected: hasActivePlan ? isConnected : false,
                 tier: planTier,
-                hasUsedTrial: user.hasUsedTrial || trialResult.hasUsedTrial,
-                trialUsedAt: user.trialUsedAt,
-                trialJustGranted: trialResult.trialGranted,
-                trialDays: trialResult.trialDays,
+                trialEligible,
                 preferredLocale: user.preferredLocale || 'pt',
                 timezone: user.timezone || null,
-                subscription: subscription ? {
-                    id: subscription.id,
-                    status: subscription.status,
-                    expiresAt: subscription.currentPeriodEnd,
-                    createdAt: subscription.createdAt,
-                    planTier: planTier
-                } : null
+                subscription: subscription
+                    ? {
+                          status: subscription.status,
+                          expiresAt: subscription.currentPeriodEnd,
+                          planTier: planTier,
+                      }
+                    : null,
             };
         } catch (error) {
             console.error('Error in /api/auth/profile:', error);
             throw error;
         }
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 6, ttl: 60000 } })
+    @Get('profile/sensitive')
+    async getSensitiveProfile(@Request() req) {
+        const user = await this.usersService.findOneById(req.user.id);
+        if (!user) return { email: '', whatsapp: null };
+        return {
+            email: user.email || '',
+            whatsapp: user.whatsapp || null,
+        };
     }
 
     @UseGuards(JwtAuthGuard)

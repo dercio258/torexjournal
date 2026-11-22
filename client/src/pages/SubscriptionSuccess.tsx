@@ -120,7 +120,7 @@ export const SubscriptionSuccess = () => {
                                 ? 'We could not verify your subscription details.'
                                 : 'Não foi possível confirmar os detalhes da assinatura.'}
                         </p>
-                        <Button variant="secondary" onClick={() => navigate('/pricing')} className="w-full">
+                        <Button variant="secondary" onClick={() => navigate('/dashboard?plans=1')} className="w-full">
                             {isEn ? 'Back to Plans' : 'Voltar'}
                         </Button>
                     </>

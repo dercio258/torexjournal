@@ -361,17 +361,25 @@ export class AccountService {
         );
     }
 
+    private isRestrictedBasicBroker(broker?: string | null): boolean {
+        const b = String(broker || '').trim();
+        if (!b) return false;
+        return /\b(ftmo|fundednext|fundingpips|goatfunded|fivepercent|5ers|alphacapital|maven|e8markets|blueguardian|fxify|thefundedtrader|topstep|deriv)\b/i.test(
+            b,
+        );
+    }
+
     private async assertAccountPlanLimits(
         userId: string,
-        opts: { creating?: boolean; restoring?: boolean; requestedType?: AccountType; currentAccountId?: string }
+        opts: { creating?: boolean; restoring?: boolean; requestedType?: AccountType; requestedBroker?: string; currentAccountId?: string }
     ): Promise<void> {
         const tier = await this.planPermissionService.getUserPlan(userId);
         if (tier === PlanTier.FREE) {
             throw new ForbiddenException('Assinatura ativa necessária para criar ou gerenciar contas de trading.');
         }
 
-        if (this.isPropFirmAccountType(opts.requestedType) && tier === PlanTier.BASIC) {
-            throw new ForbiddenException('Contas Prop Firm / Challenge / Funded requerem plano PRO ou PREMIUM.');
+        if ((this.isPropFirmAccountType(opts.requestedType) || this.isRestrictedBasicBroker(opts.requestedBroker)) && tier === PlanTier.BASIC) {
+            throw new ForbiddenException('Uso de corretoras integradas e Prop Firms requer o plano PRO ou PREMIUM.');
         }
 
         if ((opts.creating || opts.restoring) && tier === PlanTier.BASIC) {
@@ -389,7 +397,7 @@ export class AccountService {
      */
     async createAccount(userId: string, dto: CreateAccountDto) {
         const requestedType = dto.type || AccountType.LIVE;
-        await this.assertAccountPlanLimits(userId, { creating: true, requestedType });
+        await this.assertAccountPlanLimits(userId, { creating: true, requestedType, requestedBroker: dto.broker });
 
         const activeCount = await this.accountRepo.count({ where: { userId, isArchived: false } });
         const isFirstAccount = activeCount === 0;
@@ -434,8 +442,14 @@ export class AccountService {
     async updateAccount(id: string, userId: string, dto: UpdateAccountDto) {
         const account = await this.validateAccountOwnership(id, userId);
 
+        if (dto.type !== undefined || dto.broker !== undefined) {
+            await this.assertAccountPlanLimits(userId, {
+                requestedType: dto.type ?? account.type,
+                requestedBroker: dto.broker ?? account.broker,
+                currentAccountId: id,
+            });
+        }
         if (dto.type !== undefined) {
-            await this.assertAccountPlanLimits(userId, { requestedType: dto.type, currentAccountId: id });
             account.type = dto.type;
         }
         if (dto.name !== undefined) account.name = dto.name.trim();
@@ -555,6 +569,18 @@ export class AccountService {
         const account = await this.validateAccountOwnership(id, userId);
         account.appToken = this.generateToken();
         await this.accountRepo.save(account);
+        return { token: account.appToken };
+    }
+
+    /**
+     * Revela o token de conexão do MT5 EA apenas sob demanda explícita do proprietário
+     */
+    async revealAppToken(id: string, userId: string) {
+        const account = await this.validateAccountOwnership(id, userId);
+        if (!account.appToken) {
+            account.appToken = this.generateToken();
+            await this.accountRepo.save(account);
+        }
         return { token: account.appToken };
     }
 

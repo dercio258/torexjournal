@@ -151,6 +151,16 @@ export interface EmailTemplatePayloadMap {
         period: { start: string; end: string };
         subject?: string;
     };
+    MONTHLY_SUMMARY: {
+        userName?: string;
+        totalPnL: number;
+        currency?: string;
+        winRate: number;
+        totalTrades: number;
+        topLessons?: Array<{ lesson: string; count: number }>;
+        period: { start: string; end: string };
+        subject?: string;
+    };
 
     // Governance, Alerts & Communications
     SYSTEM_ALERT: {

@@ -8,18 +8,62 @@ export const PlanSummary = ({
     plan, 
     billingCycle, 
     total,
-    exchangeRate = 65,
     isEn = false
 }: { 
     plan: any; 
     billingCycle: string; 
     total: number;
-    exchangeRate?: number;
     isEn?: boolean;
 }) => {
-    const isYearly = billingCycle === 'YEARLY';
-    const subtotal = plan.monthlyPrice * (isYearly ? 12 : 1);
-    const discount = isYearly ? subtotal * (plan.annualDiscountPercent / 100) : 0;
+    const months =
+        billingCycle === 'BIENNIAL'
+            ? 24
+            : billingCycle === 'YEARLY'
+              ? 12
+              : billingCycle === 'QUARTERLY'
+                ? 3
+                : 1;
+    const discountPercent =
+        billingCycle === 'BIENNIAL'
+            ? Number(plan.biennialDiscountPercent ?? 29)
+            : billingCycle === 'YEARLY'
+              ? Number(plan.annualDiscountPercent ?? 25)
+              : billingCycle === 'QUARTERLY'
+                ? Number(plan.quarterlyDiscountPercent ?? 5)
+                : Number(plan.monthlyDiscountPercent ?? 20);
+    const subtotal = Number((Number(plan.monthlyPrice || 0) * months).toFixed(2));
+    const discount = Math.max(0, Number((subtotal - total).toFixed(2)));
+    const cycleLabel = isEn
+        ? billingCycle === 'BIENNIAL'
+            ? 'Biennial (24m)'
+            : billingCycle === 'YEARLY'
+              ? 'Annual Billing'
+              : billingCycle === 'QUARTERLY'
+                ? 'Quarterly (3m)'
+                : 'Monthly · Black Friday'
+        : billingCycle === 'BIENNIAL'
+          ? 'Cobrança Bianual (24 meses)'
+          : billingCycle === 'YEARLY'
+            ? 'Cobrança Anual'
+            : billingCycle === 'QUARTERLY'
+              ? 'Cobrança Trimestral (3 meses)'
+              : 'Mensal · Black Friday';
+    const discountTitle =
+        billingCycle === 'MONTHLY'
+            ? isEn
+                ? `Black Friday (-${discountPercent}%)`
+                : `Black Friday (-${discountPercent}%)`
+            : billingCycle === 'QUARTERLY'
+              ? isEn
+                  ? `Quarterly Discount (-${discountPercent}%)`
+                  : `Desconto Trimestral (-${discountPercent}%)`
+              : billingCycle === 'BIENNIAL'
+                ? isEn
+                    ? `Biennial Discount (-${discountPercent}%)`
+                    : `Desconto Bianual (-${discountPercent}%)`
+                : isEn
+                  ? `Annual Discount (-${discountPercent}%)`
+                  : `Desconto Anual (-${discountPercent}%)`;
 
     return (
         <motion.div 
@@ -36,9 +80,7 @@ export const PlanSummary = ({
                     <h3 className="text-3xl font-black text-fg tracking-tight">{plan.tier}</h3>
                     <div className="text-right">
                         <span className="text-[10px] text-fg-subtle uppercase tracking-widest block font-bold">
-                            {isEn
-                                ? (isYearly ? 'Annual Billing' : 'Monthly Billing')
-                                : `Cobrança ${isYearly ? 'Anual' : 'Mensal'}`}
+                            {cycleLabel}
                         </span>
                     </div>
                 </div>
@@ -50,9 +92,9 @@ export const PlanSummary = ({
                     <span>{isEn ? 'Base Price' : 'Preço Base'}</span>
                     <span className="font-mono text-slate-800 dark:text-slate-300 font-semibold">$ {subtotal.toFixed(2)} USD</span>
                 </div>
-                {isYearly && (
+                {discount > 0 && discountPercent > 0 && (
                     <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20">
-                        <span>{isEn ? `Annual Discount (-${plan.annualDiscountPercent}%)` : `Desconto Anual (-${plan.annualDiscountPercent}%)`}</span>
+                        <span>{discountTitle}</span>
                         <span className="font-mono">- $ {discount.toFixed(2)} USD</span>
                     </div>
                 )}
@@ -60,11 +102,6 @@ export const PlanSummary = ({
                     <span className="font-bold">{isEn ? 'Total Due' : 'Total a Pagar'}</span>
                     <div className="text-right">
                         <span className="text-2xl font-black font-mono text-fg ">$ {total.toFixed(2)} USD</span>
-                        {!isEn && (
-                            <span className="text-[10px] text-fg-subtle block uppercase tracking-tighter mt-0.5 font-mono">
-                                ~ MT {(total * exchangeRate).toFixed(0)} MZN (M-Pesa / e-Mola)
-                            </span>
-                        )}
                     </div>
                 </div>
             </div>
@@ -117,7 +154,7 @@ export const PaymentMethodBadge = ({
     active: boolean; 
     onClick: () => void 
 }) => {
-    const currencyTag = id === 'card' ? 'USD / MZN' : 'MZN';
+    const currencyTag = id === 'card' ? 'Visa / MC' : 'Mobile Money';
 
     return (
         <motion.button
@@ -318,7 +355,7 @@ export const CardPaymentView = ({
     </motion.div>
 );
 
-export const PollingOverlay = ({ method, total, exchangeRate = 65, isEn = false }: { method: string; total: number; exchangeRate?: number; isEn?: boolean }) => {
+export const PollingOverlay = ({ method, total, isEn = false }: { method: string; total: number; isEn?: boolean }) => {
     const isCard = method === 'card';
     return (
         <motion.div 
@@ -353,11 +390,11 @@ export const PollingOverlay = ({ method, total, exchangeRate = 65, isEn = false 
                                 )
                             ) : isEn ? (
                                 <>
-                                    We dispatched a payment prompt of <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> (~ MT {(total * exchangeRate).toFixed(0)} MZN) to your phone via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
+                                    We dispatched a payment prompt for <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> to your phone via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
                                 </>
                             ) : (
                                 <>
-                                    Lançamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> (~ MT {(total * exchangeRate).toFixed(0)} MZN) para o seu celular via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
+                                    Lançamos um pedido de pagamento referente ao valor de <span className="text-fg font-bold font-mono">$ {total.toFixed(2)} USD</span> para o seu celular via <span className="capitalize text-indigo-600 dark:text-indigo-400 font-bold">{method}</span>.
                                 </>
                             )}
                         </p>

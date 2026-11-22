@@ -21,8 +21,7 @@ export const Checkout = () => {
     const location = useLocation();
     const navigate = useNavigate();
 
-    const { plan, billingCycle, pricingConfig } = location.state || {};
-    const exchangeRate = pricingConfig?.exchangeRate ? Number(pricingConfig.exchangeRate) : 65;
+    const { plan, billingCycle } = location.state || {};
     const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'emola' | 'card'>('mpesa');
     const [phoneNumber, setPhoneNumber] = useState('');
     const [savePreference, setSavePreference] = useState(false);
@@ -58,14 +57,28 @@ export const Checkout = () => {
     }, [user?.id]);
 
     if (!plan || !billingCycle) {
-        return <Navigate to="/pricing" replace />;
+        return <Navigate to="/dashboard?plans=1" replace />;
     }
 
+    const getCycleMonths = () => {
+        if (billingCycle === 'BIENNIAL') return 24;
+        if (billingCycle === 'YEARLY') return 12;
+        if (billingCycle === 'QUARTERLY') return 3;
+        return 1;
+    };
+
+    const getCycleDiscountPercent = () => {
+        if (billingCycle === 'BIENNIAL') return Number(plan.biennialDiscountPercent ?? 29);
+        if (billingCycle === 'YEARLY') return Number(plan.annualDiscountPercent ?? 25);
+        if (billingCycle === 'QUARTERLY') return Number(plan.quarterlyDiscountPercent ?? 5);
+        return Number(plan.monthlyDiscountPercent ?? 20);
+    };
+
     const getBillTotalUSD = () => {
-        if (billingCycle === 'MONTHLY') return plan.monthlyPrice;
-        const total = plan.monthlyPrice * 12;
-        const discount = total * (plan.annualDiscountPercent / 100);
-        return Number((total - discount).toFixed(2));
+        const months = getCycleMonths();
+        const discount = getCycleDiscountPercent();
+        const perMonthUsd = Number((Number(plan.monthlyPrice || 0) * (1 - discount / 100)).toFixed(2));
+        return Number((perMonthUsd * months).toFixed(2));
     };
 
     const baseTotalUSD = getBillTotalUSD();
@@ -224,7 +237,7 @@ export const Checkout = () => {
                 <motion.button 
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    onClick={() => navigate('/pricing')}
+                    onClick={() => navigate('/dashboard?plans=1')}
                     className="flex items-center gap-2 text-slate-600 dark:text-slate-500 hover:text-fg transition-colors mb-12 group"
                 >
                     <div className="w-8 h-8 rounded-full bg-surface border border-line flex items-center justify-center group-hover:bg-surface-2 transition-colors shadow-sm">
@@ -240,7 +253,6 @@ export const Checkout = () => {
                             plan={plan} 
                             billingCycle={billingCycle} 
                             total={payableTotalUSD} 
-                            exchangeRate={exchangeRate}
                             isEn={isEn}
                         />
                     </div>
@@ -362,7 +374,7 @@ export const Checkout = () => {
                                 <div className="min-h-[260px]">
                                     <AnimatePresence mode="wait">
                                         {showPinPrompt ? (
-                                            <PollingOverlay key="polling" method={paymentMethod} total={payableTotalUSD} exchangeRate={exchangeRate} isEn={isEn} />
+                                            <PollingOverlay key="polling" method={paymentMethod} total={payableTotalUSD} isEn={isEn} />
                                         ) : (
                                             <motion.div
                                                 key={paymentMethod}
@@ -457,7 +469,7 @@ export const Checkout = () => {
                                                 : 'Tempo limite de confirmação atingido (2 min). Se já digitou o PIN, verifique o estado da conta ou tente novamente.'
                                         ) : ['mpesa', 'emola'].includes(paymentMethod) ? (
                                             <>
-                                                {isEn ? <>We sent a payment prompt of <span className="text-fg font-bold font-mono">$ {payableTotalUSD.toFixed(2)} USD</span> (~ MT {(payableTotalUSD * exchangeRate).toFixed(0)} MZN) to your phone. Please enter your <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> to authorize.</> : <>Enviamos um pedido de pagamento de <span className="text-fg font-bold font-mono">$ {payableTotalUSD.toFixed(2)} USD</span> (~ MT {(payableTotalUSD * exchangeRate).toFixed(0)} MZN) para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.</>}
+                                                {isEn ? <>We sent a payment prompt of <span className="text-fg font-bold font-mono">$ {payableTotalUSD.toFixed(2)} USD</span> to your phone. Please enter your <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> to authorize.</> : <>Enviamos um pedido de pagamento referente ao plano de <span className="text-fg font-bold font-mono">$ {payableTotalUSD.toFixed(2)} USD</span> para o seu telemóvel. Por favor, introduza o seu <span className="text-indigo-600 dark:text-indigo-400 font-bold">PIN</span> para autorizar.</>}
                                             </>
                                         ) : (
                                             <>

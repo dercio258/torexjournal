@@ -391,6 +391,12 @@ export class AdminController {
     }
 
     @UseGuards(AdminAuthGuard)
+    @Get('subscription-conversion-insights')
+    async getSubscriptionConversionInsights(@Query('days') days?: string) {
+        return this.subscriptionService.getSubscriptionConversionInsights(Number(days) || 30);
+    }
+
+    @UseGuards(AdminAuthGuard)
     @Post('trial-campaign/toggle')
     async toggleTrialCampaign(@Body() body: ToggleTrialCampaignDto) {
         return this.subscriptionService.toggleTrialCampaign(body.enabled, body.days);

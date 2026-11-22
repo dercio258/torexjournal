@@ -24,6 +24,7 @@ import { UserEntity } from '../users/user.entity';
 import { SessionEntity } from '../auth/session.entity';
 import { TelemetryService } from '../common/observability/telemetry.service';
 import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
+import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 @WebSocketGateway({
     cors: {
@@ -66,6 +67,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         @Inject(CACHE_MANAGER)
         private readonly cacheManager?: Cache,
         @Optional() private readonly telemetry?: TelemetryService,
+        @Optional() private readonly planPermissionService?: PlanPermissionService,
     ) {}
 
     afterInit() {
@@ -182,6 +184,13 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
             }
         }
 
+        if (this.planPermissionService) {
+            const tier = await this.planPermissionService.getUserPlan(userId);
+            if (tier === PlanTier.FREE) {
+                throw new Error('SUBSCRIPTION_REQUIRED');
+            }
+        }
+
         return userId;
     }
 
@@ -208,6 +217,12 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
                 }
             } catch (e: any) {
                 this.logger.debug(`Handshake token verification failed: ${e.message}`);
+                if (typeof client.disconnect === 'function') {
+                    client.disconnect(true);
+                } else if (typeof (client as any).close === 'function') {
+                    (client as any).close();
+                }
+                return;
             }
         }
 

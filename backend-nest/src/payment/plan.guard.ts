@@ -34,10 +34,18 @@ export class PlanGuard implements CanActivate {
         if (!userId) {
             return false;
         }
+        const userPlan = await this.planPermissionService.getUserPlan(userId);
         const hasPermission = await this.planPermissionService.checkPermission(userId, requiredTier);
 
         if (!hasPermission) {
-            throw new ForbiddenException(`Acesso negado: esta funcionalidade requer o plano ${requiredTier}`);
+            throw new ForbiddenException({
+                statusCode: 403,
+                code: userPlan === PlanTier.FREE ? 'SUBSCRIPTION_REQUIRED' : 'PLAN_UPGRADE_REQUIRED',
+                message:
+                    userPlan === PlanTier.FREE
+                        ? 'Assinatura ativa necessária para acessar o workspace.'
+                        : `Acesso negado: esta funcionalidade requer o plano ${requiredTier}.`,
+            });
         }
 
         return true;
