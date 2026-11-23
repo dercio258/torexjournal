@@ -28,7 +28,7 @@ export interface CountryDial {
     flagUrl: string;
 }
 
-const regionName = (() => {
+const regionNamePt = (() => {
     try {
         const dn = new Intl.DisplayNames(['pt-BR'], { type: 'region' });
         return (iso2: string) => dn.of(iso2) ?? iso2;
@@ -37,12 +37,27 @@ const regionName = (() => {
     }
 })();
 
+const regionNameEn = (() => {
+    try {
+        const dn = new Intl.DisplayNames(['en'], { type: 'region' });
+        return (iso2: string) => dn.of(iso2) ?? iso2;
+    } catch {
+        return (iso2: string) => iso2;
+    }
+})();
+
+export function getLocalizedCountryName(iso2: string, isEn = false): string {
+    const clean = String(iso2 || '').trim().toUpperCase();
+    if (!clean || clean === 'INTL') return isEn ? 'Global' : 'Global';
+    return isEn ? regionNameEn(clean) : regionNamePt(clean);
+}
+
 export const COUNTRIES: CountryDial[] = RAW.split(' ')
     .map((entry) => {
         const [iso2, code] = entry.split(':');
         return {
             iso2,
-            name: regionName(iso2),
+            name: regionNamePt(iso2),
             dialCode: `+${code}`,
             flagUrl: `https://flagcdn.com/${iso2.toLowerCase()}.svg`,
         };

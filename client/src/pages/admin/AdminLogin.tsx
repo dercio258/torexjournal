@@ -6,6 +6,7 @@ import { ShieldCheck, Calendar, Key, ArrowLeft, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../api';
 import { isValidAdminToken } from '../../lib/adminAuth';
+import { CloudflareTurnstile } from '../../components/auth/CloudflareTurnstile';
 
 export const AdminLogin = () => {
     const navigate = useNavigate();
@@ -18,6 +19,9 @@ export const AdminLogin = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
+    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileRequired, setTurnstileRequired] = useState(false);
+    const [turnstileReset, setTurnstileReset] = useState(0);
 
     useEffect(() => {
         if (isValidAdminToken()) {
@@ -29,6 +33,14 @@ export const AdminLogin = () => {
         e.preventDefault();
         setError('');
         setSuccessMessage('');
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setError('Sem ligação à internet. Reconecte-se para aceder ao painel administrativo.');
+            return;
+        }
+        if (turnstileRequired && !turnstileToken) {
+            setError('Conclua a verificação de segurança Cloudflare para continuar.');
+            return;
+        }
         setIsLoading(true);
 
         try {
@@ -36,6 +48,7 @@ export const AdminLogin = () => {
                 email,
                 pass: password,
                 date,
+                ...(turnstileToken ? { turnstileToken } : {}),
             });
 
             if (res.data.success) {
@@ -49,6 +62,7 @@ export const AdminLogin = () => {
             }
         } catch (err: any) {
             console.error(err);
+            setTurnstileReset((n) => n + 1);
             setError(err.response?.data?.message || 'Login falhou. Verifique credenciais e data.');
         } finally {
             setIsLoading(false);
@@ -163,6 +177,13 @@ export const AdminLogin = () => {
                                     </div>
                                     <p className="text-[11px] text-fg-subtle mt-1">Verificação temporal de segurança.</p>
                                 </div>
+
+                                <CloudflareTurnstile
+                                    action="admin_login"
+                                    resetTrigger={turnstileReset}
+                                    onTokenChange={setTurnstileToken}
+                                    onRequirementChange={setTurnstileRequired}
+                                />
 
                                 <Button
                                     variant="brand"

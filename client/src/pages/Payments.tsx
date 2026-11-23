@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
     RefreshCw,
     Inbox,
@@ -20,6 +19,7 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { TableRowsSkeleton } from '../components/ui/Skeleton';
+import { openWorkspacePlansModal } from '../lib/planGate';
 
 interface Payment {
     id: string;
@@ -150,7 +150,6 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
 };
 
 export const Payments = () => {
-    const navigate = useNavigate();
     const { user, refreshProfile } = useAuth();
     const { locale } = useLocale();
     const isEn = locale === 'en';
@@ -367,8 +366,8 @@ export const Payments = () => {
                     <div className="pt-3 border-t border-line-subtle">
                         <button
                             type="button"
-                            onClick={() => navigate('/dashboard?plans=1')}
-                            className="w-full h-8 inline-flex items-center justify-center gap-1.5 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg transition-colors"
+                            onClick={() => openWorkspacePlansModal('payments_change_plan')}
+                            className="w-full h-8 inline-flex items-center justify-center gap-1.5 rounded-lg bg-canvas-subtle hover:bg-surface-2 border border-line text-xs font-semibold text-fg transition-colors cursor-pointer"
                         >
                             <span>{isEn ? 'Change Plan' : 'Alterar Plano'}</span>
                             <ArrowRight size={13} />

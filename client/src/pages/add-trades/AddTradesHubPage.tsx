@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, ChevronRight, FileSpreadsheet, Lock, Monitor, Search, X } from 'lucide-react';
+import { ArrowRight, ChevronRight, FileSpreadsheet, Monitor, Search, X } from 'lucide-react';
 import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../../components/ui/BrokerLogo';
 import { DerivIcon, Mt5Icon } from './icons';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { isBasicPlanTier, openWorkspacePlansModal } from '../../lib/planGate';
+import { UpgradeBadge } from '../../components/subscription/UpgradeBadge';
 
 type CategoryFilter = 'ALL' | 'POPULAR' | 'Prop Firm' | 'Forex / ECN';
 
@@ -143,19 +144,16 @@ export const AddTradesHubPage = () => {
                                         <h2 className="text-sm font-bold text-fg group-hover:text-amber-300 transition-colors flex items-center gap-1.5">
                                             <span>{opt.title}</span>
                                         </h2>
-                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                                            <Lock size={10} />
-                                            PRO
-                                        </span>
+                                        <UpgradeBadge variant="pill" label="Upgrade" tierLabel="PRO" />
                                     </div>
                                     <p className="text-xs text-fg-muted leading-snug">
                                         {opt.description}
                                     </p>
                                 </div>
 
-                                <Lock
-                                    size={14}
-                                    className="text-amber-400 shrink-0 mt-1"
+                                <ArrowRight
+                                    size={15}
+                                    className="text-amber-400 shrink-0 mt-1 group-hover:translate-x-0.5 transition-transform"
                                 />
                             </button>
                         );
@@ -271,7 +269,7 @@ export const AddTradesHubPage = () => {
                                 }
                                 className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-accent/15 text-accent-fg border border-accent/30 text-xs font-semibold hover:bg-accent/25 transition-colors"
                             >
-                                {isBasic && <Lock size={12} />}
+                                {isBasic && <UpgradeBadge variant="mini" label="UP" tierLabel="PRO" />}
                                 {isEn ? `Use "${search.trim()}" on MetaTrader 5` : `Usar "${search.trim()}" no MetaTrader 5`}
                                 <ArrowRight size={13} />
                             </button>
@@ -310,10 +308,7 @@ export const AddTradesHubPage = () => {
                                             </div>
                                         </div>
                                         {isBasic ? (
-                                            <span className="inline-flex items-center gap-1 text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
-                                                <Lock size={10} />
-                                                PRO
-                                            </span>
+                                            <UpgradeBadge variant="pill" label="Upgrade" tierLabel="PRO" />
                                         ) : (
                                             <ChevronRight
                                                 size={14}

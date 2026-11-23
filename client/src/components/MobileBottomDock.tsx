@@ -7,7 +7,6 @@ import {
     FlaskConical,
     Gift,
     LayoutDashboard,
-    Lock,
     Plus,
     Sparkles,
     Trophy,
@@ -19,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { cn } from '../lib/cn';
 import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
+import { UpgradeBadge } from './subscription/UpgradeBadge';
 
 const CandlestickHighlightIcon: React.FC<{ className?: string; size?: number }> = ({
     className,
@@ -205,9 +205,11 @@ export const MobileBottomDock: React.FC = () => {
                                         )}
                                     >
                                         {isLocked && (
-                                            <span className="absolute top-1.5 right-1.5 text-amber-400">
-                                                <Lock size={10} />
-                                            </span>
+                                            <UpgradeBadge
+                                                variant="mini"
+                                                tierLabel="PRO"
+                                                className="absolute top-1.5 right-1.5"
+                                            />
                                         )}
                                         <Icon size={17} />
                                         <span className="text-[10.5px] font-semibold leading-tight line-clamp-1">
@@ -235,7 +237,16 @@ export const MobileBottomDock: React.FC = () => {
                         )}
                     >
                         {slot1.to.startsWith('/backtesting') && isBasic && (
-                            <Lock size={9} className="absolute top-1 right-2 text-amber-400" />
+                            <UpgradeBadge
+                                variant="mini"
+                                tierLabel="PRO"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    openWorkspacePlansModal('mobile_backtest_upgrade');
+                                }}
+                                className="absolute top-0.5 right-1"
+                            />
                         )}
                         <slot1.icon size={17} />
                         <span className="text-[10px] font-semibold leading-none tracking-tight truncate max-w-full px-0.5">

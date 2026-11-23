@@ -18,6 +18,21 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/download\//, /^\/socket\.io\//],
         runtimeCaching: [
           {
+            // Never cache Cloudflare Turnstile scripts/challenges in Service Worker so offline PWA never stalls
+            urlPattern: /^https:\/\/challenges\.cloudflare\.com\/.*/i,
+            handler: 'NetworkOnly',
+          },
+          {
+            // Never cache authentication, KEM/signing public keys, or short-lived media presigned URLs
+            urlPattern: /^\/api\/(?:auth|security|media\/signed-url)\b.*/i,
+            handler: 'NetworkOnly',
+          },
+          {
+            // Never cache private R2 presigned object responses in SW cache
+            urlPattern: /^https:\/\/.*\.r2\.cloudflarestorage\.com\/.*/i,
+            handler: 'NetworkOnly',
+          },
+          {
             urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
             handler: 'CacheFirst',
             options: {

@@ -27,6 +27,10 @@ export interface FeedStats {
     totalBars: number;
     replayIndex: number;
     replayActive: boolean;
+    /** Canonical replay timestamp preserved across finer <-> coarser timeframe switches. */
+    canonicalTimestamp?: number | null;
+    /** True when the last visible candle on a coarse timeframe is an in-progress slice synthesized from LTF data. */
+    hasPartialLastBar?: boolean;
     batchProgress?: BatchLoadProgress;
 }
 
@@ -200,6 +204,217 @@ export function periodToMs(period: Period): number {
     }
 }
 
+export function timeframeToMs(tf: string): number {
+    const clean = (tf || '').trim();
+    const match = clean.match(/^(\d+)?([a-zA-Z]+)$/);
+    if (!match) return 15 * 60 * 1000;
+    const mult = Math.max(1, parseInt(match[1] || '1', 10) || 1);
+    const unit = match[2];
+    if (unit === 'm') return mult * 60 * 1000;
+    if (unit === 'h' || unit === 'H') return mult * 60 * 60 * 1000;
+    if (unit === 'd' || unit === 'D') return mult * 24 * 60 * 60 * 1000;
+    if (unit === 'w' || unit === 'W') return mult * 7 * 24 * 60 * 60 * 1000;
+    if (unit === 'M') return mult * 30 * 24 * 60 * 60 * 1000;
+    return 15 * 60 * 1000;
+}
+
+const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+
+export function computeMaxAllowedGapMs(stepMs: number): number {
+    return Math.max(Math.max(60_000, stepMs) * 48, FIVE_DAYS_MS);
+}
+
+/**
+ * Merges two candle series ONLY when they form a contiguous window; if they belong to
+ * disjoint historical islands separated by a multi-day missing hole, prefers `incoming`
+ * so switching timeframes far in the past never splices a hole onto today's cache.
+ */
+export function mergeContiguousCandles(
+    existing: KLineData[],
+    incoming: KLineData[],
+    stepMs: number
+): KLineData[] {
+    if (!Array.isArray(incoming) || incoming.length === 0) return existing || [];
+    const cleanIncoming = mergeAndDeduplicateCandles([], incoming);
+    if (!Array.isArray(existing) || existing.length === 0) return cleanIncoming;
+    if (cleanIncoming.length === 0) return existing;
+
+    const cleanExisting =
+        existing[0].timestamp <= existing[existing.length - 1].timestamp
+            ? existing
+            : mergeAndDeduplicateCandles([], existing);
+    const maxGap = computeMaxAllowedGapMs(stepMs);
+    const eMin = cleanExisting[0].timestamp;
+    const eMax = cleanExisting[cleanExisting.length - 1].timestamp;
+    const iMin = cleanIncoming[0].timestamp;
+    const iMax = cleanIncoming[cleanIncoming.length - 1].timestamp;
+
+    if ((iMax < eMin && eMin - iMax > maxGap) || (iMin > eMax && iMin - eMax > maxGap)) {
+        return cleanIncoming;
+    }
+
+    return mergeAndDeduplicateCandles(cleanExisting, cleanIncoming);
+}
+
+/**
+ * Checks whether a candle array truly covers `targetTs` without a missing hole
+ * around the replay cursor (allows normal weekend/holiday market closures).
+ */
+export function doesHistoryCoverReplayTarget(
+    candles: KLineData[],
+    targetTs: number,
+    stepMs: number
+): boolean {
+    if (!Array.isArray(candles) || candles.length === 0 || !Number.isFinite(targetTs)) {
+        return false;
+    }
+    const safeStep = Math.max(60_000, stepMs);
+    const firstTs = candles[0].timestamp;
+    const lastTs = candles[candles.length - 1].timestamp;
+
+    if (targetTs < firstTs) return false;
+    if (targetTs >= lastTs + safeStep) return false;
+
+    const maxGap = computeMaxAllowedGapMs(safeStep);
+    let lo = 0;
+    let hi = candles.length - 1;
+    let idx = 0;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (candles[mid].timestamp <= targetTs) {
+            idx = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+
+    if (idx + 1 < candles.length) {
+        const rightGap = candles[idx + 1].timestamp - candles[idx].timestamp;
+        if (rightGap > maxGap && targetTs - candles[idx].timestamp > safeStep * 4) {
+            return false;
+        }
+    }
+    if (idx > 0) {
+        const leftGap = candles[idx].timestamp - candles[idx - 1].timestamp;
+        if (leftGap > maxGap && candles[idx].timestamp - targetTs < safeStep * 4) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export function idbCoversTargetWindowPure(
+    candles: KLineData[],
+    toTs: number,
+    stepMs: number
+): boolean {
+    if (!Array.isArray(candles) || candles.length < 60) return false;
+    const earliestTs = candles[0].timestamp;
+    const latestTs = candles[candles.length - 1].timestamp;
+    const safeStep = Math.max(60_000, stepMs);
+    const maxGap = computeMaxAllowedGapMs(safeStep);
+
+    if (earliestTs > toTs - safeStep * 10) return false;
+    if (latestTs < toTs - Math.max(safeStep * 96, 4 * 24 * 60 * 60 * 1000)) return false;
+
+    const scanStart = Math.max(1, candles.length - 120);
+    for (let i = scanStart; i < candles.length; i++) {
+        if (candles[i].timestamp - candles[i - 1].timestamp > maxGap) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export interface FinerSeriesCandidate {
+    stepMs: number;
+    candles: KLineData[];
+}
+
+export interface FormingSliceResult {
+    candles: KLineData[];
+    hasPartialLastBar: boolean;
+}
+
+/**
+ * Slices `targetCandles` up to `cutoffIdx` and rebuilds the last candle as an
+ * in-progress bar from `finerSeries` whenever viewing a coarser timeframe inside
+ * an active lower-timeframe replay cursor, preventing future HTF wicks/closes from leaking.
+ */
+export function buildVisibleReplaySlice(
+    targetCandles: KLineData[],
+    cutoffIdx: number,
+    targetStepMs: number,
+    canonicalCutoffTs: number,
+    canonicalStepMs: number | null,
+    finerSeries: FinerSeriesCandidate[]
+): FormingSliceResult {
+    if (!Array.isArray(targetCandles) || targetCandles.length === 0) {
+        return { candles: [], hasPartialLastBar: false };
+    }
+    const safeIdx = Math.max(0, Math.min(targetCandles.length - 1, cutoffIdx));
+    const visible = targetCandles.slice(0, safeIdx + 1);
+    const lastBar = visible[visible.length - 1];
+
+    if (
+        !lastBar ||
+        canonicalStepMs === null ||
+        !Number.isFinite(canonicalStepMs) ||
+        canonicalStepMs <= 0 ||
+        canonicalStepMs >= targetStepMs ||
+        canonicalCutoffTs < lastBar.timestamp ||
+        canonicalCutoffTs >= lastBar.timestamp + targetStepMs
+    ) {
+        return { candles: visible, hasPartialLastBar: false };
+    }
+
+    const revealEndExclusive = canonicalCutoffTs + canonicalStepMs;
+    if (revealEndExclusive >= lastBar.timestamp + targetStepMs) {
+        return { candles: visible, hasPartialLastBar: false };
+    }
+
+    const ranked = finerSeries
+        .filter((s) => s.stepMs > 0 && s.stepMs < targetStepMs && Array.isArray(s.candles) && s.candles.length > 0)
+        .sort((a, b) => {
+            const diffA = Math.abs(a.stepMs - canonicalStepMs);
+            const diffB = Math.abs(b.stepMs - canonicalStepMs);
+            if (diffA !== diffB) return diffA - diffB;
+            return a.stepMs - b.stepMs;
+        });
+
+    for (const candidate of ranked) {
+        const parts: KLineData[] = [];
+        for (let i = 0; i < candidate.candles.length; i++) {
+            const bar = candidate.candles[i];
+            if (bar.timestamp < lastBar.timestamp) continue;
+            if (bar.timestamp >= revealEndExclusive) break;
+            parts.push(bar);
+        }
+        if (parts.length > 0) {
+            let high = parts[0].high;
+            let low = parts[0].low;
+            let volume = 0;
+            for (const p of parts) {
+                if (p.high > high) high = p.high;
+                if (p.low < low) low = p.low;
+                volume += p.volume || 0;
+            }
+            visible[visible.length - 1] = {
+                ...lastBar,
+                open: parts[0].open,
+                high,
+                low,
+                close: parts[parts.length - 1].close,
+                volume,
+            };
+            return { candles: visible, hasPartialLastBar: true };
+        }
+    }
+
+    return { candles: visible, hasPartialLastBar: false };
+}
+
 const MODE_LABEL: Record<DataSourceMode, string> = {
     TRADINGVIEW: 'TradingView',
     BINANCE_LIVE: 'Binance',
@@ -239,11 +454,17 @@ export class CustomKLineDatafeed implements Datafeed {
 
     // Replay & timestamp synchronization state
     private fullHistory: KLineData[] = [];
+    private visibleHistory: KLineData[] = [];
     private replayActive: boolean = false;
     private replayIndex: number = 0;
     private replayCutoffTimestamp: number | null = null;
+    private canonicalReplayTimestamp: number | null = null;
+    private canonicalReplayStepMs: number | null = null;
+    private currentChartCutoffTimestamp: number | null = null;
+    private currentVisibleHasPartialLastBar: boolean = false;
     private onCandleUpdateListener?: CandleListener;
     private onBatchProgressListener?: BatchProgressListener;
+    private onHistoryPrependedListener?: (visibleCandles: KLineData[], addedBars: number) => void;
     private lastSourceUsed: string = MODE_LABEL.TRADINGVIEW;
     private lastSynthetic = false;
     private historyTicker = '';
@@ -352,22 +573,44 @@ export class CustomKLineDatafeed implements Datafeed {
         return this.fullHistory;
     }
 
+    public getVisibleReplayCandles(): KLineData[] {
+        return this.visibleHistory.length > 0 ? this.visibleHistory : this.fullHistory;
+    }
+
+    public setOnHistoryPrependedListener(
+        listener?: (visibleCandles: KLineData[], addedBars: number) => void
+    ) {
+        this.onHistoryPrependedListener = listener;
+    }
+
     public isReplayActive(): boolean {
         return this.replayActive;
     }
 
     public getReplayTimestamp(): number | null {
-        return this.replayCutoffTimestamp;
+        return this.canonicalReplayTimestamp ?? this.replayCutoffTimestamp;
+    }
+
+    public getCanonicalReplayStepMs(): number | null {
+        return this.canonicalReplayStepMs;
+    }
+
+    public getChartCutoffTimestamp(): number | null {
+        return this.currentChartCutoffTimestamp ?? this.replayCutoffTimestamp;
     }
 
     public getReplayState() {
-        const currentCandle = this.fullHistory[this.replayIndex] || this.fullHistory[this.fullHistory.length - 1] || null;
+        const currentCandle =
+            this.visibleHistory[this.visibleHistory.length - 1] ||
+            this.fullHistory[this.replayIndex] ||
+            this.fullHistory[this.fullHistory.length - 1] ||
+            null;
         return {
             replayActive: this.replayActive,
             replayIndex: this.replayIndex,
             totalBars: this.fullHistory.length,
             currentCandle,
-            replayTimestamp: currentCandle?.timestamp || this.replayCutoffTimestamp,
+            replayTimestamp: this.getReplayTimestamp() ?? currentCandle?.timestamp ?? null,
         };
     }
 
@@ -385,15 +628,32 @@ export class CustomKLineDatafeed implements Datafeed {
             totalBars: this.fullHistory.length,
             replayIndex: this.replayIndex,
             replayActive: replay,
+            canonicalTimestamp: this.canonicalReplayTimestamp ?? candle.timestamp,
+            hasPartialLastBar: this.currentVisibleHasPartialLastBar,
             batchProgress: this.batchProgress,
         });
     }
 
+    private collectFinerSeriesCandidates(symbol: SymbolInfo, targetStepMs: number): FinerSeriesCandidate[] {
+        const candidates: FinerSeriesCandidate[] = [];
+        const prefix = `${this.mode}:${symbol.exchange}:${symbol.ticker}:`;
+        this.historyCache.forEach((entry, key) => {
+            if (!key.startsWith(prefix) || !entry?.candles?.length) return;
+            const parts = key.slice(prefix.length).split(':');
+            const tf = parts[0];
+            if (!tf) return;
+            const stepMs = timeframeToMs(tf);
+            if (stepMs > 0 && stepMs < targetStepMs) {
+                candidates.push({ stepMs, candles: entry.candles });
+            }
+        });
+        return candidates;
+    }
+
     /**
      * Enables or disables Bar-by-Bar Replay mode by slicing the loaded history.
-     * If preserveTimestamp is true and replayCutoffTimestamp exists, aligns the slice
-     * to the exact historical timestamp T so switching timeframes or merging earlier batches
-     * never leaks future bars or jumps the user's current replay position.
+     * If preserveTimestamp is true and a replay cutoff timestamp exists, aligns the slice
+     * to that timestamp without clobbering the canonical LTF cursor when viewing an HTF bar.
      */
     public setReplayMode(
         enabled: boolean,
@@ -409,11 +669,16 @@ export class CustomKLineDatafeed implements Datafeed {
                 this.fullHistory.length - 1,
                 Math.max(minIdx, Math.floor(this.fullHistory.length * startRatio))
             );
+            const currentStepMs = this.currentPeriod ? periodToMs(this.currentPeriod) : 15 * 60_000;
+            const targetPreserveTs = preserveTimestamp
+                ? (this.canonicalReplayTimestamp ?? this.replayCutoffTimestamp)
+                : null;
 
-            if (preserveTimestamp && this.replayCutoffTimestamp) {
+            let usedPreservedTs = false;
+            if (targetPreserveTs !== null) {
                 let idx = -1;
                 for (let i = 0; i < this.fullHistory.length; i++) {
-                    if (this.fullHistory[i].timestamp <= this.replayCutoffTimestamp) {
+                    if (this.fullHistory[i].timestamp <= targetPreserveTs) {
                         idx = i;
                     } else {
                         break;
@@ -421,6 +686,7 @@ export class CustomKLineDatafeed implements Datafeed {
                 }
                 if (idx >= 1) {
                     this.replayIndex = idx;
+                    usedPreservedTs = true;
                 } else {
                     this.replayIndex = fallbackIdx;
                 }
@@ -428,16 +694,48 @@ export class CustomKLineDatafeed implements Datafeed {
                 this.replayIndex = fallbackIdx;
             }
 
-            const visible = this.fullHistory.slice(0, this.replayIndex + 1);
-            const last = visible[visible.length - 1];
-            if (last) {
-                this.replayCutoffTimestamp = last.timestamp;
-                this.emit(last, true);
+            if (usedPreservedTs && targetPreserveTs !== null) {
+                const sym = this.currentSymbolInfo || DEFAULT_SYMBOLS[0];
+                const sliceResult = buildVisibleReplaySlice(
+                    this.fullHistory,
+                    this.replayIndex,
+                    currentStepMs,
+                    targetPreserveTs,
+                    this.canonicalReplayStepMs,
+                    this.collectFinerSeriesCandidates(sym, currentStepMs)
+                );
+                this.visibleHistory = sliceResult.candles;
+                this.currentVisibleHasPartialLastBar = sliceResult.hasPartialLastBar;
+                this.canonicalReplayTimestamp = targetPreserveTs;
+                if (this.canonicalReplayStepMs === null) {
+                    this.canonicalReplayStepMs = currentStepMs;
+                }
+                this.replayCutoffTimestamp = targetPreserveTs;
+            } else {
+                this.visibleHistory = this.fullHistory.slice(0, this.replayIndex + 1);
+                this.currentVisibleHasPartialLastBar = false;
+                const picked = this.visibleHistory[this.visibleHistory.length - 1];
+                if (picked) {
+                    this.canonicalReplayTimestamp = picked.timestamp;
+                    this.canonicalReplayStepMs = currentStepMs;
+                    this.replayCutoffTimestamp = picked.timestamp;
+                }
             }
-            return visible;
+
+            const lastVisible = this.visibleHistory[this.visibleHistory.length - 1];
+            if (lastVisible) {
+                this.currentChartCutoffTimestamp = lastVisible.timestamp;
+                this.emit(lastVisible, true);
+            }
+            return this.visibleHistory;
         } else {
             this.replayActive = false;
             this.replayCutoffTimestamp = null;
+            this.canonicalReplayTimestamp = null;
+            this.canonicalReplayStepMs = null;
+            this.currentChartCutoffTimestamp = null;
+            this.currentVisibleHasPartialLastBar = false;
+            this.visibleHistory = this.fullHistory;
             this.replayIndex = Math.max(0, this.fullHistory.length - 1);
             const last = this.fullHistory[this.fullHistory.length - 1];
             if (last) this.emit(last, false);
@@ -446,23 +744,67 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * Sets the replay cutoff directly to a specific timestamp T
+     * Sets the replay cutoff directly to a specific timestamp T.
      */
-    public setReplayTimestamp(timestamp: number): KLineData[] {
+    public setReplayTimestamp(
+        timestamp: number,
+        options?: { preserveCanonicalStep?: boolean }
+    ): KLineData[] {
         this.replayCutoffTimestamp = timestamp;
+        this.canonicalReplayTimestamp = timestamp;
+        if (!options?.preserveCanonicalStep && this.currentPeriod) {
+            this.canonicalReplayStepMs = periodToMs(this.currentPeriod);
+        }
         return this.setReplayMode(true, 0.72, true);
     }
 
     /**
-     * Advances 1 candle forward in Replay Mode and pushes it to KLineChart via subscribe callback
+     * Advances 1 candle forward in Replay Mode and pushes it to KLineChart via subscribe callback.
+     * If the current HTF candle was an in-progress LTF synthesis, finalizes that bar first
+     * before advancing to the subsequent bar.
      */
     public stepReplayForward(): KLineData | null {
         if (!this.replayActive || this.fullHistory.length === 0) return null;
+        const currentStepMs = this.currentPeriod ? periodToMs(this.currentPeriod) : 15 * 60_000;
+
+        if (this.currentVisibleHasPartialLastBar) {
+            const finalizedCandle = this.fullHistory[this.replayIndex];
+            if (finalizedCandle) {
+                this.currentVisibleHasPartialLastBar = false;
+                if (this.visibleHistory.length > 0) {
+                    this.visibleHistory = [
+                        ...this.visibleHistory.slice(0, -1),
+                        finalizedCandle,
+                    ];
+                } else {
+                    this.visibleHistory = this.fullHistory.slice(0, this.replayIndex + 1);
+                }
+                this.canonicalReplayTimestamp = finalizedCandle.timestamp;
+                this.canonicalReplayStepMs = currentStepMs;
+                this.replayCutoffTimestamp = finalizedCandle.timestamp;
+                this.currentChartCutoffTimestamp = finalizedCandle.timestamp;
+                if (this.activeCallback) {
+                    this.activeCallback(finalizedCandle);
+                }
+                this.emit(finalizedCandle, true);
+                return finalizedCandle;
+            }
+        }
+
         if (this.replayIndex < this.fullHistory.length - 1) {
             this.replayIndex += 1;
             const nextCandle = this.fullHistory[this.replayIndex];
             if (nextCandle) {
+                this.canonicalReplayTimestamp = nextCandle.timestamp;
+                this.canonicalReplayStepMs = currentStepMs;
                 this.replayCutoffTimestamp = nextCandle.timestamp;
+                this.currentChartCutoffTimestamp = nextCandle.timestamp;
+                this.currentVisibleHasPartialLastBar = false;
+                if (this.visibleHistory.length > 0) {
+                    this.visibleHistory = [...this.visibleHistory, nextCandle];
+                } else {
+                    this.visibleHistory = this.fullHistory.slice(0, this.replayIndex + 1);
+                }
             }
             if (this.activeCallback && nextCandle) {
                 this.activeCallback(nextCandle);
@@ -624,20 +966,27 @@ export class CustomKLineDatafeed implements Datafeed {
     }
 
     /**
-     * Ensures that a specific historical timestamp `targetTimestamp` (from a synced trade or Go To Date)
-     * is covered by `this.fullHistory`. If `targetTimestamp` is outside the loaded range, fetches
-     * the 500-candle batch covering `targetTimestamp` and merges it into IndexedDB & `this.fullHistory`.
+     * Ensures that a specific historical timestamp `targetTimestamp` (from a synced trade,
+     * Go To Date, or cross-timeframe replay switch) is covered cleanly by `this.fullHistory`
+     * without leaving multi-day gaps or failing in DEMO/offline modes.
      */
-    public async ensureTimestampLoaded(targetTimestamp: number): Promise<KLineData[]> {
+    public async ensureTimestampLoaded(
+        targetTimestamp: number,
+        options?: { preserveCanonicalStep?: boolean }
+    ): Promise<KLineData[]> {
         const symbol = this.currentSymbolInfo || DEFAULT_SYMBOLS[0];
         const period = this.currentPeriod || { multiplier: 15, timespan: 'minute', text: '15m' };
         const tf = periodToTimeframe(period);
         const stepMs = periodToMs(period);
+        const startGen = this.prefetchAbortGeneration;
+        const startTicker = symbol.ticker;
 
         const earliest = this.fullHistory[0]?.timestamp ?? Infinity;
-        const latest = this.fullHistory[this.fullHistory.length - 1]?.timestamp ?? 0;
+        const needsWindow =
+            !doesHistoryCoverReplayTarget(this.fullHistory, targetTimestamp, stepMs) ||
+            targetTimestamp < earliest + stepMs * 10;
 
-        if (targetTimestamp < earliest + stepMs * 15 || targetTimestamp > latest - stepMs * 2) {
+        if (needsWindow) {
             this.updateBatchProgress({
                 isPrefetching: true,
                 statusText: 'Carregando lote da data selecionada...',
@@ -645,35 +994,77 @@ export class CustomKLineDatafeed implements Datafeed {
 
             const windowEnd = Math.min(Date.now(), targetTimestamp + stepMs * 160);
             const windowStart = targetTimestamp - stepMs * 340;
+            let working = this.fullHistory;
 
-            try {
-                if (this.mode !== 'DEMO') {
-                    const batch = await fetchSingleCandleBatch({
-                        symbol: this.resolveBackendSymbol(symbol),
-                        timeframe: tf,
-                        chunkSize: DEFAULT_BATCH_SIZE,
-                        cursorTo: windowEnd,
-                        fromTs: windowStart,
-                    });
-
-                    if (batch.candles.length > 0) {
-                        this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
-                        this.syncMemoryCache(symbol, period, this.fullHistory);
+            if (this.mode === 'DEMO') {
+                let loadedDemo: KLineData[] | null = null;
+                try {
+                    const res = await fetch(
+                        `/api/quant/ohlcv?symbol=${encodeURIComponent(symbol.ticker)}&timeframe=${encodeURIComponent(tf)}&to=${windowEnd}&limit=${DEFAULT_BATCH_SIZE}`,
+                        {
+                            headers: getQuantAuthHeaders(),
+                            signal: AbortSignal.timeout(2500),
+                        }
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (Array.isArray(data?.candles) && data.candles.length > 0) {
+                            loadedDemo = data.candles.map((c: any) => ({
+                                timestamp: Number(c.timestamp),
+                                open: Number(c.open),
+                                high: Number(c.high),
+                                low: Number(c.low),
+                                close: Number(c.close),
+                                volume: Number(c.volume || 0),
+                            }));
+                            this.lastSourceUsed = `${MODE_LABEL.DEMO} · Polars`;
+                        }
                     }
+                } catch (_) {}
+
+                if (!loadedDemo || !doesHistoryCoverReplayTarget(loadedDemo, targetTimestamp, stepMs)) {
+                    const anchor = this.fullHistory[0]?.open ?? this.priceAnchorHint ?? undefined;
+                    loadedDemo = this.generateDemoCandles(
+                        symbol.ticker,
+                        period,
+                        DEFAULT_BATCH_SIZE,
+                        windowEnd,
+                        anchor
+                    );
+                    this.lastSourceUsed = MODE_LABEL.DEMO;
                 }
-            } catch (_) {
-                const idb = await getMergedCandlesFromIDB(symbol.ticker, tf);
-                if (idb.candles.length > 0) {
-                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, idb.candles);
+                this.lastSynthetic = true;
+                working = mergeContiguousCandles(working, loadedDemo, stepMs);
+            } else {
+                // 1. Unified backend batch endpoint
+                try {
+                    if (this.mode !== 'BINANCE_LIVE') {
+                        const batch = await fetchSingleCandleBatch({
+                            symbol: this.resolveBackendSymbol(symbol),
+                            timeframe: tf,
+                            chunkSize: DEFAULT_BATCH_SIZE,
+                            cursorTo: windowEnd,
+                            fromTs: windowStart,
+                        });
+                        if (batch.candles.length > 0) {
+                            working = mergeContiguousCandles(working, batch.candles, stepMs);
+                        }
+                    }
+                } catch (_) {}
+
+                // 2. IndexedDB fallback (only contiguous ranges covering targetTimestamp)
+                if (!doesHistoryCoverReplayTarget(working, targetTimestamp, stepMs)) {
+                    try {
+                        const idb = await getMergedCandlesFromIDB(symbol.ticker, tf);
+                        if (idb.candles.length > 0 && doesHistoryCoverReplayTarget(idb.candles, targetTimestamp, stepMs)) {
+                            working = mergeContiguousCandles(working, idb.candles, stepMs);
+                        }
+                    } catch (_) {}
                 }
+
+                // 3. Binance public klines when available
                 const pair = binancePairOf(symbol.ticker);
-                if (
-                    this.mode !== 'DEMO' &&
-                    pair &&
-                    (this.fullHistory.length === 0 ||
-                        targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity) ||
-                        targetTimestamp > (this.fullHistory[this.fullHistory.length - 1]?.timestamp ?? 0))
-                ) {
+                if (pair && !doesHistoryCoverReplayTarget(working, targetTimestamp, stepMs)) {
                     try {
                         const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${periodToBinanceInterval(period)}&endTime=${windowEnd}&limit=${DEFAULT_BATCH_SIZE}`;
                         const resp = await fetch(url);
@@ -687,18 +1078,41 @@ export class CustomKLineDatafeed implements Datafeed {
                                     low: parseFloat(k[3]),
                                     close: parseFloat(k[4]),
                                     volume: parseFloat(k[5]),
+                                    turnover: parseFloat(k[7]),
                                 }));
-                                await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
-                                this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, mapped);
+                                await saveCandleBatchToIDB(
+                                    symbol.ticker,
+                                    tf,
+                                    mapped,
+                                    `${MODE_LABEL.BINANCE_LIVE} (${pair})`
+                                );
+                                working = mergeContiguousCandles(working, mapped, stepMs);
                             }
                         }
                     } catch (_) {}
                 }
-                if (
-                    (this.mode === 'DEMO' || this.fullHistory.length === 0) &&
-                    (this.fullHistory.length === 0 ||
-                        targetTimestamp < (this.fullHistory[0]?.timestamp ?? Infinity))
-                ) {
+
+                // 4. Quant-Engine Real Parquet Data Lake
+                if (!doesHistoryCoverReplayTarget(working, targetTimestamp, stepMs)) {
+                    try {
+                        const qRes = await fetch(
+                            `/api/quant/ohlcv?symbol=${encodeURIComponent(this.resolveBackendSymbol(symbol))}&timeframe=${encodeURIComponent(tf)}&to=${windowEnd}&limit=${DEFAULT_BATCH_SIZE}&source=real`,
+                            {
+                                headers: getQuantAuthHeaders(),
+                                signal: AbortSignal.timeout(4000),
+                            }
+                        );
+                        if (qRes.ok) {
+                            const qData = await qRes.json();
+                            if (qData?.isRealMarket && Array.isArray(qData.candles) && qData.candles.length > 0) {
+                                working = mergeContiguousCandles(working, qData.candles as KLineData[], stepMs);
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                // 5. Emergency offline fallback ONLY if still uncovered
+                if (!doesHistoryCoverReplayTarget(working, targetTimestamp, stepMs)) {
                     const anchor = this.fullHistory[0]?.open ?? this.priceAnchorHint ?? undefined;
                     const fallbackChunk = this.generateDemoCandles(
                         symbol.ticker,
@@ -708,11 +1122,23 @@ export class CustomKLineDatafeed implements Datafeed {
                         anchor
                     );
                     this.lastSynthetic = true;
-                    this.lastSourceUsed = MODE_LABEL.DEMO;
-                    this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, fallbackChunk);
+                    this.lastSourceUsed = 'Demo (offline — sem conexão ao feed)';
+                    working = mergeContiguousCandles(working, fallbackChunk, stepMs);
                 }
-                this.syncMemoryCache(symbol, period, this.fullHistory);
             }
+
+            // Abort cleanly if the user switched symbol/timeframe while fetching
+            const activeTf = this.currentPeriod ? periodToTimeframe(this.currentPeriod) : tf;
+            if (
+                startGen !== this.prefetchAbortGeneration ||
+                startTicker !== this.currentSymbolInfo?.ticker ||
+                tf !== activeTf
+            ) {
+                return this.getVisibleReplayCandles();
+            }
+
+            this.fullHistory = working;
+            this.syncMemoryCache(symbol, period, this.fullHistory);
 
             this.updateBatchProgress({
                 loadedBatches: this.batchProgress.loadedBatches + 1,
@@ -723,7 +1149,7 @@ export class CustomKLineDatafeed implements Datafeed {
             });
         }
 
-        return this.setReplayTimestamp(targetTimestamp);
+        return this.setReplayTimestamp(targetTimestamp, options);
     }
 
     private syncMemoryCache(symbol: SymbolInfo, period: Period, candles: KLineData[]) {
@@ -738,19 +1164,62 @@ export class CustomKLineDatafeed implements Datafeed {
 
     /**
      * Fetches (or reads from LRU cache / IndexedDB) a timeframe's history and slices it up to cutoffTimestamp.
-     * Used by the Secondary Chart in 1x2 Split-Screen Multi-Timeframe mode.
+     * Used by Auxiliary Multi-Pane charts: never triggers primary background prefetch or overwrites `this.fullHistory`,
+     * never leaks future HTF candle OHLC past the active LTF cursor, and fetches historical windows if cutoff is older.
      */
     public async getHistorySlicedAtTimestamp(
         symbol: SymbolInfo,
         period: Period,
         cutoffTimestamp: number | null
     ): Promise<KLineData[]> {
-        const candles = await this.fetchOrGetCachedCandles(symbol, period);
+        const candles = await this.fetchOrGetCachedCandles(symbol, period, {
+            anchorTs: cutoffTimestamp,
+            allowPrefetch: false,
+        });
         if (!cutoffTimestamp || !this.replayActive) {
             return candles;
         }
-        const filtered = candles.filter(c => c.timestamp <= cutoffTimestamp);
-        return filtered.length >= 5 ? filtered : candles.slice(0, Math.max(10, Math.floor(candles.length * 0.72)));
+
+        const stepMs = periodToMs(period);
+        let targetCandles = candles;
+        if (!doesHistoryCoverReplayTarget(targetCandles, cutoffTimestamp, stepMs)) {
+            const windowEnd = Math.min(Date.now(), cutoffTimestamp + stepMs * 160);
+            try {
+                const fetched = await this.fetchInitialBatchFromSource(symbol, period, windowEnd);
+                if (fetched.candles.length > 0) {
+                    targetCandles = mergeContiguousCandles(targetCandles, fetched.candles, stepMs);
+                    const tf = periodToTimeframe(period);
+                    const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${tf}:${this.maxBars}`;
+                    this.historyCache.set(cacheKey, {
+                        candles: targetCandles,
+                        source: fetched.source,
+                        synthetic: fetched.synthetic,
+                        fetchedAt: Date.now(),
+                    });
+                }
+            } catch (_) {}
+        }
+
+        let cutoffIdx = -1;
+        for (let i = 0; i < targetCandles.length; i++) {
+            if (targetCandles[i].timestamp <= cutoffTimestamp) {
+                cutoffIdx = i;
+            } else {
+                break;
+            }
+        }
+        if (cutoffIdx < 0) {
+            return [];
+        }
+
+        return buildVisibleReplaySlice(
+            targetCandles,
+            cutoffIdx,
+            stepMs,
+            cutoffTimestamp,
+            this.canonicalReplayStepMs,
+            this.collectFinerSeriesCandidates(symbol, stepMs)
+        ).candles;
     }
 
     async searchSymbols(search?: string): Promise<SymbolInfo[]> {
@@ -866,14 +1335,9 @@ export class CustomKLineDatafeed implements Datafeed {
             };
         }
 
-        // 1. Check IndexedDB dual-layer cache AND verify that it covers the requested `to` window
+        // 1. Check IndexedDB dual-layer cache AND verify contiguous coverage around `to`
         const idbCached = await getMergedCandlesFromIDB(symbol.ticker, tf);
-        const idbCoversTargetWindow =
-            idbCached.candles.length >= 60 &&
-            idbCached.earliestTs !== null &&
-            idbCached.latestTs !== null &&
-            idbCached.earliestTs <= to - stepMs * 10 &&
-            idbCached.latestTs >= to - stepMs * 96;
+        const idbCoversTargetWindow = idbCoversTargetWindowPure(idbCached.candles, to, stepMs);
 
         if (idbCoversTargetWindow) {
             return {
@@ -900,7 +1364,7 @@ export class CustomKLineDatafeed implements Datafeed {
                     toTs: to,
                 });
                 if (batchRes.candles.length > 0) {
-                    const merged = mergeAndDeduplicateCandles(idbCached.candles, batchRes.candles);
+                    const merged = mergeContiguousCandles(idbCached.candles, batchRes.candles, stepMs);
                     return {
                         candles: merged,
                         source: this.mode === 'MT5_BACKEND' ? MODE_LABEL.MT5_BACKEND : MODE_LABEL.TRADINGVIEW,
@@ -935,7 +1399,7 @@ export class CustomKLineDatafeed implements Datafeed {
                             turnover: parseFloat(k[7]),
                         }));
                         await saveCandleBatchToIDB(symbol.ticker, tf, mapped, `${MODE_LABEL.BINANCE_LIVE} (${pair})`);
-                        const merged = mergeAndDeduplicateCandles(idbCached.candles, mapped);
+                        const merged = mergeContiguousCandles(idbCached.candles, mapped, stepMs);
                         return {
                             candles: merged,
                             source: `${MODE_LABEL.BINANCE_LIVE} (${pair})`,
@@ -952,8 +1416,8 @@ export class CustomKLineDatafeed implements Datafeed {
             }
         }
 
-        // 5. If IndexedDB had partial real market candles, prefer real cached data over synthetic
-        if (idbCached.candles.length > 0) {
+        // 5. If IndexedDB had partial real market candles covering or near `to`, prefer them over synthetic
+        if (idbCached.candles.length > 0 && idbCached.earliestTs !== null && idbCached.earliestTs <= to) {
             return {
                 candles: idbCached.candles,
                 source: `${idbCached.source} · IDB`,
@@ -1021,25 +1485,39 @@ export class CustomKLineDatafeed implements Datafeed {
         symbol: SymbolInfo,
         period: Period,
         initialCursorTo: number | null,
-        estimatedTotalChunks: number
+        estimatedTotalChunks: number,
+        generation: number
     ) {
-        const generation = ++this.prefetchAbortGeneration;
         const tf = periodToTimeframe(period);
         const stepMs = periodToMs(period);
         const targetFromTs =
             this.sessionFromTs || Date.now() - stepMs * DEFAULT_BATCH_SIZE * 2;
 
+        const isStillPrimaryTarget = () =>
+            generation === this.prefetchAbortGeneration &&
+            this.currentSymbolInfo?.ticker === symbol.ticker &&
+            this.currentPeriod !== null &&
+            periodToTimeframe(this.currentPeriod) === tf;
+
         // If DEMO/synthetic or we already cover `targetFromTs` or no cursor is needed, mark complete
         const currentEarliest = this.fullHistory[0]?.timestamp ?? Infinity;
-        if (this.mode === 'DEMO' || this.lastSynthetic || !initialCursorTo || currentEarliest <= targetFromTs) {
-            this.updateBatchProgress({
-                symbol: symbol.ticker,
-                timeframe: tf,
-                loadedBatches: Math.max(1, this.batchProgress.loadedBatches),
-                totalBatches: Math.max(1, this.batchProgress.loadedBatches),
-                isPrefetching: false,
-                statusText: `${this.fullHistory.length} velas em cache`,
-            });
+        if (
+            !isStillPrimaryTarget() ||
+            this.mode === 'DEMO' ||
+            this.lastSynthetic ||
+            !initialCursorTo ||
+            currentEarliest <= targetFromTs
+        ) {
+            if (isStillPrimaryTarget()) {
+                this.updateBatchProgress({
+                    symbol: symbol.ticker,
+                    timeframe: tf,
+                    loadedBatches: Math.max(1, this.batchProgress.loadedBatches),
+                    totalBatches: Math.max(1, this.batchProgress.loadedBatches),
+                    isPrefetching: false,
+                    statusText: `${this.fullHistory.length} velas em cache`,
+                });
+            }
             return;
         }
 
@@ -1058,10 +1536,10 @@ export class CustomKLineDatafeed implements Datafeed {
         (async () => {
             let cursor: number | null = initialCursorTo;
             for (let idx = 1; idx <= maxAdditionalBatches; idx++) {
-                if (generation !== this.prefetchAbortGeneration || !cursor) break;
+                if (!isStillPrimaryTarget() || !cursor) break;
                 // Wait 250ms so chart rendering & user interactions have 100% priority
                 await new Promise((r) => setTimeout(r, 250));
-                if (generation !== this.prefetchAbortGeneration) break;
+                if (!isStillPrimaryTarget()) break;
 
                 try {
                     const batch = await fetchSingleCandleBatch({
@@ -1073,14 +1551,22 @@ export class CustomKLineDatafeed implements Datafeed {
                         fromTs: targetFromTs - stepMs * DEFAULT_BATCH_SIZE,
                     });
 
-                    if (generation !== this.prefetchAbortGeneration) break;
+                    if (!isStillPrimaryTarget()) break;
 
                     if (batch.candles.length > 0) {
-                        this.fullHistory = mergeAndDeduplicateCandles(this.fullHistory, batch.candles);
+                        const beforeLen = this.fullHistory.length;
+                        this.fullHistory = mergeContiguousCandles(this.fullHistory, batch.candles, stepMs);
                         this.syncMemoryCache(symbol, period, this.fullHistory);
-                        // Re-align replayIndex without disturbing replayCutoffTimestamp
-                        if (this.replayActive && this.replayCutoffTimestamp) {
-                            this.setReplayMode(true, 0.72, true);
+                        const addedBars = Math.max(0, this.fullHistory.length - beforeLen);
+                        // Re-align replayIndex without disturbing canonical replay cutoff
+                        if (this.replayActive && this.getReplayTimestamp()) {
+                            const updatedVisible = this.setReplayMode(true, 0.72, true);
+                            if (addedBars > 0) {
+                                this.onHistoryPrependedListener?.(updatedVisible, addedBars);
+                            }
+                        } else if (addedBars > 0) {
+                            this.visibleHistory = this.fullHistory;
+                            this.onHistoryPrependedListener?.(this.visibleHistory, addedBars);
                         }
                     }
 
@@ -1106,101 +1592,183 @@ export class CustomKLineDatafeed implements Datafeed {
 
                     if (reachedTarget) break;
                 } catch (_) {
-                    this.updateBatchProgress({
-                        isPrefetching: false,
-                        statusText: `Lote 1/1 • ${this.fullHistory.length} velas (IDB)`,
-                    });
+                    if (isStillPrimaryTarget()) {
+                        this.updateBatchProgress({
+                            isPrefetching: false,
+                            statusText: `Lote 1/1 • ${this.fullHistory.length} velas (IDB)`,
+                        });
+                    }
                     break;
                 }
             }
         })();
     }
 
-    private async fetchOrGetCachedCandles(symbol: SymbolInfo, period: Period): Promise<KLineData[]> {
+    private async fetchOrGetCachedCandles(
+        symbol: SymbolInfo,
+        period: Period,
+        options?: {
+            anchorTs?: number | null;
+            allowPrefetch?: boolean;
+            generation?: number;
+        }
+    ): Promise<KLineData[]> {
         const tf = periodToTimeframe(period);
+        const stepMs = periodToMs(period);
         const cacheKey = `${this.mode}:${symbol.exchange}:${symbol.ticker}:${tf}:${this.maxBars}`;
         const cached = this.historyCache.get(cacheKey);
+        const allowPrefetch = options?.allowPrefetch ?? false;
+        const anchorTs = options?.anchorTs ?? null;
 
-        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.candles.length > 0) {
+        const cacheCoversAnchor =
+            !anchorTs || doesHistoryCoverReplayTarget(cached?.candles || [], anchorTs, stepMs);
+
+        if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS && cached.candles.length > 0 && cacheCoversAnchor) {
             this.historyCache.delete(cacheKey); // refresh LRU order
             this.historyCache.set(cacheKey, cached);
-            this.lastSourceUsed = cached.source;
-            this.lastSynthetic = cached.synthetic;
-            this.updateBatchProgress({
-                symbol: symbol.ticker,
-                timeframe: tf,
-                loadedBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
-                totalBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
-                totalBars: cached.candles.length,
-                fromCache: true,
-                isPrefetching: false,
-                statusText: `${cached.candles.length} velas (Cache)`,
-            });
+            if (allowPrefetch) {
+                this.lastSourceUsed = cached.source;
+                this.lastSynthetic = cached.synthetic;
+                this.updateBatchProgress({
+                    symbol: symbol.ticker,
+                    timeframe: tf,
+                    loadedBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
+                    totalBatches: Math.max(1, Math.ceil(cached.candles.length / DEFAULT_BATCH_SIZE)),
+                    totalBars: cached.candles.length,
+                    fromCache: true,
+                    isPrefetching: false,
+                    statusText: `${cached.candles.length} velas (Cache)`,
+                });
+            }
             return cached.candles;
         }
 
-        const effectiveTo = this.sessionToTs ? Math.min(Date.now(), this.sessionToTs) : Date.now();
+        const effectiveTo =
+            anchorTs && anchorTs > 0
+                ? Math.min(Date.now(), anchorTs + stepMs * 160)
+                : this.sessionToTs
+                  ? Math.min(Date.now(), this.sessionToTs)
+                  : Date.now();
         const initialBatch = await this.fetchInitialBatchFromSource(symbol, period, effectiveTo);
         const sorted = initialBatch.candles
-            .filter(c => Number.isFinite(c.open) && Number.isFinite(c.close) && Number.isFinite(c.timestamp))
+            .filter((c) => Number.isFinite(c.open) && Number.isFinite(c.close) && Number.isFinite(c.timestamp))
             .sort((a, b) => a.timestamp - b.timestamp);
 
-        this.lastSourceUsed = initialBatch.source;
-        this.lastSynthetic = initialBatch.synthetic;
+        const nextSeries =
+            cached && cached.candles.length > 0
+                ? mergeContiguousCandles(cached.candles, sorted, stepMs)
+                : sorted;
 
-        if (this.historyCache.size >= MAX_CACHE_ENTRIES) {
+        if (this.historyCache.size >= MAX_CACHE_ENTRIES && !this.historyCache.has(cacheKey)) {
             const oldestKey = this.historyCache.keys().next().value;
             if (oldestKey) this.historyCache.delete(oldestKey);
         }
+        this.historyCache.delete(cacheKey);
         this.historyCache.set(cacheKey, {
-            candles: sorted,
+            candles: nextSeries,
             source: initialBatch.source,
             synthetic: initialBatch.synthetic,
             fetchedAt: Date.now(),
         });
 
-        const batchesLoaded = Math.max(1, Math.ceil(sorted.length / DEFAULT_BATCH_SIZE));
-        this.updateBatchProgress({
-            symbol: symbol.ticker,
-            timeframe: tf,
-            loadedBatches: batchesLoaded,
-            totalBatches: Math.max(batchesLoaded, initialBatch.estimatedTotalChunks),
-            totalBars: sorted.length,
-            fromCache: initialBatch.fromCache,
-            isPrefetching: false,
-            hasMore: initialBatch.hasMore,
-            statusText: initialBatch.fromCache
-                ? `Lotes ${batchesLoaded}/${batchesLoaded} • ${sorted.length} velas (IDB)`
-                : `Lote 1/${Math.max(1, initialBatch.estimatedTotalChunks)} • ${sorted.length} velas`,
-        });
+        const isPrimaryGeneration =
+            allowPrefetch &&
+            (options?.generation === undefined || options.generation === this.prefetchAbortGeneration) &&
+            symbol.ticker === this.currentSymbolInfo?.ticker &&
+            this.currentPeriod !== null &&
+            periodToTimeframe(this.currentPeriod) === tf;
 
-        // Trigger smart background prefetch of remaining batches for the session window
-        if (symbol.ticker === this.currentSymbolInfo?.ticker) {
+        if (isPrimaryGeneration) {
+            this.lastSourceUsed = initialBatch.source;
+            this.lastSynthetic = initialBatch.synthetic;
+            const batchesLoaded = Math.max(1, Math.ceil(nextSeries.length / DEFAULT_BATCH_SIZE));
+            this.updateBatchProgress({
+                symbol: symbol.ticker,
+                timeframe: tf,
+                loadedBatches: batchesLoaded,
+                totalBatches: Math.max(batchesLoaded, initialBatch.estimatedTotalChunks),
+                totalBars: nextSeries.length,
+                fromCache: initialBatch.fromCache,
+                isPrefetching: false,
+                hasMore: initialBatch.hasMore,
+                statusText: initialBatch.fromCache
+                    ? `Lotes ${batchesLoaded}/${batchesLoaded} • ${nextSeries.length} velas (IDB)`
+                    : `Lote 1/${Math.max(1, initialBatch.estimatedTotalChunks)} • ${nextSeries.length} velas`,
+            });
+
             this.startBackgroundBatchPrefetch(
                 symbol,
                 period,
                 initialBatch.nextCursorTo,
-                initialBatch.estimatedTotalChunks
+                initialBatch.estimatedTotalChunks,
+                options?.generation ?? this.prefetchAbortGeneration
             );
         }
 
-        return sorted;
+        return nextSeries;
     }
 
-    async getHistoryKLineData(symbol: SymbolInfo, period: Period, _from?: number, _to?: number): Promise<KLineData[]> {
+    async getHistoryKLineData(
+        symbol: SymbolInfo,
+        period: Period,
+        _from?: number,
+        _to?: number,
+        replayAnchorTs?: number | null,
+        preserveReplayCursor: boolean = true
+    ): Promise<KLineData[]> {
+        // Save the outgoing series in memory cache before mutating `currentSymbolInfo`/`currentPeriod`
+        // so LTF -> HTF timeframe switches always have the outgoing LTF series available for forming bars.
+        if (this.fullHistory.length > 0 && this.currentSymbolInfo && this.currentPeriod) {
+            this.syncMemoryCache(this.currentSymbolInfo, this.currentPeriod, this.fullHistory);
+        }
+
+        const loadGen = ++this.prefetchAbortGeneration;
         this.currentSymbolInfo = symbol;
         this.currentPeriod = period;
-        const candles = await this.fetchOrGetCachedCandles(symbol, period);
+
+        if (!preserveReplayCursor) {
+            this.replayCutoffTimestamp = null;
+            this.canonicalReplayTimestamp = null;
+            this.canonicalReplayStepMs = null;
+            this.currentChartCutoffTimestamp = null;
+            this.currentVisibleHasPartialLastBar = false;
+        }
+
+        const effectiveAnchorTs =
+            replayAnchorTs && replayAnchorTs > 0
+                ? replayAnchorTs
+                : this.replayActive && preserveReplayCursor
+                  ? this.getReplayTimestamp()
+                  : null;
+
+        const candles = await this.fetchOrGetCachedCandles(symbol, period, {
+            anchorTs: effectiveAnchorTs,
+            allowPrefetch: true,
+            generation: loadGen,
+        });
+
+        if (loadGen !== this.prefetchAbortGeneration) {
+            return this.getVisibleReplayCandles();
+        }
+
         this.fullHistory = candles;
         this.historyTicker = symbol.ticker;
         this.historyPeriodText = period.text ?? periodToTimeframe(period);
 
-        if (this.replayActive && candles.length > 20) {
-            return this.setReplayMode(true, 0.72, true);
+        if (this.replayActive && candles.length > 5) {
+            const shouldPreserve = Boolean(
+                preserveReplayCursor &&
+                    effectiveAnchorTs &&
+                    doesHistoryCoverReplayTarget(candles, effectiveAnchorTs, periodToMs(period))
+            );
+            return this.setReplayMode(true, 0.72, shouldPreserve);
         }
 
+        this.visibleHistory = candles;
+        this.currentVisibleHasPartialLastBar = false;
         this.replayIndex = Math.max(0, candles.length - 1);
         const last = candles[candles.length - 1];
+        this.currentChartCutoffTimestamp = last?.timestamp ?? null;
         if (last) this.emit(last, false);
         return candles;
     }
@@ -1253,8 +1821,10 @@ export class CustomKLineDatafeed implements Datafeed {
         this.activeCallback = null;
         this.onCandleUpdateListener = undefined;
         this.onBatchProgressListener = undefined;
+        this.onHistoryPrependedListener = undefined;
         this.historyCache.clear();
         this.fullHistory = [];
+        this.visibleHistory = [];
     }
 
     private stopLiveStream() {

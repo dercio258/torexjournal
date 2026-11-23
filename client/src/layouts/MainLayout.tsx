@@ -91,6 +91,7 @@ export const MainLayout = () => {
                 <WorkspacePricingModal
                     isOpen={isPlansModalOpen}
                     dismissible={true}
+                    hasActivePlan={true}
                     onClose={handleClosePlansModal}
                     trialEligible={Boolean(user?.trialEligible)}
                 />

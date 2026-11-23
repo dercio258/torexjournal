@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Check, Copy, Gift, Lock, Share2, Sparkles, TrendingUp, Users } from 'lucide-react';
+import { Award, Check, Copy, Crown, Gift, Share2, Sparkles, TrendingUp, Users } from 'lucide-react';
 import api from '../../api';
 import { useLocale } from '../../context/LocaleContext';
 import { openWorkspacePlansModal } from '../../lib/planGate';
+import { UpgradeBadge } from '../subscription/UpgradeBadge';
 
 interface ReferralItem {
     id: string;
@@ -169,13 +170,21 @@ export const ReferralProgramCard: React.FC = () => {
             ) : !isAffiliateApproved ? (
                 <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-4 space-y-3">
                     <div className="flex items-start gap-2.5 text-xs text-amber-200">
-                        <Lock size={15} className="shrink-0 mt-0.5 text-amber-400" />
-                        <div className="space-y-1">
-                            <strong className="block font-bold text-amber-300">
-                                {isEn
-                                    ? 'Affiliate Program Requires a Paid Subscription'
-                                    : 'Afiliação Disponível Apenas Após Plano Pago'}
-                            </strong>
+                        <Crown size={15} className="shrink-0 mt-0.5 text-amber-400" />
+                        <div className="space-y-1 flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <strong className="font-bold text-amber-300">
+                                    {isEn
+                                        ? 'Affiliate Program Requires a Paid Subscription'
+                                        : 'Afiliação Disponível Apenas Após Plano Pago'}
+                                </strong>
+                                <UpgradeBadge
+                                    variant="inline"
+                                    asButton
+                                    label="Upgrade"
+                                    sourceFeature="profile_affiliate_requires_paid"
+                                />
+                            </div>
                             <p className="text-[11px] text-fg-muted leading-relaxed">
                                 {isEn
                                     ? 'Outside the trial welcome step, affiliate links and commission credits are approved strictly once you subscribe to any paid plan and your invited friends register and pay any plan.'
@@ -194,20 +203,26 @@ export const ReferralProgramCard: React.FC = () => {
             ) : (
                 <>
                     {pendingCreditsUsd > 0 && !data.hasPaidSubscription && (
-                        <div className="flex items-start gap-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300">
-                            <Lock size={14} className="shrink-0 mt-0.5" />
-                            <div>
+                        <div className="flex items-start justify-between gap-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300">
+                            <div className="space-y-0.5 min-w-0">
                                 <strong className="block font-semibold">
                                     {isEn
                                         ? `$${pendingCreditsUsd.toFixed(2)} USD in anti-fraud guarantee hold`
                                         : `$${pendingCreditsUsd.toFixed(2)} USD retidos em garantia anti-fraude`}
                                 </strong>
-                                <span className="text-[11px] opacity-90">
+                                <span className="text-[11px] opacity-90 block">
                                     {isEn
                                         ? 'Activate any paid subscription to immediately unlock this balance and redeem future plans.'
                                         : 'Ative qualquer assinatura paga para liberar imediatamente este saldo para os seus próximos planos.'}
                                 </span>
                             </div>
+                            <UpgradeBadge
+                                variant="inline"
+                                asButton
+                                label="Upgrade"
+                                sourceFeature="profile_affiliate_unlock_credits"
+                                className="shrink-0 mt-0.5"
+                            />
                         </div>
                     )}
 

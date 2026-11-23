@@ -17,11 +17,13 @@ import {
     CalendarClock,
     ChevronRight,
     Server,
+    Bug,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useTheme } from '../../context/ThemeContext';
 import { cn } from '../../lib/cn';
 import { isValidAdminToken } from '../../lib/adminAuth';
+import api from '../../api';
 
 interface NavDomain {
     domain: string;
@@ -48,6 +50,12 @@ const ADMIN_DOMAINS: NavDomain[] = [
                 label: 'Telemetria MT5',
                 description: 'Status anonimizado, workers & feedback',
                 icon: Server,
+            },
+            {
+                path: '/admin/errors',
+                label: 'Erros Técnicos',
+                description: 'Referências TRX-*, stack & diagnósticos',
+                icon: Bug,
             },
             {
                 path: '/admin/analytics',
@@ -121,6 +129,7 @@ export const AdminLayout = () => {
     }
 
     const handleLogout = () => {
+        void api.post('/admin/auth/logout').catch(() => {});
         localStorage.removeItem('adminToken');
         navigate('/admin/login', { replace: true });
     };

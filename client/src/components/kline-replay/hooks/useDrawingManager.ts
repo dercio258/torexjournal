@@ -6,6 +6,9 @@ import { DrawingToolsWorkspaceState } from '../../../services/backtestSessionSna
 import {
     buildOverlayStylesPayload,
     DEFAULT_DRAWING_STYLE,
+    estimateBarIntervalMs,
+    reconcileCapturedOverlayPoints,
+    reconstructPointTimestamp,
     resolveOverlayPointsAgainstCandles,
 } from './drawingOverlayUtils';
 
@@ -59,14 +62,17 @@ export function useDrawingManager({
         const chart = chartRef.current;
         const map: Record<string, OverlayPointCoord[]> = { ...overlayGeometriesRef.current };
         if (!chart) return map;
+        const candles = chart.getDataList() || [];
+        const stepMs = estimateBarIntervalMs(candles);
         drawnOverlayIdsRef.current.forEach((id) => {
             const ov = chart.getOverlayById(id) as any;
             if (ov && Array.isArray(ov.points)) {
-                map[id] = ov.points.map((pt: any) => ({
-                    timestamp: pt.timestamp,
-                    dataIndex: pt.dataIndex,
-                    value: pt.value,
-                }));
+                map[id] = reconcileCapturedOverlayPoints(
+                    ov.points,
+                    overlayGeometriesRef.current[id],
+                    candles,
+                    stepMs
+                );
             }
         });
         overlayGeometriesRef.current = map;
@@ -90,7 +96,7 @@ export function useDrawingManager({
             const candles = chart.getDataList() || [];
             const resolvedPoints =
                 Array.isArray(opts.points) && opts.points.length > 0
-                    ? resolveOverlayPointsAgainstCandles(opts.points, candles)
+                    ? resolveOverlayPointsAgainstCandles(opts.points, candles, { forChartMount: true })
                     : undefined;
 
             const createdId = chart.createOverlay({
@@ -114,11 +120,28 @@ export function useDrawingManager({
                     if (ov && pendingOverlayIdRef.current === ov.id) {
                         pendingOverlayIdRef.current = null;
                     }
+                    if (ov?.id && Array.isArray(ov.points)) {
+                        const liveCandles = chart.getDataList() || [];
+                        overlayGeometriesRef.current[ov.id] = reconcileCapturedOverlayPoints(
+                            ov.points,
+                            overlayGeometriesRef.current[ov.id],
+                            liveCandles
+                        );
+                    }
                     setPointsTick((t) => t + 1);
                     return false;
                 },
                 onPressedMoveEnd: (event: any) => {
-                    const ovId = event?.overlay?.id;
+                    const ov = event?.overlay;
+                    const ovId = ov?.id;
+                    if (ovId && Array.isArray(ov.points)) {
+                        const liveCandles = chart.getDataList() || [];
+                        overlayGeometriesRef.current[ovId] = reconcileCapturedOverlayPoints(
+                            ov.points,
+                            overlayGeometriesRef.current[ovId],
+                            liveCandles
+                        );
+                    }
                     if (ovId) setSelectedDrawingId(ovId);
                     setPointsTick((t) => t + 1);
                     return false;
@@ -166,6 +189,7 @@ export function useDrawingManager({
         const candles = chart.getDataList() || [];
         if (candles.length === 0) return;
 
+        let updatedAny = false;
         drawnOverlayIdsRef.current.forEach((id) => {
             const savedPts = overlayGeometriesRef.current[id];
             const ov = chart.getOverlayById(id) as any;
@@ -176,11 +200,16 @@ export function useDrawingManager({
                       ? ov.points
                       : [];
             if (basePts.length > 0) {
-                const resolved = resolveOverlayPointsAgainstCandles(basePts, candles);
-                chart.overrideOverlay({ id, points: resolved } as any);
-                overlayGeometriesRef.current[id] = resolved;
+                const mountPts = resolveOverlayPointsAgainstCandles(basePts, candles, { forChartMount: true });
+                const canonicalPts = resolveOverlayPointsAgainstCandles(basePts, candles);
+                chart.overrideOverlay({ id, points: mountPts } as any);
+                overlayGeometriesRef.current[id] = canonicalPts;
+                updatedAny = true;
             }
         });
+        if (updatedAny) {
+            setPointsTick((t) => t + 1);
+        }
     }, []);
 
     const handleSelectDrawingTool = useCallback(
@@ -366,15 +395,21 @@ export function useDrawingManager({
             if (!ov || !Array.isArray(ov.points)) return;
 
             const dataList = chart.getDataList() || [];
-            const nextPoints = ov.points.map((pt: any, idx: number) => {
+            const basePoints = overlayGeometriesRef.current[id] || ov.points;
+            const canonicalPoints = basePoints.map((pt: any, idx: number) => {
                 if (idx !== pointIndex) return { ...pt };
                 const updated = { ...pt, ...patch };
-                if (typeof patch.dataIndex === 'number' && dataList[patch.dataIndex]) {
-                    updated.timestamp = dataList[patch.dataIndex].timestamp;
+                if (typeof patch.dataIndex === 'number' && Number.isFinite(patch.dataIndex)) {
+                    updated.timestamp = reconstructPointTimestamp(
+                        { dataIndex: patch.dataIndex, value: updated.value },
+                        dataList
+                    );
                 }
                 return updated;
             });
-            chart.overrideOverlay({ id, points: nextPoints });
+            overlayGeometriesRef.current[id] = canonicalPoints;
+            const mountPoints = resolveOverlayPointsAgainstCandles(canonicalPoints, dataList, { forChartMount: true });
+            chart.overrideOverlay({ id, points: mountPoints as any });
             setPointsTick((t) => t + 1);
         },
         [chartRef, selectedDrawingId]
@@ -604,11 +639,12 @@ export function useDrawingManager({
         if (!selectedDrawingId || !chartRef.current) return [];
         const ov = chartRef.current.getOverlayById(selectedDrawingId) as any;
         if (!ov || !Array.isArray(ov.points)) return [];
-        return ov.points.map((pt: any) => ({
-            dataIndex: pt.dataIndex,
-            timestamp: pt.timestamp,
-            value: pt.value,
-        }));
+        const candles = chartRef.current.getDataList() || [];
+        return reconcileCapturedOverlayPoints(
+            ov.points,
+            overlayGeometriesRef.current[selectedDrawingId],
+            candles
+        );
     }, [chartRef, selectedDrawingId, pointsTick]);
 
     const currentDrawingToolsState = useMemo<DrawingToolsWorkspaceState>(

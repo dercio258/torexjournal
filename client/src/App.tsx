@@ -51,6 +51,8 @@ const Cookies = lazy(() => import('./pages/legal/Cookies').then(m => ({ default:
 const CompleteProfile = lazy(() => import('./pages/CompleteProfile').then(m => ({ default: m.CompleteProfile })));
 const Pricing = lazy(() => import('./pages/Pricing').then(m => ({ default: m.Pricing })));
 const Checkout = lazy(() => import('./pages/Checkout').then(m => ({ default: m.Checkout })));
+const CryptoPaySlip = lazy(() => import('./pages/CryptoPaySlip').then(m => ({ default: m.CryptoPaySlip })));
+const RenewalPayment = lazy(() => import('./pages/RenewalPayment').then(m => ({ default: m.RenewalPayment })));
 const SubscriptionSuccess = lazy(() =>
     import('./pages/SubscriptionSuccess').then(m => ({ default: m.SubscriptionSuccess }))
 );
@@ -59,6 +61,7 @@ const SubscriptionSuccess = lazy(() =>
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin').then(m => ({ default: m.AdminLogin })));
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout').then(m => ({ default: m.AdminLayout })));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminErrors = lazy(() => import('./pages/admin/AdminErrors').then(m => ({ default: m.AdminErrors })));
 const AdminMt5Telemetry = lazy(() => import('./pages/admin/AdminMt5Telemetry').then(m => ({ default: m.AdminMt5Telemetry })));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics').then(m => ({ default: m.AdminAnalytics })));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then(m => ({ default: m.AdminUsers })));
@@ -291,6 +294,22 @@ function App() {
                                 }
                             />
                             <Route
+                                path="/pay/crypto/:reference"
+                                element={
+                                    <Suspense fallback={<StandalonePageSkeleton />}>
+                                        <CryptoPaySlip />
+                                    </Suspense>
+                                }
+                            />
+                            <Route
+                                path="/subscription/payment/:token"
+                                element={
+                                    <Suspense fallback={<StandalonePageSkeleton />}>
+                                        <RenewalPayment />
+                                    </Suspense>
+                                }
+                            />
+                            <Route
                                 path="/subscription/success"
                                 element={
                                     <ProtectedRoute>
@@ -326,6 +345,7 @@ function App() {
                                 }
                             >
                                 <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                                <Route path="/admin/errors" element={<AdminErrors />} />
                                 <Route path="/admin/mt5-telemetry" element={<AdminMt5Telemetry />} />
                                 <Route path="/admin/analytics" element={<AdminAnalytics />} />
                                 <Route path="/admin/lessons" element={<AdminLessons />} />

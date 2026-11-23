@@ -532,6 +532,7 @@ export function useSessionSyncController({
         currentSymbol.ticker,
         currentPeriod.text,
         secondaryPeriod.text,
+        extraAuxPeriods,
         spread,
         commission,
         zustandSetSyncStatus,

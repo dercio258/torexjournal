@@ -8,6 +8,7 @@ import { AuthLayout } from '../layouts/AuthLayout';
 import { AuthCard } from '../components/auth/AuthCard';
 import { AuthAside } from '../components/auth/AuthAside';
 import { OAuthButtons } from '../components/auth/OAuthButtons';
+import { CloudflareTurnstile } from '../components/auth/CloudflareTurnstile';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { Input } from '../components/ui/Input';
 import { PasswordInput } from '../components/ui/PasswordInput';
@@ -58,6 +59,9 @@ export const Login = () => {
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileRequired, setTurnstileRequired] = useState(false);
+    const [turnstileReset, setTurnstileReset] = useState(0);
     const cooldown = useCountdown();
 
     if (legacyRedirect) return <Navigate to={legacyRedirect} replace />;
@@ -79,12 +83,33 @@ export const Login = () => {
         const errors = validate();
         setFieldErrors(errors);
         if (Object.keys(errors).length) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setError(
+                isEn
+                    ? 'You are offline. Reconnect to sign in.'
+                    : 'Sem ligação à internet. Reconecte-se para fazer login.',
+            );
+            return;
+        }
+        if (turnstileRequired && !turnstileToken) {
+            setError(
+                isEn
+                    ? 'Complete the Cloudflare security verification to continue.'
+                    : 'Conclua a verificação de segurança Cloudflare para continuar.',
+            );
+            return;
+        }
 
         setIsLoading(true);
         try {
-            const res = await api.post('/auth/login', { email: email.trim(), password });
+            const res = await api.post('/auth/login', {
+                email: email.trim(),
+                password,
+                ...(turnstileToken ? { turnstileToken } : {}),
+            });
             if (!res.data.success) {
                 setError(res.data.message || (isEn ? 'Invalid credentials.' : 'Credenciais inválidas'));
+                setTurnstileReset((n) => n + 1);
                 return;
             }
             if (res.data.twoFactorRequired) {
@@ -104,6 +129,7 @@ export const Login = () => {
                 isEn ? 'Unable to reach authentication server.' : 'Erro ao conectar com o servidor'
             );
             setError(message);
+            setTurnstileReset((n) => n + 1);
             if (isRateLimited(err)) cooldown.start(parseRetryAfter(message, 60));
         } finally {
             setIsLoading(false);
@@ -243,6 +269,13 @@ export const Login = () => {
                             </Link>
                         </div>
                     </div>
+
+                    <CloudflareTurnstile
+                        action="login"
+                        resetTrigger={turnstileReset}
+                        onTokenChange={setTurnstileToken}
+                        onRequirementChange={setTurnstileRequired}
+                    />
 
                     {error && <Alert tone="error">{error}</Alert>}
 

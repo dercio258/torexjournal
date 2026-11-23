@@ -838,6 +838,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         auxPaneCount,
         auxPeriods,
         panePeriods,
+        auxDataSyncTick,
         gridLayoutClass,
         auxChartDivRefs,
         auxChartRefs,
@@ -859,6 +860,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         isHydratingCanvasRef,
         isRestoringSnapshotRef,
         canvasHydratedCount,
+        auxDataSyncTick,
         currentSymbol,
         currentPeriod,
         latestBar,
@@ -942,6 +944,8 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
     });
     const liveLatestTsRef = useRef<number | null>(latestBar?.timestamp ?? null);
     liveLatestTsRef.current = latestBar?.timestamp ?? null;
+    const isChartLoadingRef = useRef<boolean>(false);
+    const loadRequestGenRef = useRef<number>(0);
     const loadChartDataRef = useRef<
         ((sym: SymbolInfo, per: Period, mode: DataSourceMode, isReplay: boolean, preserve?: boolean) => Promise<void>) | null
     >(null);
@@ -959,65 +963,85 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             const df = datafeedRef.current;
             if (!chart || !df) return;
 
-            if (!isHydratingCanvasRef.current) {
-                captureCurrentOverlayGeometries();
-            }
-
-            const preservedCutoffTs =
-                preserveTimestamp && syncEnabled && isReplay
-                    ? df.getReplayTimestamp() || liveLatestTsRef.current || null
-                    : null;
-
-            df.setMode(mode);
-            const symOrderHint = liveRef.current.orders.find(
-                (o) =>
-                    o.symbol.toUpperCase() === sym.ticker.toUpperCase() &&
-                    Number.isFinite(o.entryPrice) &&
-                    o.entryPrice > 0
-            );
-            df.setPriceAnchorHint(symOrderHint?.entryPrice ?? null);
-            df.unsubscribe();
-            chart.setPriceVolumePrecision(sym.pricePrecision ?? 2, sym.volumePrecision ?? 0);
-
-            if (!isHydratingCanvasRef.current) {
-                const ctx = getCandlePaneAndYAxis(chart);
-                if (ctx) {
-                    ctx.yAxis.setAutoCalcTickFlag?.(true);
-                }
-                yAxisAutoScaleRef.current = true;
-                setYAxisAutoScale(true);
-                yAxisCustomRangeRef.current = null;
-                setYAxisCustomRange(null);
-            }
+            const reqGen = ++loadRequestGenRef.current;
+            isChartLoadingRef.current = true;
 
             try {
-                await df.getHistoryKLineData(sym, per);
-            } catch (_) {
-                return;
+                if (!isHydratingCanvasRef.current) {
+                    captureCurrentOverlayGeometries();
+                }
+
+                const preservedCutoffTs =
+                    preserveTimestamp && syncEnabled && isReplay
+                        ? df.getReplayTimestamp() || liveLatestTsRef.current || null
+                        : null;
+
+                df.setMode(mode);
+                const symOrderHint = liveRef.current.orders.find(
+                    (o) =>
+                        o.symbol.toUpperCase() === sym.ticker.toUpperCase() &&
+                        Number.isFinite(o.entryPrice) &&
+                        o.entryPrice > 0
+                );
+                df.setPriceAnchorHint(symOrderHint?.entryPrice ?? null);
+                df.unsubscribe();
+                chart.setPriceVolumePrecision(sym.pricePrecision ?? 2, sym.volumePrecision ?? 0);
+
+                if (!isHydratingCanvasRef.current) {
+                    const ctx = getCandlePaneAndYAxis(chart);
+                    if (ctx) {
+                        ctx.yAxis.setAutoCalcTickFlag?.(true);
+                    }
+                    yAxisAutoScaleRef.current = true;
+                    setYAxisAutoScale(true);
+                    yAxisCustomRangeRef.current = null;
+                    setYAxisCustomRange(null);
+                }
+
+                try {
+                    await df.getHistoryKLineData(
+                        sym,
+                        per,
+                        undefined,
+                        undefined,
+                        preservedCutoffTs,
+                        preserveTimestamp && syncEnabled
+                    );
+                } catch (_) {
+                    return;
+                }
+
+                if (reqGen !== loadRequestGenRef.current || chartRef.current !== chart) return;
+
+                const barsToRender =
+                    preservedCutoffTs && preservedCutoffTs > 0
+                        ? await df.ensureTimestampLoaded(preservedCutoffTs, { preserveCanonicalStep: true })
+                        : df.setReplayMode(isReplay, 0.72, false);
+
+                if (reqGen !== loadRequestGenRef.current || chartRef.current !== chart) return;
+
+                chart.applyNewData(barsToRender, barsToRender.length > 0);
+                if (!isHydratingCanvasRef.current) {
+                    reanchorMountedOverlays(chart);
+                }
+                (chart as any).adjustPaneViewport?.(false, true, true, true, true);
+
+                if (barsToRender.length > 0) {
+                    const last = barsToRender[barsToRender.length - 1];
+                    setLatestBar(last);
+                    legendOverlayRef.current?.updateLegend(last, null, null);
+                    setLimitEntryPrice(String(last.close));
+                    void syncAllAuxCharts(sym, df.getReplayTimestamp() ?? last.timestamp);
+                }
+
+                df.subscribe(sym, per, (bar) => {
+                    chart.updateData(bar);
+                });
+            } finally {
+                if (reqGen === loadRequestGenRef.current) {
+                    isChartLoadingRef.current = false;
+                }
             }
-
-            const barsToRender =
-                preservedCutoffTs && preservedCutoffTs > 0
-                    ? await df.ensureTimestampLoaded(preservedCutoffTs)
-                    : df.setReplayMode(isReplay, 0.72, preserveTimestamp && syncEnabled);
-
-            chart.applyNewData(barsToRender, barsToRender.length > 0);
-            if (!isHydratingCanvasRef.current) {
-                reanchorMountedOverlays(chart);
-            }
-            (chart as any).adjustPaneViewport?.(false, true, true, true, true);
-
-            if (barsToRender.length > 0) {
-                const last = barsToRender[barsToRender.length - 1];
-                setLatestBar(last);
-                legendOverlayRef.current?.updateLegend(last, null, null);
-                setLimitEntryPrice(String(last.close));
-                void syncAllAuxCharts(sym, last.timestamp);
-            }
-
-            df.subscribe(sym, per, (bar) => {
-                chart.updateData(bar);
-            });
         },
         [syncEnabled, syncAllAuxCharts, captureCurrentOverlayGeometries, getCandlePaneAndYAxis, reanchorMountedOverlays, setLimitEntryPrice]
     );
@@ -1031,6 +1055,7 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
         datafeedRef,
         legendOverlayRef,
         lastCutoffRef,
+        isChartLoadingRef,
         captureCurrentOverlayGeometries,
         reanchorMountedOverlays,
         recomputeOrdersAtCutoff,
@@ -1260,7 +1285,11 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             if (df && candles.length > 0) {
                 const last = candles[candles.length - 1];
                 const { currentSymbol: sym, currentPeriod: per } = liveRef.current;
-                lastCutoffRef.current = { key: `${sym.ticker}:${per.text}`, ts: last.timestamp };
+                lastCutoffRef.current = {
+                    key: `${sym.ticker}:${per.text}`,
+                    ts: last.timestamp,
+                    canonicalTs: df.getReplayTimestamp() ?? last.timestamp,
+                };
                 setOrders((cur) => {
                     if (cur.length === 0) return cur;
                     return recomputeOrders(cur, {
@@ -1676,6 +1705,13 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
             }
         );
         df.setSessionDateWindow(sessionFromDate, sessionToDate);
+        df.setOnHistoryPrependedListener((visibleCandles) => {
+            if (chartRef.current !== chart || isHydratingCanvasRef.current) return;
+            if (visibleCandles.length > 0) {
+                chart.applyNewData(visibleCandles, false);
+                reanchorMountedOverlays(chart);
+            }
+        });
         datafeedRef.current = df;
 
         isHydratingCanvasRef.current = true;
@@ -1693,7 +1729,11 @@ export const KLineChartProTerminal: React.FC<KLineChartProTerminalProps> = ({
                         legendOverlayRef.current?.updateLegend(last, null, null);
                         setLimitEntryPrice(String(last.close));
                         const { currentSymbol: sym, currentPeriod: per } = liveRef.current;
-                        lastCutoffRef.current = { key: `${sym.ticker}:${per.text}`, ts: last.timestamp };
+                        lastCutoffRef.current = {
+                    key: `${sym.ticker}:${per.text}`,
+                    ts: last.timestamp,
+                    canonicalTs: df.getReplayTimestamp() ?? last.timestamp,
+                };
                         syncAuxChartsRef.current?.(sym, last.timestamp);
                         if (deepLinkTradeId) {
                             const matchedTrade = (liveRef.current.orders || []).find((o) => o.id === deepLinkTradeId);

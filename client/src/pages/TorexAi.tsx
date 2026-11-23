@@ -29,6 +29,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 import { useLocale } from '../context/LocaleContext';
 import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
+import { openWorkspacePlansModal } from '../lib/planGate';
 import {
     ClientAiCreditStatus,
     ClientAiMessage,
@@ -2381,12 +2382,13 @@ export const TorexAi: React.FC = () => {
                                     {isEn ? 'Invite Friend' : 'Convidar Amigo'}
                                 </Link>
                             )}
-                            <Link
-                                to="/dashboard?plans=1"
-                                className={`${affiliateApproved ? 'py-1.5 px-2.5 bg-surface border border-line text-fg hover:bg-surface-2' : 'flex-1 text-center py-1.5 px-2 bg-accent text-accent-on hover:opacity-90'} rounded-lg text-[11px] font-semibold transition-colors`}
+                            <button
+                                type="button"
+                                onClick={() => openWorkspacePlansModal('torex_ai_referral_panel')}
+                                className={`${affiliateApproved ? 'py-1.5 px-2.5 bg-surface border border-line text-fg hover:bg-surface-2' : 'flex-1 text-center py-1.5 px-2 bg-accent text-accent-on hover:opacity-90'} rounded-lg text-[11px] font-semibold transition-colors cursor-pointer`}
                             >
                                 {isEn ? 'View Plans' : 'Ver Planos'}
-                            </Link>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -3598,13 +3600,16 @@ export const TorexAi: React.FC = () => {
                                           : 'Copiar link para ganhar créditos'}
                                 </button>
                             )}
-                            <Link
-                                to="/dashboard?plans=1"
-                                onClick={() => setIsNoCreditsModalOpen(false)}
-                                className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors ${affiliateApproved ? 'border border-line bg-surface-2 text-fg hover:border-accent/40' : 'bg-accent font-bold text-accent-on hover:bg-accent-hover'}`}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsNoCreditsModalOpen(false);
+                                    openWorkspacePlansModal('torex_ai_no_credits_modal');
+                                }}
+                                className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${affiliateApproved ? 'border border-line bg-surface-2 text-fg hover:border-accent/40' : 'bg-accent font-bold text-accent-on hover:bg-accent-hover'}`}
                             >
                                 {isEn ? 'View Plans' : 'Ver Planos'}
-                            </Link>
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -1,16 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { KeyRound, Lock, Mail } from 'lucide-react';
 import api from '../api';
 import { useLocale } from '../context/LocaleContext';
 import { AuthLayout } from '../layouts/AuthLayout';
 import { AuthCard, AuthIcon } from '../components/auth/AuthCard';
+import { CloudflareTurnstile } from '../components/auth/CloudflareTurnstile';
+import { PasswordStrengthChecklist } from '../components/auth/PasswordStrengthChecklist';
 import { Input } from '../components/ui/Input';
 import { PasswordInput } from '../components/ui/PasswordInput';
 import { Button } from '../components/ui/Button';
 import { Alert } from '../components/ui/Alert';
 import { useCountdown } from '../hooks/useCountdown';
-import { EMAIL_RE, MIN_PASSWORD_LENGTH, getApiMessage } from '../lib/authErrors';
+import { EMAIL_RE, getApiMessage } from '../lib/authErrors';
+import { evaluatePasswordStrength } from '../lib/registrationValidation';
 
 const RESEND_COOLDOWN_S = 300;
 
@@ -40,6 +43,9 @@ export const ForgotPassword = () => {
     const [success, setSuccess] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [done, setDone] = useState(false);
+    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileRequired, setTurnstileRequired] = useState(false);
+    const [turnstileReset, setTurnstileReset] = useState(0);
     const resend = useCountdown();
 
     useEffect(() => {
@@ -55,11 +61,31 @@ export const ForgotPassword = () => {
             setFieldErrors({ email: isEn ? 'Enter a valid email address.' : 'Informe um e-mail válido.' });
             return;
         }
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setError(
+                isEn
+                    ? 'You are offline. Reconnect to request a recovery code.'
+                    : 'Sem ligação à internet. Reconecte-se para solicitar o código.',
+            );
+            return;
+        }
+        if (turnstileRequired && !turnstileToken) {
+            setError(
+                isEn
+                    ? 'Complete the Cloudflare security verification to continue.'
+                    : 'Conclua a verificação de segurança Cloudflare para continuar.',
+            );
+            return;
+        }
         setFieldErrors({});
         setIsLoading(true);
         try {
-            const res = await api.post('/auth/forgot-password', { email: email.trim() });
+            const res = await api.post('/auth/forgot-password', {
+                email: email.trim(),
+                ...(turnstileToken ? { turnstileToken } : {}),
+            });
             if (!res.data.success) {
+                setTurnstileReset((n) => n + 1);
                 setError(res.data.message || (isEn ? 'Failed to send recovery code.' : 'Erro ao enviar código.'));
                 return;
             }
@@ -74,6 +100,7 @@ export const ForgotPassword = () => {
                         : 'Se o e-mail estiver registado, enviaremos um código de recuperação.')
             );
         } catch (err) {
+            setTurnstileReset((n) => n + 1);
             setError(
                 getApiMessage(err, isEn ? 'Unable to connect to the server.' : 'Erro ao conectar com o servidor')
             );
@@ -87,6 +114,11 @@ export const ForgotPassword = () => {
         requestCode();
     };
 
+    const passwordEvaluation = useMemo(
+        () => evaluatePasswordStrength(newPassword, { email }),
+        [newPassword, email],
+    );
+
     const handleReset = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
@@ -94,10 +126,11 @@ export const ForgotPassword = () => {
 
         const errors: typeof fieldErrors = {};
         if (!code.trim()) errors.code = isEn ? 'Enter the recovery code.' : 'Informe o código recebido.';
-        if (newPassword.length < MIN_PASSWORD_LENGTH)
+        if (!passwordEvaluation.valid) {
             errors.password = isEn
-                ? `Minimum ${MIN_PASSWORD_LENGTH} characters.`
-                : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres.`;
+                ? passwordEvaluation.errorEn || 'Password does not meet security requirements.'
+                : passwordEvaluation.errorPt || 'A senha não cumpre os requisitos de segurança.';
+        }
         setFieldErrors(errors);
         if (Object.keys(errors).length) return;
 
@@ -175,6 +208,12 @@ export const ForgotPassword = () => {
                             error={fieldErrors.email}
                             autoFocus
                         />
+                        <CloudflareTurnstile
+                            action="forgot_password"
+                            resetTrigger={turnstileReset}
+                            onTokenChange={setTurnstileToken}
+                            onRequirementChange={setTurnstileRequired}
+                        />
                         {error && <Alert tone="error">{error}</Alert>}
                         <Button type="submit" variant="brand" size="lg" fullWidth isLoading={isLoading}>
                             {isEn ? 'Send Recovery Code' : 'Enviar código de recuperação'}
@@ -196,20 +235,27 @@ export const ForgotPassword = () => {
                             className="font-mono tracking-[0.3em]"
                             autoFocus
                         />
-                        <PasswordInput
-                            label={isEn ? 'New password' : 'Nova senha'}
-                            autoComplete="new-password"
-                            placeholder="••••••••"
-                            icon={<Lock size={18} />}
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            error={fieldErrors.password}
-                            hint={
-                                isEn
-                                    ? `Minimum ${MIN_PASSWORD_LENGTH} characters`
-                                    : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`
-                            }
-                        />
+                        <div>
+                            <PasswordInput
+                                label={isEn ? 'New password' : 'Nova senha'}
+                                autoComplete="new-password"
+                                placeholder="••••••••"
+                                icon={<Lock size={18} />}
+                                value={newPassword}
+                                onChange={(e) => {
+                                    setNewPassword(e.target.value);
+                                    if (fieldErrors.password) {
+                                        setFieldErrors((fe) => ({ ...fe, password: undefined }));
+                                    }
+                                }}
+                                error={fieldErrors.password}
+                            />
+                            <PasswordStrengthChecklist
+                                password={newPassword}
+                                evaluation={passwordEvaluation}
+                                locale={isEn ? 'en' : 'pt'}
+                            />
+                        </div>
 
                         {error && <Alert tone="error">{error}</Alert>}
                         {success && <Alert tone="success">{success}</Alert>}

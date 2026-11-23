@@ -1,7 +1,8 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, CheckCircle2, Crown, Lock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, Crown } from 'lucide-react';
 import { useLocale } from '../../context/LocaleContext';
 import { openWorkspacePlansModal } from '../../lib/planGate';
+import { UpgradeBadge } from './UpgradeBadge';
 
 interface FeatureUpgradeGateCardProps {
     featureKey: string;
@@ -50,15 +51,23 @@ export const FeatureUpgradeGateCard: React.FC<FeatureUpgradeGateCardProps> = ({
         >
             <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                    <Lock size={22} />
+                    <Crown size={22} />
                 </div>
 
                 <div className="flex-1 min-w-0 space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                            <Crown size={11} />
-                            {isEn ? `Available on ${planLabel} & above` : `Exclusivo Plano ${planLabel} ou superior`}
-                        </span>
+                        <UpgradeBadge
+                            variant="inline"
+                            asButton
+                            tierLabel={planLabel.toUpperCase()}
+                            label={
+                                isEn
+                                    ? `Upgrade · ${planLabel} Required`
+                                    : `Upgrade · Plano ${planLabel}`
+                            }
+                            sourceFeature={featureKey}
+                            extraDetail={{ requiredPlan }}
+                        />
                     </div>
 
                     <div className="space-y-1.5">

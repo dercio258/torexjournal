@@ -107,6 +107,7 @@ export const AuthenticatedAppShell: React.FC = () => {
                 <WorkspacePricingModal
                     isOpen={true}
                     dismissible={false}
+                    hasActivePlan={false}
                     isExpired={subCheck.isExpired}
                     trialEligible={subCheck.trialEligible}
                     onActivated={() => {

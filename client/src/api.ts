@@ -28,25 +28,86 @@ import {
 } from './lib/planGate';
 import {
     decryptJsonEnvelope,
+    encryptRequestJsonEnvelope,
     getClientKemPublicKeyHeader,
     isEncryptedEnvelope,
+    ServerKemPublicBundle,
 } from './lib/payloadCrypto';
 
 const api = axios.create({
     baseURL: '/api',
+    withCredentials: true,
     headers: {
         'Content-Type': 'application/json',
     },
 });
 
+const SENSITIVE_REQUEST_ENVELOPE_PATHS = [
+    '/auth/login',
+    '/auth/register/initiate',
+    '/auth/reset-password',
+    '/mt5/cloud/connect',
+    '/integrations/deriv/connect',
+    '/subscription/subscribe/',
+    '/admin/auth/login',
+];
+
+let cachedServerKemBundle: { bundle: ServerKemPublicBundle; fetchedAt: number } | null = null;
+let serverKemInFlight: Promise<ServerKemPublicBundle | null> | null = null;
+
+async function getServerKemBundle(): Promise<ServerKemPublicBundle | null> {
+    const now = Date.now();
+    if (
+        cachedServerKemBundle &&
+        now - cachedServerKemBundle.fetchedAt < 4 * 60 * 1000 &&
+        new Date(cachedServerKemBundle.bundle.expiresAt).getTime() > now + 60_000
+    ) {
+        return cachedServerKemBundle.bundle;
+    }
+    if (serverKemInFlight) return serverKemInFlight;
+
+    serverKemInFlight = axios
+        .get<ServerKemPublicBundle>('/api/security/kem-key', {
+            withCredentials: true,
+            timeout: 4000,
+        })
+        .then((res) => {
+            if (res.data?.kid && res.data?.pub) {
+                cachedServerKemBundle = { bundle: res.data, fetchedAt: Date.now() };
+                return res.data;
+            }
+            return null;
+        })
+        .catch(() => null)
+        .finally(() => {
+            serverKemInFlight = null;
+        });
+
+    return serverKemInFlight;
+}
+
+function shouldEncryptRequestPayload(config: any): boolean {
+    const method = String(config?.method || 'get').toLowerCase();
+    if (method !== 'post' && method !== 'put' && method !== 'patch') return false;
+    if (!config?.data || typeof config.data !== 'object') return false;
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) return false;
+    if ((config.data as any)._enc) return false;
+    const rawUrl = String(config?.url || '');
+    const normalized = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+    return SENSITIVE_REQUEST_ENVELOPE_PATHS.some((prefix) => normalized.startsWith(prefix));
+}
+
 const SKIP_CACHE_PREFIXES = [
     '/health',
     '/admin',
+    '/security',
+    '/media/signed-url',
     '/auth/2fa',
     '/auth/profile/sensitive',
     '/auth/app-token',
     '/ai/chat/jobs',
     '/payment',
+    '/subscription',
     '/mt5/cloud',
 ];
 
@@ -626,6 +687,17 @@ api.interceptors.request.use(async (config) => {
     const kemHeader = await getClientKemPublicKeyHeader();
     if (kemHeader) {
         config.headers['X-Torex-Kem'] = kemHeader;
+    }
+    if (shouldEncryptRequestPayload(config)) {
+        const serverBundle = await getServerKemBundle();
+        if (serverBundle) {
+            const encryptedReq = await encryptRequestJsonEnvelope(config.data, serverBundle);
+            if (encryptedReq) {
+                config.data = encryptedReq.envelope;
+                config.headers['X-Torex-Timestamp'] = encryptedReq.timestamp;
+                config.headers['X-Torex-Nonce'] = encryptedReq.nonce;
+            }
+        }
     }
     return config;
 });

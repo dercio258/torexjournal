@@ -4,6 +4,7 @@ import {
     Activity,
     ArrowRight,
     BarChart3,
+    Bug,
     CalendarClock,
     Compass,
     Cpu,
@@ -402,6 +403,12 @@ export const AdminDashboard = () => {
             domain: 'Governança & Inteligência',
             description: 'Telemetria estrutural, eventos first-party e atribuição por funil.',
             links: [
+                {
+                    to: '/admin/errors',
+                    title: 'Erros Técnicos & Referências',
+                    meta: `${recentErrCount} incidente(s) recentes · busca por TRX-*`,
+                    icon: Bug,
+                },
                 {
                     to: '/admin/analytics',
                     title: 'Analytics & UTMs',

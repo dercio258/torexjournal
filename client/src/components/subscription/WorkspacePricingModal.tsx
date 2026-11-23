@@ -8,183 +8,45 @@ import {
     Copy,
     Crown,
     Loader2,
-    LogOut,
     Share2,
     Sparkles,
     Timer,
     X,
     Zap,
 } from 'lucide-react';
+import { resolvePricingModalCloseAction } from '../../lib/planGate';
 import api from '../../api';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { buildTaggedUrl, mergeSessionUtmsIntoSearch } from '../../lib/attribution';
+import {
+    FALLBACK_WORKSPACE_PLANS,
+    getDefaultCreditsForTier,
+    getDefaultFeaturesForTier,
+    getPlanSubtitleForTier,
+    normalizeWorkspacePlansCatalog,
+    WorkspacePlanConfig,
+} from '../../lib/pricingPlans';
 import { TRIAL_DAYS_BY_TIER_CLIENT } from '../../lib/planGate';
 import { trackButtonClick, trackConversion } from '../../lib/tracking';
 
-export interface WorkspacePlanConfig {
-    id: string;
-    tier: 'BASIC' | 'PRO' | 'PREMIUM' | string;
-    monthlyPrice: number;
-    annualMonthlyPrice?: number | null;
-    compareAtPrice?: number | null;
-    promoDiscountPercent?: number;
-    monthlyDiscountPercent: number;
-    quarterlyDiscountPercent: number;
-    annualDiscountPercent: number;
-    biennialDiscountPercent: number;
-    maxTradingAccounts?: number;
-    monthlyBacktestsLimit?: number;
-    trialEnabled: boolean;
-    trialDays: number;
-    aiDailyCredits: number;
-    description?: string;
-    features?: string[];
-}
+export type { WorkspacePlanConfig };
 
 interface WorkspacePricingModalProps {
     isOpen: boolean;
     dismissible: boolean;
+    hasActivePlan?: boolean;
     onClose?: () => void;
     onActivated?: () => void;
     isExpired?: boolean;
     trialEligible?: boolean;
 }
 
-function getDefaultCreditsForTier(tier: string): number {
-    const t = String(tier || '').toUpperCase();
-    if (t === 'PREMIUM') return 4000;
-    if (t === 'PRO') return 1500;
-    return 0;
-}
-
-function getDefaultFeaturesForTier(tier: string, credits: number, isEn: boolean): string[] {
-    const formattedCredits = credits.toLocaleString(isEn ? 'en-US' : 'pt-BR');
-    const t = String(tier || '').toUpperCase();
-    if (isEn) {
-        if (t === 'BASIC') {
-            return [
-                '1 active trading account',
-                `${formattedCredits} AI credits / month`,
-                'Torex AI',
-                'Automated Journal',
-                'Community',
-                'Website reports (view & download)',
-            ];
-        }
-        if (t === 'PRO') {
-            return [
-                'Unlimited trading accounts',
-                `${formattedCredits} AI credits / month`,
-                '10 automated backtesting runs / month',
-                'Test unlimited strategies',
-                'Trade Replay',
-                'Mentor Mode',
-                'Monthly email performance report',
-                'Offline Mode (except Trade Replay)',
-            ];
-        }
-        return [
-            'Everything in Pro',
-            `${formattedCredits} AI credits / month`,
-            '100 automated backtesting runs / month',
-            'Mentor Mode: unlimited invites',
-            'Weekly email performance report',
-            'Priority support',
-            'Full Offline Mode (including Replay)',
-        ];
-    }
-    if (t === 'BASIC') {
-        return [
-            '1 Conta de Trading ativa',
-            `${formattedCredits} Créditos AI / mês`,
-            'Torex AI',
-            'Diário Automatizado',
-            'Comunidade',
-            'Relatórios operacionais no site (visualizar e baixar)',
-        ];
-    }
-    if (t === 'PRO') {
-        return [
-            'Contas de Trading ilimitadas',
-            `${formattedCredits} Créditos AI / mês`,
-            '10 Sessões de Backtest / mês',
-            'Teste de Estratégias ilimitado',
-            'Trade Replay',
-            'Mentor Mode',
-            'Relatório operacional mensal por e-mail',
-            'Modo Offline (exceto Trade Replay)',
-        ];
-    }
-    return [
-        'Tudo do Plano Pro',
-        `${formattedCredits} Créditos AI / mês`,
-        '100 Automated Backtesting Runs / month',
-        'Mentor Mode: unlimited invites',
-        'Relatório operacional semanal por e-mail',
-        'Suporte Prioritário',
-        'Modo Offline completo (incluindo Replay)',
-    ];
-}
-
-const FALLBACK_PLANS: WorkspacePlanConfig[] = [
-    {
-        id: 'fallback-basic',
-        tier: 'BASIC',
-        monthlyPrice: 2.99,
-        annualMonthlyPrice: 2.24,
-        compareAtPrice: 2.99,
-        promoDiscountPercent: 25,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 5,
-        annualDiscountPercent: 25,
-        biennialDiscountPercent: 29,
-        maxTradingAccounts: 1,
-        monthlyBacktestsLimit: 0,
-        trialEnabled: true,
-        trialDays: 30,
-        aiDailyCredits: 0,
-    },
-    {
-        id: 'fallback-pro',
-        tier: 'PRO',
-        monthlyPrice: 19.99,
-        annualMonthlyPrice: 12.99,
-        compareAtPrice: 19.99,
-        promoDiscountPercent: 35,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 9,
-        annualDiscountPercent: 35,
-        biennialDiscountPercent: 44,
-        maxTradingAccounts: -1,
-        monthlyBacktestsLimit: 10,
-        trialEnabled: true,
-        trialDays: 14,
-        aiDailyCredits: 1500,
-    },
-    {
-        id: 'fallback-premium',
-        tier: 'PREMIUM',
-        monthlyPrice: 39.99,
-        annualMonthlyPrice: 20.39,
-        compareAtPrice: 39.99,
-        promoDiscountPercent: 49,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 19,
-        annualDiscountPercent: 49,
-        biennialDiscountPercent: 51,
-        maxTradingAccounts: -1,
-        monthlyBacktestsLimit: 100,
-        trialEnabled: true,
-        trialDays: 7,
-        aiDailyCredits: 4000,
-    },
-];
-
 export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
     isOpen,
     dismissible,
+    hasActivePlan,
     onClose,
     onActivated,
     isExpired = false,
@@ -193,12 +55,15 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { user, logout, refreshProfile } = useAuth();
-    const { locale } = useLocale();
+    const { locale, setLocale } = useLocale();
     const isEn = locale === 'en';
 
     const [billingCycle, setBillingCycle] = useState<'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'BIENNIAL'>('YEARLY');
-    const [plans, setPlans] = useState<WorkspacePlanConfig[]>(FALLBACK_PLANS);
+    const [plans, setPlans] = useState<WorkspacePlanConfig[]>(() =>
+        normalizeWorkspacePlansCatalog(FALLBACK_WORKSPACE_PLANS, isEn),
+    );
     const [isFetchingPlans, setIsFetchingPlans] = useState(false);
+    const [promoBannerVisible, setPromoBannerVisible] = useState(true);
 
     const canOfferTrial = Boolean(user && trialEligible);
     const [trialOptionByTier, setTrialOptionByTier] = useState<
@@ -287,79 +152,22 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
     }, [isOpen, dismissible, onClose]);
 
     useEffect(() => {
+        setPlans((prev) => normalizeWorkspacePlansCatalog(prev, isEn));
+    }, [isEn]);
+
+    useEffect(() => {
         if (!isOpen) return;
         let active = true;
+        setPromoBannerVisible(true);
         setIsFetchingPlans(true);
         api.get('/payment/plans')
             .then((plansRes) => {
                 if (!active) return;
-                const mapped: WorkspacePlanConfig[] = (plansRes.data || []).map((plan: any) => {
-                    const aiCredits =
-                        plan.aiDailyCredits !== null && plan.aiDailyCredits !== undefined
-                            ? Number(plan.aiDailyCredits)
-                            : getDefaultCreditsForTier(plan.tier);
-                    const defaultFeatures = getDefaultFeaturesForTier(plan.tier, aiCredits, isEn);
-                    const rawFeatures: string[] =
-                        !isEn && Array.isArray(plan.features) && plan.features.length > 0
-                            ? plan.features
-                            : defaultFeatures;
-
-                    return {
-                        id: plan.id,
-                        tier: String(plan.tier || '').toUpperCase(),
-                        monthlyPrice: Number(plan.monthlyPrice),
-                        annualMonthlyPrice:
-                            plan.annualMonthlyPrice !== null && plan.annualMonthlyPrice !== undefined
-                                ? Number(plan.annualMonthlyPrice)
-                                : null,
-                        compareAtPrice:
-                            plan.compareAtPrice !== null && plan.compareAtPrice !== undefined
-                                ? Number(plan.compareAtPrice)
-                                : null,
-                        promoDiscountPercent: Number(plan.promoDiscountPercent || 0),
-                        monthlyDiscountPercent: Number(plan.monthlyDiscountPercent ?? 20),
-                        quarterlyDiscountPercent: Number(
-                            plan.quarterlyDiscountPercent ??
-                                (String(plan.tier || '').toUpperCase() === 'PREMIUM'
-                                    ? 19
-                                    : String(plan.tier || '').toUpperCase() === 'PRO'
-                                      ? 9
-                                      : 5),
-                        ),
-                        annualDiscountPercent: Number(
-                            plan.annualDiscountPercent ??
-                                (String(plan.tier || '').toUpperCase() === 'PREMIUM'
-                                    ? 49
-                                    : String(plan.tier || '').toUpperCase() === 'PRO'
-                                      ? 35
-                                      : 25),
-                        ),
-                        biennialDiscountPercent: Number(
-                            plan.biennialDiscountPercent ??
-                                (String(plan.tier || '').toUpperCase() === 'PREMIUM'
-                                    ? 51
-                                    : String(plan.tier || '').toUpperCase() === 'PRO'
-                                      ? 44
-                                      : 29),
-                        ),
-                        maxTradingAccounts: Number(plan.maxTradingAccounts ?? 1),
-                        monthlyBacktestsLimit: Number(plan.monthlyBacktestsLimit ?? 0),
-                        trialEnabled: Boolean(plan.trialEnabled),
-                        trialDays: Number(plan.trialDays || 0),
-                        aiDailyCredits: aiCredits,
-                        description: plan.description,
-                        features: rawFeatures,
-                    };
-                });
-
-                if (mapped.length > 0) {
-                    const rank: Record<string, number> = { BASIC: 1, PRO: 2, PREMIUM: 3 };
-                    mapped.sort((a, b) => (rank[a.tier] || 99) - (rank[b.tier] || 99));
-                    setPlans(mapped);
-                }
+                setPlans(normalizeWorkspacePlansCatalog(plansRes.data || [], isEn));
             })
             .catch(() => {
-                // Keeps static fallback plans on transient error
+                if (!active) return;
+                setPlans((prev) => normalizeWorkspacePlansCatalog(prev, isEn));
             })
             .finally(() => {
                 if (active) setIsFetchingPlans(false);
@@ -464,9 +272,34 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
         });
     };
 
+    const resolvedHasActivePlan =
+        hasActivePlan ??
+        (dismissible && Boolean(user?.tier && user.tier !== 'FREE') && !isExpired);
+
     const handleLogout = () => {
         logout();
         navigate('/login', { replace: true });
+    };
+
+    const handleCloseModal = () => {
+        const action = resolvePricingModalCloseAction({
+            isAuthenticated: Boolean(user),
+            hasActivePlan: resolvedHasActivePlan,
+            hasOnClose: Boolean(onClose),
+        });
+        if (action === 'LOGOUT') {
+            handleLogout();
+            return;
+        }
+        if (action === 'CLOSE_TO_CURRENT_VIEW' && onClose) {
+            onClose();
+            return;
+        }
+        if (typeof window !== 'undefined' && window.history.length > 1) {
+            navigate(-1);
+        } else {
+            navigate('/dashboard', { replace: true });
+        }
     };
 
     const formatPostTrialChargeDate = (days: number) => {
@@ -484,7 +317,7 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
         if (!trialGatePlan) return;
         const shareText = isEn
             ? 'Join me on Torex Journal — institutional trading analytics, AI Coach & journal:'
-            : 'Vem operar comigo no Torex Journal — diário de trading automático, IA e análise institucional:';
+            : 'Vem operar comigo no Torex Journal — diário de trading automático, AI Coach e análise institucional:';
         const encodedText = encodeURIComponent(shareText);
         const encodedUrl = encodeURIComponent(referralShareUrl);
 
@@ -571,547 +404,628 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
         if (tier === 'BASIC') {
             return {
                 title: isEn ? 'Basic' : 'Básico',
-                subtitle: isEn ? 'For traders building consistency' : 'Para quem está começando no trading',
-                accentText: 'text-emerald-600 dark:text-emerald-400',
+                subtitle: getPlanSubtitleForTier('BASIC', isEn),
+                accentText: 'text-emerald-600',
+                iconWrapClass: 'bg-emerald-50 text-emerald-600',
                 cardClass:
-                    'p-5 sm:p-6 border border-line-strong bg-surface/90 rounded-2xl transition-all hover:border-emerald-500/40 flex flex-col justify-between',
+                    'p-4 sm:p-5 bg-white rounded-2xl transition-all duration-200 shadow-[0_8px_28px_-8px_rgba(15,23,42,0.08)] hover:shadow-[0_16px_38px_-10px_rgba(15,23,42,0.14)] hover:-translate-y-0.5 flex flex-col justify-between',
                 badge: null,
                 icon: Zap,
                 checkIcon: Check,
-                checkColor: 'text-emerald-500',
-                btnVariant: 'primary' as const,
+                checkColor: 'text-emerald-600',
+                btnVariant: 'brand' as const,
+                btnClass:
+                    '!border-0 bg-emerald-600 hover:bg-emerald-700 !text-white shadow-md shadow-emerald-600/20',
             };
         }
         if (tier === 'PRO') {
             return {
                 title: 'Pro',
-                subtitle: isEn ? 'For disciplined traders scaling edge' : 'Para traders consistentes em evolução',
-                accentText: 'text-indigo-500 dark:text-indigo-400',
+                subtitle: getPlanSubtitleForTier('PRO', isEn),
+                accentText: 'text-indigo-600',
+                iconWrapClass: 'bg-indigo-50 text-indigo-600',
                 cardClass:
-                    'p-5 sm:p-6 border-2 border-indigo-500/70 bg-surface rounded-2xl relative overflow-hidden shadow-xl flex flex-col justify-between',
+                    'p-4 sm:p-5 bg-white rounded-2xl relative overflow-hidden transition-all duration-200 shadow-[0_22px_50px_-14px_rgba(79,70,229,0.24)] hover:shadow-[0_26px_56px_-12px_rgba(79,70,229,0.32)] hover:-translate-y-0.5 flex flex-col justify-between',
                 badge: {
                     text: isEn ? 'MOST POPULAR' : 'MAIS POPULAR',
-                    bg: 'bg-indigo-600 text-white',
+                    bg: 'bg-indigo-600 text-white shadow-sm',
                 },
                 icon: Sparkles,
                 checkIcon: CheckCircle,
-                checkColor: 'text-indigo-500',
-                btnVariant: 'gradient' as const,
+                checkColor: 'text-indigo-600',
+                btnVariant: 'brand' as const,
+                btnClass:
+                    '!border-0 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 !text-white shadow-lg shadow-indigo-600/25',
             };
         }
         return {
             title: tier === 'PREMIUM' ? 'Premium' : tier,
-            subtitle: isEn ? 'Full desk power & deep backtesting' : 'Performance máxima & IA avançada',
-            accentText: 'text-amber-500 dark:text-amber-400',
+            subtitle: getPlanSubtitleForTier('PREMIUM', isEn),
+            accentText: 'text-amber-600',
+            iconWrapClass: 'bg-amber-50 text-amber-600',
             cardClass:
-                'p-5 sm:p-6 border-2 border-amber-500/60 bg-surface rounded-2xl relative overflow-hidden shadow-lg flex flex-col justify-between',
+                'p-4 sm:p-5 bg-white rounded-2xl relative overflow-hidden transition-all duration-200 shadow-[0_18px_42px_-12px_rgba(245,158,11,0.20)] hover:shadow-[0_22px_48px_-12px_rgba(245,158,11,0.28)] hover:-translate-y-0.5 flex flex-col justify-between',
             badge: {
                 text: isEn ? 'FULL POWER' : 'MÁXIMA POTÊNCIA',
-                bg: 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950',
+                bg: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm',
             },
             icon: Crown,
             checkIcon: CheckCircle,
-            checkColor: 'text-amber-500',
-            btnVariant: 'gradient' as const,
+            checkColor: 'text-amber-600',
+            btnVariant: 'brand' as const,
+            btnClass:
+                '!border-0 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 !text-white shadow-lg shadow-amber-500/25',
         };
     };
+
+    const promoBannerText =
+        billingCycle === 'MONTHLY'
+            ? isEn
+                ? 'Special Offer · 20% off monthly plans'
+                : 'Oferta Especial · 20% de desconto no mensal'
+            : billingCycle === 'QUARTERLY'
+              ? isEn
+                  ? 'Special Offer · Up to 19% off quarterly'
+                  : 'Oferta Especial · Até 19% no trimestral'
+              : billingCycle === 'BIENNIAL'
+                ? isEn
+                    ? 'Special Offer · Up to 51% off biennial'
+                    : 'Oferta Especial · Até 51% no bianual'
+                : isEn
+                  ? 'Special Offer · Up to 49% off annual plans'
+                  : 'Oferta Especial · Até 49% de desconto no anual';
 
     return (
         <div
             role="dialog"
             aria-modal="true"
-            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-canvas/55 backdrop-blur-sm overflow-y-auto"
+            className="theme-light fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-2.5 sm:p-5 bg-slate-900/15 backdrop-blur-[1px] overflow-y-auto"
             onClick={() => {
                 if (dismissible && onClose) onClose();
             }}
         >
             <div
                 onClick={(e) => e.stopPropagation()}
-                className="relative w-full max-w-5xl rounded-3xl border border-line-strong bg-surface/95 backdrop-blur-xl shadow-2xl p-5 sm:p-8 my-auto animate-in fade-in zoom-in-95 duration-200"
+                className="relative w-full max-w-5xl flex flex-col rounded-[28px] bg-[#F8FAFC] text-slate-900 shadow-[0_32px_72px_-16px_rgba(15,23,42,0.24)] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-200"
             >
-                {/* Top bar controls */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                    <div>
-                        {user && !dismissible && (
-                            <button
-                                type="button"
-                                onClick={handleLogout}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-fg-muted hover:text-fg transition-colors cursor-pointer"
-                            >
-                                <LogOut className="h-3.5 w-3.5" />
-                                {isEn ? 'Sign out' : 'Terminar sessão'}
-                            </button>
-                        )}
-                    </div>
+                {/* Floating Headerless Utility Controls (Zero Header Bar / Zero Borders) */}
+                <div className="absolute top-3.5 left-3.5 sm:top-4 sm:left-5 z-20 flex items-center gap-1.5">
 
-                    {dismissible && onClose && (
+                    <div
+                        role="group"
+                        aria-label={isEn ? 'Select language' : 'Selecionar idioma'}
+                        className="inline-flex items-center rounded-full bg-slate-200/75 p-0.5 text-[10.5px] font-bold"
+                    >
                         <button
                             type="button"
-                            onClick={onClose}
-                            aria-label={isEn ? 'Close' : 'Fechar'}
-                            className="rounded-xl border border-line bg-surface-2 p-2 text-fg-muted hover:text-fg transition-colors cursor-pointer"
+                            onClick={() => setLocale('pt')}
+                            className={`px-2 py-0.5 rounded-full transition-colors cursor-pointer ${
+                                !isEn
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-900'
+                            }`}
                         >
-                            <X className="h-4 w-4" />
+                            PT
                         </button>
-                    )}
+                        <button
+                            type="button"
+                            onClick={() => setLocale('en')}
+                            className={`px-2 py-0.5 rounded-full transition-colors cursor-pointer ${
+                                isEn
+                                    ? 'bg-white text-slate-900 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-900'
+                            }`}
+                        >
+                            EN
+                        </button>
+                    </div>
                 </div>
 
-                {/* Modal Header */}
-                <div className="text-center mb-6">
-                    {isExpired && (
-                        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-rose-500">
-                            {isEn ? 'Plan Expired · Renew to Unlock' : 'Plano Expirado · Renove para Desbloquear'}
-                        </div>
-                    )}
-                    <h2 className="text-2xl sm:text-3xl font-extrabold text-fg tracking-tight">
-                        {trialGatePlan
+                <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    aria-label={
+                        user && !resolvedHasActivePlan
                             ? isEn
-                                ? 'Share with Friends to Unlock Your Free Trial'
-                                : 'Compartilhe com Amigos para Liberar seu Teste Grátis'
+                                ? 'Close and sign out'
+                                : 'Fechar e sair'
                             : isEn
-                              ? 'Find the plan that fits your trading'
-                              : 'Escolha o plano ideal para o seu trading'}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-fg-muted max-w-xl mx-auto mt-1.5 mb-5">
-                        {trialGatePlan
+                              ? 'Close'
+                              : 'Fechar'
+                    }
+                    title={
+                        user && !resolvedHasActivePlan
                             ? isEn
-                                ? 'Share your affiliate link on social media, wait 30 seconds, and unlock instant free access.'
-                                : 'Partilhe seu link de afiliado nas redes sociais, aguarde 30 segundos e desbloqueie o acesso gratuito.'
+                                ? 'Close and sign out'
+                                : 'Fechar e sair'
                             : isEn
-                              ? 'Unlock your full Torex Journal workspace with monthly Torex AI credits, automated journaling, and backtesting.'
-                              : 'Desbloqueie todo o workspace do Torex Journal com créditos mensais no Torex AI, diário automatizado e backtesting.'}
-                    </p>
+                              ? 'Close'
+                              : 'Fechar'
+                    }
+                    className="absolute top-3.5 right-3.5 sm:top-4 sm:right-5 z-20 w-8 h-8 rounded-full bg-white/95 hover:bg-white text-slate-500 hover:text-slate-900 flex items-center justify-center shadow-sm transition-colors cursor-pointer"
+                >
+                    <X className="h-4 w-4" />
+                </button>
 
-                    {/* Billing Toggle (4 cycles: Monthly BF -20%, Quarterly, Annual, Biennial) */}
-                    {!trialGatePlan && (
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="inline-flex flex-wrap items-center justify-center gap-1 bg-surface-2 rounded-2xl sm:rounded-full p-1.5 border border-line shadow-inner">
+                {/* Borderless, Light-Mode, Compact Body */}
+                <div className="px-3.5 pt-11 pb-4 sm:px-7 sm:pt-7 sm:pb-6">
+                    {/* Responsive Headline & Subheadline */}
+                    <div className="text-center mb-3.5 sm:mb-4 px-1 sm:px-10">
+                        <div className="flex flex-wrap items-center justify-center gap-2 mb-1.5">
+                            {isExpired && (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-600">
+                                    {isEn ? 'Plan Expired · Renew to Unlock' : 'Plano Expirado · Renove para Desbloquear'}
+                                </span>
+                            )}
+                            {!trialGatePlan && promoBannerVisible && (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-amber-700 shadow-xs max-w-full">
+                                    <Sparkles className="w-3 h-3 shrink-0 text-amber-500" />
+                                    <span className="truncate">{promoBannerText}</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPromoBannerVisible(false)}
+                                        aria-label={isEn ? 'Dismiss banner' : 'Ocultar aviso'}
+                                        className="ml-0.5 rounded-full p-0.5 text-amber-600/70 hover:text-amber-900 transition-colors cursor-pointer shrink-0"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </span>
+                            )}
+                        </div>
+
+                        <h2 className="text-[20px] sm:text-2xl lg:text-[28px] font-extrabold text-slate-900 tracking-[-0.025em] leading-[1.15] text-balance max-w-2xl mx-auto">
+                            {trialGatePlan
+                                ? isEn
+                                    ? 'Share with Friends to Unlock Your Free Trial'
+                                    : 'Compartilhe com Amigos para Liberar seu Teste Grátis'
+                                : isEn
+                                  ? 'Plans built to scale your trading consistency'
+                                  : 'Escolha o plano ideal para evoluir sua consistência'}
+                        </h2>
+                        <p className="text-xs sm:text-[13.5px] text-slate-500 font-medium leading-relaxed text-balance max-w-xl mx-auto mt-1.5 mb-3">
+                            {trialGatePlan
+                                ? isEn
+                                    ? 'Share your affiliate link, wait 30 seconds, and unlock instant free access.'
+                                    : 'Partilhe seu link de afiliado nas redes sociais, aguarde 30 segundos e desbloqueie o acesso gratuito.'
+                                : isEn
+                                  ? 'Automated journaling, monthly AI credits, AI Coach, and market backtesting in one clean workspace.'
+                                  : 'Diário automatizado, créditos mensais de IA, AI Coach e backtesting avançado num único espaço.'}
+                        </p>
+
+                        {/* Borderless Billing Cycle Selector */}
+                        {!trialGatePlan && (
+                            <div className="grid grid-cols-2 sm:inline-flex items-center gap-1 w-full sm:w-auto bg-slate-200/75 rounded-2xl sm:rounded-full p-1">
                                 {(
                                     [
                                         {
                                             id: 'MONTHLY',
                                             labelPt: 'Mensal',
                                             labelEn: 'Monthly',
-                                            badge: '-20% BF',
-                                            badgeClass: 'text-amber-300',
+                                            badge: '-20%',
                                         },
                                         {
                                             id: 'QUARTERLY',
                                             labelPt: 'Trimestral',
                                             labelEn: 'Quarterly',
                                             badge: isEn ? 'up to -19%' : 'até -19%',
-                                            badgeClass: 'text-emerald-400',
                                         },
                                         {
                                             id: 'YEARLY',
                                             labelPt: 'Anual',
                                             labelEn: 'Annual',
                                             badge: isEn ? 'up to -49%' : 'até -49%',
-                                            badgeClass: 'text-emerald-400',
                                         },
                                         {
                                             id: 'BIENNIAL',
                                             labelPt: 'Bianual (2A)',
                                             labelEn: 'Biennial (2Y)',
                                             badge: isEn ? 'up to -51%' : 'até -51%',
-                                            badgeClass: 'text-emerald-400',
                                         },
                                     ] as const
-                                ).map((opt) => (
-                                    <button
-                                        key={opt.id}
-                                        type="button"
-                                        onClick={() => setBillingCycle(opt.id)}
-                                        className={`px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-                                            billingCycle === opt.id
-                                                ? 'bg-indigo-600 text-white shadow-md'
-                                                : 'text-fg-muted hover:text-fg'
-                                        }`}
-                                    >
-                                        {isEn ? opt.labelEn : opt.labelPt}{' '}
-                                        <span className={`text-[10.5px] ml-1 font-extrabold ${opt.badgeClass}`}>
-                                            {opt.badge}
-                                        </span>
-                                    </button>
-                                ))}
+                                ).map((opt) => {
+                                    const active = billingCycle === opt.id;
+                                    return (
+                                        <button
+                                            key={opt.id}
+                                            type="button"
+                                            onClick={() => setBillingCycle(opt.id)}
+                                            className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                                                active
+                                                    ? 'bg-white text-slate-900 shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                        >
+                                            <span>{isEn ? opt.labelEn : opt.labelPt}</span>
+                                            <span
+                                                className={`text-[10px] font-extrabold ${
+                                                    active ? 'text-emerald-600' : 'text-emerald-600/85'
+                                                }`}
+                                            >
+                                                {opt.badge}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
                             </div>
-                            <p className="text-[11px] font-medium text-amber-300">
-                                {billingCycle === 'MONTHLY'
-                                    ? isEn
-                                        ? 'Black Friday active: 20% OFF on monthly plans (USD).'
-                                        : 'Black Friday ativo: 20% DE DESCONTO no pagamento mensal.'
-                                    : isEn
-                                      ? 'Black Friday multi-period discount already applied.'
-                                      : 'Desconto promocional de Black Friday aplicado no período selecionado.'}
-                            </p>
+                        )}
+                    </div>
+
+                    {trialError && (
+                        <div className="mb-3 rounded-xl bg-rose-50 px-3.5 py-2 text-center text-xs font-semibold text-rose-600">
+                            {trialError}
                         </div>
                     )}
-                </div>
 
-                {trialError && (
-                    <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-center text-xs font-semibold text-rose-500">
-                        {trialError}
-                    </div>
-                )}
-
-                {trialGatePlan ? (
-                    (() => {
-                        const gateTier = String(trialGatePlan.tier || 'BASIC').toUpperCase() as
-                            | 'BASIC'
-                            | 'PRO'
-                            | 'PREMIUM';
-                        const gateDays = TRIAL_DAYS_BY_TIER_CLIENT[gateTier] ?? 30;
-                        const renewalDateStr = formatPostTrialChargeDate(gateDays);
-                        const recurringUsd = getPrice(trialGatePlan).toFixed(2);
-                        const progressPct = hasSharedForTrial
-                            ? Math.round(((30 - shareCooldownSeconds) / 30) * 100)
-                            : 0;
-                        const canActivateNow =
-                            hasSharedForTrial && shareCooldownSeconds === 0 && !activatingTrialTier;
-
-                        return (
-                            <div className="max-w-2xl mx-auto rounded-2xl border border-line bg-surface p-5 sm:p-7 space-y-5 shadow-xl">
-                                <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-4 text-xs sm:text-sm space-y-1.5">
-                                    <div className="font-bold text-amber-300">
-                                        {isEn
-                                            ? `${gateTier} Plan · ${gateDays}-Day Free Trial Summary`
-                                            : `Plano ${gateTier} · Resumo do Teste Grátis de ${gateDays} Dias`}
-                                    </div>
-                                    <p className="text-fg leading-relaxed">
-                                        {isEn ? (
-                                            <>
-                                                Today you pay <strong>$0.00</strong>. After{' '}
-                                                <strong>{renewalDateStr}</strong>,{' '}
-                                                <strong>${recurringUsd}/mo</strong> will be charged to
-                                                continue using the plan.
-                                            </>
-                                        ) : (
-                                            <>
-                                                Hoje o acesso é gratuito (<strong>$0.00</strong>). Após o dia{' '}
-                                                <strong>{renewalDateStr}</strong>, será cobrado{' '}
-                                                <strong>${recurringUsd}/mês</strong> para continuar a usar o
-                                                plano.
-                                            </>
-                                        )}
-                                    </p>
-                                </div>
-
-                                <div className="space-y-2.5">
-                                    <label className="block text-[11px] font-bold uppercase tracking-wider text-fg-muted">
-                                        {isEn
-                                            ? 'Your Affiliate Invitation Link'
-                                            : 'Seu Link de Afiliado para Partilha'}
-                                    </label>
-                                    <div className="flex flex-col sm:flex-row gap-2">
-                                        <input
-                                            type="text"
-                                            readOnly
-                                            value={referralShareUrl}
-                                            className="flex-1 rounded-xl border border-line bg-canvas px-3 py-2.5 text-xs font-mono text-fg focus:outline-none"
-                                        />
-                                        <Button
-                                            type="button"
-                                            variant="secondary"
-                                            onClick={() => void handleTriggerTrialShare('copy')}
-                                            className="shrink-0"
-                                        >
-                                            <Copy size={14} className="mr-1.5" />
-                                            {copiedShareLink
-                                                ? isEn
-                                                    ? 'Copied!'
-                                                    : 'Copiado!'
-                                                : isEn
-                                                  ? 'Copy Link'
-                                                  : 'Copiar Link'}
-                                        </Button>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleTriggerTrialShare('native')}
-                                            className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl bg-accent hover:bg-accent-hover text-accent-on text-xs font-bold cursor-pointer"
-                                        >
-                                            <Share2 size={13} />
-                                            <span>{isEn ? 'Share' : 'Partilhar'}</span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleTriggerTrialShare('whatsapp')}
-                                            className="inline-flex items-center justify-center h-9 px-3 rounded-xl border border-emerald-500/35 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold cursor-pointer"
-                                        >
-                                            WhatsApp
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleTriggerTrialShare('telegram')}
-                                            className="inline-flex items-center justify-center h-9 px-3 rounded-xl border border-sky-500/35 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold cursor-pointer"
-                                        >
-                                            Telegram
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleTriggerTrialShare('x')}
-                                            className="inline-flex items-center justify-center h-9 px-3 rounded-xl border border-line bg-surface-2 hover:bg-surface-3 text-fg text-xs font-bold cursor-pointer"
-                                        >
-                                            X / Twitter
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => void handleTriggerTrialShare('facebook')}
-                                            className="inline-flex items-center justify-center h-9 px-3 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-xs font-bold cursor-pointer"
-                                        >
-                                            Facebook
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-xl border border-line bg-canvas-subtle p-3.5 space-y-2">
-                                    <div className="flex items-center justify-between text-xs font-semibold">
-                                        <span className="inline-flex items-center gap-1.5 text-fg">
-                                            <Timer size={14} className="text-accent-fg" />
-                                            {!hasSharedForTrial
-                                                ? isEn
-                                                    ? 'Step 1: Click a share button above to start the 30s unlock timer'
-                                                    : 'Passo 1: Clique em partilhar acima para iniciar a contagem de 30s'
-                                                : shareCooldownSeconds > 0
-                                                  ? isEn
-                                                      ? `Verifying share... unlocking in ${shareCooldownSeconds}s`
-                                                      : `Validando partilha... liberação em ${shareCooldownSeconds}s`
-                                                  : isEn
-                                                    ? 'Verified! Your free trial button is unlocked.'
-                                                    : 'Partilha confirmada! Botão de teste gratuito liberado.'}
-                                        </span>
-                                        <span className="font-mono text-accent-fg">
-                                            {hasSharedForTrial ? `${shareCooldownSeconds}s` : '30s'}
-                                        </span>
-                                    </div>
-                                    <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
-                                        <div
-                                            className="h-full bg-emerald-500 transition-all duration-500"
-                                            style={{ width: `${progressPct}%` }}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => setTrialGatePlan(null)}
-                                        className="inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-xl border border-line bg-surface-2 hover:bg-surface-3 text-xs font-semibold text-fg-muted hover:text-fg cursor-pointer"
-                                    >
-                                        <ArrowLeft size={14} />
-                                        <span>{isEn ? 'Back to Plans' : 'Voltar aos Planos'}</span>
-                                    </button>
-
-                                    <Button
-                                        variant="gradient"
-                                        className="flex-1 py-2.5 text-xs sm:text-sm font-bold"
-                                        disabled={!canActivateNow || isPreparingShare}
-                                        isLoading={activatingTrialTier === gateTier}
-                                        onClick={() => void handleConfirmTrialActivation()}
-                                    >
-                                        {canActivateNow
-                                            ? isEn
-                                                ? `Acquire ${gateDays}-Day Free Trial`
-                                                : `Adquirir Teste de ${gateDays} Dias Grátis`
-                                            : hasSharedForTrial
-                                              ? isEn
-                                                  ? `Unlocks in ${shareCooldownSeconds}s`
-                                                  : `Disponível em ${shareCooldownSeconds}s`
-                                              : isEn
-                                                ? 'Share Link First to Unlock'
-                                                : 'Partilhe o Link para Desbloquear'}
-                                    </Button>
-                                </div>
-                            </div>
-                        );
-                    })()
-                ) : isFetchingPlans && plans.length === 0 ? (
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 className="h-6 w-6 animate-spin text-accent" />
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-stretch">
-                        {plans.map((plan) => {
-                            const meta = getPlanDisplayMeta(plan.tier);
-                            const TierIcon = meta.icon;
-                            const ItemCheck = meta.checkIcon;
-                            const tierUpper = String(plan.tier || 'BASIC').toUpperCase() as
+                    {trialGatePlan ? (
+                        (() => {
+                            const gateTier = String(trialGatePlan.tier || 'BASIC').toUpperCase() as
                                 | 'BASIC'
                                 | 'PRO'
                                 | 'PREMIUM';
-                            const isCurrentTier = user?.tier === plan.tier;
-                            const tierTrialDays = TRIAL_DAYS_BY_TIER_CLIENT[tierUpper] ?? 0;
-                            const isTierWithTrialChoice = effectiveTrialAvailable && tierTrialDays > 0;
-                            const showTrialFreeBadge =
-                                isTierWithTrialChoice && trialOptionByTier[tierUpper] === 'TRIAL';
-
-                            const featuresList =
-                                plan.features && plan.features.length > 0
-                                    ? plan.features
-                                    : getDefaultFeaturesForTier(
-                                          plan.tier,
-                                          plan.aiDailyCredits ?? getDefaultCreditsForTier(plan.tier),
-                                          isEn,
-                                      );
-
-                            const ctaLabel =
-                                isCurrentTier && user?.tier !== 'FREE'
-                                    ? isEn
-                                        ? 'Current Plan'
-                                        : 'Plano Atual'
-                                    : showTrialFreeBadge
-                                      ? isEn
-                                          ? `Start ${tierTrialDays}-Day Free Trial`
-                                          : `Começar ${tierTrialDays} Dias Grátis`
-                                      : plan.tier === 'BASIC'
-                                        ? isEn
-                                            ? 'Start Basic'
-                                            : 'Assinar Básico'
-                                        : plan.tier === 'PRO'
-                                          ? isEn
-                                              ? 'Unlock Pro'
-                                              : 'Assinar Pro'
-                                          : isEn
-                                            ? 'Unlock Premium'
-                                            : 'Assinar Premium';
+                            const gateMeta = getPlanDisplayMeta(gateTier);
+                            const gateDays = TRIAL_DAYS_BY_TIER_CLIENT[gateTier] ?? 30;
+                            const renewalDateStr = formatPostTrialChargeDate(gateDays);
+                            const recurringUsd = getPrice(trialGatePlan).toFixed(2);
+                            const progressPct = hasSharedForTrial
+                                ? Math.round(((30 - shareCooldownSeconds) / 30) * 100)
+                                : 0;
+                            const canActivateNow =
+                                hasSharedForTrial && shareCooldownSeconds === 0 && !activatingTrialTier;
 
                             return (
-                                <div key={plan.id} className={meta.cardClass}>
-                                    {meta.badge && (
-                                        <div
-                                            className={`absolute top-0 right-0 text-[10px] font-black px-3 py-1 rounded-bl-xl tracking-wider ${meta.badge.bg}`}
-                                        >
-                                            {meta.badge.text}
+                                <div className="max-w-2xl mx-auto rounded-2xl bg-white p-4 sm:p-5 space-y-3.5 shadow-[0_14px_40px_-12px_rgba(15,23,42,0.12)]">
+                                    <div className="rounded-xl bg-amber-50/90 p-3 text-xs sm:text-sm space-y-1">
+                                        <div className="font-bold text-amber-700">
+                                            {isEn
+                                                ? `${gateMeta.title} Plan · ${gateDays}-Day Free Trial Summary`
+                                                : `Plano ${gateMeta.title} · Resumo do Teste Grátis de ${gateDays} Dias`}
                                         </div>
-                                    )}
-
-                                    <div>
-                                        <div className="text-center mb-4">
-                                            <div className="inline-flex items-center gap-1.5 mb-1.5">
-                                                <TierIcon className={`w-4 h-4 ${meta.accentText}`} />
-                                                <h3 className={`text-xl font-bold ${meta.accentText}`}>
-                                                    {meta.title}
-                                                </h3>
-                                            </div>
-
-                                            <div className="flex items-baseline justify-center gap-1.5">
-                                                {!showTrialFreeBadge &&
-                                                    getDiscountPercent(plan) > 0 &&
-                                                    plan.monthlyPrice > getPrice(plan) && (
-                                                        <span className="text-sm font-semibold text-fg-subtle line-through font-mono">
-                                                            ${plan.monthlyPrice.toFixed(2)}
-                                                        </span>
-                                                    )}
-                                                <div className="flex items-baseline gap-0.5">
-                                                    <span className="text-lg font-bold text-fg-subtle align-top mt-0.5">
-                                                        $
-                                                    </span>
-                                                    <span className="text-4xl font-extrabold text-fg font-mono tabular-nums">
-                                                        {showTrialFreeBadge
-                                                            ? '0.00'
-                                                            : getPrice(plan).toFixed(2)}
-                                                    </span>
-                                                    <span className="text-xs font-bold text-fg-subtle self-end mb-1.5">
-                                                        {showTrialFreeBadge
-                                                            ? isEn
-                                                                ? ` / ${tierTrialDays}d`
-                                                                : ` / ${tierTrialDays} dias`
-                                                            : isEn
-                                                              ? ' /mo'
-                                                              : ' /mês'}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {getDiscountPercent(plan) > 0 && !showTrialFreeBadge && (
-                                                <div className="mt-1 inline-flex items-center rounded-full bg-rose-500/12 border border-rose-500/25 px-2.5 py-0.5 text-[10px] font-bold text-rose-500">
-                                                    {billingCycle === 'MONTHLY'
-                                                        ? `Black Friday · -${getDiscountPercent(plan)}%`
-                                                        : isEn
-                                                          ? `Save ${getDiscountPercent(plan)}%`
-                                                          : `Economize ${getDiscountPercent(plan)}%`}
-                                                </div>
+                                        <p className="text-slate-700 leading-snug">
+                                            {isEn ? (
+                                                <>
+                                                    Today you pay <strong>$0.00</strong>. After{' '}
+                                                    <strong>{renewalDateStr}</strong>,{' '}
+                                                    <strong>${recurringUsd}/mo</strong> will be charged to
+                                                    continue using the plan.
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Hoje o acesso é gratuito (<strong>$0.00</strong>). Após o dia{' '}
+                                                    <strong>{renewalDateStr}</strong>, será cobrado{' '}
+                                                    <strong>${recurringUsd}/mês</strong> para continuar a usar o
+                                                    plano.
+                                                </>
                                             )}
-
-                                            {!showTrialFreeBadge && getCycleMonths(billingCycle) > 1 && (
-                                                <p className="text-[11px] text-fg-subtle mt-1 font-mono">
-                                                    {isEn
-                                                        ? `$${getCycleTotalUsd(plan).toFixed(2)} billed every ${getCycleMonths(billingCycle)} months`
-                                                        : `$${getCycleTotalUsd(plan).toFixed(2)} cobrado a cada ${getCycleMonths(billingCycle)} meses`}
-                                                </p>
-                                            )}
-
-                                            {isTierWithTrialChoice && (
-                                                <div className="mt-3 text-left">
-                                                    <label className="block text-[10px] font-bold uppercase tracking-wider text-fg-muted mb-1">
-                                                        {isEn ? 'Activation Mode' : 'Modalidade de Acesso'}
-                                                    </label>
-                                                    <select
-                                                        aria-label={isEn ? 'Activation Mode' : 'Modalidade de Acesso'}
-                                                        value={trialOptionByTier[tierUpper]}
-                                                        onChange={(e) => {
-                                                            const val = e.target.value as 'TRIAL' | 'PAID';
-                                                            setTrialOptionByTier((prev) => ({
-                                                                ...prev,
-                                                                [tierUpper]: val,
-                                                            }));
-                                                        }}
-                                                        className="w-full rounded-xl border border-emerald-500/40 bg-surface-2 px-3 py-2 text-xs font-semibold text-fg focus:outline-none focus:border-emerald-500"
-                                                    >
-                                                        <option value="TRIAL">
-                                                            {isEn
-                                                                ? `${tierTrialDays}-day free trial (Free access)`
-                                                                : `Período de teste ${tierTrialDays} dias (Grátis)`}
-                                                        </option>
-                                                        <option value="PAID">
-                                                            {isEn
-                                                                ? 'Direct paid subscription'
-                                                                : 'Assinar plano diretamente'}
-                                                        </option>
-                                                    </select>
-                                                    {showTrialFreeBadge && (
-                                                        <p className="mt-1.5 text-[10.5px] leading-snug text-amber-300 font-medium">
-                                                            {isEn
-                                                                ? `After ${formatPostTrialChargeDate(tierTrialDays)}, $${getPrice(plan).toFixed(2)}/mo is charged to continue.`
-                                                                : `Após ${formatPostTrialChargeDate(tierTrialDays)}, será cobrado $${getPrice(plan).toFixed(2)}/mês para continuar.`}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            <p className="text-fg-muted text-xs mt-2 min-h-[2rem]">
-                                                {plan.description || meta.subtitle}
-                                            </p>
-                                        </div>
-
-                                        <ul className="space-y-2.5 mb-5 text-xs text-fg-muted border-t border-line pt-4">
-                                            {featuresList.map((feature, idx) => (
-                                                <li key={idx} className="flex items-start gap-2">
-                                                    <ItemCheck
-                                                        className={`w-4 h-4 ${meta.checkColor} shrink-0 mt-0.5`}
-                                                    />
-                                                    <span>{feature}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
+                                        </p>
                                     </div>
 
-                                    <Button
-                                        variant={meta.btnVariant}
-                                        className="w-full py-2.5 text-xs sm:text-sm font-bold"
-                                        isLoading={activatingTrialTier === tierUpper}
-                                        disabled={isCurrentTier && user?.tier !== 'FREE'}
-                                        onClick={() => void handleSelectPlan(plan)}
-                                    >
-                                        {ctaLabel}
-                                    </Button>
+                                    <div className="space-y-2">
+                                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                            {isEn
+                                                ? 'Your Affiliate Invitation Link'
+                                                : 'Seu Link de Afiliado para Partilha'}
+                                        </label>
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                value={referralShareUrl}
+                                                className="flex-1 rounded-xl bg-slate-100 px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="secondary"
+                                                onClick={() => void handleTriggerTrialShare('copy')}
+                                                className="shrink-0 !border-0 bg-slate-200/80 hover:bg-slate-300/80 text-slate-900"
+                                            >
+                                                <Copy size={14} className="mr-1.5" />
+                                                {copiedShareLink
+                                                    ? isEn
+                                                        ? 'Copied!'
+                                                        : 'Copiado!'
+                                                    : isEn
+                                                      ? 'Copy Link'
+                                                      : 'Copiar Link'}
+                                            </Button>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-0.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleTriggerTrialShare('native')}
+                                                className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"
+                                            >
+                                                <Share2 size={13} />
+                                                <span>{isEn ? 'Share' : 'Partilhar'}</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleTriggerTrialShare('whatsapp')}
+                                                className="inline-flex items-center justify-center h-8 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold cursor-pointer"
+                                            >
+                                                WhatsApp
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleTriggerTrialShare('telegram')}
+                                                className="inline-flex items-center justify-center h-8 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-bold cursor-pointer"
+                                            >
+                                                Telegram
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleTriggerTrialShare('x')}
+                                                className="inline-flex items-center justify-center h-8 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+                                            >
+                                                X / Twitter
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleTriggerTrialShare('facebook')}
+                                                className="inline-flex items-center justify-center h-8 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold cursor-pointer"
+                                            >
+                                                Facebook
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl bg-slate-50 p-3 space-y-1.5">
+                                        <div className="flex items-center justify-between text-xs font-semibold gap-2">
+                                            <span className="inline-flex items-center gap-1.5 text-slate-800">
+                                                <Timer size={14} className="text-emerald-600 shrink-0" />
+                                                {!hasSharedForTrial
+                                                    ? isEn
+                                                        ? 'Step 1: Click a share button above to start the 30s unlock timer'
+                                                        : 'Passo 1: Clique em partilhar acima para iniciar a contagem de 30s'
+                                                    : shareCooldownSeconds > 0
+                                                      ? isEn
+                                                          ? `Verifying share... unlocking in ${shareCooldownSeconds}s`
+                                                          : `Validando partilha... liberação em ${shareCooldownSeconds}s`
+                                                      : isEn
+                                                        ? 'Verified! Your free trial button is unlocked.'
+                                                        : 'Partilha confirmada! Botão de teste gratuito liberado.'}
+                                            </span>
+                                            <span className="font-mono text-emerald-600 shrink-0">
+                                                {hasSharedForTrial ? `${shareCooldownSeconds}s` : '30s'}
+                                            </span>
+                                        </div>
+                                        <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                            <div
+                                                className="h-full bg-emerald-500 transition-all duration-500"
+                                                style={{ width: `${progressPct}%` }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => setTrialGatePlan(null)}
+                                            className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 cursor-pointer"
+                                        >
+                                            <ArrowLeft size={14} />
+                                            <span>{isEn ? 'Back to Plans' : 'Voltar aos Planos'}</span>
+                                        </button>
+
+                                        <Button
+                                            variant="brand"
+                                            className="flex-1 py-2 text-xs sm:text-sm font-bold !border-0 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 !text-white shadow-md shadow-emerald-600/20"
+                                            disabled={!canActivateNow || isPreparingShare}
+                                            isLoading={activatingTrialTier === gateTier}
+                                            onClick={() => void handleConfirmTrialActivation()}
+                                        >
+                                            {canActivateNow
+                                                ? isEn
+                                                    ? `Acquire ${gateDays}-Day Free Trial`
+                                                    : `Adquirir Teste de ${gateDays} Dias Grátis`
+                                                : hasSharedForTrial
+                                                  ? isEn
+                                                      ? `Unlocks in ${shareCooldownSeconds}s`
+                                                      : `Disponível em ${shareCooldownSeconds}s`
+                                                  : isEn
+                                                    ? 'Share Link First to Unlock'
+                                                    : 'Partilhe o Link para Desbloquear'}
+                                        </Button>
+                                    </div>
                                 </div>
                             );
-                        })}
-                    </div>
-                )}
+                        })()
+                    ) : isFetchingPlans && plans.length === 0 ? (
+                        <div className="flex items-center justify-center py-10">
+                            <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch">
+                            {plans.map((plan) => {
+                                const meta = getPlanDisplayMeta(plan.tier);
+                                const TierIcon = meta.icon;
+                                const ItemCheck = meta.checkIcon;
+                                const tierUpper = String(plan.tier || 'BASIC').toUpperCase() as
+                                    | 'BASIC'
+                                    | 'PRO'
+                                    | 'PREMIUM';
+                                const isCurrentTier = user?.tier === plan.tier;
+                                const tierTrialDays = TRIAL_DAYS_BY_TIER_CLIENT[tierUpper] ?? 0;
+                                const isTierWithTrialChoice = effectiveTrialAvailable && tierTrialDays > 0;
+                                const showTrialFreeBadge =
+                                    isTierWithTrialChoice && trialOptionByTier[tierUpper] === 'TRIAL';
+
+                                const featuresList = getDefaultFeaturesForTier(
+                                    plan.tier,
+                                    plan.aiDailyCredits ?? getDefaultCreditsForTier(plan.tier),
+                                    isEn,
+                                );
+
+                                const ctaLabel =
+                                    isCurrentTier && user?.tier !== 'FREE'
+                                        ? isEn
+                                            ? 'Current Plan'
+                                            : 'Plano Atual'
+                                        : showTrialFreeBadge
+                                          ? isEn
+                                              ? `Start ${tierTrialDays}-Day Free Trial`
+                                              : `Começar ${tierTrialDays} Dias Grátis`
+                                          : plan.tier === 'BASIC'
+                                            ? isEn
+                                                ? 'Start Basic'
+                                                : 'Assinar Básico'
+                                            : plan.tier === 'PRO'
+                                              ? isEn
+                                                  ? 'Unlock Pro'
+                                                  : 'Assinar Pro'
+                                              : isEn
+                                                ? 'Unlock Premium'
+                                                : 'Assinar Premium';
+
+                                return (
+                                    <div key={plan.id} className={meta.cardClass}>
+                                        {meta.badge && (
+                                            <div
+                                                className={`absolute top-2.5 right-2.5 text-[9px] font-black px-2.5 py-0.5 rounded-full tracking-wider ${meta.badge.bg}`}
+                                            >
+                                                {meta.badge.text}
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <div className="text-center mb-2.5">
+                                                <div className="inline-flex items-center gap-1.5 mb-1">
+                                                    <span className={`w-6 h-6 rounded-lg inline-flex items-center justify-center ${meta.iconWrapClass}`}>
+                                                        <TierIcon className="w-3.5 h-3.5" />
+                                                    </span>
+                                                    <h3 className={`text-base sm:text-lg font-extrabold ${meta.accentText}`}>
+                                                        {meta.title}
+                                                    </h3>
+                                                </div>
+
+                                                <div className="flex items-baseline justify-center gap-1.5">
+                                                    {!showTrialFreeBadge &&
+                                                        getDiscountPercent(plan) > 0 &&
+                                                        plan.monthlyPrice > getPrice(plan) && (
+                                                            <span className="text-xs font-semibold text-slate-400 line-through font-mono">
+                                                                ${plan.monthlyPrice.toFixed(2)}
+                                                            </span>
+                                                        )}
+                                                    <div className="flex items-baseline gap-0.5">
+                                                        <span className="text-sm sm:text-base font-bold text-slate-400 align-top mt-0.5">
+                                                            $
+                                                        </span>
+                                                        <span className="text-2xl sm:text-[30px] leading-none font-extrabold text-slate-900 font-mono tabular-nums">
+                                                            {showTrialFreeBadge
+                                                                ? '0.00'
+                                                                : getPrice(plan).toFixed(2)}
+                                                        </span>
+                                                        <span className="text-[11px] font-bold text-slate-400 self-end mb-0.5">
+                                                            {showTrialFreeBadge
+                                                                ? isEn
+                                                                    ? ` / ${tierTrialDays}d`
+                                                                    : ` / ${tierTrialDays} dias`
+                                                                : isEn
+                                                                  ? ' /mo'
+                                                                  : ' /mês'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {!showTrialFreeBadge && (getDiscountPercent(plan) > 0 || getCycleMonths(billingCycle) > 1) && (
+                                                    <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
+                                                        {getDiscountPercent(plan) > 0 && (
+                                                            <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-[10px] font-bold text-rose-600 leading-none">
+                                                                {isEn
+                                                                    ? `Save ${getDiscountPercent(plan)}%`
+                                                                    : `Economize ${getDiscountPercent(plan)}%`}
+                                                            </span>
+                                                        )}
+                                                        {getCycleMonths(billingCycle) > 1 && (
+                                                            <span className="text-[10.5px] text-slate-500 font-mono font-medium">
+                                                                {`$${getCycleTotalUsd(plan).toFixed(2)}/${getCycleMonths(billingCycle)}m`}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {isTierWithTrialChoice && (
+                                                    <div className="mt-2">
+                                                        <div
+                                                            role="group"
+                                                            aria-label={isEn ? 'Activation Mode' : 'Modalidade de Acesso'}
+                                                            className="grid grid-cols-2 gap-1 rounded-xl bg-emerald-50/90 p-1"
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setTrialOptionByTier((prev) => ({
+                                                                        ...prev,
+                                                                        [tierUpper]: 'TRIAL',
+                                                                    }))
+                                                                }
+                                                                className={`rounded-lg py-1 px-1.5 text-[10.5px] font-bold transition-all cursor-pointer truncate ${
+                                                                    trialOptionByTier[tierUpper] === 'TRIAL'
+                                                                        ? 'bg-emerald-600 text-white shadow-xs'
+                                                                        : 'text-emerald-800/70 hover:text-emerald-900'
+                                                                }`}
+                                                            >
+                                                                {isEn ? `${tierTrialDays}d Free` : `${tierTrialDays}d Grátis`}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setTrialOptionByTier((prev) => ({
+                                                                        ...prev,
+                                                                        [tierUpper]: 'PAID',
+                                                                    }))
+                                                                }
+                                                                className={`rounded-lg py-1 px-1.5 text-[10.5px] font-bold transition-all cursor-pointer truncate ${
+                                                                    trialOptionByTier[tierUpper] === 'PAID'
+                                                                        ? 'bg-white text-slate-900 shadow-xs'
+                                                                        : 'text-slate-600 hover:text-slate-900'
+                                                                }`}
+                                                            >
+                                                                {isEn ? 'Pay Direct' : 'Assinar Direto'}
+                                                            </button>
+                                                        </div>
+                                                        {showTrialFreeBadge && (
+                                                            <p className="mt-1 text-[10px] leading-tight text-amber-700 font-medium">
+                                                                {isEn
+                                                                    ? `After ${formatPostTrialChargeDate(tierTrialDays)}: $${getPrice(plan).toFixed(2)}/mo`
+                                                                    : `Após ${formatPostTrialChargeDate(tierTrialDays)}: $${getPrice(plan).toFixed(2)}/mês`}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                <p className="text-slate-500 text-[11px] leading-snug mt-1.5">
+                                                    {meta.subtitle}
+                                                </p>
+                                            </div>
+
+                                            <ul className="space-y-1.5 mb-3 text-[11.5px] leading-snug text-slate-600 pt-2">
+                                                {featuresList.map((feature, idx) => (
+                                                    <li key={idx} className="flex items-start gap-1.5">
+                                                        <ItemCheck
+                                                            className={`w-3.5 h-3.5 ${meta.checkColor} shrink-0 mt-0.5`}
+                                                        />
+                                                        <span>{feature}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+
+                                        <Button
+                                            variant={meta.btnVariant}
+                                            className={`w-full py-2 text-xs font-bold min-h-[38px] ${meta.btnClass}`}
+                                            isLoading={activatingTrialTier === tierUpper}
+                                            disabled={isCurrentTier && user?.tier !== 'FREE'}
+                                            onClick={() => void handleSelectPlan(plan)}
+                                        >
+                                            {ctaLabel}
+                                        </Button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );

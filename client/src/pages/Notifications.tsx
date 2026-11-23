@@ -11,6 +11,8 @@ import {
     CheckCircle2,
     Clock,
     ArrowRight,
+    Copy,
+    QrCode,
 } from 'lucide-react';
 import api from '../api';
 import {
@@ -144,11 +146,32 @@ const TraderHealthScore = ({
     );
 };
 
-const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
+const NotificationItem = ({ item, onRead, onDelete, onResolve, onOpenCheckout }: any) => {
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const isAlert = 'severity' in item;
     const isMuted = Boolean(item.read || item.resolved);
+    const [copiedWallet, setCopiedWallet] = useState(false);
+    const [showQr, setShowQr] = useState(true);
+    const cryptoMeta = !isAlert && item.metadata?.kind === 'crypto_payment' ? item.metadata : null;
+    const pixMeta = !isAlert && item.metadata?.kind === 'pix_payment' ? item.metadata : null;
+
+    const handleCopyWallet = async (wallet: string) => {
+        try {
+            await navigator.clipboard.writeText(wallet);
+        } catch {
+            const el = document.createElement('textarea');
+            el.value = wallet;
+            el.style.position = 'fixed';
+            el.style.opacity = '0';
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+        }
+        setCopiedWallet(true);
+        window.setTimeout(() => setCopiedWallet(false), 2500);
+    };
 
     const getIcon = (type: string, severity?: string) => {
         if (severity === 'CRITICAL') return <AlertTriangle className="text-danger-fg" size={16} />;
@@ -254,6 +277,143 @@ const NotificationItem = ({ item, onRead, onDelete, onResolve }: any) => {
                         {isAlert ? item.description : item.message}
                     </p>
 
+                    {cryptoMeta && (
+                        <div className="mt-2 p-3 rounded-xl bg-surface border border-amber-500/30 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <span className="font-bold text-amber-600 dark:text-amber-400">
+                                    {cryptoMeta.cryptoAmount} {cryptoMeta.cryptoCurrency} · {cryptoMeta.network}
+                                </span>
+                                <span className="font-mono text-fg-subtle">
+                                    Ref: {cryptoMeta.reference}
+                                </span>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                                {cryptoMeta.qrCodeDataUrl && showQr && (
+                                    <div className="p-1.5 bg-white rounded-lg border border-slate-200 shrink-0">
+                                        <img
+                                            src={cryptoMeta.qrCodeDataUrl}
+                                            alt="QR Code"
+                                            className="w-24 h-24 object-contain block"
+                                        />
+                                    </div>
+                                )}
+                                <div className="flex-1 min-w-0 space-y-2 w-full">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+                                        {isEn ? 'Payment Wallet ID' : 'ID da Carteira de Pagamento'}
+                                    </div>
+                                    <div className="font-mono text-[11px] font-bold text-fg bg-canvas-subtle border border-line rounded-lg p-2 break-all select-all">
+                                        {cryptoMeta.walletAddress}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleCopyWallet(cryptoMeta.walletAddress)}
+                                            className="h-7 px-2.5 rounded-lg text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                        >
+                                            {copiedWallet ? <Check size={12} /> : <Copy size={12} />}
+                                            <span>
+                                                {copiedWallet
+                                                    ? isEn
+                                                        ? 'Wallet Copied!'
+                                                        : 'Carteira Copiada!'
+                                                    : isEn
+                                                      ? 'Copy Wallet ID'
+                                                      : 'Copiar ID da Carteira'}
+                                            </span>
+                                        </button>
+                                        {cryptoMeta.qrCodeDataUrl && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowQr((v) => !v)}
+                                                className="h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-canvas-subtle hover:bg-surface-2 border border-line text-fg inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                            >
+                                                <QrCode size={12} />
+                                                <span>
+                                                    {showQr
+                                                        ? isEn
+                                                            ? 'Hide QR'
+                                                            : 'Ocultar QR'
+                                                        : isEn
+                                                          ? 'Show QR'
+                                                          : 'Ver QR'}
+                                                </span>
+                                            </button>
+                                        )}
+                                        {cryptoMeta.checkoutUrl && onOpenCheckout && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onOpenCheckout(cryptoMeta.checkoutUrl)}
+                                                className="h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                            >
+                                                <span>{isEn ? 'Open Checkout' : 'Abrir Checkout'}</span>
+                                                <ArrowRight size={11} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {pixMeta && (
+                        <div className="mt-2 p-3 rounded-xl bg-surface border border-teal-500/30 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <span className="font-bold text-teal-600 dark:text-teal-400">
+                                    PIX · ${Number(pixMeta.amountUsd || 0).toFixed(2)} USD
+                                </span>
+                                <span className="font-mono text-fg-subtle">
+                                    Ref: {pixMeta.reference}
+                                </span>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                                {pixMeta.qrCodeDataUrl && showQr && (
+                                    <div className="p-1.5 bg-white rounded-lg border border-slate-200 shrink-0">
+                                        <img
+                                            src={pixMeta.qrCodeDataUrl}
+                                            alt="QR Code PIX"
+                                            className="w-24 h-24 object-contain block"
+                                        />
+                                    </div>
+                                )}
+                                <div className="flex-1 min-w-0 space-y-2 w-full">
+                                    <div className="font-mono text-[11px] text-fg bg-canvas-subtle border border-line rounded-lg p-2 break-all line-clamp-2 select-all">
+                                        {pixMeta.emvCode}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleCopyWallet(pixMeta.emvCode)}
+                                            className="h-7 px-2.5 rounded-lg text-[11px] font-bold bg-teal-600 hover:bg-teal-500 text-white inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                                        >
+                                            {copiedWallet ? <Check size={12} /> : <Copy size={12} />}
+                                            <span>
+                                                {copiedWallet
+                                                    ? isEn
+                                                        ? 'PIX Copied!'
+                                                        : 'PIX Copiado!'
+                                                    : isEn
+                                                      ? 'Copy PIX Code'
+                                                      : 'Copiar Código PIX'}
+                                            </span>
+                                        </button>
+                                        {pixMeta.checkoutUrl && onOpenCheckout && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onOpenCheckout(pixMeta.checkoutUrl)}
+                                                className="h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                            >
+                                                <span>{isEn ? 'Open Checkout' : 'Abrir Checkout'}</span>
+                                                <ArrowRight size={11} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {isAlert && item.metadata && Object.keys(item.metadata).length > 0 && (
                         <div className="flex flex-wrap gap-2 pt-1">
                             {Object.entries(item.metadata).map(([key, value]: [string, any]) => (
@@ -342,6 +502,7 @@ export const Notifications = () => {
                     type: n.type?.toLowerCase() || 'system',
                     title: n.title,
                     message: n.message,
+                    metadata: n.metadata || null,
                     read: n.isRead,
                     createdAt: n.createdAt,
                 }))
@@ -521,6 +682,7 @@ export const Notifications = () => {
                                 onRead={markAsRead}
                                 onDelete={deleteItem}
                                 onResolve={resolveAlert}
+                                onOpenCheckout={(url: string) => navigate(url)}
                             />
                         ))
                     ) : (

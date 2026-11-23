@@ -4,6 +4,11 @@ import { X, Sparkles, KeyRound, RefreshCw, Smartphone, ShieldAlert, Clock } from
 import api from '../../api';
 import { useLocale } from '../../context/LocaleContext';
 import { trackButtonClick } from '../../lib/tracking';
+import {
+    FALLBACK_WORKSPACE_PLANS,
+    normalizeWorkspacePlansCatalog,
+} from '../../lib/pricingPlans';
+import { openWorkspacePlansModal } from '../../lib/planGate';
 
 interface PlanModalProps {
     type: 'NO_ACTIVE_PLAN' | 'UPGRADE_REQUIRED' | 'RENEWAL_CONFIRMATION' | 'PLAN_EXPIRED' | 'NEAR_EXPIRATION_WARNING';
@@ -43,10 +48,10 @@ export const PlanModal = ({
         }
     }, [type, planTier, daysLeft]);
 
-    // Dynamic redirection for Upgrade or Plan Selection (centered dashboard modal)
+    // Dynamic redirection for Upgrade or Plan Selection (opens centered modal in current view)
     const handleRedirectToPricing = () => {
         if (onClose) onClose();
-        navigate('/dashboard?plans=1');
+        openWorkspacePlansModal('plan_modal_upgrade', { type, planTier });
     };
 
     const handleConfirmRenewal = async () => {
@@ -91,37 +96,25 @@ export const PlanModal = ({
         if (onClose) onClose();
         setIsRenewing(true);
         try {
-            const pricingRes = await api.get('/payment/pricing-config');
-            const pricingConfig = pricingRes.data;
-            const isPremium = planTier === 'PREMIUM';
-            const isPro = planTier === 'PRO';
-            const targetTier = isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'BASIC';
-            const monthlyPrice = isPremium
-                ? Number(pricingConfig.premiumPrice)
-                : isPro
-                  ? Number(pricingConfig.proPrice ?? pricingConfig.premiumPrice)
-                  : Number(pricingConfig.basicoPrice);
-            
-            // Map plan details matching backend structure
-            const plan = {
-                id: isPremium ? '3' : isPro ? '2' : '1',
-                tier: targetTier,
-                monthlyPrice,
-                annualDiscountPercent: 20,
-                trialEnabled: isPro || isPremium,
-                trialDays: isPro || isPremium ? 7 : 0
-            };
+            const plansRes = await api.get('/payment/plans').catch(() => ({ data: FALLBACK_WORKSPACE_PLANS }));
+            const catalog = normalizeWorkspacePlansCatalog(
+                Array.isArray(plansRes.data) && plansRes.data.length > 0
+                    ? plansRes.data
+                    : FALLBACK_WORKSPACE_PLANS,
+                isEn,
+            );
+            const targetTier = planTier === 'PREMIUM' ? 'PREMIUM' : planTier === 'PRO' ? 'PRO' : 'BASIC';
+            const plan = catalog.find((p) => p.tier === targetTier) || catalog[0];
 
             navigate('/checkout', {
                 state: {
                     plan,
                     billingCycle: 'MONTHLY',
-                    pricingConfig
-                }
+                },
             });
         } catch (error) {
-            console.error("Failed to redirect to checkout:", error);
-            navigate('/dashboard?plans=1');
+            console.error('Failed to redirect to checkout:', error);
+            openWorkspacePlansModal('plan_modal_renewal_fallback', { planTier });
         } finally {
             setIsRenewing(false);
         }

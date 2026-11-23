@@ -4,6 +4,11 @@ import {
     getStoredUserPlanTier,
     openWorkspacePlansModal,
 } from '../lib/planGate';
+import {
+    clearOfflineSessionKey,
+    decryptOfflineValue,
+    encryptOfflineValue,
+} from '../lib/offlineCrypto';
 
 const DB_NAME = 'torex_offline_db_v1';
 const DB_VERSION = 2;
@@ -324,13 +329,15 @@ export async function saveHttpGetCache(
     const db = await openOfflineDatabase();
     if (!db) return;
 
+    const encryptedData = await encryptOfflineValue(userScope, data);
+
     const record: HttpGetCacheRecord = {
         cacheKey: buildHttpCacheKey(userScope, urlPath, paramsKey, accountScope),
         userScope,
         urlPath,
         paramsKey,
         accountScope: accountScope || 'all',
-        data,
+        data: encryptedData,
         updatedAt: Date.now(),
     };
 
@@ -356,7 +363,7 @@ export async function readHttpGetCache(
     if (!db) return null;
 
     const cacheKey = buildHttpCacheKey(userScope, urlPath, paramsKey, accountScope);
-    return new Promise((resolve) => {
+    const rawRec = await new Promise<HttpGetCacheRecord | null>((resolve) => {
         try {
             const tx = db.transaction(STORE_HTTP_GET_CACHE, 'readonly');
             const req = tx.objectStore(STORE_HTTP_GET_CACHE).get(cacheKey);
@@ -366,6 +373,10 @@ export async function readHttpGetCache(
             resolve(null);
         }
     });
+    if (!rawRec) return null;
+    const decrypted = await decryptOfflineValue(userScope, rawRec.data);
+    if (decrypted === null && rawRec.data !== null) return null;
+    return { ...rawRec, data: decrypted };
 }
 
 export async function mutateHttpGetCacheByPrefix(
@@ -391,19 +402,28 @@ export async function mutateHttpGetCacheByPrefix(
     const matches = allUserRecords.filter((r) => r.urlPath.startsWith(urlPrefix));
     if (matches.length === 0) return;
 
+    const updatedRows: HttpGetCacheRecord[] = [];
+    for (const rec of matches) {
+        const plainData = await decryptOfflineValue(userScope, rec.data);
+        if (plainData === null && rec.data !== null) continue;
+        const nextData = mutatorFn({ ...rec, data: plainData });
+        if (nextData !== undefined) {
+            const encryptedNext = await encryptOfflineValue(userScope, nextData);
+            updatedRows.push({
+                ...rec,
+                data: encryptedNext,
+                updatedAt: Date.now(),
+            });
+        }
+    }
+    if (updatedRows.length === 0) return;
+
     await new Promise<void>((resolve) => {
         try {
             const tx = db.transaction(STORE_HTTP_GET_CACHE, 'readwrite');
             const store = tx.objectStore(STORE_HTTP_GET_CACHE);
-            for (const rec of matches) {
-                const nextData = mutatorFn(rec);
-                if (nextData !== undefined) {
-                    store.put({
-                        ...rec,
-                        data: nextData,
-                        updatedAt: Date.now(),
-                    });
-                }
+            for (const row of updatedRows) {
+                store.put(row);
             }
             tx.oncomplete = () => resolve();
             tx.onerror = () => resolve();
@@ -1420,9 +1440,11 @@ export async function saveUserProfileInIDB(
     if (!db || !userScope || userScope === 'anon' || !profile) return;
 
     const existing = await getUserProfileFromIDB(userScope);
+    const mergedProfile = { ...(existing || {}), ...profile };
+    const encryptedProfile = await encryptOfflineValue(userScope, mergedProfile);
     const record: StoredUserProfileRecord = {
         userScope,
-        profile: { ...(existing || {}), ...profile },
+        profile: encryptedProfile,
         updatedAt: Date.now(),
     };
 
@@ -1444,19 +1466,57 @@ export async function getUserProfileFromIDB(
     const db = await openOfflineDatabase();
     if (!db || !userScope || userScope === 'anon') return null;
 
-    return new Promise((resolve) => {
+    const rawRec = await new Promise<StoredUserProfileRecord | null>((resolve) => {
         try {
             const tx = db.transaction(STORE_ENTITIES_USER_PROFILE, 'readonly');
             const req = tx
                 .objectStore(STORE_ENTITIES_USER_PROFILE)
                 .get(userScope);
             req.onsuccess = () => {
-                const rec = req.result as StoredUserProfileRecord | undefined;
-                resolve(rec?.profile || null);
+                resolve((req.result as StoredUserProfileRecord) || null);
             };
             req.onerror = () => resolve(null);
         } catch {
             resolve(null);
         }
     });
+    if (!rawRec?.profile) return null;
+    return decryptOfflineValue<Record<string, any>>(userScope, rawRec.profile);
+}
+
+/**
+ * Atomically wipes all local offline IndexedDB data, encryption session keys,
+ * and runtime Service Worker API caches on logout or account switch.
+ */
+export async function wipeAllOfflineData(): Promise<void> {
+    clearOfflineSessionKey();
+    try {
+        if (dbPromise) {
+            const db = await dbPromise.catch(() => null);
+            db?.close();
+            dbPromise = null;
+        }
+        if (typeof window !== 'undefined' && 'indexedDB' in window) {
+            await new Promise<void>((resolve) => {
+                try {
+                    const req = window.indexedDB.deleteDatabase(DB_NAME);
+                    req.onsuccess = () => resolve();
+                    req.onerror = () => resolve();
+                    req.onblocked = () => resolve();
+                } catch {
+                    resolve();
+                }
+            });
+        }
+        if (typeof caches !== 'undefined' && typeof caches.keys === 'function') {
+            const keys = await caches.keys();
+            await Promise.all(
+                keys
+                    .filter((k) => k.includes('torex') || k.includes('api') || k.includes('uploads'))
+                    .map((k) => caches.delete(k).catch(() => false)),
+            );
+        }
+    } catch {
+        // Ignore cleanup failures
+    }
 }

@@ -1,11 +1,10 @@
-import { useNavigate } from 'react-router-dom';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { ShieldAlert, Rocket, ArrowRight } from 'lucide-react';
 import { useLocale } from '../../context/LocaleContext';
+import { openWorkspacePlansModal } from '../../lib/planGate';
 
 export const PlanRequiredOverlay = () => {
-    const navigate = useNavigate();
     const { locale } = useLocale();
     const isEn = locale === 'en';
 
@@ -30,7 +29,7 @@ export const PlanRequiredOverlay = () => {
                         <Button
                             variant="gradient"
                             className="w-full py-6 text-lg group"
-                            onClick={() => navigate('/dashboard?plans=1')}
+                            onClick={() => openWorkspacePlansModal('plan_required_overlay_primary')}
                         >
                             {isEn ? 'Choose Your Plan' : 'Escolher meu Plano'}
                             <Rocket className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
@@ -39,7 +38,7 @@ export const PlanRequiredOverlay = () => {
                         <Button
                             variant="secondary"
                             className="w-full py-6 border-line-strong text-fg/80 hover:bg-surface-2"
-                            onClick={() => navigate('/dashboard?plans=1')}
+                            onClick={() => openWorkspacePlansModal('plan_required_overlay_view_plans')}
                         >
                             {isEn ? 'View Available Plans' : 'Ver Planos Disponíveis'}
                             <ArrowRight className="w-5 h-5 ml-2" />

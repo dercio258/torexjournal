@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { init, dispose, Chart, KLineData } from 'klinecharts';
 import { SymbolInfo, Period } from '@klinecharts/pro';
-import { CustomKLineDatafeed } from '../../../services/klineDatafeed';
+import { CustomKLineDatafeed, periodToMs } from '../../../services/klineDatafeed';
 import { TIMEFRAMES, findTimeframeByText } from '../types';
 import { ChartLayoutMode } from '../layers/TopToolbarLayer';
 import { DrawnObjectItem, RightDrawerMode } from '../layers/RightSidePanelLayer';
@@ -9,6 +9,7 @@ import { DrawingStyleState, OverlayPointCoord } from '../layers/DrawingStyleTool
 import {
     buildOverlayStylesPayload,
     DEFAULT_DRAWING_STYLE,
+    estimateBarIntervalMs,
     resolveOverlayPointsAgainstCandles,
 } from './drawingOverlayUtils';
 
@@ -64,9 +65,11 @@ export function useMultiPaneCharts({
     const auxCleanupsRef = useRef<(null | (() => void))[]>([null, null, null]);
     const auxOrderOverlayIdsRef = useRef<[string[], string[], string[]]>([[], [], []]);
     const auxMirroredOverlayIdsRef = useRef<[string[], string[], string[]]>([[], [], []]);
+    const auxSyncGenRef = useRef<number>(0);
 
     const [layoutMode, setLayoutMode] = useState<ChartLayoutMode>(initialLayoutMode);
     const [focusedPaneIndex, setFocusedPaneIndex] = useState<number>(0);
+    const [auxDataSyncTick, setAuxDataSyncTick] = useState<number>(0);
 
     const [secondaryPeriod, setSecondaryPeriod] = useState<Period>(() => {
         if (initialSecondaryPeriodText) {
@@ -120,22 +123,31 @@ export function useMultiPaneCharts({
             const df = datafeedRef.current;
             if (!df || auxPaneCount <= 0) return;
 
+            const syncGen = ++auxSyncGenRef.current;
+            const effectiveCutoff = syncEnabled ? (cutoffTs ?? df.getReplayTimestamp() ?? null) : null;
+
+            let updatedAny = false;
             await Promise.all(
                 Array.from({ length: auxPaneCount }).map(async (_, auxIdx) => {
                     const auxChart = auxChartRefs.current[auxIdx];
                     if (!auxChart) return;
                     const panePeriod = auxPeriods[auxIdx] || TIMEFRAMES[0];
-                    auxChart.setPriceVolumePrecision(sym.pricePrecision ?? 2, sym.volumePrecision ?? 0);
                     const bars = await df.getHistorySlicedAtTimestamp(
                         sym,
                         panePeriod,
-                        syncEnabled ? cutoffTs : null
+                        effectiveCutoff
                     );
+                    if (syncGen !== auxSyncGenRef.current) return;
                     if (auxChartRefs.current[auxIdx] === auxChart) {
+                        auxChart.setPriceVolumePrecision(sym.pricePrecision ?? 2, sym.volumePrecision ?? 0);
                         auxChart.applyNewData(bars, bars.length > 0);
+                        updatedAny = true;
                     }
                 })
             );
+            if (syncGen === auxSyncGenRef.current && updatedAny) {
+                setAuxDataSyncTick((t) => t + 1);
+            }
         },
         [datafeedRef, auxPaneCount, auxPeriods, syncEnabled]
     );
@@ -206,11 +218,6 @@ export function useMultiPaneCharts({
             chartRef.current?.resize();
             auxChartRefs.current.forEach((c) => c?.resize());
         });
-
-        const cutoffTs = datafeedRef.current?.getReplayTimestamp() || latestBar?.timestamp || null;
-        if (auxPaneCount > 0) {
-            void syncAllAuxCharts(currentSymbol, cutoffTs);
-        }
     }, [auxPaneCount, layoutMode]);
 
     // Dispose any active auxiliary charts on component unmount
@@ -223,13 +230,13 @@ export function useMultiPaneCharts({
         };
     }, []);
 
-    // Update Auxiliary Charts when symbol, pane timeframes, sync toggle, or replay timestamp changes
+    // Update Auxiliary Charts when symbol, pane timeframes, layout, sync toggle, or replay timestamp changes
     useEffect(() => {
         if (auxPaneCount > 0) {
             const cutoffTs = datafeedRef.current?.getReplayTimestamp() || latestBar?.timestamp || null;
             void syncAllAuxCharts(currentSymbol, cutoffTs);
         }
-    }, [auxPaneCount, currentSymbol, auxPeriods, latestBar?.timestamp, syncEnabled, syncAllAuxCharts, datafeedRef]);
+    }, [auxPaneCount, layoutMode, currentSymbol, auxPeriods, latestBar?.timestamp, syncEnabled, syncAllAuxCharts, datafeedRef]);
 
     useEffect(() => {
         [chartRef.current, ...auxChartRefs.current].forEach((c) => {
@@ -267,13 +274,18 @@ export function useMultiPaneCharts({
             const auxCandles = auxChart.getDataList() || [];
             if (auxCandles.length === 0) continue;
 
+            const panePeriod = auxPeriods[i] || TIMEFRAMES[0];
+            const paneStepMs = estimateBarIntervalMs(auxCandles, periodToMs(panePeriod));
             const nextIds: string[] = [];
             drawnItems.forEach((item) => {
                 if (item.visible === false) return;
                 const rawPts = geoms[item.id];
                 if (!Array.isArray(rawPts) || rawPts.length === 0) return;
                 const styleState = drawingStylesById[item.id] || DEFAULT_DRAWING_STYLE;
-                const resolvedPts = resolveOverlayPointsAgainstCandles(rawPts, auxCandles);
+                const resolvedPts = resolveOverlayPointsAgainstCandles(rawPts, auxCandles, {
+                    stepMs: paneStepMs,
+                    forChartMount: true,
+                });
                 const created = auxChart.createOverlay({
                     name: item.name,
                     points: resolvedPts as any,
@@ -289,6 +301,7 @@ export function useMultiPaneCharts({
         }
     }, [
         auxPaneCount,
+        auxDataSyncTick,
         syncEnabled,
         drawingsVisible,
         drawnItems,
@@ -310,6 +323,7 @@ export function useMultiPaneCharts({
         auxPaneCount,
         auxPeriods,
         panePeriods,
+        auxDataSyncTick,
         gridLayoutClass,
         auxChartDivRefs,
         auxChartRefs,

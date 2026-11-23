@@ -63,7 +63,7 @@ export const AdminFinance = () => {
             icon: DollarSign,
             color: 'text-emerald-500',
             bg: 'bg-emerald-500/10',
-            description: 'M-Pesa, e-Mola e Cartões'
+            description: 'M-Pesa, e-Mola, Cartões, PayFast, PIX e Cripto'
         },
         {
             label: 'Assinantes Ativos',
@@ -215,17 +215,23 @@ export const AdminFinance = () => {
 
     // Payment Methods Pie Chart
     const paymentMethodsChartData = {
-        labels: ['M-Pesa (MZN)', 'e-Mola (MZN)', 'Cartão (USD/MZN)'],
+        labels: ['M-Pesa', 'e-Mola', 'Visa / Mastercard', 'PayFast', 'PIX', 'Criptomoeda'],
         datasets: [{
             data: [
                 stats?.paymentMethods?.mpesa || 0,
                 stats?.paymentMethods?.emola || 0,
                 stats?.paymentMethods?.card || 0,
+                stats?.paymentMethods?.payfast || 0,
+                stats?.paymentMethods?.pix || 0,
+                stats?.paymentMethods?.crypto || 0,
             ],
             backgroundColor: [
-                '#e11d48', // Rose / Red (M-Pesa)
-                '#0284c7', // Sky Blue (e-Mola)
-                '#8b5cf6', // Violet (Cartão)
+                '#e11d48', // M-Pesa
+                '#0284c7', // e-Mola
+                '#8b5cf6', // Visa / Mastercard
+                '#f43f5e', // PayFast
+                '#14b8a6', // PIX
+                '#f59e0b', // Criptomoeda
             ],
             borderWidth: 1,
             borderColor: ct.background

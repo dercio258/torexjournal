@@ -4,7 +4,6 @@ import {
     CheckCircle2,
     CloudUpload,
     Crown,
-    Lock,
     RefreshCw,
     RotateCcw,
     Trash2,
@@ -19,6 +18,7 @@ import {
     canUseReplayOfflineMode,
     openWorkspacePlansModal,
 } from '../../lib/planGate';
+import { UpgradeBadge } from '../subscription/UpgradeBadge';
 
 export const OfflineSyncIndicator: React.FC = () => {
     const { user } = useAuth();
@@ -89,29 +89,37 @@ export const OfflineSyncIndicator: React.FC = () => {
                 <button
                     type="button"
                     onClick={() => setOpen((prev) => !prev)}
-                    className="h-7 px-2 rounded-lg border border-amber-500/40 bg-amber-500/15 text-amber-400 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer focus:outline-none"
+                    className="h-7 px-2 rounded-lg border border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer focus:outline-none"
                     title={
                         isEn
                             ? 'Offline Mode requires Pro or Premium plan'
                             : 'Modo Offline disponível nos planos Pro e Premium'
                     }
                 >
-                    <Lock size={11} className="shrink-0" />
+                    <Crown size={11} className="shrink-0 text-amber-400" />
                     <span className="hidden xs:inline whitespace-nowrap">
-                        {isEn ? 'Offline (PRO)' : 'Offline (PRO)'}
+                        {isEn ? 'Upgrade · Offline' : 'Upgrade · Offline'}
                     </span>
                 </button>
 
                 {open && (
                     <div className="absolute right-0 mt-2 w-72 rounded-xl bg-surface border border-line-strong shadow-panel backdrop-blur-xl z-50 overflow-hidden animate-fade-in-up p-3.5 space-y-2.5 text-xs">
-                        <div className="flex items-center gap-2 font-bold text-fg">
-                            <Lock size={14} className="text-amber-400 shrink-0" />
-                            <span>{isEn ? 'Offline Mode Locked' : 'Modo Offline Bloqueado'}</span>
+                        <div className="flex items-center justify-between gap-2 font-bold text-fg">
+                            <span>{isEn ? 'Offline Mode (Pro+)' : 'Modo Offline (Pro/Premium)'}</span>
+                            <UpgradeBadge
+                                variant="pill"
+                                tierLabel="PRO"
+                                asButton
+                                onClick={() => {
+                                    setOpen(false);
+                                    openWorkspacePlansModal('offline_indicator_basic');
+                                }}
+                            />
                         </div>
                         <p className="text-[11px] text-fg-muted leading-relaxed">
                             {isEn
-                                ? 'Basic plan operates online only. Upgrade to Pro for offline access in all sections except Trade Replay, or Premium for full offline mode including Trade Replay.'
-                                : 'O pacote Básico opera apenas online. Atualize para o Pro (Offline em todas as secções exceto Trade Replay) ou Premium (Offline completo até no Replay).'}
+                                ? 'Basic plan operates online only. Upgrade to Pro or Premium to unlock Offline Mode.'
+                                : 'O pacote Básico opera apenas online. Atualize para o Plano Pro ou Premium para ativar o Modo Offline.'}
                         </p>
                         <button
                             type="button"

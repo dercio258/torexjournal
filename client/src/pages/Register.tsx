@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Gift, Globe2, Lock, Mail, User } from 'lucide-react';
 import { useLocale } from '../context/LocaleContext';
@@ -7,6 +7,8 @@ import { AuthLayout } from '../layouts/AuthLayout';
 import { AuthCard } from '../components/auth/AuthCard';
 import { AuthAside } from '../components/auth/AuthAside';
 import { OAuthButtons } from '../components/auth/OAuthButtons';
+import { CloudflareTurnstile } from '../components/auth/CloudflareTurnstile';
+import { PasswordStrengthChecklist } from '../components/auth/PasswordStrengthChecklist';
 import { CookieConsentBanner } from '../components/legal/CookieConsentBanner';
 import { Input } from '../components/ui/Input';
 import { PasswordInput } from '../components/ui/PasswordInput';
@@ -14,7 +16,11 @@ import { PhoneInput } from '../components/ui/PhoneInput';
 import { Checkbox } from '../components/ui/Checkbox';
 import { Button } from '../components/ui/Button';
 import { Alert } from '../components/ui/Alert';
-import { EMAIL_RE, MIN_PASSWORD_LENGTH, getApiMessage, getRegisterErrorMessage } from '../lib/authErrors';
+import { getApiMessage, getRegisterErrorMessage } from '../lib/authErrors';
+import {
+    evaluatePasswordStrength,
+    validateRegistrationEmailClient,
+} from '../lib/registrationValidation';
 import {
     getAttributionPayload,
     getLightweightClientMetadata,
@@ -68,6 +74,9 @@ export const Register = () => {
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileRequired, setTurnstileRequired] = useState(false);
+    const [turnstileReset, setTurnstileReset] = useState(0);
 
     const manualSelectionRef = useRef(false);
     const autoResolvedIsoRef = useRef<string | null>(null);
@@ -138,13 +147,24 @@ export const Register = () => {
         }
     };
 
+    const passwordEvaluation = useMemo(
+        () =>
+            evaluatePasswordStrength(form.password, {
+                name: form.name,
+                email: form.email,
+                contact: form.contact,
+            }),
+        [form.password, form.name, form.email, form.contact],
+    );
+
     const validate = (): FieldErrors => {
         const errors: FieldErrors = {};
         if (!form.name.trim() || form.name.trim().length < 2) {
             errors.name = isEn ? 'Enter your full name.' : 'Informe seu nome completo.';
         }
-        if (!EMAIL_RE.test(form.email.trim())) {
-            errors.email = isEn ? 'Enter a valid email address.' : 'Informe um e-mail válido.';
+        const emailErr = validateRegistrationEmailClient(form.email, isEn ? 'en' : 'pt');
+        if (emailErr) {
+            errors.email = emailErr;
         }
         const phoneCheck = validatePhoneForCountry(form.contact, selectedCountry);
         if (!phoneCheck.valid) {
@@ -152,10 +172,10 @@ export const Register = () => {
                 ? phoneCheck.errorEn || 'Enter a valid phone number with country prefix.'
                 : phoneCheck.errorPt || 'Informe um número válido com o prefixo do país.';
         }
-        if (form.password.length < MIN_PASSWORD_LENGTH) {
+        if (!passwordEvaluation.valid) {
             errors.password = isEn
-                ? `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
-                : `A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
+                ? passwordEvaluation.errorEn || 'Password does not meet security requirements.'
+                : passwordEvaluation.errorPt || 'A senha não cumpre os requisitos de segurança.';
         }
         if (!terms) {
             errors.terms = isEn
@@ -181,6 +201,23 @@ export const Register = () => {
             return;
         }
 
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setError(
+                isEn
+                    ? 'You are offline. Reconnect to create your account.'
+                    : 'Sem ligação à internet. Reconecte-se para criar a sua conta.',
+            );
+            return;
+        }
+        if (turnstileRequired && !turnstileToken) {
+            setError(
+                isEn
+                    ? 'Complete the Cloudflare security verification to continue.'
+                    : 'Conclua a verificação de segurança Cloudflare para continuar.',
+            );
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const clientMeta = getLightweightClientMetadata();
@@ -197,6 +234,7 @@ export const Register = () => {
                 visitorId: getOrCreateVisitorId(),
                 attributionData,
                 ...(referralCode ? { referralCode } : {}),
+                ...(turnstileToken ? { turnstileToken } : {}),
             });
 
             if (res.data?.verificationToken) {
@@ -213,6 +251,7 @@ export const Register = () => {
                 return;
             }
 
+            setTurnstileReset((n) => n + 1);
             setError(
                 getRegisterErrorMessage(
                     res.data?.error || res.data?.message || (isEn ? 'Registration failed' : 'Falha no registo'),
@@ -220,6 +259,7 @@ export const Register = () => {
                 ),
             );
         } catch (err) {
+            setTurnstileReset((n) => n + 1);
             setError(getRegisterErrorMessage(backendMessage(err), locale));
         } finally {
             setIsSubmitting(false);
@@ -316,6 +356,16 @@ export const Register = () => {
                             icon={<Mail size={18} />}
                             value={form.email}
                             onChange={update('email')}
+                            onBlur={() => {
+                                if (!form.email.trim()) return;
+                                const emailErr = validateRegistrationEmailClient(
+                                    form.email,
+                                    isEn ? 'en' : 'pt',
+                                );
+                                if (emailErr) {
+                                    setFieldErrors((fe) => ({ ...fe, email: emailErr }));
+                                }
+                            }}
                             error={fieldErrors.email}
                         />
 
@@ -365,21 +415,23 @@ export const Register = () => {
                             </div>
                         )}
 
-                        <PasswordInput
-                            name="password"
-                            label={isEn ? 'Password' : 'Senha'}
-                            autoComplete="new-password"
-                            placeholder="••••••••"
-                            icon={<Lock size={18} />}
-                            value={form.password}
-                            onChange={update('password')}
-                            error={fieldErrors.password}
-                            hint={
-                                isEn
-                                    ? `Minimum ${MIN_PASSWORD_LENGTH} characters`
-                                    : `Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`
-                            }
-                        />
+                        <div>
+                            <PasswordInput
+                                name="password"
+                                label={isEn ? 'Password' : 'Senha'}
+                                autoComplete="new-password"
+                                placeholder="••••••••"
+                                icon={<Lock size={18} />}
+                                value={form.password}
+                                onChange={update('password')}
+                                error={fieldErrors.password}
+                            />
+                            <PasswordStrengthChecklist
+                                password={form.password}
+                                evaluation={passwordEvaluation}
+                                locale={isEn ? 'en' : 'pt'}
+                            />
+                        </div>
 
                         <Checkbox
                             className="pt-1"
@@ -416,6 +468,13 @@ export const Register = () => {
                                     </>
                                 )
                             }
+                        />
+
+                        <CloudflareTurnstile
+                            action="register"
+                            resetTrigger={turnstileReset}
+                            onTokenChange={setTurnstileToken}
+                            onRequirementChange={setTurnstileRequired}
                         />
 
                         {error && <Alert tone="error">{error}</Alert>}

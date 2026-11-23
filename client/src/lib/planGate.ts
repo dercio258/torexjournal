@@ -99,3 +99,19 @@ export function openWorkspacePlansModal(
         );
     }
 }
+
+export type PricingModalCloseAction = 'LOGOUT' | 'CLOSE_TO_CURRENT_VIEW' | 'NAVIGATE_FALLBACK';
+
+export function resolvePricingModalCloseAction(params: {
+    isAuthenticated: boolean;
+    hasActivePlan: boolean;
+    hasOnClose: boolean;
+}): PricingModalCloseAction {
+    if (params.isAuthenticated && !params.hasActivePlan) {
+        return 'LOGOUT';
+    }
+    if (params.hasOnClose) {
+        return 'CLOSE_TO_CURRENT_VIEW';
+    }
+    return 'NAVIGATE_FALLBACK';
+}

@@ -11,7 +11,6 @@ import {
     Users,
     Trophy,
     X,
-    Lock,
     PanelLeftClose,
     PanelLeftOpen,
     Sparkles,
@@ -21,6 +20,7 @@ import { useLocale } from '../context/LocaleContext';
 import { cn } from '../lib/cn';
 import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
 import { BasicPlanSimpleUpgradeCard } from './subscription/BasicPlanSimpleUpgradeCard';
+import { UpgradeBadge } from './subscription/UpgradeBadge';
 
 const DevelopmentModal = ({
     featureName,
@@ -65,7 +65,7 @@ const DevelopmentModal = ({
                 </button>
 
                 <div className="w-14 h-14 rounded-2xl bg-warning/10 border border-warning/20 flex items-center justify-center text-warning mb-5">
-                    <Lock size={26} />
+                    <Sparkles size={26} />
                 </div>
 
                 <h3 className="text-lg sm:text-xl font-bold text-fg mb-2">
@@ -208,12 +208,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
                         {requiresPremium && isBasic && (
                             collapsed ? (
-                                <Lock size={10} className="text-amber-400 shrink-0 ml-0.5" />
+                                <UpgradeBadge
+                                    variant="mini"
+                                    tierLabel="PRO"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openWorkspacePlansModal(
+                                            to.startsWith('/calendar')
+                                                ? 'sidebar_economic_calendar'
+                                                : 'sidebar_backtesting',
+                                        );
+                                        if (onClose) onClose();
+                                    }}
+                                    className="ml-0.5"
+                                />
                             ) : (
-                                <span className="inline-flex items-center gap-1 text-[9px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold shrink-0 ml-1 uppercase">
-                                    <Lock size={9} />
-                                    PRO
-                                </span>
+                                <UpgradeBadge
+                                    variant="pill"
+                                    label="Upgrade"
+                                    tierLabel="PRO"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openWorkspacePlansModal(
+                                            to.startsWith('/calendar')
+                                                ? 'sidebar_economic_calendar'
+                                                : 'sidebar_backtesting',
+                                        );
+                                        if (onClose) onClose();
+                                    }}
+                                    className="ml-1"
+                                />
                             )
                         )}
                     </>

@@ -14,11 +14,11 @@ import {
     Edit3, 
     Award, 
     AlertCircle, 
-    KeyRound,
-    Lock
+    KeyRound
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isBasicPlanTier, isRestrictedBasicBrokerName, openWorkspacePlansModal } from '../../lib/planGate';
+import { UpgradeBadge } from '../subscription/UpgradeBadge';
 
 export const AccountManagerModal: React.FC = () => {
     const { user } = useAuth();
@@ -538,24 +538,26 @@ export const AccountManagerModal: React.FC = () => {
                                 >
                                     <option value="live">{isEn ? 'Live Capital' : 'Live (Real)'}</option>
                                     <option value="demo">Demo</option>
-                                    <option value="prop_firm">{isBasic ? '🔒 Prop Firm (PRO)' : 'Prop Firm'}</option>
-                                    <option value="challenge">{isBasic ? (isEn ? '🔒 Evaluation Challenge (PRO)' : '🔒 Challenge / Desafio (PRO)') : (isEn ? 'Evaluation Challenge' : 'Challenge (Desafio)')}</option>
-                                    <option value="funded">{isBasic ? '🔒 Funded (PRO)' : 'Funded'}</option>
+                                    <option value="prop_firm">{isBasic ? '✦ Prop Firm (Upgrade PRO)' : 'Prop Firm'}</option>
+                                    <option value="challenge">{isBasic ? (isEn ? '✦ Evaluation Challenge (Upgrade PRO)' : '✦ Challenge / Desafio (Upgrade PRO)') : (isEn ? 'Evaluation Challenge' : 'Challenge (Desafio)')}</option>
+                                    <option value="funded">{isBasic ? '✦ Funded (Upgrade PRO)' : 'Funded'}</option>
                                     <option value="custom">{isEn ? 'Custom' : 'Personalizada'}</option>
                                 </select>
                                 {isBasic && (
-                                    <button
-                                        type="button"
-                                        onClick={() => openWorkspacePlansModal('account_propfirm_type')}
-                                        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:underline cursor-pointer"
-                                    >
-                                        <Lock size={11} />
-                                        <span>
-                                            {isEn
-                                                ? 'Prop Firms & Deriv sync require Pro or Premium'
-                                                : 'Mesas Proprietárias & Deriv disponíveis no Plano Pro'}
-                                        </span>
-                                    </button>
+                                    <div className="mt-2">
+                                        <UpgradeBadge
+                                            variant="inline"
+                                            asButton
+                                            tierLabel="PRO"
+                                            sourceFeature="account_propfirm_type"
+                                            label={
+                                                isEn
+                                                    ? 'Upgrade PRO · Prop Firms & Deriv'
+                                                    : 'Upgrade PRO · Mesas Prop & Deriv'
+                                            }
+                                            className="normal-case tracking-normal text-[11px] font-semibold"
+                                        />
+                                    </div>
                                 )}
                             </div>
 

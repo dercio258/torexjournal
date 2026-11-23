@@ -6,6 +6,7 @@ import {
     getUserProfileFromIDB,
     rememberUserScope,
     saveUserProfileInIDB,
+    wipeAllOfflineData,
 } from '../services/offlineDb';
 import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
 import { queryClient } from '../lib/queryClient';
@@ -189,10 +190,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
     }, [token, fetchProfile]);
 
-    const logout = useCallback(() => {
-        if (localStorage.getItem('token')) {
-            void api.post('/auth/logout').catch(() => {});
-        }
+    const performLocalLogoutCleanup = useCallback(() => {
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
         localStorage.removeItem('torex_selected_account_id');
@@ -201,6 +199,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         writeCachedUser(null);
         queryClient.clear();
         clearBacktestTransientClientState();
+        void wipeAllOfflineData();
         useOfflineSyncStore.setState({
             isSyncing: false,
             syncStatus:
@@ -214,9 +213,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             lastSyncedAt: null,
             justSyncedBannerUntil: null,
         });
-        if (typeof caches !== 'undefined' && typeof caches.delete === 'function') {
-            void caches.delete('torex-uploads-media-v1').catch(() => {});
-        }
         inFlightProfileRef.current = null;
         identifiedSessionRef.current = null;
         setTokenObj(null);
@@ -224,6 +220,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
         setIsLoading(false);
     }, []);
+
+    const logout = useCallback(() => {
+        if (localStorage.getItem('token')) {
+            void api.post('/auth/logout').catch(() => {});
+        }
+        performLocalLogoutCleanup();
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                const bc = new BroadcastChannel('torex_auth_channel');
+                bc.postMessage({ type: 'TOREX_LOGOUT' });
+                bc.close();
+            }
+        } catch {
+            // ignore BroadcastChannel errors
+        }
+    }, [performLocalLogoutCleanup]);
 
     useEffect(() => {
         const handleUnauthorized = () => {
@@ -238,10 +250,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
 
         window.addEventListener('auth:unauthorized', handleUnauthorized);
+
+        let bc: BroadcastChannel | null = null;
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                bc = new BroadcastChannel('torex_auth_channel');
+                bc.onmessage = (evt) => {
+                    if (evt?.data?.type === 'TOREX_LOGOUT') {
+                        performLocalLogoutCleanup();
+                    }
+                };
+            }
+        } catch {
+            // ignore BroadcastChannel unsupported browsers
+        }
+
         return () => {
             window.removeEventListener('auth:unauthorized', handleUnauthorized);
+            bc?.close();
         };
-    }, []);
+    }, [performLocalLogoutCleanup]);
 
     const login = useCallback((newToken: string, email?: string) => {
         const previousToken = localStorage.getItem('token');

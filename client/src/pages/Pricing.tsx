@@ -22,7 +22,7 @@ export const Pricing = () => {
             <WorkspacePricingModal
                 isOpen={true}
                 dismissible={true}
-                onClose={() => navigate('/')}
+                onClose={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
                 trialEligible={false}
             />
         </div>

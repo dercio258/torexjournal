@@ -152,6 +152,113 @@ export async function decryptJsonEnvelope<T = any>(env: EncryptedPayloadEnvelope
     return JSON.parse(decoded) as T;
 }
 
+export interface ServerKemPublicBundle {
+    alg: string;
+    kid: string;
+    pub: string;
+    expiresAt: string;
+}
+
+export interface EncryptedRequestEnvelope {
+    _enc: 'ecdh-p256-aes256gcm-req-v1';
+    kid: string;
+    epk: string;
+    iv: string;
+    tag: string;
+    ct: string;
+}
+
+/**
+ * Encrypts a sensitive outgoing JSON request body (e.g. login, MT5 credentials, Deriv token)
+ * using an ephemeral client ECDH P-256 keypair + server public key (`kid`) + HKDF-SHA256 + AES-256-GCM.
+ */
+export async function encryptRequestJsonEnvelope(
+    payload: unknown,
+    serverBundle: ServerKemPublicBundle,
+): Promise<{ envelope: EncryptedRequestEnvelope; timestamp: string; nonce: string } | null> {
+    try {
+        const subtle = globalThis.crypto?.subtle;
+        if (!subtle || !serverBundle?.pub || !serverBundle?.kid) return null;
+
+        const serverPubBytes = base64UrlToBytes(serverBundle.pub);
+        if (serverPubBytes.length !== 65 || serverPubBytes[0] !== 0x04) return null;
+
+        const serverPubKey = await subtle.importKey(
+            'raw',
+            serverPubBytes.slice().buffer,
+            { name: 'ECDH', namedCurve: 'P-256' },
+            false,
+            [],
+        );
+
+        const ephemeralPair = await subtle.generateKey(
+            { name: 'ECDH', namedCurve: 'P-256' },
+            false,
+            ['deriveBits'],
+        );
+        const rawEpk = await subtle.exportKey('raw', ephemeralPair.publicKey);
+        const clientEpkBytes = new Uint8Array(rawEpk);
+
+        const sharedBits = await subtle.deriveBits(
+            { name: 'ECDH', public: serverPubKey },
+            ephemeralPair.privateKey,
+            256,
+        );
+
+        const ivBytes = new Uint8Array(12);
+        globalThis.crypto.getRandomValues(ivBytes);
+
+        const hkdfKey = await subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+        const infoBytes = new TextEncoder().encode('torex-req-envelope-v1');
+        const aesKey = await subtle.deriveKey(
+            {
+                name: 'HKDF',
+                hash: 'SHA-256',
+                salt: ivBytes.slice().buffer,
+                info: infoBytes.slice().buffer,
+            },
+            hkdfKey,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt'],
+        );
+
+        const aad = concatBytes(clientEpkBytes, serverPubBytes, ivBytes);
+        const plaintextBytes = new TextEncoder().encode(JSON.stringify(payload));
+        const cipherWithTagBuf = await subtle.encrypt(
+            {
+                name: 'AES-GCM',
+                iv: ivBytes.slice().buffer,
+                additionalData: aad.slice().buffer,
+                tagLength: 128,
+            },
+            aesKey,
+            plaintextBytes.slice().buffer,
+        );
+        const cipherWithTag = new Uint8Array(cipherWithTagBuf);
+        const ctBytes = cipherWithTag.slice(0, cipherWithTag.length - 16);
+        const tagBytes = cipherWithTag.slice(cipherWithTag.length - 16);
+
+        const nonceBytes = new Uint8Array(12);
+        globalThis.crypto.getRandomValues(nonceBytes);
+
+        return {
+            envelope: {
+                _enc: 'ecdh-p256-aes256gcm-req-v1',
+                kid: serverBundle.kid,
+                epk: bytesToBase64Url(clientEpkBytes),
+                iv: bytesToBase64Url(ivBytes),
+                tag: bytesToBase64Url(tagBytes),
+                ct: bytesToBase64Url(ctBytes),
+            },
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            nonce: bytesToBase64Url(nonceBytes),
+        };
+    } catch {
+        return null;
+    }
+}
+
 export function maskEmailClient(email?: string | null): string {
     const raw = String(email || '').trim();
     if (!raw) return '';

@@ -23,7 +23,7 @@ import {
     applyPreviewTpDrag,
     OrderQuickTagPatch,
 } from '../orderPreviewMath';
-import { resolveOverlayPointsAgainstCandles } from './drawingOverlayUtils';
+import { estimateBarIntervalMs, resolveOverlayPointsAgainstCandles } from './drawingOverlayUtils';
 
 export interface UseOrderExecutionParams {
     chartRef: React.MutableRefObject<Chart | null>;
@@ -34,6 +34,7 @@ export interface UseOrderExecutionParams {
     isHydratingCanvasRef: React.MutableRefObject<boolean>;
     isRestoringSnapshotRef: React.MutableRefObject<boolean>;
     canvasHydratedCount: number;
+    auxDataSyncTick?: number;
     currentSymbol: SymbolInfo;
     currentPeriod: Period;
     latestBar: KLineData | null;
@@ -65,6 +66,7 @@ export function useOrderExecution({
     isHydratingCanvasRef,
     isRestoringSnapshotRef,
     canvasHydratedCount,
+    auxDataSyncTick = 0,
     currentSymbol,
     currentPeriod,
     latestBar,
@@ -87,7 +89,7 @@ export function useOrderExecution({
     initialCommission,
 }: UseOrderExecutionParams) {
     const orderOverlayIdsRef = useRef<string[]>([]);
-    const lastCutoffRef = useRef<{ key: string; ts: number } | null>(null);
+    const lastCutoffRef = useRef<{ key: string; ts: number; canonicalTs?: number } | null>(null);
 
     const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>(initialOrderSide);
     const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'STOP'>(initialOrderType);
@@ -163,8 +165,12 @@ export function useOrderExecution({
         (symbolTicker: string, periodText: string, cutoffTs: number, rewind: boolean) => {
             const df = datafeedRef.current;
             if (!df) return;
-            lastCutoffRef.current = { key: `${symbolTicker}:${periodText}`, ts: cutoffTs };
-            const candles = df.getFullHistory();
+            lastCutoffRef.current = {
+                key: `${symbolTicker}:${periodText}`,
+                ts: cutoffTs,
+                canonicalTs: df.getReplayTimestamp() ?? cutoffTs,
+            };
+            const candles = df.isReplayActive() ? df.getVisibleReplayCandles() : df.getFullHistory();
             setOrders((cur) =>
                 cur.length === 0
                     ? cur
@@ -188,14 +194,26 @@ export function useOrderExecution({
 
             const key = `${feedStats.ticker}:${feedStats.periodText}`;
             const prev = lastCutoffRef.current;
+            const canonicalTs = feedStats.canonicalTimestamp ?? candle.timestamp;
+            const isPureTfSwitch =
+                Boolean(prev) &&
+                prev!.key !== key &&
+                prev!.key.startsWith(`${feedStats.ticker}:`) &&
+                prev!.canonicalTs !== undefined &&
+                canonicalTs === prev!.canonicalTs;
+
             const rewind = !!prev && prev.key === key && candle.timestamp < prev.ts;
             const prevUptoTs = !rewind && prev && prev.key === key ? prev.ts : undefined;
-            lastCutoffRef.current = { key, ts: candle.timestamp };
+            lastCutoffRef.current = { key, ts: candle.timestamp, canonicalTs };
+
+            if (isPureTfSwitch) {
+                return;
+            }
 
             setOrders((cur) => {
                 if (cur.length === 0) return cur;
                 if (!rewind && !cur.some((o) => o.status === 'OPEN' || o.status === 'PENDING')) return cur;
-                const candles = df.getFullHistory();
+                const candles = df.isReplayActive() ? df.getVisibleReplayCandles() : df.getFullHistory();
                 return recomputeOrders(cur, {
                     symbol: feedStats.ticker,
                     candles,
@@ -776,20 +794,17 @@ export function useOrderExecution({
         });
 
         // 2) Render permanent Entry & Exit candle markers + dashed execution path for OPEN, WIN, and LOSS orders
-        const mountExecutionMarkersOnChart = (targetChart: Chart, outIds: string[]) => {
+        const mountExecutionMarkersOnChart = (targetChart: Chart, outIds: string[], paneStepMs: number) => {
             const chartCandles = targetChart.getDataList() || [];
             if (chartCandles.length === 0) return;
 
             const lastChartBar = chartCandles[chartCandles.length - 1];
-            const barSpanMs =
-                chartCandles.length >= 2
-                    ? Math.max(60_000, lastChartBar.timestamp - chartCandles[chartCandles.length - 2].timestamp)
-                    : periodToMs(currentPeriod);
+            const barSpanMs = estimateBarIntervalMs(chartCandles, paneStepMs);
 
             const executedOrders = symbolOrders.filter(
                 (o) =>
                     (o.status === 'OPEN' || o.status === 'WIN' || o.status === 'LOSS') &&
-                    (o.filledAt ?? o.openedAt) <= lastChartBar.timestamp + barSpanMs
+                    (o.filledAt ?? o.openedAt) < lastChartBar.timestamp + barSpanMs
             );
 
             executedOrders.forEach((ord) => {
@@ -803,7 +818,7 @@ export function useOrderExecution({
                     });
                 } else if (ord.status === 'OPEN') {
                     const liveMark = ord.side === 'BUY' ? lastChartBar.close : lastChartBar.close + (ord.spread || 0);
-                    if (lastChartBar.timestamp > entryTs || Math.abs(liveMark - ord.entryPrice) > 0) {
+                    if (lastChartBar.timestamp >= entryTs || Math.abs(liveMark - ord.entryPrice) > 0) {
                         rawPts.push({
                             timestamp: lastChartBar.timestamp,
                             value: liveMark,
@@ -811,7 +826,10 @@ export function useOrderExecution({
                     }
                 }
 
-                const snappedPts = resolveOverlayPointsAgainstCandles(rawPts, chartCandles).map((pt) => {
+                const snappedPts = resolveOverlayPointsAgainstCandles(rawPts, chartCandles, {
+                    stepMs: barSpanMs,
+                    forChartMount: true,
+                }).map((pt) => {
                     if (typeof pt.dataIndex === 'number' && pt.dataIndex >= 0 && pt.dataIndex < chartCandles.length) {
                         return {
                             ...pt,
@@ -843,13 +861,14 @@ export function useOrderExecution({
             });
         };
 
-        mountExecutionMarkersOnChart(chart, orderOverlayIdsRef.current);
+        mountExecutionMarkersOnChart(chart, orderOverlayIdsRef.current, periodToMs(currentPeriod));
 
         if (syncEnabled && auxPaneCount > 0) {
             for (let i = 0; i < auxPaneCount; i++) {
                 const auxChart = auxChartRefs.current[i];
                 if (auxChart) {
-                    mountExecutionMarkersOnChart(auxChart, auxOrderOverlayIdsRef.current[i]);
+                    const auxPer = auxPeriods[i] || currentPeriod;
+                    mountExecutionMarkersOnChart(auxChart, auxOrderOverlayIdsRef.current[i], periodToMs(auxPer));
                 }
             }
         }
@@ -864,6 +883,7 @@ export function useOrderExecution({
         currentPeriod,
         ct,
         canvasHydratedCount,
+        auxDataSyncTick,
         latestBar?.timestamp,
         latestBar?.close,
         auxPaneCount,

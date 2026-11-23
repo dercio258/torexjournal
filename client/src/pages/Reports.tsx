@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
     Download,
     Printer,
@@ -17,11 +16,12 @@ import {
     Share2,
     Sparkles,
     Mail,
-    Lock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useAccount } from '../context/AccountContext';
 import { useLocale } from '../context/LocaleContext';
+import { openWorkspacePlansModal } from '../lib/planGate';
+import { UpgradeBadge } from '../components/subscription/UpgradeBadge';
 import { useDashboardFilters } from '../context/DashboardFilterContext';
 import {
     OperationalBreakdown,
@@ -86,7 +86,6 @@ function resolveSessionBucket(tag?: string | null): 'asia' | 'london' | 'overlap
 }
 
 export const Reports = () => {
-    const navigate = useNavigate();
     const { user } = useAuth();
     const { locale } = useLocale();
     const isEn = locale === 'en';
@@ -155,7 +154,7 @@ export const Reports = () => {
 
     const handleSendEmailReport = async () => {
         if (normalizedTier !== 'PRO' && normalizedTier !== 'PREMIUM') {
-            navigate('/dashboard?plans=1');
+            openWorkspacePlansModal('reports_email_upgrade');
             return;
         }
         const frequency = normalizedTier === 'PREMIUM' ? 'WEEKLY' : 'MONTHLY';
@@ -829,10 +828,11 @@ export const Reports = () => {
                                         </span>
                                     </>
                                 ) : (
-                                    <>
-                                        <Lock size={12} className="text-amber-400" />
-                                        <span>{isEn ? 'Email Report (Pro+)' : 'E-mail (Pro/Premium)'}</span>
-                                    </>
+                                    <UpgradeBadge
+                                        variant="inline"
+                                        tierLabel="PRO"
+                                        label={isEn ? 'Upgrade · Email' : 'Upgrade · E-mail'}
+                                    />
                                 )}
                             </button>
                         </div>

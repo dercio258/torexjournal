@@ -86,10 +86,10 @@ export const AdminPlans = () => {
         biennialDiscountPercent: '29',
         usdToMznRate: '74',
         monthlyPriceMzn: '',
-        maxTradingAccounts: '1',
+        maxTradingAccounts: '3',
         monthlyBacktestsLimit: '0',
         trialDays: '0',
-        aiDailyCredits: '0'
+        aiDailyCredits: '100'
     });
     const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -228,7 +228,7 @@ export const AdminPlans = () => {
 
     const openEditModal = (plan: any) => {
         const defaultCredits =
-            plan.tier === 'PREMIUM' ? 4000 : plan.tier === 'PRO' ? 1500 : 0;
+            plan.tier === 'PREMIUM' ? 4000 : plan.tier === 'PRO' ? 1500 : 100;
         setEditingPlanId(plan.id);
         setNewPlan({
             tier: plan.tier,
@@ -244,7 +244,7 @@ export const AdminPlans = () => {
             biennialDiscountPercent: (plan.biennialDiscountPercent ?? 29).toString(),
             usdToMznRate: (plan.usdToMznRate ?? 74).toString(),
             monthlyPriceMzn: plan.monthlyPriceMzn?.toString() || '',
-            maxTradingAccounts: (plan.maxTradingAccounts ?? (plan.tier === 'BASIC' ? 1 : -1)).toString(),
+            maxTradingAccounts: (plan.maxTradingAccounts ?? (plan.tier === 'BASIC' ? 3 : -1)).toString(),
             monthlyBacktestsLimit: (plan.monthlyBacktestsLimit ?? (plan.tier === 'PREMIUM' ? 100 : plan.tier === 'PRO' ? 10 : 0)).toString(),
             trialDays: (plan.trialDays ?? 0).toString(),
             aiDailyCredits: (plan.aiDailyCredits ?? defaultCredits).toString()
@@ -823,7 +823,7 @@ export const AdminPlans = () => {
                             value={newPlan.aiDailyCredits}
                             onChange={(e) => setNewPlan({ ...newPlan, aiDailyCredits: e.target.value })}
                             className="w-full bg-canvas border border-line rounded-lg px-4 py-2.5 text-fg focus:outline-none focus:border-indigo-500 transition-colors"
-                            placeholder="Ex: 0 (BASIC), 1500 (PRO), 4000 (PREMIUM)"
+                            placeholder="Ex: 100 (BASIC), 1500 (PRO), 4000 (PREMIUM)"
                             required
                         />
                     </div>

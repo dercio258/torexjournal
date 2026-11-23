@@ -10,7 +10,8 @@ export interface UseReplayPlaybackParams {
     chartRef: React.MutableRefObject<Chart | null>;
     datafeedRef: React.MutableRefObject<CustomKLineDatafeed | null>;
     legendOverlayRef: React.MutableRefObject<ChartLegendOverlayRef | null>;
-    lastCutoffRef: React.MutableRefObject<{ key: string; ts: number } | null>;
+    lastCutoffRef: React.MutableRefObject<{ key: string; ts: number; canonicalTs?: number } | null>;
+    isChartLoadingRef?: React.MutableRefObject<boolean>;
     captureCurrentOverlayGeometries: () => Record<string, any>;
     reanchorMountedOverlays: (chart: Chart | null) => void;
     recomputeOrdersAtCutoff: (symbolTicker: string, periodText: string, cutoffTs: number, rewind: boolean) => void;
@@ -38,6 +39,7 @@ export function useReplayPlayback({
     datafeedRef,
     legendOverlayRef,
     lastCutoffRef,
+    isChartLoadingRef,
     captureCurrentOverlayGeometries,
     reanchorMountedOverlays,
     recomputeOrdersAtCutoff,
@@ -66,7 +68,7 @@ export function useReplayPlayback({
     }, [cutCandleMode]);
 
     const handleStepForward = useCallback(() => {
-        if (!datafeedRef.current || !chartRef.current) return;
+        if (!datafeedRef.current || !chartRef.current || isChartLoadingRef?.current) return;
         if (!replayActive) {
             setReplayActive(true);
             const sliced = datafeedRef.current.setReplayMode(true, 0.72, false);
@@ -76,7 +78,7 @@ export function useReplayPlayback({
         }
         const nextBar = datafeedRef.current.stepReplayForward();
         if (!nextBar) setAutoPlaying(false);
-    }, [datafeedRef, chartRef, replayActive]);
+    }, [datafeedRef, chartRef, isChartLoadingRef, replayActive]);
 
     const handleStepBackward = useCallback(() => {
         const df = datafeedRef.current;
@@ -264,7 +266,11 @@ export function useReplayPlayback({
                 chart.applyNewData(bars, true);
                 const last = bars[bars.length - 1];
                 if (last) {
-                    lastCutoffRef.current = { key: `${activeSym.ticker}:${currentPeriod.text}`, ts: last.timestamp };
+                    lastCutoffRef.current = {
+                        key: `${activeSym.ticker}:${currentPeriod.text}`,
+                        ts: last.timestamp,
+                        canonicalTs: df.getReplayTimestamp() ?? last.timestamp,
+                    };
                     setLatestBar(last);
                     legendOverlayRef.current?.updateLegend(last, null, null);
                     setOrders((cur) =>
