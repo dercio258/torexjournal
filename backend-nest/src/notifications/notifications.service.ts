@@ -73,6 +73,7 @@ export class NotificationsService {
             type?: NotificationType;
             actionUrl?: string;
             actionLabel?: string;
+            metadata?: Record<string, any> | null;
         },
         options: { skipEmail?: boolean; skipExternal?: boolean } = {},
     ) {
@@ -83,6 +84,7 @@ export class NotificationsService {
             title: data.title,
             message: data.message,
             type: data.type || NotificationType.SYSTEM,
+            metadata: data.metadata ?? null,
         });
 
         const saved = await this.notificationRepo.save(notification);

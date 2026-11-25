@@ -155,6 +155,10 @@ quant-engine/datasets/
 
 # Local data: user uploads (personal data) and regenerable market data
 uploads/
+private-uploads/
+backend-nest/private-uploads/
+.torex-keys/
+backend-nest/.torex-keys/
 quant-engine/data/parquet/
 quant-engine/data/ai_eval/embeddings_cache.json
 __pycache__/

@@ -3,6 +3,7 @@ import { DerivService } from './deriv.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
+import { ConnectDerivDto } from './dto/deriv.dto';
 
 @Controller('integrations/deriv')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -24,7 +25,7 @@ export class DerivController {
     }
 
     @Post('connect')
-    async connect(@Req() req, @Body() body: { token: string }) {
+    async connect(@Req() req, @Body() body: ConnectDerivDto) {
         return this.derivService.connect(req.user.id, body.token);
     }
 

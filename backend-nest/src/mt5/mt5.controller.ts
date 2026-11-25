@@ -9,7 +9,19 @@ import { Mt5DataDto } from './dto/mt5-data.dto';
 import { Mt5InstanceService } from './mt5-instance.service';
 import { ConfigService } from '@nestjs/config';
 import { CryptoUtil } from '../common/utils/crypto.util';
-import { getMt5CredentialSecret } from '../common/security/security.config';
+import { getMt5CredentialKeyring } from '../common/security/security.config';
+import {
+    ConnectCloudMt5Dto,
+    CreateManualTradeDto,
+    DisconnectCloudMt5Dto,
+    KeepAliveCloudMt5Dto,
+    PrefetchDemoSessionDto,
+    SaveMarketFeedDemoDto,
+    SendMt5CommandDto,
+    SubmitBehaviorFeedbackDto,
+    SyncCloudMt5Dto,
+} from './dto/mt5.dto';
+import { sanitizeJournalPayload } from '../common/security/input-sanitizer.util';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 
@@ -113,7 +125,7 @@ export class Mt5Controller {
     @Post(':id/command')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
-    async sendCommand(@Param('id') id: string, @Body() body: { type: number, payload?: string }, @Req() req) {
+    async sendCommand(@Param('id') id: string, @Body() body: SendMt5CommandDto, @Req() req) {
         const cleanId = (id || '').trim();
         const whereConds: any[] = [{ mt5Id: cleanId, userId: req.user.id }];
         if (this.isValidUuid(cleanId)) {
@@ -139,8 +151,8 @@ export class Mt5Controller {
     @Post('journal/:ticket')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
-    async updateJournal(@Body() data: any, @Param('ticket') ticket: string, @Req() req) {
-        return this.mt5Service.updateJournal(ticket, data, req.user.id);
+    async updateJournal(@Body() data: Record<string, any>, @Param('ticket') ticket: string, @Req() req) {
+        return this.mt5Service.updateJournal(ticket, sanitizeJournalPayload(data || {}), req.user.id);
     }
 
     @Post('trades/:id/behavior-feedback')
@@ -148,7 +160,7 @@ export class Mt5Controller {
     @RequirePlan(PlanTier.BASIC)
     async submitBehaviorFeedback(
         @Param('id') id: string,
-        @Body() body: { verdict: 'CONFIRM' | 'FALSE_POSITIVE'; correctedFlags?: string[]; note?: string },
+        @Body() body: SubmitBehaviorFeedbackDto,
         @Req() req,
     ) {
         return this.mt5Service.submitBehaviorFeedback(id, body, req.user.id);
@@ -175,8 +187,8 @@ export class Mt5Controller {
     @Post('manual')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.BASIC)
-    async createManualTrade(@Body() data: any, @Req() req) {
-        return this.mt5Service.createManualTrade(data, req.user.id);
+    async createManualTrade(@Body() data: CreateManualTradeDto, @Req() req) {
+        return this.mt5Service.createManualTrade(sanitizeJournalPayload(data), req.user.id);
     }
 
     @Post('ping')
@@ -193,9 +205,12 @@ export class Mt5Controller {
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.BASIC)
     async getWorkerStatus() {
+        const workersRaw = this.mt5WorkerService.getWorkerStatus(undefined, false);
+        const workers = Array.isArray(workersRaw) ? workersRaw : [];
+        const onlineCount = workers.filter((w: any) => Boolean(w?.isOnline)).length;
         return {
-            workers: this.mt5WorkerService.getWorkerStatus(undefined, false),
-            pendingTasks: this.mt5WorkerService.getPendingTasks(false).length
+            available: onlineCount > 0,
+            onlineWorkers: onlineCount,
         };
     }
 
@@ -237,7 +252,7 @@ export class Mt5Controller {
     @Post('cloud/connect')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
-    async connectCloud(@Body() body: { login: string; pass: string; server: string; accountId?: string }, @Req() req) {
+    async connectCloud(@Body() body: ConnectCloudMt5Dto, @Req() req) {
         const cleanLogin = (body.login || '').toString().replace(/[\r\n\0]/g, '').trim();
         const cleanServer = this.mt5WorkerService.normalizeBrokerServer((body.server || '').toString().replace(/[\r\n\0]/g, '').trim());
         const cleanPass = String(body.pass || '').replace(/[\r\n\0]/g, '').trim();
@@ -290,7 +305,8 @@ export class Mt5Controller {
         let targetAccount: AccountEntity;
         const encryptedPass = CryptoUtil.encrypt(
             cleanPass,
-            getMt5CredentialSecret(this.configService),
+            getMt5CredentialKeyring(this.configService),
+            { aad: `mt5:${req.user.id}:${cleanLogin}` },
         );
         if (!account) {
             const created = this.accountRepo.create({
@@ -361,7 +377,18 @@ export class Mt5Controller {
             }
         }
 
-        const { mt5EncryptedPass: _omitPass, ...safeAccount } = targetAccount as any;
+        const safeAccount = {
+            id: targetAccount.id,
+            name: targetAccount.name,
+            broker: targetAccount.broker,
+            type: targetAccount.type,
+            currency: targetAccount.currency,
+            isPrimary: targetAccount.isPrimary,
+            isConnected: targetAccount.isConnected,
+            balance: targetAccount.balance,
+            equity: targetAccount.equity,
+            mt5Id: targetAccount.mt5Id,
+        };
 
         return {
             success: true,
@@ -371,14 +398,13 @@ export class Mt5Controller {
             accountId: targetAccount.id,
             account: safeAccount,
             server: task.server,
-            instance: localInstance
         };
     }
 
     @Post('cloud/sync')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
-    async syncCloud(@Body() body: { login?: string; accountId?: string; forceFull?: boolean }, @Req() req) {
+    async syncCloud(@Body() body: SyncCloudMt5Dto, @Req() req) {
         let account: AccountEntity | null = null;
         const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
 
@@ -432,7 +458,7 @@ export class Mt5Controller {
     @Post('cloud/keep-alive')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.BASIC)
-    async keepCloudAccountAlive(@Body() body: { accountId: string }, @Req() req) {
+    async keepCloudAccountAlive(@Body() body: KeepAliveCloudMt5Dto, @Req() req) {
         if (!this.isValidUuid(body?.accountId)) {
             throw new BadRequestException('Informe um accountId válido.');
         }
@@ -442,7 +468,7 @@ export class Mt5Controller {
     @Post('cloud/disconnect')
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
-    async disconnectCloud(@Body() body: { login: string; accountId?: string }, @Req() req) {
+    async disconnectCloud(@Body() body: DisconnectCloudMt5Dto, @Req() req) {
         const cleanLogin = (body.login || '').toString().trim();
         const validAccountId = this.isValidUuid(body.accountId) ? body.accountId!.trim() : undefined;
 
@@ -494,7 +520,7 @@ export class Mt5Controller {
      */
     @Get('market-feed-demo')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.BASIC)
+    @RequirePlan(PlanTier.PRO)
     async getMarketFeedDemo(@Req() req) {
         return this.mt5WorkerService.getSharedDemoFeedAccount(req.user.id);
     }
@@ -506,7 +532,7 @@ export class Mt5Controller {
     @UseGuards(JwtAuthGuard, PlanGuard)
     @RequirePlan(PlanTier.PRO)
     async saveMarketFeedDemo(
-        @Body() body: { login: string; pass?: string; server: string },
+        @Body() body: SaveMarketFeedDemoDto,
         @Req() req,
     ) {
         return this.mt5WorkerService.saveSharedDemoFeedAccount(req.user.id, body);
@@ -518,19 +544,9 @@ export class Mt5Controller {
      */
     @Post('market-feed-demo/prefetch-session')
     @UseGuards(JwtAuthGuard, PlanGuard)
-    @RequirePlan(PlanTier.BASIC)
+    @RequirePlan(PlanTier.PRO)
     async prefetchSessionWithDemo(
-        @Body()
-        body: {
-            sessionId?: string;
-            symbols: string[];
-            timeframe: string;
-            fromDate?: string;
-            toDate?: string;
-            demoLogin?: string;
-            demoPass?: string;
-            demoServer?: string;
-        },
+        @Body() body: PrefetchDemoSessionDto,
         @Req() req,
     ) {
         return this.mt5WorkerService.prefetchSessionWithDemoAccount(req.user.id, body);

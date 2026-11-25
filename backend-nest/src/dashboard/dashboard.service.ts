@@ -19,6 +19,7 @@ import {
 import { DailyNoteEntity, TradeNoteEntity } from './journal-notes.entity';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
 import { getQuantInternalHeaders } from '../common/security/security.config';
+import { CloudflareR2StorageService } from '../common/security/cloudflare-r2-storage.service';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 @Injectable()
@@ -56,6 +57,8 @@ export class DashboardService {
         private hypothesisRepo?: Repository<BacktestHypothesisEntity>,
         @Optional()
         private readonly planPermissionService?: PlanPermissionService,
+        @Optional()
+        private readonly r2Storage?: CloudflareR2StorageService,
     ) { }
 
     private isValidUuid(id?: string): boolean {
@@ -3682,6 +3685,23 @@ export class DashboardService {
             throw new BadRequestException('No screenshot binary provided');
         }
 
+        if (this.r2Storage) {
+            const stored = await this.r2Storage.uploadPrivateObject({
+                userId,
+                folder: 'backtest-screenshots',
+                buffer,
+                ext,
+            });
+            return {
+                ok: true,
+                id: safeShotId,
+                url: stored.url,
+                key: stored.key,
+                provider: stored.provider,
+                sizeBytes: buffer.length,
+            };
+        }
+
         const userDir = path.join(process.cwd(), 'uploads', 'backtest-screenshots', safeUser);
         await fs.promises.mkdir(userDir, { recursive: true });
         const filename = `${safeSession}_${safeShotId}.${ext}`;
@@ -3697,12 +3717,21 @@ export class DashboardService {
     }
 
     /**
-     * Deletes a user-owned backtest screenshot file from `/uploads/backtest-screenshots/<safeUserId>/`.
+     * Deletes a user-owned backtest screenshot file from private R2/local storage or legacy `/uploads/backtest-screenshots/<safeUserId>/`.
      */
     async deleteBacktestScreenshotFile(userId: string, rawUrl?: string) {
+        if (!rawUrl || typeof rawUrl !== 'string') {
+            return { ok: false };
+        }
+
+        if (this.r2Storage && rawUrl.startsWith('/api/media/private/')) {
+            const ok = await this.r2Storage.deleteByUrl(rawUrl, userId);
+            return { ok };
+        }
+
         const safeUser = this.sanitizePathToken(userId, 'user');
         const expectedPrefix = `/uploads/backtest-screenshots/${safeUser}/`;
-        if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.startsWith(expectedPrefix)) {
+        if (!rawUrl.startsWith(expectedPrefix)) {
             return { ok: false };
         }
 
@@ -3752,6 +3781,19 @@ export class DashboardService {
                         const ext = kind === 'webp' ? 'webp' : kind === 'png' ? 'png' : 'jpg';
                         const buf = Buffer.from(match[2], 'base64');
                         if (buf.length > 0 && buf.length <= 12 * 1024 * 1024) {
+                            if (this.r2Storage) {
+                                const stored = await this.r2Storage.uploadPrivateObject({
+                                    userId,
+                                    folder: 'backtest-screenshots',
+                                    buffer: buf,
+                                    ext,
+                                });
+                                out.push({
+                                    ...item,
+                                    dataUrl: stored.url,
+                                });
+                                continue;
+                            }
                             if (!dirEnsured) {
                                 await fs.promises.mkdir(userDir, { recursive: true });
                                 dirEnsured = true;
@@ -3802,6 +3844,16 @@ export class DashboardService {
                         const ext = kind === 'webp' ? 'webp' : kind === 'png' ? 'png' : 'jpg';
                         const buf = Buffer.from(match[2], 'base64');
                         if (buf.length > 0 && buf.length <= 12 * 1024 * 1024) {
+                            if (this.r2Storage) {
+                                const stored = await this.r2Storage.uploadPrivateObject({
+                                    userId,
+                                    folder: 'backtest-screenshots',
+                                    buffer: buf,
+                                    ext,
+                                });
+                                out.push(stored.url);
+                                continue;
+                            }
                             if (!dirEnsured) {
                                 await fs.promises.mkdir(userDir, { recursive: true });
                                 dirEnsured = true;

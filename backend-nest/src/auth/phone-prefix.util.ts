@@ -168,8 +168,11 @@ export function validateAndNormalizeContact(
     }
 
     const matchedMeta =
-        (selectedMeta && withPlus.startsWith(selectedMeta.dialCode) ? selectedMeta : undefined) ||
-        BY_DIAL_DESC.find((item) => withPlus.startsWith(item.dialCode));
+        selectedMeta && withPlus.startsWith(selectedMeta.dialCode)
+            ? selectedMeta
+            : !countryIso2
+              ? BY_DIAL_DESC.find((item) => withPlus.startsWith(item.dialCode))
+              : undefined;
 
     if (matchedMeta) {
         const localNumber = withPlus.slice(matchedMeta.dialCode.length);

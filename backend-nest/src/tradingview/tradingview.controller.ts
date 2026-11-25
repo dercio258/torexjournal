@@ -3,6 +3,7 @@ import { TradingViewService } from './tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
+import { PrefetchCandlesDto } from './dto/tradingview.dto';
 
 const DAY_MS = 86_400_000;
 
@@ -49,7 +50,7 @@ export class TradingViewController {
         try {
             return await this.tvService.searchSymbols(query, type, exchange);
         } catch (error) {
-            throw new InternalServerErrorException(error.message);
+            throw new InternalServerErrorException('Pesquisa de ativos temporariamente indisponível.', { cause: error });
         }
     }
 
@@ -87,8 +88,8 @@ export class TradingViewController {
                 earliestTs: fromTs,
             });
         } catch (error) {
-            // Explicit outage: the client shows "feed indisponível" instead of fake prices.
-            throw new ServiceUnavailableException(`Feed TradingView indisponível: ${error.message}`);
+            // Explicit outage: sanitized for user, technical cause logged in Admin
+            throw new ServiceUnavailableException('Dados de mercado temporariamente indisponíveis.', { cause: error });
         }
     }
 
@@ -148,7 +149,7 @@ export class TradingViewController {
                 earliestTs: effectiveEarliestTs,
             });
         } catch (error) {
-            throw new ServiceUnavailableException(`Falha ao carregar lote de velas TradingView: ${error.message}`);
+            throw new ServiceUnavailableException('Dados históricos temporariamente indisponíveis.', { cause: error });
         }
     }
 
@@ -158,15 +159,7 @@ export class TradingViewController {
     @Post('candles/prefetch')
     async prefetchBatches(
         @Req() req: any,
-        @Body() body: {
-            items: Array<{
-                symbol: string;
-                timeframe?: string;
-                toTs?: number;
-                fromTs?: number;
-                chunkSize?: number;
-            }>;
-        },
+        @Body() body: PrefetchCandlesDto,
     ) {
         const { earliestTs } = await this.limitsFor(req);
         const items = Array.isArray(body?.items) ? body.items.slice(0, 8) : [];
@@ -206,7 +199,7 @@ export class TradingViewController {
         try {
             return await this.tvService.getQuote(symbol);
         } catch (error) {
-            throw new InternalServerErrorException(error.message);
+            throw new InternalServerErrorException('Cotação temporariamente indisponível.', { cause: error });
         }
     }
 }

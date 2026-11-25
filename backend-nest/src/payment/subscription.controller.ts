@@ -4,7 +4,15 @@ import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { FastifyReply } from 'fastify';
-import { SubscribeMobileDto, SubscribeCardDto, RedeemReferralCreditsDto } from './dto/subscription.dto';
+import {
+    SubscribeMobileDto,
+    SubscribeCardDto,
+    SubscribeCryptoDto,
+    SubscribePixDto,
+    SubscribePayFastDto,
+    RedeemReferralCreditsDto,
+} from './dto/subscription.dto';
+import { extractTrustedClientIp } from '../common/security/security.config';
 
 @Controller('subscription')
 export class SubscriptionController {
@@ -38,6 +46,11 @@ export class SubscriptionController {
             body.phoneNumber,
             body.savePreference,
             body.useReferralCredits,
+            {
+                ip: extractTrustedClientIp(req),
+                userAgent: req?.headers?.['user-agent'],
+                origin: req?.headers?.origin,
+            },
         );
     }
 
@@ -53,7 +66,117 @@ export class SubscriptionController {
             body.cancelUrl,
             body.phoneNumber,
             body.useReferralCredits,
+            {
+                ip: extractTrustedClientIp(req),
+                userAgent: req?.headers?.['user-agent'],
+                origin: req?.headers?.origin,
+            },
         );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @Post('subscribe/payfast')
+    async subscribePayFast(@Request() req, @Body() body: SubscribePayFastDto) {
+        return this.subscriptionService.createPayFastSubscription(
+            req.user.id,
+            body.tier as any,
+            body.cycle as any,
+            body.returnUrl,
+            body.phoneNumber,
+            body.useReferralCredits,
+            {
+                ip: extractTrustedClientIp(req),
+                userAgent: req?.headers?.['user-agent'],
+                origin: req?.headers?.origin,
+            },
+        );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @Post('subscribe/crypto')
+    async subscribeCrypto(@Request() req, @Body() body: SubscribeCryptoDto) {
+        return this.subscriptionService.createCryptoSubscription(
+            req.user.id,
+            body.tier,
+            body.cycle as any,
+            body.cryptocurrency,
+            body.useReferralCredits,
+            body.forceNew,
+        );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 45, ttl: 60000 } })
+    @Get('crypto/active')
+    async getActiveCryptoPayment(
+        @Request() req,
+        @Query('reference') reference?: string,
+    ) {
+        return this.subscriptionService.getActiveCryptoPayment(req.user.id, reference);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 15, ttl: 60000 } })
+    @Post('crypto/:reference/cancel')
+    async cancelCryptoPayment(
+        @Request() req,
+        @Param('reference') reference: string,
+    ) {
+        return this.subscriptionService.cancelPendingCryptoPayment(req.user.id, reference);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 60, ttl: 60000 } })
+    @Get('pix/quote')
+    async getPixQuote(
+        @Request() req,
+        @Query('tier') tier: string,
+        @Query('cycle') cycle: string,
+        @Query('useReferralCredits') useReferralCredits?: string,
+    ) {
+        return this.subscriptionService.getPixQuote(
+            req.user.id,
+            tier,
+            (cycle || 'MONTHLY').toUpperCase() as any,
+            useReferralCredits === 'true' || useReferralCredits === '1',
+        );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @Post('subscribe/pix')
+    async subscribePix(@Request() req, @Body() body: SubscribePixDto) {
+        return this.subscriptionService.createPixSubscription(
+            req.user.id,
+            body.tier,
+            body.cycle as any,
+            body.payerDocument,
+            body.payerName,
+            body.useReferralCredits,
+            body.forceNew,
+        );
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 45, ttl: 60000 } })
+    @Get('pix/active')
+    async getActivePixPayment(
+        @Request() req,
+        @Query('reference') reference?: string,
+    ) {
+        return this.subscriptionService.getActivePixPayment(req.user.id, reference);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Throttle({ default: { limit: 15, ttl: 60000 } })
+    @Post('pix/:reference/cancel')
+    async cancelPixPayment(
+        @Request() req,
+        @Param('reference') reference: string,
+    ) {
+        return this.subscriptionService.cancelPendingPixPayment(req.user.id, reference);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -112,36 +235,97 @@ export class SubscriptionController {
 
     // --- Payment Status Sync (Authenticated & ownership-verified) ---
     @UseGuards(JwtAuthGuard)
-    @Throttle({ default: { limit: 10, ttl: 60000 } })
+    @Throttle({ default: { limit: 45, ttl: 60000 } })
     @Post('check-status/:reference')
-    async checkStatus(@Request() req, @Param('reference') reference: string) {
-        const outcome = await this.subscriptionService.checkPaymentStatus(reference, req.user.id);
-        return { status: outcome.status || 'checked', found: outcome.found };
+    async checkStatus(
+        @Request() req,
+        @Param('reference') reference: string,
+        @Body() body?: { force?: boolean },
+        @Query('force') forceQuery?: string,
+    ) {
+        const forceRemote =
+            body?.force === true || forceQuery === '1' || forceQuery === 'true';
+        const outcome = await this.subscriptionService.checkPaymentStatus(
+            reference,
+            req.user.id,
+            { forceRemote },
+        );
+        return {
+            status: outcome.status || 'checked',
+            found: outcome.found,
+            reference: outcome.reference,
+            paymentMethod: outcome.paymentMethod,
+            tier: outcome.tier,
+            cycle: outcome.cycle,
+            nextPollAfterMs: outcome.nextPollAfterMs,
+            failureReason: outcome.failureReason,
+            serverCheckedAt: outcome.serverCheckedAt,
+        };
     }
 
-    // Redirect status callback route
+    // Redirect status callback routes (authoritative verification before routing to success or checkout failure modal)
     @Get('payment/status/card')
-    @Get('paymet/staus/card')
-    async handleCardStatusRedirect(@Query('reference') reference: string, @Res() res: FastifyReply) {
-        this.logger.log(`User returned from card payment flow for reference: ${reference}`);
-
-        let paymentStatus: 'active' | 'failed' | 'pending' = reference ? 'pending' : 'failed';
-        if (reference) {
-            try {
-                const outcome = await this.subscriptionService.checkPaymentStatus(reference);
-                if (outcome?.status === 'ACTIVE' || outcome?.status === 'APPROVED') {
-                    paymentStatus = 'active';
-                } else if (outcome?.status === 'CANCELLED' || outcome?.status === 'EXPIRED') {
-                    paymentStatus = 'failed';
-                }
-            } catch (err: any) {
-                this.logger.error(`Error checking status on redirect: ${err?.message || err}`);
-            }
-        }
-
-        const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3001';
-        return res.redirect(
-            `${frontendUrl}/subscription/success?subscription_id=${encodeURIComponent(reference || '')}&payment_status=${paymentStatus}`,
+    @Throttle({ default: { limit: 30, ttl: 60000 } })
+    async handleCardStatusRedirect(@Query() query: Record<string, any>, @Res() res: FastifyReply) {
+        const redirectUrl = await this.subscriptionService.resolvePaymentCallbackRedirect(
+            'success',
+            {
+                reference:
+                    query?.reference ||
+                    query?.subscription_id ||
+                    query?.external_id ||
+                    query?.source_id,
+                method: query?.method || 'card',
+                status: query?.payment_status || query?.status,
+                reason: query?.payment_reason || query?.reason || query?.error || query?.message,
+                locale: query?.locale,
+                renewalToken: query?.renewal_token || query?.token,
+            },
         );
+        return res.redirect(redirectUrl);
+    }
+
+    @Get('payment/callback/success')
+    @Throttle({ default: { limit: 30, ttl: 60000 } })
+    async handlePaymentCallbackSuccess(@Query() query: Record<string, any>, @Res() res: FastifyReply) {
+        const redirectUrl = await this.subscriptionService.resolvePaymentCallbackRedirect(
+            'success',
+            {
+                reference:
+                    query?.reference ||
+                    query?.subscription_id ||
+                    query?.external_id ||
+                    query?.source_id ||
+                    query?.order_id,
+                method: query?.method,
+                status: query?.payment_status || query?.status,
+                reason: query?.payment_reason || query?.reason || query?.error || query?.message,
+                locale: query?.locale,
+                renewalToken: query?.renewal_token || query?.token,
+            },
+        );
+        return res.redirect(redirectUrl);
+    }
+
+    @Get('payment/callback/failed')
+    @Throttle({ default: { limit: 30, ttl: 60000 } })
+    async handlePaymentCallbackFailed(@Query() query: Record<string, any>, @Res() res: FastifyReply) {
+        const redirectUrl = await this.subscriptionService.resolvePaymentCallbackRedirect(
+            'failed',
+            {
+                reference:
+                    query?.reference ||
+                    query?.subscription_id ||
+                    query?.external_id ||
+                    query?.source_id ||
+                    query?.order_id,
+                method: query?.method,
+                status: query?.payment_status || query?.status || 'failed',
+                reason: query?.payment_reason || query?.reason || query?.error || query?.message,
+                locale: query?.locale,
+                renewalToken: query?.renewal_token || query?.token,
+            },
+        );
+        return res.redirect(redirectUrl);
     }
 }

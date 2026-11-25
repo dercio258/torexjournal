@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Inject, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Inject, OnModuleInit, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { UserEntity } from './user.entity';
 import { maskEmailAddress, maskPhoneNumber } from '../common/security/payload-envelope.util';
+import { CloudflareR2StorageService } from '../common/security/cloudflare-r2-storage.service';
 
 export interface AuthGuardUserSnapshot {
     id: string;
@@ -325,6 +326,8 @@ export class UsersService implements OnModuleInit {
         private usersRepository: Repository<UserEntity>,
         @Inject(CACHE_MANAGER)
         private cacheManager: Cache,
+        @Optional()
+        private readonly r2Storage?: CloudflareR2StorageService,
     ) {}
 
     async onModuleInit(): Promise<void> {
@@ -488,8 +491,17 @@ export class UsersService implements OnModuleInit {
     }
 
     private async deleteAvatarFileIfLocal(avatarUrl?: string | null): Promise<void> {
+        if (!avatarUrl || typeof avatarUrl !== 'string') {
+            return;
+        }
+
+        if (this.r2Storage) {
+            const removed = await this.r2Storage.deleteByUrl(avatarUrl);
+            if (removed) return;
+        }
+
         const expectedPrefix = '/uploads/avatars/';
-        if (!avatarUrl || typeof avatarUrl !== 'string' || !avatarUrl.startsWith(expectedPrefix)) {
+        if (!avatarUrl.startsWith(expectedPrefix)) {
             return;
         }
 
@@ -577,18 +589,28 @@ export class UsersService implements OnModuleInit {
             throw new BadRequestException('Formato inválido. Envie uma imagem JPG, PNG, WEBP ou GIF válida.');
         }
 
-        const opaqueOwnerTag = createHash('sha256')
-            .update(`torex-avatar:${userId}`)
-            .digest('hex')
-            .slice(0, 12);
-        const randomSuffix = randomBytes(12).toString('hex');
-        const filename = `av_${opaqueOwnerTag}_${randomSuffix}.${ext}`;
+        let newAvatarUrl: string;
+        if (this.r2Storage) {
+            const stored = await this.r2Storage.uploadPublicObject({
+                folder: 'avatars',
+                buffer: file.buffer,
+                ext,
+            });
+            newAvatarUrl = stored.url;
+        } else {
+            const opaqueOwnerTag = createHash('sha256')
+                .update(`torex-avatar:${userId}`)
+                .digest('hex')
+                .slice(0, 12);
+            const randomSuffix = randomBytes(12).toString('hex');
+            const filename = `av_${opaqueOwnerTag}_${randomSuffix}.${ext}`;
 
-        const avatarsDir = path.join(process.cwd(), 'uploads', 'avatars');
-        await fs.promises.mkdir(avatarsDir, { recursive: true });
-        await fs.promises.writeFile(path.join(avatarsDir, filename), file.buffer);
+            const avatarsDir = path.join(process.cwd(), 'uploads', 'avatars');
+            await fs.promises.mkdir(avatarsDir, { recursive: true });
+            await fs.promises.writeFile(path.join(avatarsDir, filename), file.buffer);
+            newAvatarUrl = `/uploads/avatars/${filename}`;
+        }
 
-        const newAvatarUrl = `/uploads/avatars/${filename}`;
         const currentUser = await this.findOneById(userId);
         if (currentUser?.avatarUrl && currentUser.avatarUrl !== newAvatarUrl) {
             await this.deleteAvatarFileIfLocal(currentUser.avatarUrl);

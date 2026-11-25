@@ -9,6 +9,13 @@ import { PaymentsController } from './payments.controller';
 import { PaymentEntity } from './payment.entity';
 import { Subscription } from './subscription.entity';
 import { SubscriptionPlanConfig } from './subscription-plan.entity';
+import { CryptoPaymentSession } from './crypto-payment-session.entity';
+import { PixPaymentSession } from './pix-payment-session.entity';
+import { SubscriptionRenewalInvoice } from './subscription-renewal-invoice.entity';
+import { NowPaymentsService } from './paymentgateways/nowpayment';
+import { HubblyService } from './paymentgateways/hubbly';
+import { DebitoPayService } from './paymentgateways/debitopay.service';
+import { CheckoutGeoIpService } from './checkout-geoip.service';
 import { UsersModule } from '../users/users.module';
 import { AccountEntity } from '../account/account.entity';
 import { ConfigModule } from '@nestjs/config';
@@ -25,7 +32,16 @@ import { PlanGuard } from './plan.guard';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([PaymentEntity, AccountEntity, Subscription, SubscriptionPlanConfig, UserEntity]),
+        TypeOrmModule.forFeature([
+            PaymentEntity,
+            AccountEntity,
+            Subscription,
+            SubscriptionPlanConfig,
+            CryptoPaymentSession,
+            PixPaymentSession,
+            SubscriptionRenewalInvoice,
+            UserEntity,
+        ]),
         BullModule.registerQueue(
             {
                 name: 'subscription-queue',
@@ -45,12 +61,24 @@ import { PlanGuard } from './plan.guard';
     ],
     providers: [
         PaymentService,
+        NowPaymentsService,
+        HubblyService,
+        DebitoPayService,
+        CheckoutGeoIpService,
         SubscriptionService,
         PlanPermissionService,
         ...(process.env.MT5_DEDICATED_SERVER === 'true' ? [] : [SubscriptionProcessor]),
         PlanGuard,
     ],
     controllers: [PaymentController, SubscriptionController, PaymentsController, WebhookController],
-    exports: [SubscriptionService, PlanPermissionService, PlanGuard],
+    exports: [
+        SubscriptionService,
+        PlanPermissionService,
+        PlanGuard,
+        NowPaymentsService,
+        HubblyService,
+        DebitoPayService,
+        CheckoutGeoIpService,
+    ],
 })
 export class PaymentModule { }

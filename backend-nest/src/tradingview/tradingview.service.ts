@@ -699,20 +699,24 @@ export class TradingViewService {
             : (options.earliestTs || effectiveTo - chunkSize * intervalMs * 4);
 
         const toBucket = Math.floor(effectiveTo / intervalMs) * intervalMs;
-        const batchCacheKey = `tv_batch:${tvSymbol}:${tvTimeframe}:${chunkSize}:${toBucket}`;
+        const batchCacheKey = `tv_batch:${tvSymbol}:${tvTimeframe}:${chunkSize}:${toBucket}:${options.earliestTs || 0}`;
 
         const cachedBatch = await this.cacheManager.get<CandleResponse>(batchCacheKey);
         let candles: any[] = [];
         let fromCache = false;
         let dataSource: CandleResponse['source'] = 'tradingview';
 
-        // 1. Check MT5 Demo / Synced Candle Store first
+        // 1. Check MT5 Demo / Synced Candle Store first (only when it actually covers near `effectiveTo`)
         const mt5Bars = await this.getMt5CachedCandles(symbol, timeframe);
         const mt5InWindow = mt5Bars.filter(
             (c) => c.timestamp <= effectiveTo && (!options.earliestTs || c.timestamp >= options.earliestTs),
         );
+        const latestMt5Ts = mt5InWindow.length > 0 ? mt5InWindow[mt5InWindow.length - 1].timestamp : 0;
+        const mt5CoversTargetEnd =
+            mt5InWindow.length >= Math.min(50, chunkSize * 0.25) &&
+            latestMt5Ts >= effectiveTo - Math.max(intervalMs * 96, 4 * 24 * 60 * 60 * 1000);
 
-        if (mt5InWindow.length >= Math.min(50, chunkSize * 0.25)) {
+        if (mt5CoversTargetEnd) {
             candles = mt5InWindow.slice(-chunkSize);
             fromCache = true;
             dataSource = 'mt5';

@@ -8,7 +8,7 @@ export class AuditLogEntity {
     id: string;
 
     @Column({ name: 'user_id', nullable: true })
-    userId: string;
+    userId: string | null;
 
     @ManyToOne(() => UserEntity)
     @JoinColumn({ name: 'user_id' })

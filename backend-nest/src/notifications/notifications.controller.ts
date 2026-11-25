@@ -1,9 +1,13 @@
 
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, UseGuards, ForbiddenException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
+import {
+    TestNotificationDto,
+    UpdateNotificationSettingsDto,
+} from './dto/notifications.dto';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -43,12 +47,15 @@ export class NotificationsController {
     }
 
     @Post('settings')
-    async updateSettings(@Req() req, @Body() body: any) {
+    async updateSettings(@Req() req, @Body() body: UpdateNotificationSettingsDto) {
         return this.notificationsService.updateSettings(req.user.id, body);
     }
 
     @Post('test')
-    async sendTest(@Req() req, @Body() body: { title: string; message: string; type?: string }) {
+    async sendTest(@Req() req, @Body() body: TestNotificationDto) {
+        if (process.env.NODE_ENV === 'production') {
+            throw new ForbiddenException('Este recurso não está disponível em produção.');
+        }
         return this.notificationsService.create(req.user.id, {
             title: body.title || 'Test Notification',
             message: body.message || 'This is a test notification.',

@@ -693,6 +693,8 @@ api.interceptors.request.use(async (config) => {
         if (serverBundle) {
             const encryptedReq = await encryptRequestJsonEnvelope(config.data, serverBundle);
             if (encryptedReq) {
+                (config as any)._rawPlainData = config.data;
+                (config as any)._usedKemEnvelope = true;
                 config.data = encryptedReq.envelope;
                 config.headers['X-Torex-Timestamp'] = encryptedReq.timestamp;
                 config.headers['X-Torex-Nonce'] = encryptedReq.nonce;
@@ -709,7 +711,27 @@ api.interceptors.response.use(
         }
         return response;
     },
-    (error) => {
+    async (error) => {
+        const reqConfig = error?.config as any;
+        if (
+            error?.response?.status === 400 &&
+            reqConfig?._usedKemEnvelope &&
+            !reqConfig?._kemRetried &&
+            (error?.response?.headers?.['x-torex-kem-invalid'] === '1' ||
+                String(error?.response?.data?.message || '').toLowerCase().includes('envelope seguro'))
+        ) {
+            cachedServerKemBundle = null;
+            reqConfig._kemRetried = true;
+            if (reqConfig._rawPlainData !== undefined) {
+                reqConfig.data = reqConfig._rawPlainData;
+            }
+            if (reqConfig.headers) {
+                delete reqConfig.headers['X-Torex-Timestamp'];
+                delete reqConfig.headers['X-Torex-Nonce'];
+            }
+            return api.request(reqConfig);
+        }
+
         if (error.response?.status === 401) {
             if ((error.config as any)?._isSyncEngineRequest) {
                 useOfflineSyncStore
@@ -720,10 +742,16 @@ api.interceptors.response.use(
                 return Promise.reject(error);
             }
 
-            const isAiChatRequest = Boolean(
-                error.config?.url?.startsWith('/ai/chat')
-            );
-            if (!isAiChatRequest) {
+            const reqUrl = String(error.config?.url || '');
+            const isAiChatRequest = reqUrl.startsWith('/ai/chat');
+            const isPublicAuthFlowRequest =
+                reqUrl.startsWith('/auth/login') ||
+                reqUrl.startsWith('/auth/register') ||
+                reqUrl.startsWith('/auth/verify-2fa') ||
+                reqUrl.startsWith('/auth/resend-2fa') ||
+                reqUrl.startsWith('/auth/forgot-password') ||
+                reqUrl.startsWith('/auth/reset-password');
+            if (!isAiChatRequest && !isPublicAuthFlowRequest) {
                 console.error(
                     `API Auth Error (401) on URL:`,
                     error.config?.url
@@ -736,9 +764,13 @@ api.interceptors.response.use(
                     }
                 } else {
                     localStorage.removeItem('token');
+                    const path = window.location.pathname;
                     if (
-                        !window.location.pathname.includes('/login') &&
-                        !window.location.pathname.includes('/register')
+                        !path.includes('/login') &&
+                        !path.includes('/register') &&
+                        !path.includes('/verify-account') &&
+                        !path.includes('/2fa') &&
+                        !path.includes('/forgot-password')
                     ) {
                         try {
                             sessionStorage.setItem('torex_auth_expired', '1');

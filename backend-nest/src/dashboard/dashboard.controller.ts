@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Req, UseGuards, UseInterceptors, UploadedFile, Param, Query, Optional } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Put, Patch, Delete, Body, Req, Res, UseGuards, UseInterceptors, UploadedFile, Param, Query, Optional } from '@nestjs/common';
+import { FastifyReply } from 'fastify';
 import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { DashboardService } from './dashboard.service';
 import { JournalService } from './journal.service';
@@ -7,6 +8,9 @@ import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 import { SessionService } from './session.service';
 import { WeeklyReportService } from './weekly-report.service';
+import { sanitizeJournalPayload } from '../common/security/input-sanitizer.util';
+import { CloudflareR2StorageService } from '../common/security/cloudflare-r2-storage.service';
+import { DigitalSignatureService } from '../common/security/digital-signature.service';
 
 @Controller('dashboard')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -17,6 +21,8 @@ export class DashboardController {
         private readonly journalService: JournalService,
         private readonly sessionService: SessionService,
         @Optional() private readonly weeklyReportService?: WeeklyReportService,
+        @Optional() private readonly r2Storage?: CloudflareR2StorageService,
+        @Optional() private readonly digitalSignature?: DigitalSignatureService,
     ) { }
 
     private resolveAccountId(req: any, queryAccountId?: string): string | undefined {
@@ -25,6 +31,13 @@ export class DashboardController {
             return undefined;
         }
         return id;
+    }
+
+    private assertObjectBody(body: unknown): Record<string, any> {
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            throw new BadRequestException('Formato de dados inválido.');
+        }
+        return sanitizeJournalPayload(body as Record<string, any>);
     }
 
     @Post('sessions/check')
@@ -114,11 +127,12 @@ export class DashboardController {
     @Post('mental-log')
     async saveMentalLog(
         @Req() req,
-        @Body() body: any,
+        @Body() body: Record<string, any>,
         @Query('accountId') queryAccountId?: string
     ) {
-        const accountId = this.resolveAccountId(req, queryAccountId || body?.accountId);
-        return this.dashboardService.saveMentalLog(req.user.id, body, accountId);
+        const safeBody = this.assertObjectBody(body);
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody?.accountId);
+        return this.dashboardService.saveMentalLog(req.user.id, safeBody, accountId);
     }
 
     @Get('mental-log/today')
@@ -134,7 +148,6 @@ export class DashboardController {
     @Post('mental-log/image')
     @UseInterceptors(
         new FastifyFileInterceptor('file', {
-            dest: './uploads',
             allowedImageOnly: true,
             maxFileSizeBytes: 5 * 1024 * 1024,
         }),
@@ -146,7 +159,25 @@ export class DashboardController {
         @Query('accountId') queryAccountId?: string
     ) {
         const accountId = this.resolveAccountId(req, queryAccountId || req.body?.accountId);
-        const imageUrl = `/uploads/${file.filename}`;
+        let imageUrl = `/uploads/${file.filename}`;
+        if (this.r2Storage && file?.buffer) {
+            const mime = String(file?.mimetype || '').toLowerCase();
+            const ext = mime.includes('webp')
+                ? 'webp'
+                : mime.includes('gif')
+                  ? 'gif'
+                  : mime.includes('jp')
+                    ? 'jpg'
+                    : 'png';
+            const stored = await this.r2Storage.uploadPrivateObject({
+                userId: req.user.id,
+                folder: 'mental-logs',
+                buffer: file.buffer,
+                ext,
+                contentType: file.mimetype,
+            });
+            imageUrl = stored.url;
+        }
         await this.dashboardService.saveMentalLogImage(req.user.id, imageUrl, session, accountId);
         return { imageUrl };
     }
@@ -171,11 +202,12 @@ export class DashboardController {
     }
 
     @Post('technical-journal')
-    async createTechnicalJournal(@Req() req, @Body() body: any, @Query('accountId') queryAccountId?: string) {
+    async createTechnicalJournal(@Req() req, @Body() body: Record<string, any>, @Query('accountId') queryAccountId?: string) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
-        const date = body.date;
-        const accountId = this.resolveAccountId(req, queryAccountId || body.accountId);
-        return this.dashboardService.saveTechnicalJournal(userId, date, body, accountId);
+        const date = safeBody.date;
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody.accountId);
+        return this.dashboardService.saveTechnicalJournal(userId, date, safeBody, accountId);
     }
 
     // ------------------------------------------------------------------------
@@ -198,16 +230,17 @@ export class DashboardController {
     async upsertDailyNote(
         @Req() req,
         @Param('date') date: string,
-        @Body() body: any,
+        @Body() body: Record<string, any>,
         @Query('accountId') queryAccountId?: string
     ) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
-        const accountId = this.resolveAccountId(req, queryAccountId || body?.accountId);
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody?.accountId);
         const rawUpdatedAt = req.headers?.['x-client-updated-at'];
         const clientUpdatedAt =
             (Array.isArray(rawUpdatedAt) ? rawUpdatedAt[0] : rawUpdatedAt) ||
-            body?.clientUpdatedAt;
-        return this.journalService.upsertDailyNote(userId, date, body, accountId, clientUpdatedAt);
+            safeBody?.clientUpdatedAt;
+        return this.journalService.upsertDailyNote(userId, date, safeBody, accountId, clientUpdatedAt);
     }
 
     @Delete('journal/daily/:date')
@@ -225,14 +258,15 @@ export class DashboardController {
     async upsertTradeNote(
         @Req() req,
         @Param('tradeId') tradeId: string,
-        @Body() body: any
+        @Body() body: Record<string, any>
     ) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
         const rawUpdatedAt = req.headers?.['x-client-updated-at'];
         const clientUpdatedAt =
             (Array.isArray(rawUpdatedAt) ? rawUpdatedAt[0] : rawUpdatedAt) ||
-            body?.clientUpdatedAt;
-        return this.journalService.upsertTradeNote(userId, tradeId, body, clientUpdatedAt);
+            safeBody?.clientUpdatedAt;
+        return this.journalService.upsertTradeNote(userId, tradeId, safeBody, clientUpdatedAt);
     }
 
     @Delete('journal/trade/:tradeId')
@@ -245,23 +279,25 @@ export class DashboardController {
     }
 
     @Post('journal/general')
-    async createGeneralNote(@Req() req, @Body() body: any) {
+    async createGeneralNote(@Req() req, @Body() body: Record<string, any>) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
-        return this.journalService.createGeneralNote(userId, body);
+        return this.journalService.createGeneralNote(userId, safeBody);
     }
 
     @Put('journal/general/:id')
     async updateGeneralNote(
         @Req() req,
         @Param('id') id: string,
-        @Body() body: any
+        @Body() body: Record<string, any>
     ) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
         const rawUpdatedAt = req.headers?.['x-client-updated-at'];
         const clientUpdatedAt =
             (Array.isArray(rawUpdatedAt) ? rawUpdatedAt[0] : rawUpdatedAt) ||
-            body?.clientUpdatedAt;
-        return this.journalService.updateGeneralNote(userId, id, body, clientUpdatedAt);
+            safeBody?.clientUpdatedAt;
+        return this.journalService.updateGeneralNote(userId, id, safeBody, clientUpdatedAt);
     }
 
     @Delete('journal/general/:id')
@@ -271,26 +307,27 @@ export class DashboardController {
     }
 
     @Post('journal/screenshot')
-    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true }))
+    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true, maxFileSizeBytes: 5 * 1024 * 1024 }))
     async uploadJournalScreenshot(
         @Req() req,
         @UploadedFile() file: any,
-        @Body() body: any
+        @Body() body: Record<string, any>
     ) {
         const userId = req.user.id || req.user.userId;
-        return this.journalService.uploadJournalScreenshot(userId, file, body);
+        return this.journalService.uploadJournalScreenshot(userId, file, body || {});
     }
 
     @Patch('trades/:id')
-    async updateTrade(@Req() req, @Param('id') id: string, @Body() body: any) {
+    async updateTrade(@Req() req, @Param('id') id: string, @Body() body: Record<string, any>) {
+        const safeBody = this.assertObjectBody(body);
         const rawUpdatedAt = req.headers?.['x-client-updated-at'];
         const clientUpdatedAt =
             (Array.isArray(rawUpdatedAt) ? rawUpdatedAt[0] : rawUpdatedAt) ||
-            body?.clientUpdatedAt;
+            safeBody?.clientUpdatedAt;
         return this.dashboardService.updateTradeMetadata(
             req.user.id,
             id,
-            body,
+            safeBody,
             clientUpdatedAt,
         );
     }
@@ -317,6 +354,7 @@ export class DashboardController {
     @Get('report')
     async getReport(
         @Req() req,
+        @Res({ passthrough: true }) reply: FastifyReply,
         @Query('accountId') queryAccountId?: string,
         @Query('startDate') startDate?: string,
         @Query('endDate') endDate?: string,
@@ -329,7 +367,7 @@ export class DashboardController {
     ) {
         const accountId = this.resolveAccountId(req, queryAccountId);
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.getReportData(
+        const report = await this.dashboardService.getReportData(
             userId,
             accountId,
             startDate,
@@ -338,6 +376,20 @@ export class DashboardController {
             type,
             { symbols, side, sessions, outcome }
         );
+        if (this.digitalSignature && report && typeof report === 'object') {
+            const envelope = this.digitalSignature.signCanonicalPayload(
+                report,
+                'performance_report',
+            );
+            reply.header('X-Torex-Signature', envelope.signature);
+            reply.header('X-Torex-Signature-Kid', envelope.kid);
+            reply.header('X-Torex-Content-Hash', envelope.contentHashSha256);
+            return {
+                ...report,
+                _signature: envelope,
+            };
+        }
+        return report;
     }
 
     @Post('report/email')
@@ -356,36 +408,38 @@ export class DashboardController {
     @RequirePlan(PlanTier.PRO)
     async simulateBacktest(
         @Req() req,
-        @Body() body: any,
+        @Body() body: Record<string, any>,
         @Query('accountId') queryAccountId?: string
     ) {
-        const accountId = this.resolveAccountId(req, queryAccountId || body.accountId);
+        const safeBody = this.assertObjectBody(body);
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody.accountId);
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.simulateBacktest(userId, accountId, body);
+        return this.dashboardService.simulateBacktest(userId, accountId, safeBody);
     }
 
     @Post('backtest/save')
     @RequirePlan(PlanTier.PRO)
     async saveBacktest(
         @Req() req,
-        @Body() body: any,
+        @Body() body: Record<string, any>,
         @Query('accountId') queryAccountId?: string
     ) {
-        const accountId = this.resolveAccountId(req, queryAccountId || body.accountId);
+        const safeBody = this.assertObjectBody(body);
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody.accountId);
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.saveBacktestSession(userId, { ...body, accountId });
+        return this.dashboardService.saveBacktestSession(userId, { ...safeBody, accountId });
     }
 
     @Post('backtest/screenshot')
     @RequirePlan(PlanTier.PRO)
-    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true }))
+    @UseInterceptors(new FastifyFileInterceptor('file', { allowedImageOnly: true, maxFileSizeBytes: 5 * 1024 * 1024 }))
     async uploadBacktestScreenshot(
         @Req() req,
         @UploadedFile() file: any,
-        @Body() body: any
+        @Body() body: Record<string, any>
     ) {
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.saveBacktestScreenshotFile(userId, file, body);
+        return this.dashboardService.saveBacktestScreenshotFile(userId, file, body || {});
     }
 
     @Post('backtest/screenshot/delete')
@@ -402,12 +456,13 @@ export class DashboardController {
     @RequirePlan(PlanTier.PRO)
     async syncReplaySession(
         @Req() req,
-        @Body() body: any,
+        @Body() body: Record<string, any>,
         @Query('accountId') queryAccountId?: string
     ) {
-        const accountId = this.resolveAccountId(req, queryAccountId || body?.accountId);
+        const safeBody = this.assertObjectBody(body);
+        const accountId = this.resolveAccountId(req, queryAccountId || safeBody?.accountId);
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.syncReplaySessionState(userId, { ...body, accountId });
+        return this.dashboardService.syncReplaySessionState(userId, { ...safeBody, accountId });
     }
 
     @Get('backtest/session/:sessionId')
@@ -447,10 +502,11 @@ export class DashboardController {
     @RequirePlan(PlanTier.PRO)
     async syncBacktestStrategy(
         @Req() req,
-        @Body() body: any
+        @Body() body: Record<string, any>
     ) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
-        return this.dashboardService.syncBacktestStrategy(userId, body);
+        return this.dashboardService.syncBacktestStrategy(userId, safeBody);
     }
 
     @Delete('backtest/strategy/:strategyId')
@@ -489,11 +545,12 @@ export class DashboardController {
 
     @Post('backtest/hypotheses')
     @RequirePlan(PlanTier.PRO)
-    async saveBacktestHypothesis(@Req() req, @Body() body: any) {
+    async saveBacktestHypothesis(@Req() req, @Body() body: Record<string, any>) {
+        const safeBody = this.assertObjectBody(body);
         const userId = req.user.id || req.user.userId;
-        const resolvedAccountId = this.resolveAccountId(req, body?.accountId);
+        const resolvedAccountId = this.resolveAccountId(req, safeBody?.accountId);
         return this.dashboardService.saveBacktestHypothesis(userId, {
-            ...(body || {}),
+            ...safeBody,
             ...(resolvedAccountId ? { accountId: resolvedAccountId } : {}),
         });
     }

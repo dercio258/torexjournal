@@ -46,7 +46,7 @@ export const parseRetryAfter = (message: string, fallback = 60): number => {
     return fallback;
 };
 
-/** Friendly messages for known registration errors in PT or EN. */
+/** Friendly messages for known registration and verification errors in PT or EN. */
 export const getRegisterErrorMessage = (original: string, locale: 'pt' | 'en' = 'pt'): string => {
     const err = original?.toLowerCase() || '';
     const isDirectPolicyMessage =
@@ -66,19 +66,59 @@ export const getRegisterErrorMessage = (original: string, locale: 'pt' | 'en' = 
         err.includes('caractere') ||
         err.includes('character') ||
         err.includes('contacto') ||
-        err.includes('prefixo');
+        err.includes('prefixo') ||
+        err.includes('código') ||
+        err.includes('code') ||
+        err.includes('verificação') ||
+        err.includes('verification') ||
+        err.includes('aguarde') ||
+        err.includes('wait') ||
+        err.includes('tentativa') ||
+        err.includes('attempt') ||
+        err.includes('cloudflare') ||
+        err.includes('anti-bot') ||
+        err.includes('envelope') ||
+        err.includes('expirou') ||
+        err.includes('expirad') ||
+        err.includes('expired') ||
+        err.includes('já foi verificada') ||
+        err.includes('already verified');
 
     if (locale === 'en') {
-        if (err.includes('email already registered')) return 'This email address is already linked to an account.';
-        if (err.includes('invalid or expired otp')) return 'Invalid or expired verification code. Please request a new one.';
+        if (err.includes('email already registered')) {
+            return 'This email address is already linked to a verified account. Please sign in.';
+        }
+        if (err.includes('invalid or expired otp')) {
+            return 'Invalid or expired verification code. Please request a new one.';
+        }
         if (err.includes('otp is required')) return 'Email verification code is required.';
+        if (err.includes('código invalidado por excesso de tentativas')) {
+            return 'Code invalidated after too many attempts. Click "Resend code" to receive a new one.';
+        }
+        if (err.includes('código expirado')) {
+            return 'Verification code expired. Click "Resend code" to receive a new one.';
+        }
+        if (err.includes('código de verificação inválido') || err.includes('código inválido')) {
+            return 'Invalid verification code. Check your email and try again.';
+        }
+        if (err.includes('aguarde 60 segundos') || err.includes('aguarde alguns segundos')) {
+            return 'Please wait a few seconds before requesting another verification code.';
+        }
+        if (err.includes('já foi verificada') || err.includes('already verified')) {
+            return 'This account is already verified. Sign in to continue.';
+        }
+        if (err.includes('anti-bot') || err.includes('cloudflare') || err.includes('desafio de segurança')) {
+            return 'Please complete the Cloudflare security verification and try again.';
+        }
         if (err.includes('connect')) return 'Unable to reach the server. Check your connection and try again.';
         if (err.includes('validation')) return 'Invalid input. Please review the highlighted fields.';
         if (isDirectPolicyMessage && original) return original;
         if (!original) return 'Unable to complete registration. Please try again.';
         return `Unable to complete registration: ${original}`;
     }
-    if (err.includes('email already registered')) return 'Este endereço de e-mail já está associado a uma conta.';
+    if (err.includes('email already registered')) {
+        return 'Este endereço de e-mail já está associado a uma conta verificada. Faça login para entrar.';
+    }
     if (err.includes('invalid or expired otp')) return 'Código de verificação inválido ou expirado. Tente novamente.';
     if (err.includes('otp is required')) return 'O código de verificação é obrigatório.';
     if (err.includes('connect')) return 'Falha na comunicação com o servidor. Verifique sua conexão.';

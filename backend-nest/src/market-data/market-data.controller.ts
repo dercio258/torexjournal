@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, Post, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Post, UseInterceptors, UploadedFile, BadRequestException, HttpException } from '@nestjs/common';
 import { MarketDataParserService } from './market-data-parser.service';
 import { TradingViewService } from '../tradingview/tradingview.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -41,6 +41,7 @@ export class MarketDataController {
     ) { }
 
     @Get('candles')
+    @RequirePlan(PlanTier.PRO)
     async getCandles(
         @Query('symbol') symbol: string,
         @Query('from') from: string,
@@ -70,17 +71,37 @@ export class MarketDataController {
     }
 
     @Post('upload-mt5')
-    @UseInterceptors(new FastifyFileInterceptor('file'))
+    @UseInterceptors(
+        new FastifyFileInterceptor('file', {
+            allowedImageOnly: false,
+            maxFileSizeBytes: 10 * 1024 * 1024,
+        }),
+    )
     async uploadMt5Csv(@UploadedFile() file: any) {
-        if (!file) throw new BadRequestException('No file uploaded');
-        
+        if (!file) throw new BadRequestException('Nenhum arquivo enviado.');
+        const originalName = String(file.originalname || '').toLowerCase();
+        if (
+            originalName &&
+            !originalName.endsWith('.csv') &&
+            !originalName.endsWith('.txt') &&
+            !originalName.endsWith('.tsv')
+        ) {
+            throw new BadRequestException(
+                'Formato de arquivo não suportado. Envie um arquivo .csv válido.',
+            );
+        }
+
         try {
-            // Buffer to UTF-16LE if needed, but standard UTF-8/ISO might work for MT5
-            // Let's try to detect format or just use toString()
             const content = file.buffer.toString('utf-8');
             return this.marketDataParser.parseMt5Csv(content);
-        } catch (e) {
-            throw new BadRequestException(`Failed to parse MT5 CSV: ${e.message}`);
+        } catch (e: any) {
+            if (e instanceof HttpException) {
+                throw e;
+            }
+            throw new BadRequestException(
+                'Não foi possível ler o arquivo CSV enviado. Verifique se está no formato correto.',
+                { cause: e },
+            );
         }
     }
 }

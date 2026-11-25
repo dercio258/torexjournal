@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import * as QRCode from 'qrcode';
 import { TelemetryService } from '../common/observability/telemetry.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import {
@@ -127,6 +128,7 @@ export class EmailService implements OnModuleDestroy {
             userId?: string;
             utmCampaign?: string;
             utmMedium?: string;
+            attachments?: nodemailer.SendMailOptions['attachments'];
         } = {},
     ): Promise<boolean> {
         const startedAt = Date.now();
@@ -177,6 +179,7 @@ export class EmailService implements OnModuleDestroy {
                 subject,
                 text: resolvedText,
                 html: resolvedHtml,
+                ...(options.attachments?.length ? { attachments: options.attachments } : {}),
             });
 
             const durationMs = Date.now() - startedAt;
@@ -225,6 +228,33 @@ export class EmailService implements OnModuleDestroy {
         const rendered = renderEmailTemplate(template, data);
         const finalSubject = (data as any)?.subject || rendered.subject;
 
+        const attachments: nodemailer.SendMailOptions['attachments'] = [];
+        if (rendered.inlineQr?.data && rendered.inlineQr?.cid) {
+            try {
+                const qrBuffer = await QRCode.toBuffer(rendered.inlineQr.data, {
+                    type: 'png',
+                    width: 260,
+                    margin: 2,
+                    errorCorrectionLevel: 'M',
+                    color: {
+                        dark: '#0F172A',
+                        light: '#FFFFFF',
+                    },
+                });
+                attachments.push({
+                    filename: rendered.inlineQr.filename || 'qrcode.png',
+                    content: qrBuffer,
+                    cid: rendered.inlineQr.cid,
+                    contentType: 'image/png',
+                    contentDisposition: 'inline',
+                });
+            } catch (err: any) {
+                this.logger.warn(
+                    `Failed generating inline QR attachment for ${template}: ${err?.message || err}`,
+                );
+            }
+        }
+
         return this.sendEmail(to, finalSubject, rendered.text, rendered.html, {
             throwOnError: options.throwOnError,
             templateName: template,
@@ -232,6 +262,7 @@ export class EmailService implements OnModuleDestroy {
             userId: options.userId,
             utmCampaign: options.utmCampaign,
             utmMedium: options.utmMedium,
+            attachments: attachments.length > 0 ? attachments : undefined,
         });
     }
 

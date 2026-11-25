@@ -46,6 +46,21 @@ describe('Institutional Email Templates Registry (18 Situations)', () => {
             method: 'mpesa',
             reference: 'TOREX2026111209001234',
         },
+        CRYPTO_PAYMENT_INITIATED: {
+            userName: 'Carlos Silva',
+            plan: 'PRO',
+            cycle: 'Mensal',
+            amountUsd: 15.99,
+            cryptoAmount: '15.99',
+            cryptoCurrency: 'USDT.TRC20',
+            displayName: 'Tether USD (TRC20)',
+            network: 'TRON (TRC20)',
+            walletAddress: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
+            reference: 'TOREX2026111209009876',
+            copyWalletUrl: 'https://torexjournal.com/pay/crypto/TOREX2026111209009876?sig=abc123&copy=1',
+            checkoutUrl: 'https://torexjournal.com/checkout?cryptoRef=TOREX2026111209009876',
+            expiresAt: '2026-11-12T10:00:00.000Z',
+        },
         PAYMENT_SUCCESS: {
             userName: 'Carlos Silva',
             plan: 'PRO',
@@ -145,8 +160,8 @@ describe('Institutional Email Templates Registry (18 Situations)', () => {
 
     const allTemplateNames = Object.keys(EmailTemplateRegistry) as EmailTemplateName[];
 
-    it('registers all 19 institutional templates', () => {
-        expect(allTemplateNames).toHaveLength(19);
+    it('registers all 20 institutional templates', () => {
+        expect(allTemplateNames).toHaveLength(20);
     });
 
     it.each(allTemplateNames)(
@@ -204,5 +219,28 @@ describe('Institutional Email Templates Registry (18 Situations)', () => {
         });
         expect(tradeSummary.html).toContain('+USD 250,00');
         expect(tradeSummary.html).not.toContain('250.00 MT');
+    });
+
+    it('renders CRYPTO_PAYMENT_INITIATED with inline QR CID, wallet address, and copy wallet button', () => {
+        const rendered = renderEmailTemplate('CRYPTO_PAYMENT_INITIATED', {
+            userName: 'Carlos Silva',
+            plan: 'PRO',
+            cycle: 'Mensal',
+            amountUsd: 15.99,
+            cryptoAmount: '15.99',
+            cryptoCurrency: 'USDT.TRC20',
+            displayName: 'Tether USD (TRC20)',
+            network: 'TRON (TRC20)',
+            walletAddress: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE',
+            reference: 'TOREX2026111209009876',
+            copyWalletUrl: 'https://torexjournal.com/pay/crypto/TOREX2026111209009876?sig=abc123&copy=1',
+            checkoutUrl: 'https://torexjournal.com/checkout?cryptoRef=TOREX2026111209009876',
+        });
+
+        expect(rendered.inlineQr?.cid).toBe('crypto-payment-qr@torexjournal.com');
+        expect(rendered.inlineQr?.data).toBe('TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE');
+        expect(rendered.html).toContain('cid:crypto-payment-qr@torexjournal.com');
+        expect(rendered.html).toContain('TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE');
+        expect(rendered.html).toContain('Copiar ID da Carteira');
     });
 });

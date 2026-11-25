@@ -73,7 +73,7 @@ export class FastifyFileInterceptor implements NestInterceptor {
 
         const parts = req.parts();
         let filePartObj: any = null;
-        req.body = req.body || {};
+        req.body = Object.assign(Object.create(null), req.body || {});
 
         const maxSize = this.options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_BYTES;
         const requireImage = this.options?.allowedImageOnly ?? Boolean(this.options?.dest);
@@ -143,14 +143,25 @@ export class FastifyFileInterceptor implements NestInterceptor {
                         part.file.resume();
                     }
                 } else {
-                    req.body[part.fieldname] = part.value;
+                    const key = String(part.fieldname || '');
+                    if (
+                        key &&
+                        key !== '__proto__' &&
+                        key !== 'constructor' &&
+                        key !== 'prototype'
+                    ) {
+                        req.body[key] = part.value;
+                    }
                 }
             }
         } catch (err: any) {
             if (err instanceof BadRequestException) {
                 throw err;
             }
-            throw new BadRequestException(`Multipart parsing failed: ${err.message}`);
+            throw new BadRequestException(
+                'Não foi possível processar o arquivo enviado. Verifique o formato e tente novamente.',
+                { cause: err },
+            );
         }
 
         if (!filePartObj) {

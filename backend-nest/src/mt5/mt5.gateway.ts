@@ -9,6 +9,8 @@ import {
     ConnectedSocket,
 } from '@nestjs/websockets';
 import { Inject, Logger, Optional, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { extractSocketTokenFromHandshake } from '../common/security/cookie-security.util';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
@@ -23,7 +25,7 @@ import { AccountEntity } from '../account/account.entity';
 import { UserEntity } from '../users/user.entity';
 import { SessionEntity } from '../auth/session.entity';
 import { TelemetryService } from '../common/observability/telemetry.service';
-import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
+import { buildSessionCacheKey, getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 @WebSocketGateway({
@@ -152,7 +154,7 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         // Verify session is active (respects logout/session revocation)
         let sessionActive = false;
         if (this.cacheManager) {
-            const cached = await this.cacheManager.get(`user_session:${cleanToken}`).catch(() => null);
+            const cached = await this.cacheManager.get(buildSessionCacheKey(cleanToken)).catch(() => null);
             if (cached === 'active') sessionActive = true;
         }
         if (!sessionActive && this.sessionRepo) {
@@ -194,10 +196,33 @@ export class Mt5Gateway implements OnGatewayInit, OnGatewayConnection, OnGateway
         return userId;
     }
 
+    @OnEvent('security.revoke_user')
+    handleUserSessionRevoked(event: { userId?: string; reason?: string }) {
+        const targetUserId = event?.userId;
+        if (!targetUserId) return;
+        for (const [client, meta] of this.clients.entries()) {
+            if (meta?.userId === targetUserId) {
+                try {
+                    if (typeof client.emit === 'function') {
+                        client.emit('session_revoked', { reason: event.reason || 'revoked' });
+                    }
+                    if (typeof client.disconnect === 'function') {
+                        client.disconnect(true);
+                    } else if (typeof (client as any).close === 'function') {
+                        (client as any).close();
+                    }
+                } catch {
+                    // ignore already closed socket
+                }
+                this.clients.delete(client);
+            }
+        }
+        this.telemetry?.setWsActiveClients(this.clients.size);
+    }
+
     async handleConnection(client: Socket) {
         const handshakeToken =
-            client.handshake?.auth?.token ||
-            (client.handshake?.headers?.authorization || '').replace(/^Bearer\s+/i, '') ||
+            extractSocketTokenFromHandshake(client.handshake) ||
             (client.handshake?.query?.token as string);
 
         if (handshakeToken) {

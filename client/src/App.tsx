@@ -220,11 +220,9 @@ function App() {
                             <Route
                                 path="/verify-account"
                                 element={
-                                    <GuestRoute>
-                                        <Suspense fallback={<StandalonePageSkeleton />}>
-                                            <VerifyAccount />
-                                        </Suspense>
-                                    </GuestRoute>
+                                    <Suspense fallback={<StandalonePageSkeleton />}>
+                                        <VerifyAccount />
+                                    </Suspense>
                                 }
                             />
                             <Route

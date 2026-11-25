@@ -33,6 +33,16 @@ export class PaymentsController {
                 method = 'M-Pesa';
             } else if (sub.paymentMethod === 'emola') {
                 method = 'e-Mola';
+            } else if (sub.paymentMethod === 'crypto') {
+                method = 'Criptomoeda';
+            } else if (sub.paymentMethod === 'pix') {
+                method = 'PIX';
+            } else if (sub.paymentMethod === 'payfast') {
+                method = 'PayFast';
+            } else if (sub.paymentMethod === 'referral_credits') {
+                method = 'Créditos de Afiliado';
+            } else if (sub.paymentMethod === 'TRIAL') {
+                method = 'Avaliação Gratuita';
             }
 
             return {

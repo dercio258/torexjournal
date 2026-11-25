@@ -28,6 +28,7 @@ import {
     mergeSessionUtmsIntoSearch,
     sanitizeReturnTo,
 } from '../lib/attribution';
+import { savePendingVerification } from '../lib/pendingVerification';
 import { COOKIE_CONSENT_EVENT, hasConsentFor } from '../lib/cookieConsent';
 import {
     CountryDial,
@@ -238,16 +239,17 @@ export const Register = () => {
             });
 
             if (res.data?.verificationToken) {
-                sessionStorage.setItem(
-                    'torex_pending_verification',
-                    JSON.stringify({
-                        verificationToken: res.data.verificationToken,
-                        emailMasked: res.data.emailMasked || form.email.trim(),
-                        email: form.email.trim(),
-                        returnTo: safeReturnTo,
-                    }),
-                );
-                navigate('/verify-account');
+                const pending = {
+                    verificationToken: res.data.verificationToken,
+                    emailMasked: res.data.emailMasked || form.email.trim(),
+                    returnTo: safeReturnTo,
+                    fromLogin: false,
+                    codeSent: res.data.codeSent !== false,
+                };
+                savePendingVerification(pending);
+                navigate('/verify-account', {
+                    state: { pendingVerification: pending },
+                });
                 return;
             }
 

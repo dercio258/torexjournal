@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { createHash } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 import { cavemanCompressHistory } from './ai-caveman-compressor';
+import { AiPiiScrubberService } from './ai-pii-scrubber.service';
 
 export type LlmProviderKind = 'none' | 'gemini' | 'openai_compatible' | 'qwen';
 
@@ -78,8 +79,14 @@ export class AiLlmProviderService {
 
     constructor(
         private readonly configService: ConfigService,
-        private readonly httpService: HttpService
+        private readonly httpService: HttpService,
+        @Optional() private readonly piiScrubber?: AiPiiScrubberService,
     ) {}
+
+    private scrubOutboundPrompt(text: string): string {
+        if (!this.piiScrubber) return text;
+        return this.piiScrubber.scrubOutboundText(text).text;
+    }
 
     private hashSecret(secret: string): string {
         return createHash('sha256').update(secret).digest('hex');
@@ -653,6 +660,10 @@ export class AiLlmProviderService {
         }
 
         const safeHistory = this.prepareSafeHistory(params.history, 4);
+        const scrubbedHistory = this.piiScrubber
+            ? this.piiScrubber.scrubHistory(safeHistory).history
+            : safeHistory;
+        const scrubbedUserPrompt = this.scrubOutboundPrompt(params.userPrompt);
 
         // 1. Tenta primariamente o Qwen (modelo barato e rápido de linha de frente)
         if (qwen.enabled) {
@@ -660,8 +671,8 @@ export class AiLlmProviderService {
             try {
                 const messages = this.buildOpenAiMessages(
                     params.systemPrompt,
-                    safeHistory,
-                    params.userPrompt
+                    scrubbedHistory,
+                    scrubbedUserPrompt
                 );
 
                 const res = await this.postQwenChatCompletion(
@@ -702,8 +713,8 @@ export class AiLlmProviderService {
             const startedAt = Date.now();
             try {
                 const contents = this.buildGeminiContents(
-                    safeHistory,
-                    params.userPrompt
+                    scrubbedHistory,
+                    scrubbedUserPrompt
                 );
 
                 const { data, modelUsed } = await this.postGeminiGenerateContent(
@@ -768,14 +779,18 @@ export class AiLlmProviderService {
         }
 
         const safeHistory = this.prepareSafeHistory(params.history, 6);
+        const scrubbedHistory = this.piiScrubber
+            ? this.piiScrubber.scrubHistory(safeHistory).history
+            : safeHistory;
+        const scrubbedTaskPrompt = this.scrubOutboundPrompt(params.userTaskPrompt);
 
         // 1. Execução primária no Gemini (Analista Oficial)
         if (gemini.enabled && gemini.key) {
             const startedAt = Date.now();
             try {
                 const contents = this.buildGeminiContents(
-                    safeHistory,
-                    params.userTaskPrompt
+                    scrubbedHistory,
+                    scrubbedTaskPrompt
                 );
 
                 const { data, modelUsed } = await this.postGeminiGenerateContent(
@@ -831,8 +846,8 @@ export class AiLlmProviderService {
             try {
                 const messages = this.buildOpenAiMessages(
                     params.systemPrompt,
-                    safeHistory,
-                    params.userTaskPrompt
+                    scrubbedHistory,
+                    scrubbedTaskPrompt
                 );
 
                 const res = await this.postQwenChatCompletion(

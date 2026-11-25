@@ -17,6 +17,7 @@ import { Alert } from '../components/ui/Alert';
 import { useCountdown } from '../hooks/useCountdown';
 import { EMAIL_RE, getApiMessage, isRateLimited, parseRetryAfter } from '../lib/authErrors';
 import { mergeSessionUtmsIntoSearch, sanitizeReturnTo } from '../lib/attribution';
+import { savePendingVerification } from '../lib/pendingVerification';
 import { identifyUserOnTracker, trackConversion } from '../lib/tracking';
 
 type FieldErrors = Partial<Record<'email' | 'password', string>>;
@@ -48,11 +49,13 @@ export const Login = () => {
     const { locale } = useLocale();
     const isEn = locale === 'en';
     const navigate = useNavigate();
+    const location = useLocation();
     const [searchParams] = useSearchParams();
     const legacyRedirect = useLegacyRedirect();
 
     const safeReturnTo = sanitizeReturnTo(searchParams.get('returnTo'));
     const sessionExpired = searchParams.get('reason') === 'session_expired';
+    const infoMessage = (location.state as { infoMessage?: string } | null)?.infoMessage || null;
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -110,6 +113,21 @@ export const Login = () => {
             if (!res.data.success) {
                 setError(res.data.message || (isEn ? 'Invalid credentials.' : 'Credenciais inválidas'));
                 setTurnstileReset((n) => n + 1);
+                return;
+            }
+            if (res.data.requiresEmailVerification && res.data.verificationToken) {
+                const pending = {
+                    verificationToken: res.data.verificationToken,
+                    emailMasked: res.data.emailMasked || email.trim(),
+                    returnTo: safeReturnTo,
+                    fromLogin: true,
+                    codeSent: res.data.codeSent !== false,
+                };
+                savePendingVerification(pending);
+                navigate('/verify-account', {
+                    replace: true,
+                    state: { pendingVerification: pending },
+                });
                 return;
             }
             if (res.data.twoFactorRequired) {
@@ -227,7 +245,8 @@ export const Login = () => {
                 }
             >
                 <form onSubmit={handleSubmit} noValidate className="space-y-5">
-                    {sessionExpired && !error && (
+                    {infoMessage && !error && <Alert tone="info">{infoMessage}</Alert>}
+                    {sessionExpired && !error && !infoMessage && (
                         <Alert tone="info">
                             {isEn
                                 ? 'Your session expired for security. Sign in again to resume where you left off.'

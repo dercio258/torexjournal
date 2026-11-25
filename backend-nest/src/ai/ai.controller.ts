@@ -20,6 +20,14 @@ import { PlanTier } from '../payment/plan-permission.service';
 import { AiService } from './ai.service';
 import { TorexAiChatService } from './torex-ai-chat.service';
 import { AiCreditsService } from './ai-credits.service';
+import {
+    CreateAiChatSessionDto,
+    ForceGenerateInsightsDto,
+    MarkChatJobPresenceDto,
+    RecordMessageSignalDto,
+    SendAiChatMessageDto,
+    SubmitMessageFeedbackDto,
+} from './dto/ai.dto';
 import { AccountEntity } from '../account/account.entity';
 import { AiUserProfileService } from './ai-user-profile.service';
 import { ProfileFactType } from './ai-profile-extractor';
@@ -124,7 +132,7 @@ export class AiController {
     }
 
     @Post('generate')
-    async forceGenerate(@Req() req: any, @Body() data: { metrics: any; accountId?: string }) {
+    async forceGenerate(@Req() req: any, @Body() data: ForceGenerateInsightsDto) {
         const userId = req.user.id || req.user.userId;
         await this.aiCreditsService.assertCanInteract(userId);
 
@@ -175,13 +183,7 @@ export class AiController {
     @Post('chat/sessions')
     async createChatSession(
         @Req() req: any,
-        @Body()
-        body?: {
-            id?: string | null;
-            accountId?: string | null;
-            title?: string | null;
-            locale?: string;
-        }
+        @Body() body?: CreateAiChatSessionDto
     ) {
         const userId = req.user.id || req.user.userId;
         const accountId = this.resolveAccountId(req, body?.accountId || undefined);
@@ -216,7 +218,7 @@ export class AiController {
     async markChatJobPresence(
         @Req() req: any,
         @Param('jobId') jobId: string,
-        @Body() body?: { away?: boolean },
+        @Body() body?: MarkChatJobPresenceDto,
     ) {
         const userId = req.user.id || req.user.userId;
         return this.torexAiChatService.markJobPresence(
@@ -229,14 +231,7 @@ export class AiController {
     @Post('chat/message')
     async sendChatMessage(
         @Req() req: any,
-        @Body()
-        body: {
-            sessionId?: string | null;
-            message: string;
-            accountId?: string | null;
-            async?: boolean;
-            locale?: string;
-        }
+        @Body() body: SendAiChatMessageDto
     ) {
         const userId = req.user.id || req.user.userId;
         const userName =
@@ -279,7 +274,7 @@ export class AiController {
     async recordMessageSignal(
         @Req() req: any,
         @Param('messageId') messageId: string,
-        @Body() body: { signal?: string }
+        @Body() body: RecordMessageSignalDto
     ) {
         const userId = req.user.id || req.user.userId;
         return this.torexAiChatService.recordClientSignal({
@@ -293,13 +288,7 @@ export class AiController {
     async submitMessageFeedback(
         @Req() req: any,
         @Param('messageId') messageId: string,
-        @Body()
-        body: {
-            rating: 1 | -1;
-            reasonCode?: string | null;
-            correctionNote?: string | null;
-            locale?: string;
-        }
+        @Body() body: SubmitMessageFeedbackDto
     ) {
         const userId = req.user.id || req.user.userId;
         const userName =

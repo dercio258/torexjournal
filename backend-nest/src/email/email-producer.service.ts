@@ -27,6 +27,7 @@ const TEMPLATE_DEFAULT_PRIORITY: Record<EmailTemplateName, 1 | 2 | 3> = {
     ACCOUNT_LOCKED: 1,
 
     PAYMENT_INITIATED: 2,
+    CRYPTO_PAYMENT_INITIATED: 2,
     PAYMENT_SUCCESS: 2,
     PAYMENT_FAILED: 2,
     TRIAL_WELCOME: 2,
@@ -83,11 +84,25 @@ export class EmailProducerService {
             ...(options.jobId ? { jobId: options.jobId } : {}),
         };
 
+        const ENQUEUE_TIMEOUT_MS = 3500;
+        const withEnqueueTimeout = <T>(promise: Promise<T>): Promise<T> => {
+            let timer: NodeJS.Timeout | undefined;
+            return Promise.race([
+                promise,
+                new Promise<T>((_, reject) => {
+                    timer = setTimeout(() => reject(new Error('Bull enqueue timeout')), ENQUEUE_TIMEOUT_MS);
+                    timer.unref?.();
+                }),
+            ]).finally(() => {
+                if (timer) clearTimeout(timer);
+            });
+        };
+
         try {
             if (options.jobId) {
-                const existing = await this.emailQueue.getJob(options.jobId);
+                const existing = await withEnqueueTimeout(this.emailQueue.getJob(options.jobId));
                 if (existing) {
-                    const state = await existing.getState();
+                    const state = await withEnqueueTimeout(existing.getState());
                     if (state !== 'failed') {
                         this.telemetry?.recordEmailDeduplicated();
                         this.logger.debug(
@@ -100,17 +115,19 @@ export class EmailProducerService {
                 }
             }
 
-            await this.emailQueue.add(
-                'send-template',
-                {
-                    to: cleanTo,
-                    template,
-                    data,
-                    correlationId,
-                    trackingMeta: options.trackingMeta,
-                    enqueuedAt: new Date().toISOString(),
-                },
-                jobOptions,
+            await withEnqueueTimeout(
+                this.emailQueue.add(
+                    'send-template',
+                    {
+                        to: cleanTo,
+                        template,
+                        data,
+                        correlationId,
+                        trackingMeta: options.trackingMeta,
+                        enqueuedAt: new Date().toISOString(),
+                    },
+                    jobOptions,
+                ),
             );
 
             this.telemetry?.recordEmailEnqueued(template, 1);

@@ -22,7 +22,8 @@ import { UserEntity } from '../users/user.entity';
 import { SessionEntity } from '../auth/session.entity';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 import { RedisSecurityService } from '../common/security/redis-security.service';
-import { getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
+import { buildSessionCacheKey, getJwtSecret, isCorsOriginAllowed } from '../common/security/security.config';
+import { extractSocketTokenFromHandshake } from '../common/security/cookie-security.util';
 
 @WebSocketGateway({
     cors: {
@@ -82,7 +83,7 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
             // Ensure session is still active (not logged out / revoked)
             let sessionActive = false;
             if (this.cacheManager) {
-                const cached = await this.cacheManager.get(`user_session:${cleanToken}`).catch(() => null);
+                const cached = await this.cacheManager.get(buildSessionCacheKey(cleanToken)).catch(() => null);
                 if (cached === 'active') sessionActive = true;
             }
             if (!sessionActive && this.sessionRepo) {
@@ -123,19 +124,31 @@ export class NetworkGateway implements OnGatewayConnection, OnGatewayDisconnect 
         }
     }
 
+    @OnEvent('security.revoke_user')
+    handleUserSessionRevoked(event: { userId?: string; reason?: string }) {
+        const targetUserId = event?.userId;
+        if (!targetUserId || !this.server) return;
+        try {
+            this.server.to(`user_room:${targetUserId}`).emit('session_revoked', {
+                reason: event.reason || 'revoked',
+            });
+            this.server.in(`user_room:${targetUserId}`).disconnectSockets(true);
+        } catch {
+            // ignore if sockets already closed
+        }
+        this.onlineUserSockets.delete(targetUserId);
+    }
+
     async handleConnection(client: Socket) {
         try {
-            const rawToken =
-                client.handshake.auth?.token ||
-                client.handshake.headers?.authorization;
-            const userId = await this.verifyUserIdFromToken(rawToken);
+            const rawToken = extractSocketTokenFromHandshake(client.handshake);
+            const userId = await this.verifyUserIdFromToken(rawToken || undefined);
             if (!userId) {
                 client.disconnect(true);
                 return;
             }
 
             client.data.userId = userId;
-            client.data.token = rawToken;
             client.join(`user_room:${userId}`);
             this.trackOnlineSocket(userId, client.id);
         } catch {

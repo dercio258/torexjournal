@@ -14,6 +14,7 @@ import { ClickHouseService } from '../clickhouse/clickhouse.service';
 import { PlanPermissionService, PlanTier } from '../payment/plan-permission.service';
 
 const RECONCILE_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+export const BASIC_PLAN_MAX_ACTIVE_TRADING_ACCOUNTS = 3;
 
 export interface AccountWithStats extends AccountEntity {
     tradesCount: number;
@@ -384,9 +385,9 @@ export class AccountService {
 
         if ((opts.creating || opts.restoring) && tier === PlanTier.BASIC) {
             const activeCount = await this.accountRepo.count({ where: { userId, isArchived: false } });
-            if (activeCount >= 1) {
+            if (activeCount >= BASIC_PLAN_MAX_ACTIVE_TRADING_ACCOUNTS) {
                 throw new ForbiddenException(
-                    'O plano BASIC permite no máximo 1 conta ativa. Faça upgrade para PRO ou PREMIUM para múltiplas contas.'
+                    `O plano BASIC permite no máximo ${BASIC_PLAN_MAX_ACTIVE_TRADING_ACCOUNTS} contas ativas. Faça upgrade para PRO ou PREMIUM para múltiplas contas.`
                 );
             }
         }

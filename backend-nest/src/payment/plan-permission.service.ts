@@ -15,7 +15,7 @@ export enum PlanTier {
 
 export const AI_DAILY_CREDITS_BY_TIER: Record<PlanTier, number> = {
     [PlanTier.FREE]: 0,
-    [PlanTier.BASIC]: 0,
+    [PlanTier.BASIC]: 100,
     [PlanTier.PRO]: 1500,
     [PlanTier.PREMIUM]: 4000,
 };

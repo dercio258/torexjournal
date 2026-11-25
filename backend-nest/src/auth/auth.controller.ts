@@ -26,7 +26,14 @@ import { PlanPermissionService, PlanTier } from '../payment/plan-permission.serv
 import { SubscriptionService } from '../payment/subscription.service';
 import { ConfigService } from '@nestjs/config';
 import { extractTrustedClientIp } from '../common/security/security.config';
+import { TurnstileService } from '../common/security/turnstile.service';
 import { maskEmailAddress, maskPhoneNumber } from '../common/security/payload-envelope.util';
+import {
+    clearUserSessionCookies,
+    extractUserAccessToken,
+    extractUserRefreshToken,
+    setUserSessionCookies,
+} from '../common/security/cookie-security.util';
 import {
     LoginDto,
     RefreshTokenDto,
@@ -57,24 +64,49 @@ export class AuthController {
         private readonly accountService: AccountService,
         private readonly planPermissionService: PlanPermissionService,
         private readonly subscriptionService: SubscriptionService,
-        private readonly configService: ConfigService
+        private readonly configService: ConfigService,
+        private readonly turnstileService: TurnstileService,
     ) { }
 
     @Post('login')
     @Throttle({ default: { limit: 9, ttl: 60000 } })
-    async login(@Body() body: LoginDto, @Request() req) {
+    async login(
+        @Body() body: LoginDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
+        await this.turnstileService.verifyOrThrow(body.turnstileToken, ip, 'login');
 
-        return this.authService.authenticateAndLogin(body.email, body.password, ip, userAgent);
+        const result: any = await this.authService.authenticateAndLogin(body.email, body.password, ip, userAgent);
+        if (result?.token) {
+            setUserSessionCookies(res, req, {
+                accessToken: result.token,
+                refreshToken: result.refreshToken,
+            });
+        }
+        return result;
     }
 
     @Post('refresh')
     @Throttle({ default: { limit: 15, ttl: 60000 } })
-    async refresh(@Body() body: RefreshTokenDto, @Request() req) {
+    async refresh(
+        @Body() body: RefreshTokenDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        return this.authService.refresh(body.refreshToken, ip, userAgent);
+        const tokenToUse = extractUserRefreshToken(req, body?.refreshToken) || '';
+        const result: any = await this.authService.refresh(tokenToUse, ip, userAgent);
+        if (result?.token) {
+            setUserSessionCookies(res, req, {
+                accessToken: result.token,
+                refreshToken: result.refreshToken,
+            });
+        }
+        return result;
     }
 
     @Get('geo-hint')
@@ -88,15 +120,27 @@ export class AuthController {
     async initiateRegistration(@Body() body: RegisterInitiateDto, @Request() req) {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
+        await this.turnstileService.verifyOrThrow(body.turnstileToken, ip, 'register');
         return this.authService.initiateRegistration(body, ip, userAgent);
     }
 
     @Post('register/verify')
     @Throttle({ default: { limit: 6, ttl: 60000 } })
-    async verifyRegistration(@Body() body: VerifyRegistrationDto, @Request() req) {
+    async verifyRegistration(
+        @Body() body: VerifyRegistrationDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        return this.authService.verifyRegistration(body.verificationToken, body.otp, ip, userAgent);
+        const result: any = await this.authService.verifyRegistration(body.verificationToken, body.otp, ip, userAgent);
+        if (result?.token) {
+            setUserSessionCookies(res, req, {
+                accessToken: result.token,
+                refreshToken: result.refreshToken,
+            });
+        }
+        return result;
     }
 
     @Post('register/resend')
@@ -107,44 +151,50 @@ export class AuthController {
 
     @Post('register')
     @Throttle({ default: { limit: 3, ttl: 60000 } }) // Limit: 3 req/min
-    async register(@Body() body: RegisterDto, @Request() req) {
-        try {
-            const ip = extractTrustedClientIp(req);
-            const userAgent = req.headers['user-agent'];
-            return await this.authService.register(body, ip, userAgent);
-        } catch (e) {
-            return { success: false, error: e.message };
+    async register(
+        @Body() body: RegisterDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
+        const ip = extractTrustedClientIp(req);
+        const userAgent = req.headers['user-agent'];
+        await this.turnstileService.verifyOrThrow(body.turnstileToken, ip, 'register');
+        const result: any = await this.authService.register(body, ip, userAgent);
+        if (result?.token) {
+            setUserSessionCookies(res, req, {
+                accessToken: result.token,
+                refreshToken: result.refreshToken,
+            });
         }
+        return result;
     }
 
     @Post('send-otp')
     @Throttle({ default: { limit: 3, ttl: 60000 } })
-    async sendOtp(@Body() body: SendOtpDto) {
-        try {
-            return await this.authService.sendOtp(body.email);
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
+    async sendOtp(@Body() body: SendOtpDto, @Request() req) {
+        await this.turnstileService.verifyOrThrow(
+            body.turnstileToken,
+            extractTrustedClientIp(req),
+            'send_otp',
+        );
+        return this.authService.sendOtp(body.email);
     }
 
     @Post('forgot-password')
     @Throttle({ default: { limit: 3, ttl: 60000 } })
-    async forgotPassword(@Body() body: ForgotPasswordDto) {
-        try {
-            return await this.authService.forgotPassword(body.email);
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
+    async forgotPassword(@Body() body: ForgotPasswordDto, @Request() req) {
+        await this.turnstileService.verifyOrThrow(
+            body.turnstileToken,
+            extractTrustedClientIp(req),
+            'forgot_password',
+        );
+        return this.authService.forgotPassword(body.email);
     }
 
     @Post('reset-password')
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     async resetPassword(@Body() body: ResetPasswordDto) {
-        try {
-            return await this.authService.resetPassword(body);
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
+        return this.authService.resetPassword(body);
     }
 
     @UseGuards(JwtAuthGuard)
@@ -156,9 +206,10 @@ export class AuthController {
 
     @UseGuards(JwtAuthGuard)
     @Post('logout')
-    async logout(@Request() req) {
-        const token = req.headers.authorization?.replace('Bearer ', '');
+    async logout(@Request() req, @Res({ passthrough: true }) res: FastifyReply) {
+        const token = extractUserAccessToken(req) || '';
         await this.authService.logout(token, req.user?.id);
+        clearUserSessionCookies(res, req);
         return { success: true, message: 'Logged out successfully' };
     }
 
@@ -196,6 +247,12 @@ export class AuthController {
                 name: user.name,
                 username: user.username,
                 email: maskEmailAddress(user.email),
+                emailVerified: Boolean(
+                    user.emailVerifiedAt ||
+                        user.googleId ||
+                        user.githubId ||
+                        user.isTwoFactorConfirmed,
+                ),
                 avatarUrl: hasActivePlan ? user.avatarUrl : null,
                 whatsapp: hasActivePlan ? maskPhoneNumber(user.whatsapp) : null,
                 twoFactorEnabled: Boolean(user.twoFactorEnabled),
@@ -278,10 +335,21 @@ export class AuthController {
 
     @Post('verify-2fa')
     @Throttle({ default: { limit: 6, ttl: 60000 } })
-    async verify2fa(@Body() body: Verify2faDto, @Request() req) {
+    async verify2fa(
+        @Body() body: Verify2faDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
         const ip = extractTrustedClientIp(req);
         const userAgent = req.headers['user-agent'];
-        return this.authService.verify2fa(body.twoFactorToken || body.userId || '', body.otp, ip, userAgent);
+        const result: any = await this.authService.verify2fa(body.twoFactorToken || body.userId || '', body.otp, ip, userAgent);
+        if (result?.token) {
+            setUserSessionCookies(res, req, {
+                accessToken: result.token,
+                refreshToken: result.refreshToken,
+            });
+        }
+        return result;
     }
 
     @Post('resend-2fa')
@@ -322,8 +390,16 @@ export class AuthController {
 
     @Post('oauth/exchange')
     @Throttle({ default: { limit: 10, ttl: 60000 } })
-    async exchangeOAuthCode(@Body() body: OAuthExchangeDto) {
-        return this.authService.exchangeOAuthCode(body.code);
+    async exchangeOAuthCode(
+        @Body() body: OAuthExchangeDto,
+        @Request() req,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
+        const result: any = await this.authService.exchangeOAuthCode(body.code);
+        if (result?.token) {
+            setUserSessionCookies(res, req, { accessToken: result.token });
+        }
+        return result;
     }
 
     @UseGuards(GoogleOauthGuard)

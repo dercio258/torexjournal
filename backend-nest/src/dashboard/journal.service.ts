@@ -26,6 +26,7 @@ import {
     GeneralNoteEntity,
 } from './journal-notes.entity';
 import { ClickHouseService } from '../clickhouse/clickhouse.service';
+import { CloudflareR2StorageService } from '../common/security/cloudflare-r2-storage.service';
 
 export interface DailyJournalMetrics {
     totalTrades: number;
@@ -80,7 +81,9 @@ export class JournalService implements OnModuleInit {
         private readonly cacheManager: Cache,
         private readonly clickHouseService: ClickHouseService,
         @Optional()
-        private readonly eventEmitter?: EventEmitter2
+        private readonly eventEmitter?: EventEmitter2,
+        @Optional()
+        private readonly r2Storage?: CloudflareR2StorageService,
     ) {}
 
     /**
@@ -1277,6 +1280,21 @@ export class JournalService implements OnModuleInit {
 
         if (!buffer || buffer.length === 0) {
             throw new BadRequestException('Nenhum arquivo de imagem recebido');
+        }
+
+        if (this.r2Storage) {
+            const stored = await this.r2Storage.uploadPrivateObject({
+                userId,
+                folder: 'journal-screenshots',
+                buffer,
+                ext,
+            });
+            return {
+                ok: true,
+                url: stored.url,
+                key: stored.key,
+                provider: stored.provider,
+            };
         }
 
         const userDir = path.join(process.cwd(), 'uploads', 'journal-screenshots', safeUser);

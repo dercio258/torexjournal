@@ -66,6 +66,23 @@ export interface EmailTemplatePayloadMap {
         plan?: string;
         subject?: string;
     };
+    CRYPTO_PAYMENT_INITIATED: {
+        userName?: string;
+        plan?: string;
+        cycle?: string;
+        amountUsd: string | number;
+        cryptoAmount: string | number;
+        cryptoCurrency: string;
+        displayName: string;
+        network: string;
+        walletAddress: string;
+        payinExtraId?: string | null;
+        reference: string;
+        copyWalletUrl: string;
+        checkoutUrl: string;
+        expiresAt?: string | null;
+        subject?: string;
+    };
     PAYMENT_SUCCESS: {
         userName?: string;
         plan: string;
@@ -177,11 +194,18 @@ export interface EmailTemplatePayloadMap {
 
 export type EmailTemplateName = keyof EmailTemplatePayloadMap;
 
+export interface EmailInlineQrSpec {
+    cid: string;
+    data: string;
+    filename?: string;
+}
+
 export interface RenderedEmail {
     subject: string;
     preheader: string;
     html: string;
     text: string;
+    inlineQr?: EmailInlineQrSpec;
 }
 
 export interface EmailTemplateDefinition<T = any> {
@@ -191,4 +215,5 @@ export interface EmailTemplateDefinition<T = any> {
     preheader: (data: T) => string;
     renderBody: (data: T) => string;
     footerNote?: (data: T) => string | undefined;
+    buildInlineQr?: (data: T) => EmailInlineQrSpec | undefined;
 }

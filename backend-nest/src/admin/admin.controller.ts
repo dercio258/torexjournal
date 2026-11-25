@@ -14,7 +14,18 @@ import {
     BadRequestException,
     Query,
     Optional,
+    Req,
+    Res,
 } from '@nestjs/common';
+import { FastifyReply } from 'fastify';
+import { randomInt, randomUUID } from 'crypto';
+import { AdminAuditService } from './admin-audit.service';
+import {
+    clearAdminSessionCookie,
+    extractAdminToken,
+    setAdminSessionCookie,
+} from '../common/security/cookie-security.util';
+import { extractTrustedClientIp, getAdminJwtSecret, timingSafeEqualStr } from '../common/security/security.config';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { SubscriptionService } from '../payment/subscription.service';
@@ -37,9 +48,8 @@ import { AdminAuthGuard } from './admin-auth.guard';
 import { EmailProducerService } from '../email/email-producer.service';
 import { TelemetryService } from '../common/observability/telemetry.service';
 import { Throttle } from '@nestjs/throttler';
-import { randomInt } from 'crypto';
 import { RedisSecurityService } from '../common/security/redis-security.service';
-import { getAdminJwtSecret, timingSafeEqualStr } from '../common/security/security.config';
+import { TurnstileService } from '../common/security/turnstile.service';
 import {
     AdminLoginDto,
     AdminVerifyOtpDto,
@@ -72,12 +82,21 @@ export class AdminController {
         @Optional() private aiTrainingReportService?: AiTrainingReportService,
         @Optional() private aiSemanticMemoryService?: AiSemanticMemoryService,
         @Optional() private aiFeedbackSignalsService?: AiFeedbackSignalsService,
+        @Optional() private adminAuditService?: AdminAuditService,
+        @Optional() private turnstileService?: TurnstileService,
     ) {}
 
     // --- Auth ---
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('auth/login')
-    async login(@Body() body: AdminLoginDto) {
+    async login(@Body() body: AdminLoginDto, @Req() req: any) {
+        if (this.turnstileService) {
+            await this.turnstileService.verifyOrThrow(
+                body.turnstileToken,
+                extractTrustedClientIp(req),
+                'admin_login',
+            );
+        }
         const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '').trim().toLowerCase();
         const adminPass = this.configService.get<string>('ADMIN_PASS') || '';
 
@@ -121,7 +140,11 @@ export class AdminController {
 
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('auth/verify')
-    async verifyOtp(@Body() body: AdminVerifyOtpDto) {
+    async verifyOtp(
+        @Body() body: AdminVerifyOtpDto,
+        @Req() req: any,
+        @Res({ passthrough: true }) res: FastifyReply,
+    ) {
         const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '').trim().toLowerCase();
 
         if (!adminEmail || !timingSafeEqualStr(body.email, adminEmail)) {
@@ -152,10 +175,20 @@ export class AdminController {
         await this.redisSecurity.deleteKey(otpFailKey);
 
         const secret = getAdminJwtSecret(this.configService);
+        const jti = randomUUID();
         const token = this.jwtService.sign(
-            { email: adminEmail, role: 'admin', isAdmin: true },
+            { email: adminEmail, role: 'admin', isAdmin: true, jti },
             { secret, expiresIn: '12h' },
         );
+
+        setAdminSessionCookie(res, req, token);
+        void this.adminAuditService?.record({
+            adminEmail,
+            action: 'ADMIN_LOGIN_SUCCESS',
+            targetType: 'session',
+            targetId: jti,
+            ip: extractTrustedClientIp(req),
+        });
 
         return {
             success: true,
@@ -164,11 +197,99 @@ export class AdminController {
         };
     }
 
-    // --- Observability, Telemetry & Redis Queue Inspection ---
+    @UseGuards(AdminAuthGuard)
+    @Post('auth/logout')
+    async adminLogout(@Req() req: any, @Res({ passthrough: true }) res: FastifyReply) {
+        const token = extractAdminToken(req);
+        const jti = req?.admin?.jti;
+        if (jti) {
+            await this.redisSecurity.setValue(`jwt_revoked:${jti}`, '1', 12 * 60 * 60 * 1000);
+        } else if (token) {
+            try {
+                const decoded: any = this.jwtService.decode(token);
+                if (decoded?.jti) {
+                    await this.redisSecurity.setValue(`jwt_revoked:${decoded.jti}`, '1', 12 * 60 * 60 * 1000);
+                }
+            } catch {
+                // ignore
+            }
+        }
+        clearAdminSessionCookie(res, req);
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'ADMIN_LOGOUT',
+            targetType: 'session',
+            targetId: jti || null,
+            ip: extractTrustedClientIp(req),
+        });
+        return { success: true };
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Get('audit-logs')
+    async getAdminAuditLogs(
+        @Query('search') search?: string,
+        @Query('action') action?: string,
+        @Query('limit') limit?: string,
+    ) {
+        if (!this.adminAuditService) {
+            return { items: [], chainIntegrity: { valid: true, checked: 0 } };
+        }
+        return this.adminAuditService.listLogs({
+            search,
+            action,
+            limit: limit ? Number(limit) : undefined,
+        });
+    }
+
+    // --- Observability, Telemetry, Technical Errors & Redis Queue Inspection ---
     @UseGuards(AdminAuthGuard)
     @Get('telemetry')
     async getTelemetry() {
         return this.telemetryService.getSnapshot();
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Get('errors')
+    async listTechnicalErrors(
+        @Query('search') search?: string,
+        @Query('domain') domain?: string,
+        @Query('severity') severity?: string,
+        @Query('status') status?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.telemetryService.listTechnicalErrors({
+            search,
+            domain,
+            severity,
+            status,
+            limit: limit ? Number(limit) : undefined,
+        });
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Patch('errors/:idOrRef/resolve')
+    async resolveTechnicalError(
+        @Param('idOrRef') idOrRef: string,
+        @Body() body: { resolved?: boolean },
+        @Req() req: any,
+    ) {
+        const clean = String(idOrRef || '').trim();
+        if (!clean || clean.length > 80) {
+            throw new BadRequestException('Referência de erro inválida.');
+        }
+        const res = await this.telemetryService.setTechnicalErrorStatus(
+            clean,
+            body?.resolved !== false,
+        );
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: body?.resolved !== false ? 'ERROR_RESOLVED' : 'ERROR_REOPENED',
+            targetType: 'system_error',
+            targetId: clean,
+            ip: extractTrustedClientIp(req),
+        });
+        return res;
     }
 
     @UseGuards(AdminAuthGuard)
@@ -373,14 +494,30 @@ export class AdminController {
 
     @UseGuards(AdminAuthGuard)
     @Patch('plans/:id')
-    async updatePlan(@Param('id') id: string, @Body() body: any) {
-        return this.subscriptionService.updatePlanConfig(id, body);
+    async updatePlan(@Param('id') id: string, @Body() body: Record<string, any>, @Req() req: any) {
+        const res = await this.subscriptionService.updatePlanConfig(id, body);
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'UPDATE_PLAN_CONFIG',
+            targetType: 'plan',
+            targetId: id,
+            ip: extractTrustedClientIp(req),
+        });
+        return res;
     }
 
     @UseGuards(AdminAuthGuard)
     @Post('plans')
-    async createPlan(@Body() body: any) {
-        return this.subscriptionService.createPlanConfig(body);
+    async createPlan(@Body() body: Record<string, any>, @Req() req: any) {
+        const res = await this.subscriptionService.createPlanConfig(body);
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'CREATE_PLAN_CONFIG',
+            targetType: 'plan',
+            targetId: String((res as any)?.id || ''),
+            ip: extractTrustedClientIp(req),
+        });
+        return res;
     }
 
     // --- Trial Campaign Management ---
@@ -415,8 +552,18 @@ export class AdminController {
     async adjustUserSubscription(
         @Param('id') id: string,
         @Body() body: AdjustUserSubscriptionDto,
+        @Req() req: any,
     ) {
-        return this.subscriptionService.adminAdjustUserSubscription(id, body);
+        const res = await this.subscriptionService.adminAdjustUserSubscription(id, body);
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'ADJUST_USER_SUBSCRIPTION',
+            targetType: 'user',
+            targetId: id,
+            ip: extractTrustedClientIp(req),
+            details: { planTier: (body as any)?.planTier, days: (body as any)?.days, status: (body as any)?.status },
+        });
+        return res;
     }
 
     // --- Video Lessons (Comunidade & Videoaulas em /network) ---

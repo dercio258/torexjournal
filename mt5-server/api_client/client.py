@@ -1,5 +1,11 @@
+import hashlib
+import hmac
+import json
+import secrets
 import threading
+import time
 import requests
+from urllib.parse import urlparse
 from typing import List, Optional, Dict, Any
 from loguru import logger
 from config.settings import settings
@@ -39,11 +45,30 @@ class BackendApiClient:
             return f"Página HTML de erro (HTTP {status_code})"
         return raw[:300]
 
+    def _build_hmac_headers(self, method: str, full_url: str, body_bytes: bytes) -> Dict[str, str]:
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_hex(12)
+        path = urlparse(full_url).path
+        body_hash = hashlib.sha256(body_bytes or b"").hexdigest()
+        canonical = "\n".join([method.upper(), path, timestamp, nonce, body_hash]).encode("utf-8")
+        signature = hmac.new(
+            settings.worker_key.encode("utf-8"),
+            canonical,
+            hashlib.sha256,
+        ).hexdigest()
+        return {
+            "X-Worker-Timestamp": timestamp,
+            "X-Worker-Nonce": nonce,
+            "X-Worker-Signature": f"sha256={signature}",
+        }
+
     def _post(self, endpoint: str, json_data: Any) -> Optional[requests.Response]:
         url = f"{self.base_url}{endpoint}"
+        body_bytes = json.dumps(json_data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        headers = self._build_hmac_headers("POST", url, body_bytes)
         with self._http_lock:
             try:
-                response = self.session.post(url, json=json_data, timeout=self.timeout)
+                response = self.session.post(url, data=body_bytes, headers=headers, timeout=self.timeout)
                 if not response.ok:
                     summary = self._format_error_body(response.status_code, response.text)
                     logger.warning(f"Resposta do backend ({response.status_code}) em POST {endpoint}: {summary}")
@@ -54,9 +79,10 @@ class BackendApiClient:
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[requests.Response]:
         url = f"{self.base_url}{endpoint}"
+        headers = self._build_hmac_headers("GET", url, b"")
         with self._http_lock:
             try:
-                response = self.session.get(url, params=params, timeout=self.timeout)
+                response = self.session.get(url, params=params, headers=headers, timeout=self.timeout)
                 if not response.ok:
                     summary = self._format_error_body(response.status_code, response.text)
                     logger.warning(f"Resposta do backend ({response.status_code}) em GET {endpoint}: {summary}")

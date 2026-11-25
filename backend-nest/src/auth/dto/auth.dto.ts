@@ -30,14 +30,21 @@ export class LoginDto {
     @MinLength(1, { message: 'A senha é obrigatória.' })
     @MaxLength(128)
     password: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class RefreshTokenDto {
+    @IsOptional()
     @Transform(trimString)
     @IsString()
     @MinLength(16)
     @MaxLength(512)
-    refreshToken: string;
+    refreshToken?: string;
 }
 
 export class SendOtpDto {
@@ -45,6 +52,12 @@ export class SendOtpDto {
     @IsEmail({}, { message: 'Informe um e-mail válido.' })
     @MaxLength(254)
     email: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class RegisterDto {
@@ -106,6 +119,12 @@ export class RegisterDto {
     @IsString()
     @MaxLength(32)
     referralCode?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class ForgotPasswordDto {
@@ -113,6 +132,12 @@ export class ForgotPasswordDto {
     @IsEmail({}, { message: 'Informe um e-mail válido.' })
     @MaxLength(254)
     email: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class ResetPasswordDto {
@@ -355,6 +380,12 @@ export class RegisterInitiateDto {
     @IsString()
     @MaxLength(32)
     referralCode?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class VerifyRegistrationDto {

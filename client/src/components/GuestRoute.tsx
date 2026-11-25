@@ -4,10 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { sanitizeReturnTo } from '../lib/attribution';
 
 export const GuestRoute = ({ children }: { children: React.ReactNode }) => {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, user } = useAuth();
     const location = useLocation();
 
-    if (isAuthenticated) {
+    if (isAuthenticated && user?.emailVerified !== false) {
         const params = new URLSearchParams(location.search);
         const queryReturnTo = sanitizeReturnTo(params.get('returnTo'));
         const stateFrom = location.state?.from;

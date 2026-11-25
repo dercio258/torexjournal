@@ -137,6 +137,60 @@ export function getDerivEncryptionSecret(configService?: ConfigService): string 
     return deriveDomainSecret('deriv-encryption', getJwtSecret(configService));
 }
 
+export function getTwoFactorEncryptionSecret(configService?: ConfigService): string {
+    const raw = readEnv(configService, 'TWO_FACTOR_ENCRYPTION_KEY');
+    if (raw && !WEAK_SECRET_PLACEHOLDERS.has(raw)) {
+        return raw;
+    }
+    return deriveDomainSecret('two-factor-at-rest', getJwtSecret(configService));
+}
+
+export function buildRotatingKeyring(
+    primarySecret: string,
+    previousSecrets: Array<string | undefined | null> = [],
+    activeKid = 'k1',
+): { activeKid: string; keys: Record<string, string> } {
+    const keys: Record<string, string> = { [activeKid]: primarySecret };
+    let idx = 0;
+    for (const prev of previousSecrets) {
+        const clean = (prev || '').trim();
+        if (clean && !WEAK_SECRET_PLACEHOLDERS.has(clean) && clean !== primarySecret) {
+            idx += 1;
+            keys[`prev_${idx}`] = clean;
+        }
+    }
+    return { activeKid, keys };
+}
+
+export function getTwoFactorEncryptionKeyring(configService?: ConfigService) {
+    const primary = getTwoFactorEncryptionSecret(configService);
+    const prev = readEnv(configService, 'TWO_FACTOR_ENCRYPTION_KEY_PREVIOUS');
+    const legacyJwtFallback = getJwtSecret(configService);
+    return buildRotatingKeyring(primary, [prev, legacyJwtFallback], 'totp_v1');
+}
+
+export function getMt5CredentialKeyring(configService?: ConfigService) {
+    const primary = getMt5CredentialSecret(configService);
+    const prev = readEnv(configService, 'MT5_CREDENTIAL_SECRET_PREVIOUS');
+    const workerKey = readEnv(configService, 'WORKER_KEY') || readEnv(configService, 'MT5_WORKER_KEY');
+    return buildRotatingKeyring(primary, [prev, workerKey], 'mt5_v1');
+}
+
+export function getDerivEncryptionKeyring(configService?: ConfigService) {
+    const primary = getDerivEncryptionSecret(configService);
+    const prev = readEnv(configService, 'DERIV_ENCRYPTION_KEY_PREVIOUS');
+    return buildRotatingKeyring(primary, [prev], 'deriv_v1');
+}
+
+/**
+ * Deterministic SHA-256 Redis cache key for active JWT sessions.
+ * Ensures raw Bearer JWT tokens are never stored as plaintext Redis keys.
+ */
+export function buildSessionCacheKey(rawToken: string): string {
+    const digest = createHash('sha256').update(String(rawToken || ''), 'utf8').digest('hex');
+    return `user_session:sha256:${digest}`;
+}
+
 export function getAiQuorumHmacSalt(configService?: ConfigService): string {
     return getDomainSecret(configService, ['AI_QUORUM_HMAC_SALT'], 'ai-quorum-salt');
 }
@@ -147,6 +201,26 @@ export function getAiQuorumHmacSalt(configService?: ConfigService): string {
 export function validateDomainSecretsOnBoot(configService?: ConfigService): void {
     getJwtSecret(configService);
     getAdminJwtSecret(configService);
+
+    if (isProdEnv(configService)) {
+        const missingDedicatedKeys = [
+            'MT5_CREDENTIAL_SECRET',
+            'DERIV_ENCRYPTION_KEY',
+            'TWO_FACTOR_ENCRYPTION_KEY',
+        ].filter((k) => {
+            const v = readEnv(configService, k);
+            return !v || WEAK_SECRET_PLACEHOLDERS.has(v);
+        });
+        if (missingDedicatedKeys.length > 0) {
+            const msg =
+                `[SecurityConfig] AVISO: Chaves dedicadas de criptografia em repouso ausentes em produção (${missingDedicatedKeys.join(', ')}). ` +
+                'Defina chaves independentes do JWT_SECRET para permitir rotação segura sem re-encriptação imediata.';
+            if (readEnv(configService, 'STRICT_DATA_KEYS') === 'true') {
+                throw new Error(`CRITICAL SECURITY ERROR: ${msg}`);
+            }
+            console.warn(msg);
+        }
+    }
 }
 
 /**

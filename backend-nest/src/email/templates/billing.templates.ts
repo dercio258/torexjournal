@@ -15,9 +15,12 @@ import {
 import { EmailTemplateDefinition, EmailTemplatePayloadMap } from './types';
 import { buildAppUrl, escapeHtml, formatCurrency, formatInstitutionalDate } from './utils';
 
+export const CRYPTO_QR_CID = 'crypto-payment-qr@torexjournal.com';
+
 export const billingTemplates: {
     [K in
         | 'PAYMENT_INITIATED'
+        | 'CRYPTO_PAYMENT_INITIATED'
         | 'PAYMENT_SUCCESS'
         | 'PAYMENT_FAILED'
         | 'TRIAL_WELCOME'
@@ -59,6 +62,144 @@ export const billingTemplates: {
                     'amber',
                 )}
                 ${renderActionButton('Consultar Histórico de Pagamentos', paymentsUrl, 'slate')}
+            `;
+        },
+    },
+
+    CRYPTO_PAYMENT_INITIATED: {
+        category: 'Pagamento Cripto',
+        tone: 'amber',
+        subject: (data) =>
+            data.subject ||
+            `Carteira e QR Code para pagamento em ${data.cryptoCurrency} (Ref. ${data.reference}) — Torex Journal`,
+        preheader: (data) =>
+            `Envie exatamente ${data.cryptoAmount} ${data.cryptoCurrency} na rede ${data.network}. QR Code e botão para copiar o endereço incluídos.`,
+        buildInlineQr: (data) =>
+            data.walletAddress
+                ? {
+                      cid: CRYPTO_QR_CID,
+                      data: String(data.walletAddress).trim(),
+                      filename: 'qrcode-pagamento-cripto.png',
+                  }
+                : undefined,
+        renderBody: (data) => {
+            const safeWallet = escapeHtml(data.walletAddress);
+            const safeExtraId = data.payinExtraId ? escapeHtml(data.payinExtraId) : '';
+            const safeCopyUrl = escapeHtml(buildAppUrl(data.copyWalletUrl));
+            const safeCheckoutUrl = escapeHtml(buildAppUrl(data.checkoutUrl));
+            const safeCryptoAmount = escapeHtml(String(data.cryptoAmount));
+            const safeCryptoCurrency = escapeHtml(data.cryptoCurrency);
+            const safeNetwork = escapeHtml(data.network);
+            const expiryText = data.expiresAt
+                ? (() => {
+                      const d = new Date(data.expiresAt);
+                      return Number.isNaN(d.getTime())
+                          ? escapeHtml(String(data.expiresAt))
+                          : d.toLocaleString('pt-PT', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                timeZoneName: 'short',
+                            });
+                  })()
+                : undefined;
+
+            return `
+                ${renderHeading(`Pagamento em ${data.displayName} iniciado`)}
+                ${renderGreeting(data.userName)}
+                <p class="body-p">
+                    Geramos o endereço exclusivo da carteira e o QR Code para concluir a ativação da sua assinatura no <strong>Torex Journal</strong>. Envie o valor exato indicado abaixo usando a rede correta:
+                </p>
+                ${renderKeyValueTable([
+                    ...(data.plan ? [{ label: 'Plano Selecionado', value: data.plan }] : []),
+                    ...(data.cycle ? [{ label: 'Ciclo de Faturamento', value: data.cycle }] : []),
+                    {
+                        label: 'Valor Equivalente',
+                        value: formatCurrency(data.amountUsd, 'USD'),
+                        mono: true,
+                    },
+                    {
+                        label: 'Valor Exato a Enviar',
+                        value: `${data.cryptoAmount} ${data.cryptoCurrency}`,
+                        mono: true,
+                        tone: 'warning',
+                    },
+                    { label: 'Criptomoeda', value: data.displayName },
+                    { label: 'Rede (Network)', value: data.network, tone: 'positive' },
+                    { label: 'Referência', value: data.reference, mono: true },
+                    ...(expiryText ? [{ label: 'Validade da Cotação', value: expiryText, mono: true }] : []),
+                ])}
+
+                <!-- QR CODE & WALLET ID BOX -->
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin: 24px 0; background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 8px; overflow: hidden;">
+                    <tr>
+                        <td align="center" style="padding: 24px 20px 18px 20px;">
+                            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: #475569; margin-bottom: 14px;">
+                                QR Code de Pagamento (${safeCryptoCurrency})
+                            </div>
+                            <div style="display: inline-block; padding: 12px; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px;">
+                                <img src="cid:${CRYPTO_QR_CID}" alt="QR Code da Carteira ${safeCryptoCurrency}" width="200" height="200" style="display: block; width: 200px; height: 200px;" />
+                            </div>
+                            <div style="margin-top: 10px; font-size: 12px; color: #64748B;">
+                                Escaneie com sua carteira ou corretora (${safeNetwork})
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 20px 22px 20px;">
+                            <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #475569; margin-bottom: 8px; text-align: center;">
+                                ID da Carteira de Pagamento (Endereço)
+                            </div>
+                            <div style="background-color: #FFFFFF; border: 1px dashed #94A3B8; border-radius: 6px; padding: 14px 16px; text-align: center; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 13px; font-weight: 700; color: #0F172A; word-break: break-all; -webkit-user-select: all; user-select: all;">
+                                ${safeWallet}
+                            </div>
+                            ${
+                                safeExtraId
+                                    ? `
+                                <div style="margin-top: 12px; background-color: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 10px 14px; text-align: center;">
+                                    <div style="font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #92400E; margin-bottom: 4px;">
+                                        Memo / Destination Tag (Obrigatório)
+                                    </div>
+                                    <div style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: 14px; font-weight: 700; color: #78350F; word-break: break-all; -webkit-user-select: all; user-select: all;">
+                                        ${safeExtraId}
+                                    </div>
+                                </div>
+                            `
+                                    : ''
+                            }
+                            <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-top: 16px;">
+                                <tr>
+                                    <td align="center">
+                                        <a href="${safeCopyUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 26px; background-color: #D97706; color: #FFFFFF; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 6px; letter-spacing: 0.2px;">
+                                            Copiar ID da Carteira
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <div style="margin-top: 8px; font-size: 11px; color: #64748B; text-align: center;">
+                                Clique no botão acima para copiar o endereço verificado com 1 toque ou selecione o código acima.
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+
+                ${renderCalloutBox(
+                    `ATENÇÃO DE SEGURANÇA: Envie exclusivamente ${data.cryptoAmount} ${data.cryptoCurrency} através da rede ${data.network}. Transferências feitas em outra rede ou abaixo do valor indicado podem não ser reconhecidas automaticamente. Assim que a transação for confirmada na blockchain, sua assinatura será ativada automaticamente.`,
+                    'amber',
+                    'Instrução Importante',
+                )}
+
+                <table cellpadding="0" cellspacing="0" role="presentation" style="margin: 20px 0 8px 0;">
+                    <tr>
+                        <td align="left" style="border-radius: 6px; background-color: #0F172A;">
+                            <a href="${safeCheckoutUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 11px 22px; font-size: 13px; font-weight: 600; color: #FFFFFF; text-decoration: none; border-radius: 6px;">
+                                Acompanhar Pagamento no Checkout
+                            </a>
+                        </td>
+                    </tr>
+                </table>
             `;
         },
     },
@@ -310,7 +451,7 @@ export const billingTemplates: {
                     } cuja confirmação financeira não foi concluída.
                 </p>
                 <p class="body-p">
-                    Caso tenha ocorrido instabilidade na operadora móvel ou deseje utilizar outro método de pagamento (M-Pesa, e-Mola ou Cartão), você pode retomar a contratação diretamente no painel.
+                    Caso tenha ocorrido instabilidade na operadora móvel ou deseje utilizar outro método de pagamento (M-Pesa, e-Mola, Cartão ou Criptomoeda), você pode retomar a contratação diretamente no painel.
                 </p>
                 ${renderActionButton('Visualizar Planos Disponíveis', pricingUrl, 'slate')}
                 <p class="muted-note">

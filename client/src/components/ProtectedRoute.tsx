@@ -4,8 +4,12 @@ import { useAuth } from '../context/AuthContext';
 import { mergeSessionUtmsIntoSearch, sanitizeReturnTo } from '../lib/attribution';
 
 export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, user } = useAuth();
     const location = useLocation();
+
+    if (isAuthenticated && user && user.emailVerified === false) {
+        return <Navigate to="/verify-account" state={{ from: location }} replace />;
+    }
 
     if (!isAuthenticated) {
         const candidatePath = `${location.pathname}${location.search}${location.hash}`;

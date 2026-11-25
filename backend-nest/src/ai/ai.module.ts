@@ -23,6 +23,7 @@ import { AiSemanticIntentRouterService } from './ai-semantic-intent-router.servi
 import { AiDeterministicSqlToolsService } from './ai-deterministic-sql-tools.service';
 import { AiRagService } from './ai-rag.service';
 import { AiPrivacySanitizerService } from './ai-privacy-sanitizer.service';
+import { AiPiiScrubberService } from './ai-pii-scrubber.service';
 import { AiUserProfileService } from './ai-user-profile.service';
 import { AiFeedbackSignalsService } from './ai-feedback-signals.service';
 import { AiReplyCacheService } from './ai-reply-cache.service';
@@ -81,6 +82,7 @@ import { AlertsModule } from '../alerts/alerts.module';
         AiRagService,
         AiPromptSystemService,
         AiPrivacySanitizerService,
+        AiPiiScrubberService,
         AiUserProfileService,
         AiFeedbackSignalsService,
         AiReplyCacheService,
@@ -101,6 +103,7 @@ import { AlertsModule } from '../alerts/alerts.module';
         AiRagService,
         AiPromptSystemService,
         AiPrivacySanitizerService,
+        AiPiiScrubberService,
         AiUserProfileService,
         AiFeedbackSignalsService,
         AiSemanticMemoryService,

@@ -12,6 +12,7 @@ import { useOfflineSyncStore } from '../store/useOfflineSyncStore';
 import { queryClient } from '../lib/queryClient';
 import { clearBacktestTransientClientState } from '../services/backtestWorkspaceStore';
 import { maskEmailClient } from '../lib/payloadCrypto';
+import { clearPendingVerification } from '../lib/pendingVerification';
 
 function decodeJwtSubject(jwtToken: string): string | null {
     try {
@@ -30,6 +31,7 @@ function decodeJwtSubject(jwtToken: string): string | null {
 export interface AuthUser {
     id: string;
     email: string;
+    emailVerified?: boolean;
     username: string;
     name?: string;
     avatarUrl?: string | null;
@@ -292,6 +294,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             rememberUserScope(nextSubject);
         }
 
+        clearPendingVerification();
         localStorage.setItem('token', newToken);
         if (email) {
             const maskedEmail = maskEmailClient(email);

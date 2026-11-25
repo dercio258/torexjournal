@@ -72,12 +72,14 @@ export function renderEmailTemplate<K extends EmailTemplateName>(
     });
 
     const text = htmlToPlainText(html);
+    const inlineQr = def.buildInlineQr ? def.buildInlineQr(safeData) : undefined;
 
     return {
         subject,
         preheader,
         html,
         text,
+        ...(inlineQr ? { inlineQr } : {}),
     };
 }
 

@@ -10,14 +10,29 @@ import {
     Query,
     UseInterceptors,
     UploadedFile,
+    Optional,
 } from '@nestjs/common';
 import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
+import { CloudflareR2StorageService } from '../common/security/cloudflare-r2-storage.service';
 import { NetworkService } from './network.service';
 import { NetworkAcademyService } from './video-lesson.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlanGuard, RequirePlan } from '../payment/plan.guard';
 import { PlanTier } from '../payment/plan-permission.service';
 import { NetworkGateway } from './network.gateway';
+import {
+    AddPostCommentDto,
+    CreateNetworkPostDto,
+    DirectMessageDto,
+    LessonCommentDto,
+    MarkLessonWatchedDto,
+    PostChannelMessageDto,
+} from './dto/network.dto';
+import {
+    sanitizeInternalImageUrl,
+    sanitizePlainText,
+    sanitizeRichHtml,
+} from '../common/security/input-sanitizer.util';
 
 @Controller('network')
 @UseGuards(JwtAuthGuard, PlanGuard)
@@ -26,7 +41,8 @@ export class NetworkController {
     constructor(
         private readonly networkService: NetworkService,
         private readonly academyService: NetworkAcademyService,
-        private readonly networkGateway: NetworkGateway
+        private readonly networkGateway: NetworkGateway,
+        @Optional() private readonly r2Storage?: CloudflareR2StorageService,
     ) {}
 
     // =========================================================================
@@ -47,7 +63,7 @@ export class NetworkController {
     async markLessonWatched(
         @Req() req,
         @Param('id') id: string,
-        @Body() body: { isWatched?: boolean }
+        @Body() body: MarkLessonWatchedDto
     ) {
         return this.academyService.markLessonWatched(
             req.user.id,
@@ -67,12 +83,12 @@ export class NetworkController {
     async addLessonComment(
         @Req() req,
         @Param('id') id: string,
-        @Body() body: { content: string }
+        @Body() body: LessonCommentDto
     ) {
         return this.academyService.addLessonComment(
             req.user.id,
             id,
-            body?.content
+            sanitizePlainText(body?.content, 2000)
         );
     }
 
@@ -96,21 +112,26 @@ export class NetworkController {
 
     @Get('chat/history')
     async getChatHistory(@Query('room') room: string = 'global') {
-        return this.networkService.getChatHistory(room);
+        const safeRoom = /^[a-z0-9_-]{2,32}$/i.test(String(room || '').trim())
+            ? String(room).trim().toLowerCase()
+            : 'global';
+        return this.networkService.getChatHistory(safeRoom);
     }
 
     @Post('chat/message')
     @RequirePlan(PlanTier.PRO)
     async postChannelMessage(
         @Req() req,
-        @Body() body: { content: string; room?: string }
+        @Body() body: PostChannelMessageDto
     ) {
+        const rawRoom = String(body?.room || 'global').trim().toLowerCase();
+        const safeRoom = /^[a-z0-9_-]{2,32}$/i.test(rawRoom) ? rawRoom : 'global';
         const msg = await this.networkService.saveChatMessage(
             req.user.id,
-            body?.content,
-            body?.room || 'global'
+            sanitizePlainText(body?.content, 2000),
+            safeRoom
         );
-        this.networkGateway.server?.emit('msgToClient', msg);
+        this.networkGateway.server?.to(safeRoom).emit('msgToClient', msg);
         return msg;
     }
 
@@ -132,12 +153,12 @@ export class NetworkController {
     async sendDirectMessage(
         @Req() req,
         @Param('partnerId') partnerId: string,
-        @Body() body: { content: string }
+        @Body() body: DirectMessageDto
     ) {
         return this.networkService.sendDirectMessage(
             req.user.id,
             partnerId,
-            body?.content
+            sanitizePlainText(body?.content, 2000)
         );
     }
 
@@ -154,25 +175,46 @@ export class NetworkController {
     @RequirePlan(PlanTier.PRO)
     @UseInterceptors(
         new FastifyFileInterceptor('file', {
-            dest: './uploads',
             allowedImageOnly: true,
             maxFileSizeBytes: 5 * 1024 * 1024,
         }),
     )
     async uploadImage(@UploadedFile() file) {
+        const mime = String(file?.mimetype || '').toLowerCase();
+        const ext = mime.includes('webp')
+            ? 'webp'
+            : mime.includes('gif')
+              ? 'gif'
+              : mime.includes('jp')
+                ? 'jpg'
+                : 'png';
+        if (this.r2Storage && file?.buffer) {
+            const stored = await this.r2Storage.uploadPublicObject({
+                folder: 'network',
+                buffer: file.buffer,
+                ext,
+                contentType: file.mimetype,
+            });
+            return {
+                imageUrl: stored.url,
+                provider: stored.provider,
+            };
+        }
         return { imageUrl: `/uploads/${file.filename}` };
     }
 
     @Post('post')
     @RequirePlan(PlanTier.PRO)
-    async createPost(@Req() req, @Body() body: any) {
+    async createPost(@Req() req, @Body() body: CreateNetworkPostDto) {
+        const safeContent = sanitizeRichHtml(body.content, 10000);
+        const safeImageUrl = sanitizeInternalImageUrl(body.imageUrl);
         return this.networkService.createPost(
             req.user.id,
-            body.content,
+            safeContent,
             body.type,
             body.tradeData,
             body.visibility,
-            body.imageUrl
+            safeImageUrl
         );
     }
 
@@ -193,12 +235,12 @@ export class NetworkController {
     async addComment(
         @Req() req,
         @Param('id') postId: number,
-        @Body() body: { content: string }
+        @Body() body: AddPostCommentDto
     ) {
         return this.networkService.addComment(
             req.user.id,
             Number(postId),
-            body.content
+            sanitizePlainText(body.content, 2000)
         );
     }
 

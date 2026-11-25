@@ -15,19 +15,26 @@ export class PaymentService {
     ) { }
 
     async getPricingConfig() {
-        const basicPlan = await this.planConfigRepo.findOne({ where: { tier: 'BASIC' } });
-        const proPlan = await this.planConfigRepo.findOne({ where: { tier: 'PRO' } });
-        const premiumPlan = await this.planConfigRepo.findOne({ where: { tier: 'PREMIUM' } });
+        const basicPlan = await this.planConfigRepo.findOne({
+            where: { tier: 'BASIC', isActive: true },
+            order: { monthlyPrice: 'ASC' },
+        });
+        const proPlan = await this.planConfigRepo.findOne({
+            where: { tier: 'PRO', isActive: true },
+        });
+        const premiumPlan = await this.planConfigRepo.findOne({
+            where: { tier: 'PREMIUM', isActive: true },
+        });
 
         const basicoPrice = basicPlan
             ? Number(basicPlan.monthlyPrice)
-            : Number(this.configService.get<number>('PLANO_BASICO_PRICE', 9));
+            : Number(this.configService.get<number>('PLANO_BASICO_PRICE', 2.99));
         const proPrice = proPlan
             ? Number(proPlan.monthlyPrice)
-            : Number(this.configService.get<number>('PLANO_PRO_PRICE') ?? this.configService.get<number>('PLANO_PREMIUN_PRICE', 19));
+            : Number(this.configService.get<number>('PLANO_PRO_PRICE') ?? this.configService.get<number>('PLANO_PREMIUN_PRICE', 19.99));
         const premiumPrice = premiumPlan
             ? Number(premiumPlan.monthlyPrice)
-            : Number(this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proPrice * 2, 39)));
+            : Number(this.configService.get<number>('PLANO_PREMIUM_PRICE', Math.max(proPrice * 2, 39.99)));
 
         const rateFromEnv =
             this.configService.get<number>('EXCHANGE_RATE') ??

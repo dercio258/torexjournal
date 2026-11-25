@@ -1,6 +1,16 @@
 import { Controller, Post, Get, Body, Param, UseGuards, HttpCode, Logger, Req } from '@nestjs/common';
 import { WorkerAuthGuard } from './worker-auth.guard';
 import { Mt5WorkerService } from './mt5-worker.service';
+import {
+    AckWorkerTaskDto,
+    ExchangeCredentialsDto,
+    RegisterWorkerDto,
+    SyncWorkerAccountMetricsDto,
+    SyncWorkerOrdersDto,
+    SyncWorkerPositionsDto,
+    SyncWorkerTradesDto,
+    WorkerHeartbeatDto,
+} from './dto/mt5-worker.dto';
 
 @Controller('v1/mt5-worker')
 @UseGuards(WorkerAuthGuard)
@@ -11,13 +21,13 @@ export class Mt5WorkerController {
 
     @Post('register')
     @HttpCode(200)
-    async register(@Body() body: { workerId: string; capacity: number; systemInfo: Record<string, any> }) {
-        return this.workerService.registerWorker(body.workerId, body.capacity, body.systemInfo);
+    async register(@Body() body: RegisterWorkerDto) {
+        return this.workerService.registerWorker(body.workerId, body.capacity, body.systemInfo || {});
     }
 
     @Post('heartbeat')
     @HttpCode(200)
-    async heartbeat(@Body() body: any) {
+    async heartbeat(@Body() body: WorkerHeartbeatDto) {
         return this.workerService.recordHeartbeat(body);
     }
 
@@ -31,38 +41,27 @@ export class Mt5WorkerController {
     @HttpCode(200)
     async ackTask(
         @Param('id') id: string,
-        @Body() body: { taskId?: string; status: any; message?: string; details?: any }
+        @Body() body: AckWorkerTaskDto
     ) {
         const taskId = id || body.taskId;
-        return this.workerService.ackTask(taskId, body.status, body.message, body.details);
+        return this.workerService.ackTask(taskId, body.status as any, body.message, body.details);
     }
 
     @Post('credentials/exchange')
     @HttpCode(200)
-    async exchangeCredentials(@Body() body: { taskId: string; accountId: number; credentialToken: string }) {
+    async exchangeCredentials(@Body() body: ExchangeCredentialsDto) {
         return this.workerService.exchangeCredential(body.taskId, body.accountId, body.credentialToken);
     }
 
     @Post('sync/accounts')
     @HttpCode(200)
-    async syncAccounts(@Body() body: any, @Req() req: any) {
+    async syncAccounts(@Body() body: SyncWorkerAccountMetricsDto, @Req() req: any) {
         return this.workerService.syncAccountMetrics(body, req?.workerId);
     }
 
     @Post('sync/trades')
     @HttpCode(200)
-    async syncTrades(
-        @Body()
-        body: {
-            accountId: number;
-            login?: string;
-            server?: string;
-            serverTzOffsetSec?: number;
-            trades?: any[];
-            deals?: any[];
-            lastDealTicket?: number;
-        },
-    ) {
+    async syncTrades(@Body() body: SyncWorkerTradesDto) {
         const deals = body.trades || body.deals || [];
         const login = body.login || body.accountId?.toString();
         return this.workerService.syncTrades(
@@ -77,17 +76,17 @@ export class Mt5WorkerController {
 
     @Post('sync/positions')
     @HttpCode(200)
-    async syncPositions(@Body() body: { accountId: number; login?: string; server?: string; positions: any[]; skipped?: boolean }) {
+    async syncPositions(@Body() body: SyncWorkerPositionsDto) {
         if (body?.skipped) {
             return { success: true, skipped: true };
         }
         const login = body.login || body.accountId?.toString();
-        return this.workerService.syncPositions(body.accountId, login, body.positions, body.server);
+        return this.workerService.syncPositions(body.accountId, login, body.positions || [], body.server);
     }
 
     @Post('sync/orders')
     @HttpCode(200)
-    async syncOrders(@Body() body: { accountId: number; login?: string; orders: any[] }) {
+    async syncOrders(@Body() body: SyncWorkerOrdersDto) {
         const login = body.login || body.accountId?.toString();
         return this.workerService.syncOrders(body.accountId, login, body.orders || []);
     }

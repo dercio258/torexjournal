@@ -22,7 +22,13 @@ import {
   isRequestHttps,
   validateDomainSecretsOnBoot,
 } from './common/security/security.config';
-import { encryptJsonEnvelopeForClient } from './common/security/payload-envelope.util';
+import {
+  decryptRequestEnvelopeFromClient,
+  encryptJsonEnvelopeForClient,
+  isEncryptedRequestEnvelope,
+} from './common/security/payload-envelope.util';
+import { isCookieAuthenticatedMutation } from './common/security/cookie-security.util';
+import { RedisSecurityService } from './common/security/redis-security.service';
 import { randomUUID } from 'crypto';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
@@ -50,7 +56,7 @@ async function bootstrap() {
   const httpsOptions = resolveHttpsOptions();
   const fastifyOptions: any = {
     trustProxy: getTrustProxySetting(),
-    bodyLimit: 52428800,
+    bodyLimit: 10 * 1024 * 1024,
     ...(httpsOptions ? { https: httpsOptions } : {}),
   };
 
@@ -66,6 +72,7 @@ async function bootstrap() {
 
   const logger = app.get(PinoLoggerService);
   const telemetry = app.get(TelemetryService);
+  const redisSecurity = app.get(RedisSecurityService);
   app.useLogger(logger);
 
   const enforceHttps = isHttpsEnforced(configService);
@@ -108,6 +115,31 @@ async function bootstrap() {
       return;
     }
 
+    // CSRF defense-in-depth: cookie-authenticated state-changing requests MUST come from an allowed Origin/Referer
+    if (
+      cleanPath.startsWith('/api') &&
+      !cleanPath.startsWith('/api/webhook') &&
+      isCookieAuthenticatedMutation(req)
+    ) {
+      const originHeader = typeof req.headers?.origin === 'string' ? req.headers.origin : '';
+      let derivedOrigin = originHeader;
+      if (!derivedOrigin && typeof req.headers?.referer === 'string') {
+        try {
+          derivedOrigin = new URL(req.headers.referer).origin;
+        } catch {
+          derivedOrigin = '';
+        }
+      }
+      if (derivedOrigin && !isCorsOriginAllowed(derivedOrigin, configService)) {
+        reply.code(403).send({
+          statusCode: 403,
+          error: 'Forbidden',
+          message: 'Pedido rejeitado pela política de origem segura.',
+        });
+        return;
+      }
+    }
+
     correlationStorage.run(
       {
         correlationId,
@@ -117,6 +149,53 @@ async function bootstrap() {
       },
       done,
     );
+  });
+
+  // Bidirectional ECDH P-256 request payload decryption + anti-replay nonce check
+  fastifyInstance.addHook('preValidation', async (req: any, reply: any) => {
+    const cleanPath = (req.url || '').split('?')[0];
+    if (!cleanPath.startsWith('/api') || !isEncryptedRequestEnvelope(req.body)) {
+      return;
+    }
+
+    const tsHeader = req.headers?.['x-torex-timestamp'];
+    const nonceHeader = req.headers?.['x-torex-nonce'];
+    if (typeof tsHeader === 'string' && tsHeader.trim()) {
+      const parsedTs = Number(tsHeader.trim());
+      const tsMs = parsedTs < 1e12 ? parsedTs * 1000 : parsedTs;
+      if (!Number.isFinite(tsMs) || Math.abs(Date.now() - tsMs) > 3 * 60 * 1000) {
+        reply.code(401).send({
+          statusCode: 401,
+          error: 'Unauthorized',
+          message: 'A solicitação expirou. Atualize a página e tente novamente.',
+        });
+        return reply;
+      }
+    }
+    if (typeof nonceHeader === 'string' && nonceHeader.trim()) {
+      const nonceKey = `req_env_nonce:${nonceHeader.trim().slice(0, 64)}`;
+      const fresh = await redisSecurity.setIfAbsent(nonceKey, '1', 4 * 60 * 1000);
+      if (!fresh) {
+        reply.code(401).send({
+          statusCode: 401,
+          error: 'Unauthorized',
+          message: 'Solicitação duplicada rejeitada por segurança.',
+        });
+        return reply;
+      }
+    }
+
+    const decrypted = decryptRequestEnvelopeFromClient(req.body);
+    if (!decrypted) {
+      reply.header('X-Torex-Kem-Invalid', '1');
+      reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Não foi possível validar o envelope seguro da solicitação. Recarregue a página e tente novamente.',
+      });
+      return reply;
+    }
+    req.body = decrypted;
   });
 
   // Security Response Headers (Helmet-equivalent without external dependency)
@@ -138,9 +217,31 @@ async function bootstrap() {
     if (cleanPath.startsWith('/uploads')) {
       reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
       reply.header('Cross-Origin-Resource-Policy', 'same-site');
+    } else if (!cleanPath.startsWith('/api')) {
+      const cspPolicy = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net https://analytics.tiktok.com https://cdn.utmify.com.br https://challenges.cloudflare.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https: wss: ws:",
+        "worker-src 'self' blob:",
+        "frame-src 'self' https://challenges.cloudflare.com https://www.youtube.com https://player.vimeo.com",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+      ].join('; ');
+      const cspHeaderName =
+        process.env.CSP_ENFORCE === 'true'
+          ? 'Content-Security-Policy'
+          : 'Content-Security-Policy-Report-Only';
+      reply.header(cspHeaderName, cspPolicy);
     }
 
-    if (cleanPath.startsWith('/api') && (req.headers?.authorization || req.headers?.['x-torex-kem'])) {
+    if (
+      cleanPath.startsWith('/api') &&
+      (req.headers?.authorization || req.headers?.cookie || req.headers?.['x-torex-kem'])
+    ) {
       reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       reply.header('Pragma', 'no-cache');
     }
@@ -289,8 +390,9 @@ async function bootstrap() {
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders:
-      'Content-Type, Accept, Authorization, App-Token, X-App-Token, X-Account-Id, X-Correlation-Id, X-Request-Id, X-Worker-Id, X-Worker-Key, X-Idempotency-Key, X-Client-Updated-At, X-Sync-Replay',
-    exposedHeaders: 'X-Correlation-Id, X-Idempotency-Replayed',
+      'Content-Type, Accept, Authorization, App-Token, X-App-Token, X-Account-Id, X-Correlation-Id, X-Request-Id, X-Worker-Id, X-Worker-Key, X-Worker-Timestamp, X-Worker-Nonce, X-Worker-Signature, X-Idempotency-Key, X-Client-Updated-At, X-Sync-Replay, X-Torex-Kem, X-Torex-Timestamp, X-Torex-Nonce',
+    exposedHeaders:
+      'X-Correlation-Id, X-Idempotency-Replayed, X-Torex-Enc, X-Torex-Kem-Invalid, X-Error-Ref, X-Torex-Signature, X-Torex-Signature-Kid, X-Torex-Content-Hash',
   });
 
   // Connect RabbitMQ Microservice (Optional)

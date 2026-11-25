@@ -911,6 +911,27 @@ export class AnalyticsService {
             throw new BadRequestException('Unsupported URL scheme');
         }
 
+        // Enforce strict redirect host allowlist against Open Redirect / Phishing
+        const host = parsed.hostname.toLowerCase();
+        const configuredHosts = new Set<string>(['torexjournal.com', 'www.torexjournal.com']);
+        for (const envKey of ['FRONTEND_URL', 'BASE_URL']) {
+            const rawEnv = (this.configService.get<string>(envKey) || '').trim();
+            if (!rawEnv) continue;
+            try {
+                configuredHosts.add(new URL(rawEnv).hostname.toLowerCase());
+            } catch {
+                // ignore malformed env URL
+            }
+        }
+        const isProd = (this.configService.get<string>('NODE_ENV') || process.env.NODE_ENV) === 'production';
+        const isAllowedHost =
+            configuredHosts.has(host) ||
+            host.endsWith('.torexjournal.com') ||
+            (!isProd && (host === 'localhost' || host === '127.0.0.1'));
+        if (!isAllowedHost) {
+            throw new BadRequestException('Destination host is not allowed');
+        }
+
         const safeCta = this.cleanStr(cta, 160) || 'email_cta';
 
         const sanitizedClickedUrl = this.redactSensitiveUrlParams(destUrl, 1024) || destUrl.slice(0, 1024);

@@ -9,7 +9,7 @@ import {
     Res,
     UseGuards,
 } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import { OptionalJwtAuthGuard } from '../common/guards/optional-jwt-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { extractTrustedClientIp } from '../common/security/security.config';
@@ -20,7 +20,7 @@ import { IdentifyVisitorDto, RecordUserActivityDto, TrackBatchDto } from './dto/
 export class AnalyticsController {
     constructor(private readonly analyticsService: AnalyticsService) {}
 
-    @SkipThrottle()
+    @Throttle({ default: { limit: 60, ttl: 60000 } })
     @Get('analytics/pixel-config')
     async getPublicPixelConfig() {
         return this.analyticsService.getPublicPixelConfig();
@@ -60,7 +60,7 @@ export class AnalyticsController {
         });
     }
 
-    @SkipThrottle()
+    @Throttle({ default: { limit: 60, ttl: 60000 } })
     @Get('track/email/open/:token')
     async trackEmailOpen(
         @Param('token') token: string,
@@ -79,7 +79,7 @@ export class AnalyticsController {
             .send(TRANSPARENT_1X1_GIF);
     }
 
-    @SkipThrottle()
+    @Throttle({ default: { limit: 60, ttl: 60000 } })
     @Get('track/email/click')
     async trackEmailClick(
         @Query('t') token: string,

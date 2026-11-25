@@ -1,4 +1,4 @@
-import { Controller, Post, UseInterceptors, UploadedFile, UseGuards, Req, Logger, BadRequestException, Query } from '@nestjs/common';
+import { Controller, Post, UseInterceptors, UploadedFile, UseGuards, Req, Logger, BadRequestException, HttpException, InternalServerErrorException, Query } from '@nestjs/common';
 import { FastifyFileInterceptor } from '../common/interceptors/fastify-file.interceptor';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReportParserService } from './report-parser.service';
@@ -107,9 +107,15 @@ export class ImportController {
                 accountId: result.accountId || targetAccountId
             };
 
-        } catch (e) {
-            this.logger.error(`Falha na importação: ${e.message}`);
-            throw new BadRequestException(`Falha na importação: ${e.message}`);
+        } catch (e: any) {
+            if (e instanceof HttpException) {
+                throw e;
+            }
+            this.logger.error(`Falha na importação: ${e?.message || e}`);
+            throw new InternalServerErrorException(
+                'Não foi possível processar o relatório enviado.',
+                { cause: e },
+            );
         }
     }
 }

@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { AdminController } from './admin.controller';
 import { AdminIntelligenceService } from './admin-intelligence.service';
+import { AdminAuditService } from './admin-audit.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersModule } from '../users/users.module';
 import { PaymentModule } from '../payment/payment.module';
@@ -39,6 +40,6 @@ import { getAdminJwtSecret } from '../common/security/security.config';
         }),
     ],
     controllers: [AdminController],
-    providers: [AdminIntelligenceService],
+    providers: [AdminIntelligenceService, AdminAuditService],
 })
 export class AdminModule {}

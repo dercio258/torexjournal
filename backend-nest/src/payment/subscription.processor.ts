@@ -95,8 +95,12 @@ export class SubscriptionProcessor {
         const updatedSub = await this.subscriptionRepo.findOne({ where: { id: subscriptionId } });
         if (updatedSub && updatedSub.status === SubscriptionStatus.APPROVAL_PENDING) {
             let nextDelay = 10000;
-            if (pollType === 'card') {
-                nextDelay = elapsed < 5 * 60 * 1000 ? 60000 : 10 * 60 * 1000;
+            if (pollType === 'card' || pollType === 'payfast') {
+                nextDelay = elapsed < 5 * 60 * 1000 ? 30000 : 120000;
+            } else if (pollType === 'crypto') {
+                nextDelay = elapsed < 10 * 60 * 1000 ? 20000 : 60000;
+            } else if (pollType === 'pix') {
+                nextDelay = elapsed < 5 * 60 * 1000 ? 15000 : 45000;
             }
             await this.subscriptionQueue.add('check-pending', job.data, { delay: nextDelay });
         }

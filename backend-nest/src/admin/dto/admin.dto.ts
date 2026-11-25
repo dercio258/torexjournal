@@ -34,6 +34,12 @@ export class AdminLoginDto {
     @IsString()
     @MaxLength(32)
     date?: string;
+
+    @IsOptional()
+    @Transform(trimString)
+    @IsString()
+    @MaxLength(4096)
+    turnstileToken?: string;
 }
 
 export class AdminVerifyOtpDto {

@@ -8,7 +8,7 @@ import { DerivAuthEntity } from './entities/deriv-auth.entity';
 import { DerivTransactionEntity } from './entities/deriv-transaction.entity';
 import { DerivClient } from './deriv.client';
 import { CryptoUtil } from '../common/utils/crypto.util';
-import { getJwtSecret } from '../common/security/security.config';
+import { getDerivEncryptionKeyring, getJwtSecret } from '../common/security/security.config';
 import { ConfigService } from '@nestjs/config';
 import { Mt5Service } from '../mt5/mt5.service';
 import { ImportMethod } from '../mt5/import-log.entity';
@@ -205,8 +205,10 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
             // Disconnect only any pre-existing connection for THIS same Deriv account (multi-account safe)
             this.disconnectConnection(connKey);
 
-            const encryptionKey = this.getEncryptionKey();
-            const encryptedToken = CryptoUtil.encrypt(token, encryptionKey);
+            const derivKeyring = getDerivEncryptionKeyring(this.configService);
+            const encryptedToken = CryptoUtil.encrypt(token, derivKeyring, {
+                aad: `deriv:${userId}:${derivAccountId}`,
+            });
 
             let auth = await this.derivAuthRepo.findOne({ where: { userId, accountId: derivAccountId } });
             if (auth) {
@@ -290,8 +292,20 @@ export class DerivService implements OnModuleInit, OnModuleDestroy {
         // Disconnect only existing client for THIS specific Deriv account
         this.disconnectConnection(connKey);
 
-        const encryptionKey = this.getEncryptionKey();
-        const token = CryptoUtil.decrypt(auth.encryptedToken, encryptionKey);
+        const derivKeyring = getDerivEncryptionKeyring(this.configService);
+        const legacyKey = this.getEncryptionKey();
+        const combinedKeyring = {
+            activeKid: derivKeyring.activeKid,
+            keys: { ...derivKeyring.keys, legacy: legacyKey },
+        };
+        let token: string;
+        try {
+            token = CryptoUtil.decrypt(auth.encryptedToken, combinedKeyring, {
+                aad: `deriv:${auth.userId}:${auth.accountId}`,
+            });
+        } catch {
+            token = CryptoUtil.decrypt(auth.encryptedToken, combinedKeyring);
+        }
 
         const client = new DerivClient();
 

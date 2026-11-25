@@ -5,6 +5,10 @@ import * as fs from 'fs';
 import { getCorrelationId } from '../observability/correlation.context';
 import { TelemetryService } from '../observability/telemetry.service';
 import { formatErrorDetails } from '../observability/error-formatter';
+import {
+    SUPPORT_EMAIL,
+    sanitizePublicErrorResponse,
+} from '../observability/error-sanitizer.util';
 
 const MIME_TYPES: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
@@ -139,63 +143,133 @@ export class GenericExceptionFilter implements ExceptionFilter {
         }
 
         let status = HttpStatus.INTERNAL_SERVER_ERROR;
-        let message = 'Ocorreu um erro interno no servidor. Por favor, tente novamente mais tarde.';
-        let error = 'Internal Server Error';
+        let rawMessage = '';
+        let detailedTechnicalReason = '';
+        let exceptionName: string | null = null;
+        let errorCode: string | null = null;
+        let stackTrace: string | null = null;
 
         const correlationId =
             (request.headers?.['x-correlation-id'] as string) || getCorrelationId();
+        const reqUserId =
+            (request as any)?.user?.id ||
+            (request as any)?.user?.userId ||
+            (request as any)?.admin?.email ||
+            null;
 
         if (exception instanceof HttpException) {
             status = exception.getStatus();
+            exceptionName = exception.name || 'HttpException';
             const resObj: any = exception.getResponse();
-            let detailedLogReason = '';
             if (typeof resObj === 'string') {
-                message = resObj;
-                detailedLogReason = resObj;
+                rawMessage = resObj;
+                detailedTechnicalReason = resObj;
             } else if (typeof resObj === 'object' && resObj !== null) {
                 if (Array.isArray(resObj.message)) {
-                    message = resObj.message[0] || message;
-                    detailedLogReason = resObj.message.join('; ');
+                    rawMessage = String(resObj.message[0] || '');
+                    detailedTechnicalReason = resObj.message.join('; ');
                 } else {
-                    message = resObj.message || message;
-                    detailedLogReason = String(resObj.message || message);
+                    rawMessage = String(resObj.message || '');
+                    detailedTechnicalReason = rawMessage;
                 }
-                error = resObj.error || error;
             }
-            if (status >= 500) {
-                const causeText = exception.cause ? ` | cause: ${formatErrorDetails(exception.cause)}` : '';
-                this.logger.error(
-                    `HTTP ${status} (${error}) em ${request.method} ${cleanPath}: ${detailedLogReason || message}${causeText}`,
-                    exception.stack,
-                );
-                this.telemetry?.recordError('http', `${request.method} ${cleanPath}: ${detailedLogReason || message}`, correlationId, { status });
-            } else if (status >= 400 && cleanPath.startsWith('/api') && status !== HttpStatus.UNAUTHORIZED && status !== HttpStatus.NOT_FOUND) {
-                this.logger.warn(
-                    `HTTP ${status} (${error}) em ${request.method} ${cleanPath}: ${detailedLogReason || message}`,
-                );
+            if (exception.cause) {
+                const causeText = formatErrorDetails(exception.cause);
+                detailedTechnicalReason = detailedTechnicalReason
+                    ? `${detailedTechnicalReason} | cause: ${causeText}`
+                    : causeText;
+                const causeObj = exception.cause as any;
+                if (causeObj?.code) errorCode = String(causeObj.code);
+                if (causeObj?.stack) stackTrace = String(causeObj.stack);
+            }
+            if (!stackTrace && exception.stack) {
+                stackTrace = String(exception.stack);
             }
         } else {
-            const formattedCause = formatErrorDetails(exception);
-            this.logger.error(
-                `Exceção não tratada em ${request.method} ${cleanPath}: ${formattedCause}`,
-                exception?.stack,
-            );
-            this.telemetry?.recordError('unhandled', `${request.method} ${cleanPath}: ${formattedCause}`, correlationId);
-            if (cleanPath.includes('/mt5-worker/')) {
-                message = exception?.message || message;
+            exceptionName =
+                typeof exception?.name === 'string' ? exception.name : 'UnhandledError';
+            if (exception?.code !== undefined && exception?.code !== null) {
+                errorCode = String(exception.code);
             }
+            detailedTechnicalReason = formatErrorDetails(exception);
+            stackTrace = typeof exception?.stack === 'string' ? exception.stack : null;
+        }
+
+        const sanitized = sanitizePublicErrorResponse({
+            status,
+            rawMessage,
+            path: cleanPath,
+            correlationId,
+        });
+
+        const isApiRoute = cleanPath.startsWith('/api');
+        const shouldRecordInAdmin =
+            status >= 500 ||
+            (isApiRoute && sanitized.wasSanitized) ||
+            (isApiRoute &&
+                status >= 400 &&
+                status !== HttpStatus.UNAUTHORIZED &&
+                status !== HttpStatus.NOT_FOUND);
+
+        if (status >= 500) {
+            this.logger.error(
+                `[${sanitized.errorRef}] HTTP ${status} em ${request.method} ${cleanPath}: ${detailedTechnicalReason || rawMessage}`,
+                stackTrace || undefined,
+            );
+        } else if (sanitized.wasSanitized && isApiRoute) {
+            this.logger.warn(
+                `[${sanitized.errorRef}] HTTP ${status} sanitizado em ${request.method} ${cleanPath}: ${detailedTechnicalReason || rawMessage}`,
+            );
+        } else if (
+            status >= 400 &&
+            isApiRoute &&
+            status !== HttpStatus.UNAUTHORIZED &&
+            status !== HttpStatus.NOT_FOUND
+        ) {
+            this.logger.warn(
+                `[${sanitized.errorRef}] HTTP ${status} em ${request.method} ${cleanPath}: ${detailedTechnicalReason || rawMessage}`,
+            );
+        }
+
+        if (shouldRecordInAdmin) {
+            this.telemetry?.recordTechnicalError({
+                errorRef: sanitized.errorRef,
+                domain: sanitized.domainCode,
+                severity:
+                    status >= 500
+                        ? 'critical'
+                        : sanitized.wasSanitized
+                          ? 'error'
+                          : 'warning',
+                statusCode: status,
+                method: request.method,
+                path: cleanPath,
+                userId: reqUserId ? String(reqUserId) : null,
+                exceptionName,
+                errorCode,
+                technicalMessage: detailedTechnicalReason || rawMessage || sanitized.publicError,
+                publicMessage: sanitized.publicMessage,
+                wasSanitized: sanitized.wasSanitized,
+                stack: status >= 500 || sanitized.wasSanitized ? stackTrace : null,
+                correlationId,
+                meta: {
+                    domainLabel: sanitized.domainLabel,
+                },
+            });
         }
 
         // Impede que CDNs (como Cloudflare) façam cache de respostas 404/500
         response.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+        response.header('X-Error-Ref', sanitized.errorRef);
         if (correlationId) {
             response.header('X-Correlation-Id', correlationId);
         }
         response.status(status).send({
             statusCode: status,
-            message: message,
-            error: error,
-            ...(correlationId ? { correlationId } : {}),
+            message: sanitized.publicMessage,
+            error: sanitized.publicError,
+            errorRef: sanitized.errorRef,
+            supportEmail: SUPPORT_EMAIL,
         });
     }
 }

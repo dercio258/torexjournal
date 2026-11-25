@@ -1,4 +1,11 @@
-import { createCipheriv, createECDH, hkdfSync, randomBytes } from 'crypto';
+import {
+    createCipheriv,
+    createDecipheriv,
+    createECDH,
+    ECDH,
+    hkdfSync,
+    randomBytes,
+} from 'crypto';
 
 /**
  * Masks an email address while preserving recognizable hints (e.g. "de***9@gmail.com").
@@ -80,6 +87,139 @@ export function encryptJsonEnvelopeForClient(
             tag: tag.toString('base64url'),
             ct: ct.toString('base64url'),
         });
+    } catch {
+        return null;
+    }
+}
+
+// =============================================================================
+// Bidirectional Request Payload Encryption (Client -> Server ECDH P-256)
+// =============================================================================
+
+export interface EncryptedRequestEnvelope {
+    _enc: 'ecdh-p256-aes256gcm-req-v1';
+    kid: string;
+    epk: string;
+    iv: string;
+    tag: string;
+    ct: string;
+}
+
+interface ServerKemEntry {
+    kid: string;
+    ecdh: ECDH;
+    publicKeyBuf: Buffer;
+    publicKeyB64Url: string;
+    createdAt: number;
+    expiresAt: number;
+}
+
+const SERVER_KEM_ROTATE_MS = 12 * 60 * 60 * 1000; // Rotate active key every 12h
+const SERVER_KEM_GRACE_MS = 2 * 60 * 60 * 1000;   // Keep previous key valid for 2h
+
+let activeServerKem: ServerKemEntry | null = null;
+let previousServerKem: ServerKemEntry | null = null;
+
+function createServerKemEntry(): ServerKemEntry {
+    const ecdh = createECDH('prime256v1');
+    const publicKeyBuf = ecdh.generateKeys();
+    const now = Date.now();
+    return {
+        kid: `sk_${randomBytes(6).toString('hex')}`,
+        ecdh,
+        publicKeyBuf,
+        publicKeyB64Url: publicKeyBuf.toString('base64url'),
+        createdAt: now,
+        expiresAt: now + SERVER_KEM_ROTATE_MS,
+    };
+}
+
+function ensureActiveServerKem(): ServerKemEntry {
+    const now = Date.now();
+    if (!activeServerKem) {
+        activeServerKem = createServerKemEntry();
+        return activeServerKem;
+    }
+    if (now >= activeServerKem.expiresAt) {
+        previousServerKem = {
+            ...activeServerKem,
+            expiresAt: now + SERVER_KEM_GRACE_MS,
+        };
+        activeServerKem = createServerKemEntry();
+    }
+    return activeServerKem;
+}
+
+export function getServerKemPublicBundle() {
+    const active = ensureActiveServerKem();
+    return {
+        alg: 'ecdh-p256-aes256gcm-req-v1',
+        kid: active.kid,
+        pub: active.publicKeyB64Url,
+        expiresAt: new Date(active.expiresAt).toISOString(),
+    };
+}
+
+export function isEncryptedRequestEnvelope(body: unknown): body is EncryptedRequestEnvelope {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
+    const obj = body as Record<string, unknown>;
+    return (
+        obj._enc === 'ecdh-p256-aes256gcm-req-v1' &&
+        typeof obj.kid === 'string' &&
+        typeof obj.epk === 'string' &&
+        typeof obj.iv === 'string' &&
+        typeof obj.tag === 'string' &&
+        typeof obj.ct === 'string'
+    );
+}
+
+/**
+ * Decrypts a client-encrypted sensitive JSON request body using the server's
+ * matching ECDH P-256 key (`kid`). Bound to AAD = clientEpk || serverPub || iv.
+ */
+export function decryptRequestEnvelopeFromClient(
+    env: EncryptedRequestEnvelope,
+): Record<string, any> | null {
+    try {
+        const active = ensureActiveServerKem();
+        const now = Date.now();
+        let entry: ServerKemEntry | null = null;
+        if (active.kid === env.kid) {
+            entry = active;
+        } else if (
+            previousServerKem &&
+            previousServerKem.kid === env.kid &&
+            previousServerKem.expiresAt > now
+        ) {
+            entry = previousServerKem;
+        }
+        if (!entry) return null;
+
+        const clientEpkBuf = Buffer.from(env.epk.trim(), 'base64url');
+        const ivBuf = Buffer.from(env.iv.trim(), 'base64url');
+        const tagBuf = Buffer.from(env.tag.trim(), 'base64url');
+        const ctBuf = Buffer.from(env.ct.trim(), 'base64url');
+
+        if (clientEpkBuf.length !== 65 || clientEpkBuf[0] !== 0x04) return null;
+        if (ivBuf.length !== 12 || tagBuf.length !== 16) return null;
+
+        const sharedSecret = entry.ecdh.computeSecret(clientEpkBuf);
+        const aesKey = Buffer.from(
+            hkdfSync(
+                'sha256',
+                sharedSecret,
+                ivBuf,
+                Buffer.from('torex-req-envelope-v1', 'utf8'),
+                32,
+            ),
+        );
+        const aad = Buffer.concat([clientEpkBuf, entry.publicKeyBuf, ivBuf]);
+        const decipher = createDecipheriv('aes-256-gcm', aesKey, ivBuf);
+        decipher.setAAD(aad);
+        decipher.setAuthTag(tagBuf);
+        const plain = Buffer.concat([decipher.update(ctBuf), decipher.final()]).toString('utf8');
+        const parsed = JSON.parse(plain);
+        return parsed && typeof parsed === 'object' ? parsed : null;
     } catch {
         return null;
     }
