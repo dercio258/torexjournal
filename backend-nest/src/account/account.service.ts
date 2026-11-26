@@ -213,13 +213,34 @@ export class AccountService {
                         lowerSrv.includes('goatfunded') ||
                         lowerSrv.includes('fundingpips') ||
                         lowerSrv.includes('fundednext') ||
+                        lowerSrv.includes('growthnext') ||
                         lowerSrv.includes('fivepercent') ||
                         lowerSrv.includes('alphacapital') ||
+                        lowerSrv.includes('acgmarkets') ||
                         lowerSrv.includes('maven') ||
                         lowerSrv.includes('e8markets') ||
+                        lowerSrv.includes('e8funding') ||
                         lowerSrv.includes('blueguardian') ||
                         lowerSrv.includes('fxify') ||
+                        lowerSrv.includes('fundedtradingplus') ||
+                        lowerSrv.includes('fortraders') ||
+                        lowerSrv.includes('fttrading') ||
+                        lowerSrv.includes('fundingtraders') ||
                         lowerSrv.includes('thefundedtrader') ||
+                        lowerSrv.includes('dnafunded') ||
+                        lowerSrv.includes('oandaproptrader') ||
+                        lowerSrv.includes('brightfunded') ||
+                        lowerSrv.includes('instantfunding') ||
+                        lowerSrv.includes('aquafunded') ||
+                        lowerSrv.includes('myfundedfx') ||
+                        lowerSrv.includes('seacrest') ||
+                        lowerSrv.includes('thinkcapital') ||
+                        lowerSrv.includes('fintokei') ||
+                        lowerSrv.includes('citytradersimperium') ||
+                        lowerSrv.includes('larkfunding') ||
+                        lowerSrv.includes('audacitycapital') ||
+                        lowerSrv.includes('toptiertrader') ||
+                        lowerSrv.includes('blueberryfunded') ||
                         lowerSrv.includes('topstep');
                     const newAcc = this.accountRepo.create({
                         userId,
@@ -365,7 +386,7 @@ export class AccountService {
     private isRestrictedBasicBroker(broker?: string | null): boolean {
         const b = String(broker || '').trim();
         if (!b) return false;
-        return /\b(ftmo|fundednext|fundingpips|goatfunded|fivepercent|5ers|alphacapital|maven|e8markets|blueguardian|fxify|thefundedtrader|topstep|deriv)\b/i.test(
+        return /\b(ftmo|fundednext|growthnext|fundingpips|goatfunded|fivepercent|5ers|alphacapital|acgmarkets|maven|e8markets|e8funding|blueguardian|fxify|fundedtradingplus|fortraders|fttrading|fundingtraders|thefundedtrader|dnafunded|oandaproptrader|brightfunded|instantfunding|aquafunded|myfundedfx|seacrest|thinkcapital|fintokei|citytradersimperium|larkfunding|audacitycapital|toptiertrader|blueberryfunded|topstep|deriv)\b/i.test(
             b,
         );
     }

@@ -267,7 +267,134 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
 
     public normalizeBrokerServer(server: string): string {
         const s = (server || '').trim();
+        if (!s) return s;
         const lower = s.toLowerCase();
+
+        // Normalização dinâmica para clusters numerados (Exness, XM, HFM, IC Markets, Pepperstone, Vantage, Prop Firms, etc.)
+        const exnessMatch = lower.match(/^exness(ke|za|eu|uk)?[\s_-]*mt5[\s_-]*(real|trial|demo)[\s_-]*(\d*)$/);
+        if (exnessMatch) {
+            const region = (exnessMatch[1] || '').toUpperCase();
+            const kind = exnessMatch[2] === 'real' ? 'Real' : 'Trial';
+            const rawNum = exnessMatch[3] ? parseInt(exnessMatch[3], 10) : 0;
+            const suffix = rawNum > 1 ? String(rawNum) : '';
+            return `Exness${region}-MT5${kind}${suffix}`;
+        }
+
+        const xmMatch = lower.match(/^xmglobal[\s_-]*mt5(?:[\s_-]*(\d+))?$/);
+        if (xmMatch) {
+            const rawNum = xmMatch[1] ? parseInt(xmMatch[1], 10) : 0;
+            return rawNum > 1 ? `XMGlobal-MT5 ${rawNum}` : 'XMGlobal-MT5';
+        }
+
+        const hfmGlobalLiveMatch = lower.match(/^hfmarketsglobal[\s_-]*live[\s_-]*(\d+)$/);
+        if (hfmGlobalLiveMatch) {
+            return `HFMarketsGlobal-Live${parseInt(hfmGlobalLiveMatch[1], 10)}`;
+        }
+        if (/^hfmarketsglobal[\s_-]*demo$/.test(lower)) return 'HFMarketsGlobal-Demo';
+
+        const hfmRegMatch = lower.match(/^hfmarkets(sv|sa|ke)[\s_-]*(live|demo)[\s_-]*(\d*)$/);
+        if (hfmRegMatch) {
+            const reg = hfmRegMatch[1].toUpperCase();
+            const kind = hfmRegMatch[2] === 'live' ? 'Live' : 'Demo';
+            const rawNum = hfmRegMatch[3] ? parseInt(hfmRegMatch[3], 10) : 0;
+            return `HFMarkets${reg}-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const icmMatch = lower.match(/^icmarkets(sc|eu|au)[\s_-]*(mt5|demo)(?:[\s_-]*(\d+))?$/);
+        if (icmMatch) {
+            const reg = icmMatch[1].toUpperCase();
+            if (icmMatch[2] === 'demo') return `ICMarkets${reg}-Demo`;
+            const rawNum = icmMatch[3] ? parseInt(icmMatch[3], 10) : 0;
+            return rawNum > 1 ? `ICMarkets${reg}-MT5-${rawNum}` : `ICMarkets${reg}-MT5`;
+        }
+
+        const pepLiveMatch = lower.match(/^pepperstone[\s_-]*mt5[\s_-]*live[\s_-]*(\d+)$/);
+        if (pepLiveMatch) {
+            return `Pepperstone-MT5-Live${String(parseInt(pepLiveMatch[1], 10)).padStart(2, '0')}`;
+        }
+
+        const vantageMatch = lower.match(/^vantageinternational[\s_-]*(live|demo)(?:[\s_-]*(\d+))?$/);
+        if (vantageMatch) {
+            if (vantageMatch[1] === 'demo') return 'VantageInternational-Demo';
+            const rawNum = vantageMatch[2] ? parseInt(vantageMatch[2], 10) : 0;
+            return rawNum > 1 ? `VantageInternational-Live ${rawNum}` : 'VantageInternational-Live';
+        }
+
+        const justMarketsMatch = lower.match(/^justmarkets[\s_-]*(live|demo)[\s_-]*(\d*)$/);
+        if (justMarketsMatch) {
+            const kind = justMarketsMatch[1] === 'live' ? 'Live' : 'Demo';
+            const rawNum = justMarketsMatch[2] ? parseInt(justMarketsMatch[2], 10) : 0;
+            return `JustMarkets-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const fxgtMatch = lower.match(/^fxgt[\s_-]*(live|demo)[\s_-]*(\d*)$/);
+        if (fxgtMatch) {
+            const kind = fxgtMatch[1] === 'live' ? 'Live' : 'Demo';
+            const rawNum = fxgtMatch[2] ? parseInt(fxgtMatch[2], 10) : 0;
+            return `FXGT-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const puPrimeMatch = lower.match(/^puprime[\s_-]*(live|demo)[\s_-]*(\d*)$/);
+        if (puPrimeMatch) {
+            const kind = puPrimeMatch[1] === 'live' ? 'Live' : 'Demo';
+            const rawNum = puPrimeMatch[2] ? parseInt(puPrimeMatch[2], 10) : 0;
+            return `PUPrime-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const dooPrimeMatch = lower.match(/^dooprime[\s_-]*(live|demo)(?:[\s_-]*(\d+))?$/);
+        if (dooPrimeMatch) {
+            if (dooPrimeMatch[1] === 'demo') return 'DooPrime-Demo';
+            const rawNum = dooPrimeMatch[2] ? parseInt(dooPrimeMatch[2], 10) : 0;
+            return rawNum > 1 ? `DooPrime-Live ${rawNum}` : 'DooPrime-Live';
+        }
+
+        const swissLiveMatch = lower.match(/^swissquote[\s_-]*live[\s_-]*(\d+)$/);
+        if (swissLiveMatch) {
+            return `Swissquote-Live${parseInt(swissLiveMatch[1], 10)}`;
+        }
+
+        const cptLiveMatch = lower.match(/^cptmarkets[\s_-]*live[\s_-]*(\d+)$/);
+        if (cptLiveMatch) {
+            return `CPTMarkets-Live${String(parseInt(cptLiveMatch[1], 10)).padStart(2, '0')}`;
+        }
+
+        const valetaxMatch = lower.match(/^valetaxintl[\s_-]*(live|demo)[\s_-]*(\d*)$/);
+        if (valetaxMatch) {
+            const kind = valetaxMatch[1] === 'live' ? 'Live' : 'Demo';
+            const rawNum = valetaxMatch[2] ? parseInt(valetaxMatch[2], 10) : 0;
+            return `ValetaxIntl-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const ftmoMatch = lower.match(/^ftmo[\s_-]*(server|demo)[\s_-]*(\d*)$/);
+        if (ftmoMatch) {
+            const kind = ftmoMatch[1] === 'server' ? 'Server' : 'Demo';
+            const rawNum = ftmoMatch[2] ? parseInt(ftmoMatch[2], 10) : 0;
+            return `FTMO-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const fundedNextMatch = lower.match(/^fundednext[\s_-]*(server|trial)[\s_-]*(\d*)$/);
+        if (fundedNextMatch) {
+            const rawNum = fundedNextMatch[2] ? parseInt(fundedNextMatch[2], 10) : 0;
+            if (fundedNextMatch[1] === 'trial') {
+                return `FundedNext-Trial${rawNum > 1 ? rawNum : ''}`;
+            }
+            return rawNum > 1 ? `FundedNext-Server ${rawNum}` : 'FundedNext-Server';
+        }
+
+        const fundingPipsMatch = lower.match(/^fundingpips[\s_-]*(server|demo)[\s_-]*(\d*)$/);
+        if (fundingPipsMatch) {
+            const kind = fundingPipsMatch[1] === 'server' ? 'Server' : 'Demo';
+            const rawNum = fundingPipsMatch[2] ? parseInt(fundingPipsMatch[2], 10) : 0;
+            return `FundingPips-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
+        const goatMatch = lower.match(/^goatfunded[\s_-]*(server|demo)[\s_-]*(\d*)$/);
+        if (goatMatch) {
+            const kind = goatMatch[1] === 'server' ? 'Server' : 'Demo';
+            const rawNum = goatMatch[2] ? parseInt(goatMatch[2], 10) : 0;
+            return `GoatFunded-${kind}${rawNum > 1 ? rawNum : ''}`;
+        }
+
         const typoMap: Record<string, string> = {
             'deric-demo': 'Deriv-Demo',
             'deriv-demo': 'Deriv-Demo',
@@ -276,41 +403,134 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             'deric-server-02': 'Deriv-Server-02',
             'deriv-server-02': 'Deriv-Server-02',
             'deriv-server-03': 'Deriv-Server-03',
-            'goatfunded-server': 'GoatFunded-Server',
-            'goatfunded-server2': 'GoatFunded-Server2',
-            'goatfunded-server 2': 'GoatFunded-Server2',
-            'goatfunded-server-2': 'GoatFunded-Server2',
-            'goatfunded-server3': 'GoatFunded-Server3',
-            'goatfunded-demo': 'GoatFunded-Demo',
             'goatfundedtrader-server': 'GoatFundedTrader-Server',
             'goatfundedtrader-server2': 'GoatFundedTrader-Server2',
-            'ftmo-demo': 'FTMO-Demo',
-            'ftmo-demo2': 'FTMO-Demo2',
-            'ftmo-server': 'FTMO-Server',
-            'ftmo-server2': 'FTMO-Server2',
-            'ftmo-server3': 'FTMO-Server3',
-            'ftmo-server4': 'FTMO-Server4',
-            'fundednext-trial': 'FundedNext-Trial',
-            'fundednext-server': 'FundedNext-Server',
-            'fundingpips-demo': 'FundingPips-Demo',
-            'fundingpips-server': 'FundingPips-Server',
-            'fundingpips-server2': 'FundingPips-Server2',
-            'fundingpips-server3': 'FundingPips-Server3',
             'fivepercentonline-real': 'FivePercentOnline-Real',
             'fivepercentonline-demo': 'FivePercentOnline-Demo',
+            'fivepercentonline-server': 'FivePercentOnline-Server',
             'alphacapitalgroup-server': 'AlphaCapitalGroup-Server',
             'alphacapitalgroup-server2': 'AlphaCapitalGroup-Server2',
             'alphacapitalgroup-demo': 'AlphaCapitalGroup-Demo',
+            'acgmarkets-live': 'ACGMarkets-Live',
+            'acgmarkets-demo': 'ACGMarkets-Demo',
             'maven-server': 'Maven-Server',
             'maven-server2': 'Maven-Server2',
             'maven-demo': 'Maven-Demo',
+            'maventrade-server': 'MavenTrade-Server',
             'e8markets-server': 'E8Markets-Server',
             'e8markets-demo': 'E8Markets-Demo',
+            'e8funding-server': 'E8Funding-Server',
             'blueguardian-server': 'BlueGuardian-Server',
             'blueguardian-server2': 'BlueGuardian-Server2',
             'blueguardian-demo': 'BlueGuardian-Demo',
             'fxify-server': 'FXIFY-Server',
             'fxify-demo': 'FXIFY-Demo',
+            'fundedtradingplus-live': 'FundedTradingPlus-Live',
+            'fundedtradingplus-demo': 'FundedTradingPlus-Demo',
+            'fttrading-server': 'fttrading-server',
+            'fortraders-demo': 'ForTraders-Demo',
+            'fundingtradersgroup-server': 'FundingTradersGroup-Server',
+            'fundingtraders-demo': 'FundingTraders-Demo',
+            'thefundedtrader-server': 'TheFundedTrader-Server',
+            'thefundedtrader-demo': 'TheFundedTrader-Demo',
+            'dnafunded-live': 'DNAFunded-Live',
+            'dnafunded-demo': 'DNAFunded-Demo',
+            'oandaproptrader-live': 'OANDAPropTrader-Live',
+            'oandaproptrader-demo': 'OANDAPropTrader-Demo',
+            'xm.com-mt5': 'XM.COM-MT5',
+            'xmmena-mt5': 'XMMena-MT5',
+            'fbs-demo': 'FBS-Demo',
+            'fbs-real': 'FBS-Real',
+            'octafx-demo': 'OctaFX-Demo',
+            'octafx-real': 'OctaFX-Real',
+            'octafx-real2': 'OctaFX-Real2',
+            'octafx-real3': 'OctaFX-Real3',
+            'octamarkets-demo': 'OctaMarkets-Demo',
+            'octamarkets-real': 'OctaMarkets-Real',
+            'tickmill-demo': 'Tickmill-Demo',
+            'tickmill-live': 'Tickmill-Live',
+            'tickmill-live02': 'Tickmill-Live02',
+            'tickmilluk-demo': 'TickmillUK-Demo',
+            'tickmilluk-live': 'TickmillUK-Live',
+            'fusionmarkets-demo': 'FusionMarkets-Demo',
+            'fusionmarkets-demo 2': 'FusionMarkets-Demo 2',
+            'fusionmarkets-live': 'FusionMarkets-Live',
+            'fusionmarkets-live 2': 'FusionMarkets-Live 2',
+            'fusionmarkets-live 3': 'FusionMarkets-Live 3',
+            'forextimefxtm-demo01': 'ForexTimeFXTM-Demo01',
+            'forextimefxtm-demo02': 'ForexTimeFXTM-Demo02',
+            'forextimefxtm-live01': 'ForexTimeFXTM-Live01',
+            'forextimefxtm-live02': 'ForexTimeFXTM-Live02',
+            'startrader-demo': 'STARTRADER-Demo',
+            'startrader-live': 'STARTRADER-Live',
+            'startrader-live2': 'STARTRADER-Live2',
+            'startrader-live3': 'STARTRADER-Live3',
+            'startrader-live4': 'STARTRADER-Live4',
+            'startraderfinancial-demo': 'STARTRADERFinancial-Demo',
+            'startraderfinancial-live': 'STARTRADERFinancial-Live',
+            'dprimevu-demo': 'DPrimeVU-Demo',
+            'monetamarkets-demo': 'MonetaMarkets-Demo',
+            'monetamarkets-live': 'MonetaMarkets-Live',
+            'monetamarkets-live 2': 'MonetaMarkets-Live 2',
+            'activtrades-demo': 'ActivTrades-Demo',
+            'activtrades-live': 'ActivTrades-Live',
+            'activtradescorp-demo': 'ActivTradesCorp-Demo',
+            'activtradescorp-live': 'ActivTradesCorp-Live',
+            'equitibrokeragesc-demo': 'EquitiBrokerageSC-Demo',
+            'equitibrokeragesc-live': 'EquitiBrokerageSC-Live',
+            'equitigroupltd-live': 'EquitiGroupLtd-Live',
+            'mexatlantic-demo': 'MEXAtlantic-Demo',
+            'mexatlantic-real': 'MEXAtlantic-Real',
+            'mexatlantic-real-2': 'MEXAtlantic-Real-2',
+            'mexgroup-demo': 'MEXGroup-Demo',
+            'mexgroup-live': 'MEXGroup-Live',
+            'atfx-demo': 'ATFX-Demo',
+            'atfx-live': 'ATFX-Live',
+            'atfxgm-demo': 'ATFXGM-Demo',
+            'atfxgm-live': 'ATFXGM-Live',
+            'alpari-mt5-demo': 'Alpari-MT5-Demo',
+            'alpari-mt5': 'Alpari-MT5',
+            'amarkets-demo': 'AMarkets-Demo',
+            'amarkets-real': 'AMarkets-Real',
+            'infinoxlimited-mt5demo': 'InfinoxLimited-MT5Demo',
+            'infinoxlimited-mt5live': 'InfinoxLimited-MT5Live',
+            'swissquote-demo': 'Swissquote-Demo',
+            'swissquote-server': 'Swissquote-Server',
+            'swissquote-real': 'Swissquote-Real',
+            'swissquotebankeu-server': 'SwissquoteBankEU-Server',
+            'darwinex-demo': 'Darwinex-Demo',
+            'darwinex-live': 'Darwinex-Live',
+            'globalprime-demo': 'GlobalPrime-Demo',
+            'globalprime-trade': 'GlobalPrime-Trade',
+            'gomarkets-demo': 'GOMarkets-Demo',
+            'gomarkets-live': 'GOMarkets-Live',
+            'cptmarkets-demo': 'CPTMarkets-Demo',
+            'cptmarketsuklimited-trading-live': 'CPTMarketsUKLimited-Trading-Live',
+            'scopemarkets-demo': 'ScopeMarkets-Demo',
+            'scopemarkets-live': 'ScopeMarkets-Live',
+            'capitalpointtrading-demo': 'CapitalPointTrading-Demo',
+            'capitalpointtrading-mt5': 'CapitalPointTrading-MT5',
+            'capitalpointtrading-mt5-6': 'CapitalPointTrading-MT5-6',
+            'libertex-demo': 'Libertex-Demo',
+            'libertex-real': 'Libertex-Real',
+            'instaforex-demo': 'InstaForex-Demo',
+            'instaforex-server': 'InstaForex-Server',
+            'instaforex-europe': 'InstaForex-Europe',
+            'instaforex-asia': 'InstaForex-Asia',
+            'freshforex-mt5-demo': 'FreshForex-MT5-Demo',
+            'freshforex-mt5': 'FreshForex-MT5',
+            'nordfx-demo': 'NordFX-Demo',
+            'nordfx-real': 'NordFX-Real',
+            'cmtrading-demo': 'CMTrading-Demo',
+            'cmtrading-live': 'CMTrading-Live',
+            'bdswissglobal-demo': 'BDSwissGlobal-Demo',
+            'bdswissglobal-live': 'BDSwissGlobal-Live',
+            'cfifinancial-demo': 'CFIFinancial-Demo',
+            'cfifinancial-live': 'CFIFinancial-Live',
+            'btgpactual-demo': 'BTGPactual-Demo',
+            'btgpactual-prd': 'BTGPactual-PRD',
+            'xpinvestimentos-demo': 'XPInvestimentos-Demo',
+            'xpinvestimentos-prd': 'XPInvestimentos-PRD',
         };
         return typoMap[lower] || s;
     }

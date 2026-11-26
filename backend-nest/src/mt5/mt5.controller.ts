@@ -287,13 +287,34 @@ export class Mt5Controller {
             lowerSrv.includes('goatfunded') ||
             lowerSrv.includes('fundingpips') ||
             lowerSrv.includes('fundednext') ||
+            lowerSrv.includes('growthnext') ||
             lowerSrv.includes('fivepercent') ||
             lowerSrv.includes('alphacapital') ||
+            lowerSrv.includes('acgmarkets') ||
             lowerSrv.includes('maven') ||
             lowerSrv.includes('e8markets') ||
+            lowerSrv.includes('e8funding') ||
             lowerSrv.includes('blueguardian') ||
             lowerSrv.includes('fxify') ||
+            lowerSrv.includes('fundedtradingplus') ||
+            lowerSrv.includes('fortraders') ||
+            lowerSrv.includes('fttrading') ||
+            lowerSrv.includes('fundingtraders') ||
             lowerSrv.includes('thefundedtrader') ||
+            lowerSrv.includes('dnafunded') ||
+            lowerSrv.includes('oandaproptrader') ||
+            lowerSrv.includes('brightfunded') ||
+            lowerSrv.includes('instantfunding') ||
+            lowerSrv.includes('aquafunded') ||
+            lowerSrv.includes('myfundedfx') ||
+            lowerSrv.includes('seacrest') ||
+            lowerSrv.includes('thinkcapital') ||
+            lowerSrv.includes('fintokei') ||
+            lowerSrv.includes('citytradersimperium') ||
+            lowerSrv.includes('larkfunding') ||
+            lowerSrv.includes('audacitycapital') ||
+            lowerSrv.includes('toptiertrader') ||
+            lowerSrv.includes('blueberryfunded') ||
             lowerSrv.includes('topstep');
 
         const inferredType = isPropServer
