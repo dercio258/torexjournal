@@ -242,31 +242,81 @@ class SyncEngine:
         SyncEngine.inspect_mt5_ui_state(close_modals=True)
 
     @staticmethod
-    def _clean_pending_liveupdate():
+    def _clean_pending_liveupdate(target_path: Optional[str] = None):
         """
-        Remove executáveis pendentes na pasta 'liveupdate' do MetaQuotes em AppData.
+        Remove executáveis pendentes na pasta 'liveupdate' do MetaQuotes em AppData e também
+        dentro da instância portátil alvo (instances/acc_*/liveupdate).
         Quando o MT5 baixa um update em background, ao iniciar ele tenta rodar liveupdate\\terminal64.exe,
-        o que abre um prompt UAC do Windows e congela o Pipe Server IPC (-10003) por 60 segundos.
+        o que abre um prompt UAC/reinício do Windows e congela o Pipe Server IPC (-10003 / -10005).
         """
         try:
             import os
             import shutil
             appdata = os.environ.get("APPDATA")
-            if not appdata:
-                return
-            terminals_root = Path(appdata) / "MetaQuotes" / "Terminal"
-            if not terminals_root.exists():
-                return
-            for liveupdate_dir in terminals_root.glob("*/liveupdate"):
-                if liveupdate_dir.is_dir():
-                    logger.info(f"Removendo pasta de LiveUpdate pendente que bloqueia o IPC: {liveupdate_dir}")
-                    shutil.rmtree(liveupdate_dir, ignore_errors=True)
-            # Também verifica em Common/liveupdate
-            common_lu = terminals_root / "Common" / "liveupdate"
-            if common_lu.is_dir():
-                shutil.rmtree(common_lu, ignore_errors=True)
+            if appdata:
+                terminals_root = Path(appdata) / "MetaQuotes" / "Terminal"
+                if terminals_root.exists():
+                    for liveupdate_dir in terminals_root.glob("*/liveupdate"):
+                        if liveupdate_dir.is_dir():
+                            logger.info(f"Removendo pasta de LiveUpdate pendente que bloqueia o IPC: {liveupdate_dir}")
+                            shutil.rmtree(liveupdate_dir, ignore_errors=True)
+                    common_lu = terminals_root / "Common" / "liveupdate"
+                    if common_lu.is_dir():
+                        shutil.rmtree(common_lu, ignore_errors=True)
+
+            if target_path:
+                inst_root = Path(target_path).resolve().parent
+                for lu_name in ("liveupdate", "LiveUpdate"):
+                    inst_lu = inst_root / lu_name
+                    if inst_lu.is_dir():
+                        logger.info(f"Removendo LiveUpdate pendente na instância portátil: {inst_lu}")
+                        shutil.rmtree(inst_lu, ignore_errors=True)
         except Exception as e:
             logger.debug(f"Limpeza preventiva de liveupdate ignorada: {e}")
+
+    @staticmethod
+    def _reclaim_memory_from_other_terminals(
+        keep_path: Optional[str] = None,
+        min_free_mb: float = 350.0,
+        max_mem_pct: float = 82.0,
+        force: bool = False,
+    ) -> int:
+        """
+        Em VPS com pouca RAM (ex.: 2 GB) ou após timeout persistente de IPC (-10005 / porta 22346),
+        encerra outras instâncias concorrentes de terminal64.exe antes de inicializar a conta alvo.
+        """
+        import os
+        avail_mb = 0.0
+        try:
+            mem = psutil.virtual_memory()
+            avail_mb = mem.available / (1024 * 1024)
+            if not force and avail_mb >= min_free_mb and mem.percent < max_mem_pct:
+                return 0
+        except Exception:
+            if not force:
+                return 0
+
+        norm_keep = os.path.normcase(os.path.abspath(keep_path)) if keep_path else None
+        reclaimed = 0
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                if 'terminal64' not in name:
+                    continue
+                exe_path = proc.info.get('exe') or ''
+                norm_exe = os.path.normcase(os.path.abspath(exe_path)) if exe_path else ''
+                if norm_keep and norm_exe and norm_exe == norm_keep:
+                    continue
+                if 'instances' in norm_exe or norm_keep:
+                    logger.warning(
+                        f"[RAM-RECLAIM] Encerrando terminal MT5 concorrente (PID: {proc.info['pid']}, Path: {exe_path}) "
+                        f"para liberar RAM antes de inicializar a conta alvo (RAM livre: {round(avail_mb, 1)} MB)..."
+                    )
+                    proc.kill()
+                    reclaimed += 1
+            except Exception:
+                pass
+        return reclaimed
 
     @staticmethod
     def _kill_duplicate_or_instance_terminals(keep_path: Optional[str] = None):
@@ -373,10 +423,10 @@ class SyncEngine:
             return s
         lower = s.lower()
 
-        m = re.match(r"^exness(ke|za|eu|uk)?[\s_-]*mt5[\s_-]*(real|trial|demo)[\s_-]*(\d*)$", lower)
+        m = re.match(r"^exness(ke|za|eu|uk)?[\s_-]*mt5[\s_-]*(real[a-z]?|trial[a-z]?|demo)[\s_-]*(\d*)$", lower)
         if m:
             region = (m.group(1) or "").upper()
-            kind = "Real" if m.group(2) == "real" else "Trial"
+            kind = "Real" if m.group(2).startswith("real") else "Trial"
             num = int(m.group(3)) if m.group(3) else 0
             return f"Exness{region}-MT5{kind}{num if num > 1 else ''}"
 
@@ -662,13 +712,13 @@ class SyncEngine:
                 "            tbuf = ctypes.create_unicode_buffer(256)\n"
                 "            user32.GetWindowTextW(hwnd, tbuf, 256)\n"
                 "            title = (tbuf.value or '').lower()\n"
-                "            if title in ('login', 'metatrader 5', '') or 'account' in title or 'demo' in title or 'password' in title:\n"
+                "            if title in ('login', 'metatrader 5', '') or any(k in title for k in ('account', 'demo', 'password', 'autoriza', 'conta', 'senha', 'conectar', 'servidor', 'abrir', 'update', 'atualiza', 'aviso', 'disclaimer', 'certificate', 'proxy')):\n"
                 "                user32.PostMessageW(hwnd, 0x0010, 0, 0)\n"
                 "                user32.PostMessageW(hwnd, 0x0111, 2, 0)\n"
                 "    return True\n"
                 "c_cb = WNDENUMPROC(cb)\n"
                 f"time.sleep({max(0.1, float(initial_delay))})\n"
-                "for _ in range(160):\n"
+                "for _ in range(180):\n"
                 "    user32.EnumWindows(c_cb, 0)\n"
                 "    time.sleep(0.4)\n"
             )
@@ -689,8 +739,12 @@ class SyncEngine:
             if watchdog_proc is not None:
                 try:
                     watchdog_proc.terminate()
+                    watchdog_proc.wait(timeout=1.0)
                 except Exception:
-                    pass
+                    try:
+                        watchdog_proc.kill()
+                    except Exception:
+                        pass
 
     def ensure_connected(
         self,
@@ -769,8 +823,8 @@ class SyncEngine:
             # Se o executável estiver em instances/acc_<id>, usa portable=True para isolar dados e sessão
             use_portable = "program files" not in (term_path or "").lower()
 
-            # Remove qualquer atualização automática pendente que trave o Pipe Server (-10003) e fecha popups
-            self._clean_pending_liveupdate()
+            # Remove qualquer atualização automática pendente que trave o Pipe Server (-10003 / -10005) e fecha popups
+            self._clean_pending_liveupdate(target_path=term_path)
             self._dismiss_mt5_dialogs()
 
             switching_terminal = bool(
@@ -809,8 +863,9 @@ class SyncEngine:
                         mt5.shutdown()
                     except Exception:
                         pass
+                    self._reclaim_memory_from_other_terminals(keep_path=term_path)
                     init_ok = self._run_with_dialog_watchdog(
-                        lambda: _init_with_or_without_creds(30000),
+                        lambda: _init_with_or_without_creds(35000),
                         initial_delay=0.3,
                     )
                 else:
@@ -821,13 +876,14 @@ class SyncEngine:
                         if progress_callback:
                             progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: _init_with_or_without_creds(25000),
+                            lambda: _init_with_or_without_creds(30000),
                             initial_delay=0.3,
                         )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
-            # Passo 2: Se a instância isolada da conta não respondeu, reinicia apenas o processo dela
+            # Passo 2: Se a instância isolada da conta não respondeu, libera RAM se necessário, reinicia apenas o processo dela
+            # e tenta novamente com timeout ampliado (60s).
             if not init_ok:
                 logger.info(f"Reiniciando processo MT5 isolado da conta {login_clean} via: {term_path}")
                 if progress_callback:
@@ -837,21 +893,54 @@ class SyncEngine:
                 except Exception:
                     pass
                 self._kill_stuck_terminals(target_path=term_path)
-                self._clean_pending_liveupdate()
-                time.sleep(2.0)
+                reclaimed = self._reclaim_memory_from_other_terminals(keep_path=term_path)
+                self._clean_pending_liveupdate(target_path=term_path)
+                time.sleep(3.0 if reclaimed > 0 else 2.0)
                 try:
                     init_ok = self._run_with_dialog_watchdog(
-                        lambda: _init_with_or_without_creds(45000),
+                        lambda: _init_with_or_without_creds(60000),
                         initial_delay=0.5,
                     )
                 except Exception as e:
                     logger.error(f"Erro ao inicializar terminal MT5 via path: {e}")
 
+            # Passo 2b: Se ainda deu IPC timeout (-10005) ao autenticar inline no initialize(),
+            # separa abertura do pipe IPC (initialize sem credenciais) do login explícito no Passo 3.
+            if not init_ok and term_path and login_clean and pass_clean:
+                last_err = mt5.last_error()
+                last_code = last_err[0] if isinstance(last_err, (tuple, list)) and len(last_err) > 0 else None
+                if last_code == -10005:
+                    logger.warning(
+                        f"[IPC-RECOVERY] Timeout (-10005) no initialize com credenciais para {login_clean}@{server_clean}. "
+                        f"Tentando abrir o canal IPC do terminal primeiro e autenticar via mt5.login() em seguida..."
+                    )
+                    try:
+                        mt5.shutdown()
+                    except Exception:
+                        pass
+                    self._reclaim_memory_from_other_terminals(keep_path=term_path, force=True)
+                    self._dismiss_mt5_dialogs()
+                    time.sleep(2.0)
+                    try:
+                        init_ok = self._run_with_dialog_watchdog(
+                            lambda: bool(mt5.initialize(path=term_path, portable=use_portable, timeout=60000)),
+                            initial_delay=0.5,
+                        )
+                    except Exception as e:
+                        logger.error(f"Erro na recuperação de pipe IPC para {login_clean}: {e}")
+
             self._dismiss_mt5_dialogs()
 
             if not init_ok:
                 err = mt5.last_error()
-                self.last_connect_error = f"Não foi possível inicializar o processo MT5 na VPS: {err}"
+                snap = self.get_resource_snapshot()
+                ui_diag = self.inspect_mt5_ui_state(close_modals=False)
+                self.last_connect_error = (
+                    f"Não foi possível inicializar o processo MT5 na VPS: {err} "
+                    f"(RAM livre: {snap['memory_available_mb']} MB / {snap['memory_total_mb']} MB | "
+                    f"Terminais MT5 abertos: {len(ui_diag.get('pids', []))} | "
+                    f"Modais: {len(ui_diag.get('modals', []))})"
+                )
                 logger.error(self.last_connect_error)
                 return False
 

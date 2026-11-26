@@ -271,10 +271,10 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         const lower = s.toLowerCase();
 
         // Normalização dinâmica para clusters numerados (Exness, XM, HFM, IC Markets, Pepperstone, Vantage, Prop Firms, etc.)
-        const exnessMatch = lower.match(/^exness(ke|za|eu|uk)?[\s_-]*mt5[\s_-]*(real|trial|demo)[\s_-]*(\d*)$/);
+        const exnessMatch = lower.match(/^exness(ke|za|eu|uk)?[\s_-]*mt5[\s_-]*(real[a-z]?|trial[a-z]?|demo)[\s_-]*(\d*)$/);
         if (exnessMatch) {
             const region = (exnessMatch[1] || '').toUpperCase();
-            const kind = exnessMatch[2] === 'real' ? 'Real' : 'Trial';
+            const kind = exnessMatch[2].startsWith('real') ? 'Real' : 'Trial';
             const rawNum = exnessMatch[3] ? parseInt(exnessMatch[3], 10) : 0;
             const suffix = rawNum > 1 ? String(rawNum) : '';
             return `Exness${region}-MT5${kind}${suffix}`;

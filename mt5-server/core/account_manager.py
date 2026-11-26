@@ -169,20 +169,30 @@ class AccountManager:
 
                             saved_status = str(item.get("status", "ONLINE") or "ONLINE").upper()
                             last_err_str = str(item.get("last_error") or "")
-                            # Só mantém em quarentena no boot se foi erro real de senha/autorização (-6).
-                            # Erros transitórios de IPC (-10005 / timeout) voltam para ONLINE automaticamente.
+                            raw_login = str(item["login"]).strip()
+                            is_invalid_login = not raw_login.isdigit() or len(raw_login) < 4
+                            # Só mantém em quarentena no boot se foi erro real de senha/autorização (-6)
+                            # ou se o login salvo não é numérico (ex.: e-mail salvo por engano como login MT5).
                             is_real_auth_fail = (
-                                saved_status in ("FAILED", "AUTH_FAILED")
-                                and ("-6" in last_err_str or "autoriza" in last_err_str.lower() or "authorization" in last_err_str.lower())
+                                is_invalid_login
+                                or (
+                                    saved_status in ("FAILED", "AUTH_FAILED")
+                                    and ("-6" in last_err_str or "autoriza" in last_err_str.lower() or "authorization" in last_err_str.lower())
+                                )
                             )
                             initial_status = "FAILED" if is_real_auth_fail else "ONLINE"
                             initial_err_cnt = int(item.get("error_count", 0) or 0) if is_real_auth_fail else 0
+                            initial_err_msg = (
+                                f"Login MT5 inválido (não numérico): '{raw_login}'"
+                                if is_invalid_login
+                                else (item.get("last_error") if is_real_auth_fail else None)
+                            )
 
                             session = AccountSession(
                                 account_id=acc_id,
                                 account_uuid=item.get("account_uuid"),
-                                login=str(item["login"]),
-                                server=str(item["server"]),
+                                login=raw_login,
+                                server=str(item["server"]).strip(),
                                 password=decrypted_pwd,
                                 last_deal_ticket=int(item.get("last_deal_ticket", 0)),
                                 last_deal_time=last_deal_dt,
@@ -190,7 +200,7 @@ class AccountManager:
                                 tz_sync_version=int(item.get("tz_sync_version", 0) or 0),
                                 status=initial_status,
                                 error_count=initial_err_cnt,
-                                last_error=item.get("last_error") if is_real_auth_fail else None,
+                                last_error=initial_err_msg,
                             )
                             self.accounts[acc_id] = session
                     active_cnt = len([a for a in self.accounts.values() if a.status not in ("FAILED", "AUTH_FAILED")])
@@ -294,12 +304,14 @@ class AccountManager:
                 self._save_pool()
 
     def get_active_account_ids(self) -> List[int]:
-        """Retorna apenas contas operacionais (ignora contas em quarentena por falha de autenticação -6)."""
+        """Retorna apenas contas operacionais com login MT5 numérico válido (ignora quarentena e logins corrompidos)."""
         with self._lock:
             return [
                 acc_id
                 for acc_id, acc in self.accounts.items()
                 if acc.status not in ("FAILED", "AUTH_FAILED")
+                and str(acc.login or "").strip().isdigit()
+                and len(str(acc.login or "").strip()) >= 4
             ]
 
     def update_checkpoint(

@@ -53,12 +53,19 @@ class MT5ProcessManager:
         base_dir = base_exe.parent
 
         try:
-            # Se existia um hardlink antigo (nlink > 1), substitui por cópia independente do executável
+            # Se existia hardlink antigo (nlink > 1) ou executável base foi atualizado (build novo), sincroniza cópia independente
             need_copy_exe = not isolated_exe.exists()
             if not need_copy_exe:
                 try:
-                    if os.stat(isolated_exe).st_nlink > 1:
+                    iso_stat = os.stat(isolated_exe)
+                    base_stat = os.stat(base_exe)
+                    if iso_stat.st_nlink > 1:
                         isolated_exe.unlink()
+                        need_copy_exe = True
+                    elif (
+                        iso_stat.st_size != base_stat.st_size
+                        and not self.is_running(account_id, account_uuid=account_uuid)
+                    ):
                         need_copy_exe = True
                 except Exception:
                     pass
@@ -129,6 +136,11 @@ class MT5ProcessManager:
                     "ProxyEnable=0",
                     "KeepPrivate=1",
                     "MCPServer=0",
+                    "[Experts]",
+                    "Enabled=1",
+                    "AllowLiveTrading=0",
+                    "AllowDllImport=0",
+                    "Api=0",
                 ]
                 common_content = "\r\n".join(common_lines) + "\r\n"
                 for cfg_target in (isolated_cfg_dir / "common.ini", isolated_cfg_upper / "common.ini"):
@@ -238,7 +250,13 @@ class MT5ProcessManager:
                 return False
 
         instance_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
-        isolated_exe = self.get_or_prepare_isolated_terminal_exe(account_id, account_uuid=account_uuid)
+        isolated_exe = self.get_or_prepare_isolated_terminal_exe(
+            account_id,
+            login=login,
+            server=server,
+            password=password,
+            account_uuid=account_uuid,
+        )
         config_path = self.create_startup_config(account_id, login, server, password, account_uuid=account_uuid)
 
         cmd = [

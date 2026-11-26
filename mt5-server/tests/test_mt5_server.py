@@ -481,5 +481,69 @@ class TestHealthMonitorAntiFalsePositive(unittest.TestCase):
             self.assertTrue(is_safe, f"Cooldown should clear early once CPU normalizes: {err}")
 
 
+class TestIpcTimeoutRecovery(unittest.TestCase):
+    def test_recovers_from_ipc_timeout_via_split_initialize_and_explicit_login(self):
+        engine = SyncEngine()
+        mock_mt5 = MagicMock()
+        # Passo 1 fails (-10005), Passo 2 fails (-10005), Passo 2b succeeds opening pipe without inline creds
+        mock_mt5.initialize.side_effect = [False, False, True]
+        mock_mt5.last_error.return_value = (-10005, "IPC timeout")
+        mock_mt5.account_info.side_effect = [
+            None,
+            None,
+            SimpleNamespace(login=439300462, server="GoatFunded-Server2", name="Trader", balance=10000.0),
+        ]
+        mock_mt5.terminal_info.return_value = SimpleNamespace(connected=True, ping_last=50000)
+        mock_mt5.login.return_value = True
+
+        with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
+             patch.object(sync_engine_mod, "mt5", mock_mt5, create=True), \
+             patch.object(engine, "_run_with_dialog_watchdog", side_effect=lambda fn, initial_delay=0.5: fn()), \
+             patch.object(engine, "_dismiss_mt5_dialogs"), \
+             patch.object(engine, "_kill_stuck_terminals"), \
+             patch.object(engine, "_reclaim_memory_from_other_terminals", return_value=1) as mock_reclaim, \
+             patch.object(engine, "_clean_pending_liveupdate") as mock_clean, \
+             patch("core.sync_engine.time.sleep", return_value=None):
+            ok = engine.connect_account(
+                account_id=439300462,
+                login="439300462",
+                server="GoatFunded-Server2",
+                password="SecretPassword",
+                path=r"C:\torex\mt5-server\instances\acc_test\terminal64.exe",
+            )
+
+        self.assertTrue(ok)
+        self.assertGreaterEqual(mock_reclaim.call_count, 1)
+        self.assertGreaterEqual(mock_clean.call_count, 1)
+        # Passo 2b initialized pipe without inline login, then Passo 3 called mt5.login with password
+        self.assertEqual(mock_mt5.initialize.call_count, 3)
+        self.assertNotIn("login", mock_mt5.initialize.call_args_list[2].kwargs)
+        mock_mt5.login.assert_called_once_with(
+            login=439300462,
+            password="SecretPassword",
+            server="GoatFunded-Server2",
+            timeout=20000,
+        )
+
+    def test_quarantines_non_numeric_email_logins_and_fixes_exness_typo(self):
+        self.assertEqual(SyncEngine._normalize_broker_server("Exness-MT5Reala30"), "Exness-MT5Real30")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig_data_dir = settings.data_dir
+            settings.data_dir = tmp
+            try:
+                pool_path = Path(tmp) / "accounts_pool.json"
+                pool_path.write_text(
+                    '[{"account_id": 1, "login": "Alberto.cossv@icloud.com", "server": "FivePercentOnline-Real", "status": "ONLINE"},'
+                    ' {"account_id": 222707555, "login": "222707555", "server": "Exness-MT5Real30", "status": "ONLINE"}]',
+                    encoding="utf-8",
+                )
+                mgr = AccountManager()
+                self.assertEqual(mgr.get_account(1).status, "FAILED")
+                self.assertEqual(mgr.get_active_account_ids(), [222707555])
+            finally:
+                settings.data_dir = orig_data_dir
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

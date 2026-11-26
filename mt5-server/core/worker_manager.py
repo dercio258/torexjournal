@@ -573,23 +573,30 @@ class WorkerManager:
             target_login = "DEMO_FEED"
             target_server = "MetaQuotes-Demo"
             if active_ids:
-                acc = self.account_manager.get_account(active_ids[0])
+                # Escolhe a primeira conta com login numérico válido e menos falhas consecutivas de IPC
+                healthy_candidates = [
+                    self.account_manager.get_account(aid)
+                    for aid in active_ids
+                    if self._consecutive_connect_failures.get(aid, 0) < 3
+                ]
+                acc = next((a for a in healthy_candidates if a and str(a.login).strip().isdigit()), None)
                 if acc:
                     target_login = acc.login
-                    target_server = acc.server
+                    target_server = self.sync_engine._normalize_broker_server(acc.server)
                     logger.info(
                         f"[CALENDAR-10MIN] Ciclo automático de 10 minutos: consultando novas notícias no MT5 via Conta #{target_login}@{target_server}..."
                     )
                     isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
                         acc.account_id,
                         login=acc.login,
-                        server=acc.server,
+                        server=target_server,
                         password=acc.password,
+                        account_uuid=acc.account_uuid,
                     )
                     self.sync_engine.ensure_connected(
                         account_id=acc.account_id,
                         login=acc.login,
-                        server=acc.server,
+                        server=target_server,
                         password=acc.password,
                         path=isolated_path,
                     )
@@ -646,9 +653,18 @@ class WorkerManager:
             now = time.time()
             last_acc_sync = self._account_last_sync_ts.get(account_id, 0.0)
             is_idle = self._account_idle_map.get(account_id, False)
+            failures = self._consecutive_connect_failures.get(account_id, 0)
             # Se a conta está com saldo $0.00 e 0 posições (ex: 408953138) e existe outra conta ativa operando (ex: 6371945),
             # aplica cooldown de 30 minutos (1800s) para NÃO deslogar a conta ativa do terminal único MT5 (porta 22346)!
-            if is_idle and has_funded_active:
+            if failures >= 5:
+                min_cooldown = 1800.0
+            elif failures == 4:
+                min_cooldown = 900.0
+            elif failures == 3:
+                min_cooldown = 360.0
+            elif failures == 2:
+                min_cooldown = 180.0
+            elif is_idle and has_funded_active:
                 min_cooldown = 1800.0
             elif len(active_ids) > 1:
                 min_cooldown = 90.0
@@ -674,14 +690,15 @@ class WorkerManager:
 
         try:
             self._account_last_sync_ts[account_id] = time.time()
+            normalized_server = self.sync_engine._normalize_broker_server(acc.server)
             isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
                 account_id,
                 login=acc.login,
-                server=acc.server,
+                server=normalized_server,
                 password=acc.password,
                 account_uuid=acc.account_uuid,
             )
-            if not self.sync_engine.ensure_connected(account_id, acc.login, acc.server, acc.password, isolated_path):
+            if not self.sync_engine.ensure_connected(account_id, acc.login, normalized_server, acc.password, isolated_path):
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 failures = self._consecutive_connect_failures.get(account_id, 0) + 1

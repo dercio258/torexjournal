@@ -7,6 +7,7 @@ describe('Mt5WorkerService.normalizeBrokerServer', () => {
         ['exness-mt5real', 'Exness-MT5Real'],
         ['exness-mt5real1', 'Exness-MT5Real'],
         ['exness-mt5real37', 'Exness-MT5Real37'],
+        ['Exness-MT5Reala30', 'Exness-MT5Real30'],
         ['Exness MT5 Real 45', 'Exness-MT5Real45'],
         ['exness-mt5-trial15', 'Exness-MT5Trial15'],
         ['exness-mt5demo12', 'Exness-MT5Trial12'],
