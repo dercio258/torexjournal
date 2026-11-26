@@ -371,5 +371,115 @@ class TestPhase1SecurityHardening(unittest.TestCase):
         self.assertEqual(list(kernel32.LocalFree.argtypes), [ctypes.c_void_p])
 
 
+class TestSettingsEnvPrecedence(unittest.TestCase):
+    def test_worker_local_env_overrides_parent_and_backend_env(self):
+        import os
+        from config.settings import Settings, BASE_DIR
+
+        env_files = [str(p) for p in Settings.model_config["env_file"]]
+        self.assertEqual(env_files[-1], str(BASE_DIR / ".env"))
+
+        clean_env = {k: v for k, v in os.environ.items() if k not in ("WORKER_ID", "WORKER_KEY")}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, clean_env, clear=True):
+            root = Path(tmp)
+            backend_env = root / "backend.env"
+            parent_env = root / "parent.env"
+            worker_env = root / "worker.env"
+            backend_env.write_text("WORKER_ID=worker-backend\nWORKER_KEY=from_backend_key\n", encoding="utf-8")
+            parent_env.write_text("WORKER_ID=worker-parent\nWORKER_KEY=from_parent_key\n", encoding="utf-8")
+            worker_env.write_text("WORKER_ID=win-worker-02\nWORKER_KEY=from_worker_key\n", encoding="utf-8")
+
+            loaded = Settings(_env_file=(str(backend_env), str(parent_env), str(worker_env)))
+            self.assertEqual(loaded.worker_id, "win-worker-02")
+            self.assertEqual(loaded.worker_key, "from_worker_key")
+
+
+class TestBrokerServerNormalization(unittest.TestCase):
+    def test_normalizes_exness_and_major_broker_servers(self):
+        cases = [
+            ("exness-mt5real", "Exness-MT5Real"),
+            ("exness-mt5real37", "Exness-MT5Real37"),
+            ("Exness MT5 Real 45", "Exness-MT5Real45"),
+            ("exness-mt5-trial15", "Exness-MT5Trial15"),
+            ("exnesske-mt5real", "ExnessKE-MT5Real"),
+            ("xmglobal-mt5 14", "XMGlobal-MT5 14"),
+            ("hfmarketsglobal-live12", "HFMarketsGlobal-Live12"),
+            ("icmarketssc-mt5-6", "ICMarketsSC-MT5-6"),
+            ("pepperstone-mt5-live2", "Pepperstone-MT5-Live02"),
+            ("dooprime-live 5", "DooPrime-Live 5"),
+            ("cptmarkets-live3", "CPTMarkets-Live03"),
+            ("ftmo-server6", "FTMO-Server6"),
+            ("fundednext-server 5", "FundedNext-Server 5"),
+            ("fusionmarkets-live 2", "FusionMarkets-Live 2"),
+            ("btgpactual-prd", "BTGPactual-PRD"),
+            ("fundedtradingplus-live", "FundedTradingPlus-Live"),
+            ("deric-demo", "Deriv-Demo"),
+        ]
+        for raw, expected in cases:
+            self.assertEqual(SyncEngine._normalize_broker_server(raw), expected)
+
+
+class TestHealthMonitorAntiFalsePositive(unittest.TestCase):
+    def setUp(self):
+        from core.health_monitor import reset_cpu_sampler_for_tests
+        reset_cpu_sampler_for_tests()
+        self.orig_guard = settings.enable_resource_guard
+        self.orig_max_cpu = settings.max_cpu_percent
+        self.orig_max_mem = settings.max_memory_percent
+        self.orig_min_mb = settings.min_available_memory_mb
+        settings.enable_resource_guard = True
+        settings.max_cpu_percent = 95.0
+        settings.max_memory_percent = 92.0
+        settings.min_available_memory_mb = 150.0
+
+    def tearDown(self):
+        from core.health_monitor import reset_cpu_sampler_for_tests
+        settings.enable_resource_guard = self.orig_guard
+        settings.max_cpu_percent = self.orig_max_cpu
+        settings.max_memory_percent = self.orig_max_mem
+        settings.min_available_memory_mb = self.orig_min_mb
+        reset_cpu_sampler_for_tests()
+
+    def test_ignores_single_cpu_spike_and_triggers_only_on_sustained_saturation_with_early_recovery(self):
+        from core.health_monitor import HealthMonitor
+
+        hm = HealthMonitor(MagicMock())
+        healthy_mem = SimpleNamespace(
+            total=2048 * 1024 * 1024,
+            available=416 * 1024 * 1024,
+            percent=79.7,
+        )
+
+        # Prime (t=100), normal (t=103), single transient spike 97.6% (t=106), then back to 21.8% (t=109)
+        cpu_values = [0.0, 12.0, 97.6, 21.8]
+        with patch("core.health_monitor.psutil.virtual_memory", return_value=healthy_mem), \
+             patch("core.health_monitor.psutil.cpu_percent", side_effect=cpu_values):
+            for t in (100.0, 103.0, 106.0, 109.0):
+                is_safe, err, _ = hm.check_resource_guard(operation="Sync", now=t)
+                self.assertTrue(is_safe, f"Transient CPU spike at t={t} must not trip guard: {err}")
+
+        # Now simulate genuinely sustained >= 96% CPU for > 15s (4 samples across 20s)
+        sustained_cpus = [96.5, 97.0, 98.0, 98.5, 97.5, 97.0, 98.0, 98.5]
+        with patch("core.health_monitor.psutil.virtual_memory", return_value=healthy_mem), \
+             patch("core.health_monitor.psutil.cpu_percent", side_effect=sustained_cpus):
+            tripped = False
+            for idx, t in enumerate([120.0, 124.0, 128.0, 132.0, 137.0, 142.0, 147.0, 152.0]):
+                is_safe, _, _ = hm.check_resource_guard(operation="Sync", now=t)
+                if not is_safe:
+                    tripped = True
+                    trip_t = t
+                    break
+            self.assertTrue(tripped, "Sustained CPU saturation >=15s must trigger guard")
+
+        # After CPU drops back to 15% and 6s pass, cooldown must auto-clear early instead of waiting 30s
+        with patch("core.health_monitor.psutil.virtual_memory", return_value=healthy_mem), \
+             patch("core.health_monitor.psutil.cpu_percent", side_effect=[15.0, 14.0, 13.0, 12.0]):
+            hm.get_resource_metrics(now=trip_t + 3.0)
+            hm.get_resource_metrics(now=trip_t + 6.0)
+            hm.get_resource_metrics(now=trip_t + 9.0)
+            is_safe, err, _ = hm.check_resource_guard(operation="Sync", now=trip_t + 12.0)
+            self.assertTrue(is_safe, f"Cooldown should clear early once CPU normalizes: {err}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

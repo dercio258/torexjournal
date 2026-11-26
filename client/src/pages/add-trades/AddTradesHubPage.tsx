@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, ChevronRight, FileSpreadsheet, Monitor, Search, X } from 'lucide-react';
-import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
+import { MT5_BROKERS_CATALOG, Mt5BrokerGroup, matchesBrokerServerQuery } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../../components/ui/BrokerLogo';
 import { DerivIcon, Mt5Icon } from './icons';
 import { useAuth } from '../../context/AuthContext';
@@ -101,11 +101,7 @@ export const AddTradesHubPage = () => {
             return (
                 group.broker.toLowerCase().includes(q) ||
                 group.category.toLowerCase().includes(q) ||
-                group.servers.some(
-                    (s) =>
-                        s.name.toLowerCase().includes(q) ||
-                        (s.description && s.description.toLowerCase().includes(q))
-                )
+                group.servers.some((s) => matchesBrokerServerQuery(group, s, q))
             );
         });
     }, [search, category]);
@@ -280,9 +276,7 @@ export const AddTradesHubPage = () => {
                         {filteredBrokers.map((group) => {
                             const matchingServers = hasSearchQuery
                                 ? group.servers
-                                      .filter((s) =>
-                                          s.name.toLowerCase().includes(search.trim().toLowerCase())
-                                      )
+                                      .filter((s) => matchesBrokerServerQuery(group, s, search))
                                       .slice(0, 3)
                                 : [];
 

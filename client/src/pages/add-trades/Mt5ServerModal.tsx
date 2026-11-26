@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Building2, Check, Search, X } from 'lucide-react';
-import { MT5_BROKERS_CATALOG } from '../../constants/mt5ServersCatalog';
+import { MT5_BROKERS_CATALOG, matchesBrokerServerQuery } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../../components/ui/BrokerLogo';
 import { useLocale } from '../../context/LocaleContext';
 
@@ -57,19 +57,9 @@ export const Mt5ServerModal = ({
             if (brokerFilter !== 'ALL' && group.id !== brokerFilter && group.category !== brokerFilter) {
                 return null;
             }
-            const brokerMatches =
-                !q ||
-                group.broker.toLowerCase().includes(q) ||
-                group.id.toLowerCase().includes(q) ||
-                group.category.toLowerCase().includes(q);
-
             const matchingServers = group.servers.filter((srv) => {
                 if (envFilter !== 'ALL' && srv.env !== envFilter) return false;
-                if (!q || brokerMatches) return true;
-                return (
-                    srv.name.toLowerCase().includes(q) ||
-                    (srv.description && srv.description.toLowerCase().includes(q))
-                );
+                return matchesBrokerServerQuery(group, srv, q);
             });
 
             if (matchingServers.length === 0) return null;

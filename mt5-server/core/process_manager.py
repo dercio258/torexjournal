@@ -222,16 +222,17 @@ class MT5ProcessManager:
         available_mb = round(mem.available / (1024 * 1024), 1)
 
         if settings.enable_resource_guard:
-            cpu_usage = psutil.cpu_percent(interval=None)
+            from .health_monitor import sample_smoothed_cpu_percent
+            cpu_usage, _ = sample_smoothed_cpu_percent()
             used_mb = round((mem.total - mem.available) / (1024 * 1024), 1)
             total_mb = round(mem.total / (1024 * 1024), 1)
             mem_pct = round(mem.percent, 1)
 
-            if mem_pct >= settings.max_memory_percent or available_mb < settings.min_available_memory_mb or cpu_usage >= settings.max_cpu_percent:
+            if mem_pct >= settings.max_memory_percent or available_mb < settings.min_available_memory_mb:
                 logger.error(
                     f"[RECURSOS CRÍTICOS] Impossível iniciar terminal da conta {account_id}! "
                     f"RAM consumida: {used_mb} MB / {total_mb} MB ({mem_pct}%) | "
-                    f"RAM livre: {available_mb} MB | CPU: {cpu_usage}%. "
+                    f"RAM livre: {available_mb} MB | CPU média: {cpu_usage}%. "
                     f"Operação cancelada para evitar congelamento da VPS."
                 )
                 return False

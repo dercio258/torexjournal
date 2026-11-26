@@ -30,7 +30,7 @@ import {
 import api from '../../api';
 import { useAccount } from '../../context/AccountContext';
 import { useLocale } from '../../context/LocaleContext';
-import { MT5_BROKERS_CATALOG } from '../../constants/mt5ServersCatalog';
+import { MT5_BROKERS_CATALOG, matchesBrokerServerQuery } from '../../constants/mt5ServersCatalog';
 import { pullAccountHistoryInBatchesAndBuildUnifiedSession } from '../../services/historicalBatchCache';
 
 interface AutoSyncFormProps {
@@ -79,19 +79,9 @@ export const AutoSyncForm = ({ brokerName, serverName = '', onBack }: AutoSyncFo
             if (selectedBrokerFilter !== 'ALL' && group.id !== selectedBrokerFilter && group.category !== selectedBrokerFilter) {
                 return null;
             }
-            const brokerMatches =
-                !q ||
-                group.broker.toLowerCase().includes(q) ||
-                group.id.toLowerCase().includes(q) ||
-                group.category.toLowerCase().includes(q);
-
             const matchingServers = group.servers.filter((srv) => {
                 if (selectedEnvFilter !== 'ALL' && srv.env !== selectedEnvFilter) return false;
-                if (!q || brokerMatches) return true;
-                return (
-                    srv.name.toLowerCase().includes(q) ||
-                    (srv.description && srv.description.toLowerCase().includes(q))
-                );
+                return matchesBrokerServerQuery(group, srv, q);
             });
 
             if (matchingServers.length === 0) return null;

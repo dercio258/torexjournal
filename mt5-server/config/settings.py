@@ -31,11 +31,13 @@ class Settings(BaseSettings):
     resource_cooldown_seconds: int = Field(default=30, alias="RESOURCE_COOLDOWN_SECONDS")
     max_consecutive_resource_failures: int = Field(default=5, alias="MAX_CONSECUTIVE_RESOURCE_FAILURES")
 
+    # pydantic-settings aplica env_file em ordem crescente de prioridade (o último sobrescreve os anteriores),
+    # portanto mt5-server/.env deve ficar por último para ter prioridade sobre ../.env e backend-nest/.env.
     model_config = SettingsConfigDict(
         env_file=(
-            str(BASE_DIR / ".env"),
-            str(BASE_DIR.parent / ".env"),
             str(BASE_DIR.parent / "backend-nest" / ".env"),
+            str(BASE_DIR.parent / ".env"),
+            str(BASE_DIR / ".env"),
         ),
         env_file_encoding="utf-8",
         extra="ignore"

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Monitor, Upload, Search, Lock, Building2, ChevronRight } from 'lucide-react';
-import { MT5_BROKERS_CATALOG, Mt5BrokerGroup } from '../../constants/mt5ServersCatalog';
+import { MT5_BROKERS_CATALOG, Mt5BrokerGroup, matchesBrokerServerQuery } from '../../constants/mt5ServersCatalog';
 import { BrokerLogo } from '../ui/BrokerLogo';
 import { useLocale } from '../../context/LocaleContext';
 
@@ -73,11 +73,7 @@ export const BrokerSelector = ({ onSelect }: BrokerSelectorProps) => {
             return (
                 group.broker.toLowerCase().includes(q) ||
                 group.category.toLowerCase().includes(q) ||
-                group.servers.some(
-                    (s) =>
-                        s.name.toLowerCase().includes(q) ||
-                        (s.description && s.description.toLowerCase().includes(q))
-                )
+                group.servers.some((s) => matchesBrokerServerQuery(group, s, q))
             );
         });
     }, [search, categoryFilter]);
