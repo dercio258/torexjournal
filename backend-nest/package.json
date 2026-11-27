@@ -21,6 +21,8 @@
         "migration:run:prod": "typeorm migration:run -d ./dist/data-source.js",
         "migration:revert": "npm run typeorm -- -d ./src/data-source.ts migration:revert",
         "ai:training-report": "ts-node -r tsconfig-paths/register src/scripts/export-ai-training-report.ts",
+        "storage:migrate-r2:dry": "ts-node -r tsconfig-paths/register src/scripts/migrate-local-storage-to-r2.ts --dry-run",
+        "storage:migrate-r2": "ts-node -r tsconfig-paths/register src/scripts/migrate-local-storage-to-r2.ts --apply",
         "ml:train-behavior": "..\\quant-engine\\.venv\\Scripts\\python.exe ..\\quant-engine\\scripts\\build_and_train_behavior_ml.py"
     },
     "dependencies": {

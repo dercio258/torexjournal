@@ -42,6 +42,10 @@ const MIME_BY_EXT: Record<string, string> = {
     png: 'image/png',
     webp: 'image/webp',
     gif: 'image/gif',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    ogg: 'video/ogg',
+    mov: 'video/quicktime',
     pdf: 'application/pdf',
     csv: 'text/csv; charset=utf-8',
     json: 'application/json; charset=utf-8',
@@ -228,7 +232,9 @@ export class CloudflareR2StorageService {
         }
 
         const encodedKey = encodeObjectKeyPath(params.key);
-        const canonicalUri = `/${rfc3986Encode(params.bucket)}/${encodedKey}`;
+        const canonicalUri = encodedKey
+            ? `/${rfc3986Encode(params.bucket)}/${encodedKey}`
+            : `/${rfc3986Encode(params.bucket)}`;
         const endpointUrl = new URL(cfg.endpoint);
         const host = endpointUrl.host;
         const fullUrl = `${cfg.endpoint}${canonicalUri}`;
@@ -472,6 +478,152 @@ export class CloudflareR2StorageService {
         } finally {
             clearTimeout(timer);
         }
+    }
+
+    /**
+     * Checks bucket reachability & SigV4 credentials via S3 HeadBucket (`HEAD /<bucket>`).
+     */
+    async headBucketInR2(bucket: string): Promise<{ ok: boolean; status: number; detail?: string }> {
+        const { url, headers } = this.buildSigV4Headers({
+            method: 'HEAD',
+            bucket,
+            key: '',
+        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+            const res = await fetch(url, {
+                method: 'HEAD',
+                headers,
+                signal: controller.signal,
+            });
+            if (res.ok) {
+                return { ok: true, status: res.status };
+            }
+            return {
+                ok: false,
+                status: res.status,
+                detail: res.statusText || `HTTP ${res.status}`,
+            };
+        } catch (err: any) {
+            return {
+                ok: false,
+                status: 0,
+                detail: err?.message || String(err),
+            };
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * Verifies both public and private Cloudflare R2 buckets are reachable with current credentials.
+     */
+    async verifyR2Connection(): Promise<{
+        ok: boolean;
+        publicBucket: { name: string; ok: boolean; status: number; detail?: string };
+        privateBucket: { name: string; ok: boolean; status: number; detail?: string };
+    }> {
+        const cfg = this.getConfig();
+        if (!cfg.enabled) {
+            const err = { ok: false, status: 0, detail: 'Cloudflare R2 credentials not configured' };
+            return {
+                ok: false,
+                publicBucket: { name: cfg.publicBucket, ...err },
+                privateBucket: { name: cfg.privateBucket, ...err },
+            };
+        }
+        const pubCheck = await this.headBucketInR2(cfg.publicBucket);
+        const privCheck =
+            cfg.privateBucket === cfg.publicBucket
+                ? pubCheck
+                : await this.headBucketInR2(cfg.privateBucket);
+
+        return {
+            ok: pubCheck.ok && privCheck.ok,
+            publicBucket: { name: cfg.publicBucket, ...pubCheck },
+            privateBucket: { name: cfg.privateBucket, ...privCheck },
+        };
+    }
+
+    /**
+     * Checks whether a specific object key already exists in Cloudflare R2 (for idempotent syncs).
+     */
+    async objectExistsInR2(visibility: 'public' | 'private', key: string): Promise<boolean> {
+        const cfg = this.getConfig();
+        if (!cfg.enabled) {
+            throw new Error('Cloudflare R2 is not configured');
+        }
+        const cleanKey = this.sanitizeObjectKey(key);
+        if (!cleanKey) return false;
+
+        const bucket = visibility === 'public' ? cfg.publicBucket : cfg.privateBucket;
+        const { url, headers } = this.buildSigV4Headers({
+            method: 'HEAD',
+            bucket,
+            key: cleanKey,
+        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+            const res = await fetch(url, {
+                method: 'HEAD',
+                headers,
+                signal: controller.signal,
+            });
+            if (res.ok) return true;
+            if (res.status === 404) return false;
+            throw new Error(`R2 HEAD failed (${res.status}) for ${bucket}/${cleanKey}`);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * Strictly uploads an object directly to Cloudflare R2 at an explicit key without falling back to local disk.
+     * Intended for migration / backfill jobs where silent local fallback must never happen.
+     */
+    async uploadRawObjectToR2(params: {
+        visibility: 'public' | 'private';
+        key: string;
+        buffer: Buffer;
+        contentType: string;
+        cacheControl?: string;
+    }): Promise<StoredObjectResult> {
+        const cfg = this.getConfig();
+        if (!cfg.enabled) {
+            throw new Error('Cloudflare R2 is not configured');
+        }
+        if (params.visibility === 'public' && !cfg.publicBaseUrl) {
+            throw new Error('R2_PUBLIC_URL is required for public Cloudflare R2 uploads');
+        }
+
+        const cleanKey = this.sanitizeObjectKey(params.key);
+        if (!cleanKey) {
+            throw new BadRequestException(`Chave de objeto R2 inválida: ${params.key}`);
+        }
+
+        const bucket = params.visibility === 'public' ? cfg.publicBucket : cfg.privateBucket;
+        const cacheControl =
+            params.cacheControl ||
+            (params.visibility === 'public'
+                ? 'public, max-age=31536000, immutable'
+                : 'private, max-age=300');
+
+        await this.putToR2(bucket, cleanKey, params.buffer, params.contentType, cacheControl);
+
+        return {
+            url:
+                params.visibility === 'public'
+                    ? `${cfg.publicBaseUrl}/${cleanKey}`
+                    : `/api/media/private/${cleanKey}`,
+            key: cleanKey,
+            provider: 'cloudflare-r2',
+            visibility: params.visibility,
+            contentType: params.contentType,
+            sizeBytes: params.buffer.length,
+            sha256: sha256Hex(params.buffer),
+        };
     }
 
     /**
