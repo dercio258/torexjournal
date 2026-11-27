@@ -36,7 +36,7 @@ import { PlanModal } from '../components/dashboard/PlanModal';
 import { IdleAccountWarningBanner } from '../components/dashboard/IdleAccountWarningBanner';
 import { DashboardAppInstallCard } from '../components/pwa/DashboardAppInstallCard';
 import { PlanRenewalBannerCard } from '../components/subscription/PlanRenewalBannerCard';
-import { BasicPlanSimpleUpgradeCard } from '../components/subscription/BasicPlanSimpleUpgradeCard';
+import { InviteFriendBanner } from '../components/dashboard/InviteFriendBanner';
 import { TrialCelebrationModal } from '../components/subscription/TrialCelebrationModal';
 import { DashboardSkeleton } from '../components/ui/Skeleton';
 import { DashboardEn } from './DashboardEn';
@@ -268,7 +268,7 @@ const DashboardPt = () => {
                 />
             )}
 
-            <BasicPlanSimpleUpgradeCard locale="pt" />
+            <InviteFriendBanner locale="pt" />
 
             {isConsolidated ? (
                 <ConsolidatedDashboardView stats={currentStats} />

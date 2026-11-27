@@ -624,7 +624,7 @@ export const TorexAi: React.FC = () => {
     const [inputText, setInputText] = useState<string>('');
     const [isNoCreditsModalOpen, setIsNoCreditsModalOpen] = useState<boolean>(false);
     const [copiedReferralLink, setCopiedReferralLink] = useState<boolean>(false);
-    const [affiliateApproved, setAffiliateApproved] = useState<boolean>(false);
+    const [affiliateApproved, setAffiliateApproved] = useState<boolean>(true);
     const [affiliateShareUrl, setAffiliateShareUrl] = useState<string>('');
     const [isSubmittingSend, setIsSubmittingSend] = useState<boolean>(false);
     const [draftStageInfo, setDraftStageInfo] = useState<{
@@ -701,12 +701,12 @@ export const TorexAi: React.FC = () => {
         api.get('/referrals/me')
             .then((res) => {
                 if (!active || !res.data) return;
-                setAffiliateApproved(Boolean(res.data.affiliateApproved));
+                setAffiliateApproved(res.data.affiliateApproved !== false);
                 setAffiliateShareUrl(String(res.data.shareUrl || ''));
             })
             .catch(() => {
                 if (!active) return;
-                setAffiliateApproved(false);
+                setAffiliateApproved(true);
                 setAffiliateShareUrl('');
             });
         return () => {
@@ -2365,27 +2365,21 @@ export const TorexAi: React.FC = () => {
                             </span>
                         </div>
                         <p className="text-[11px] text-fg-muted leading-relaxed">
-                            {affiliateApproved
-                                ? isEn
-                                    ? 'Invite 1 friend who subscribes & pays to unlock +50 daily AI credits for 1 month (3 paid friends = $10 credit).'
-                                    : 'Convide 1 amigo que assine e pague um plano para desbloquear +50 créditos IA/dia por 1 mês (3 pagantes = $10).'
-                                : isEn
-                                  ? 'Activate any paid plan to unlock affiliate invites (+50 AI/day per paid friend).'
-                                  : 'Assine qualquer plano pago para aprovar sua afiliação e ganhar créditos por convidados pagantes.'}
+                            {isEn
+                                ? 'Invite 1 friend who subscribes & pays to unlock +50 daily AI credits for 1 month (3 paid friends = $10 credit).'
+                                : 'Convide 1 amigo que assine e pague um plano para desbloquear +50 créditos IA/dia por 1 mês (3 pagantes = $10).'}
                         </p>
                         <div className="flex items-center gap-1.5 pt-0.5">
-                            {affiliateApproved && (
-                                <Link
-                                    to="/profile"
-                                    className="flex-1 text-center py-1.5 px-2 rounded-lg bg-accent text-accent-on text-[11px] font-semibold hover:opacity-90 transition-opacity"
-                                >
-                                    {isEn ? 'Invite Friend' : 'Convidar Amigo'}
-                                </Link>
-                            )}
+                            <Link
+                                to="/profile#affiliates"
+                                className="flex-1 text-center py-1.5 px-2 rounded-lg bg-accent text-accent-on text-[11px] font-semibold hover:opacity-90 transition-opacity"
+                            >
+                                {isEn ? 'Invite Friend' : 'Convidar Amigo'}
+                            </Link>
                             <button
                                 type="button"
                                 onClick={() => openWorkspacePlansModal('torex_ai_referral_panel')}
-                                className={`${affiliateApproved ? 'py-1.5 px-2.5 bg-surface border border-line text-fg hover:bg-surface-2' : 'flex-1 text-center py-1.5 px-2 bg-accent text-accent-on hover:opacity-90'} rounded-lg text-[11px] font-semibold transition-colors cursor-pointer`}
+                                className="py-1.5 px-2.5 bg-surface border border-line text-fg hover:bg-surface-2 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
                             >
                                 {isEn ? 'View Plans' : 'Ver Planos'}
                             </button>
@@ -3570,13 +3564,9 @@ export const TorexAi: React.FC = () => {
                         </div>
 
                         <p className="text-xs leading-relaxed text-fg-muted">
-                            {affiliateApproved
-                                ? isEn
-                                    ? 'Copy your affiliate invite link (friends count once they register and pay any plan) or upgrade to Pro / Premium for monthly credits.'
-                                    : 'Copie o seu link de afiliado (válido para amigos que se registem e paguem qualquer plano) ou atualize para o plano Pro / Premium.'
-                                : isEn
-                                  ? 'Subscribe to Pro or Premium to unlock monthly AI credits and qualify for the paid affiliate program.'
-                                  : 'Assine o plano Pro ou Premium para liberar créditos mensais de IA e aprovar o seu programa de afiliados.'}
+                            {isEn
+                                ? 'Copy your free affiliate invite link (friends count once they register and pay any plan) or upgrade to Pro / Premium for monthly credits.'
+                                : 'Copie o seu link gratuito de afiliado (válido para amigos que se registem e paguem qualquer plano) ou atualize para o plano Pro / Premium.'}
                         </p>
 
                         <div className="flex flex-col gap-2 pt-1">
@@ -3606,7 +3596,7 @@ export const TorexAi: React.FC = () => {
                                     setIsNoCreditsModalOpen(false);
                                     openWorkspacePlansModal('torex_ai_no_credits_modal');
                                 }}
-                                className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${affiliateApproved ? 'border border-line bg-surface-2 text-fg hover:border-accent/40' : 'bg-accent font-bold text-accent-on hover:bg-accent-hover'}`}
+                                className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer ${affiliateShareUrl ? 'border border-line bg-surface-2 text-fg hover:border-accent/40' : 'bg-accent font-bold text-accent-on hover:bg-accent-hover'}`}
                             >
                                 {isEn ? 'View Plans' : 'Ver Planos'}
                             </button>

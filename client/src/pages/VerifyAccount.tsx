@@ -162,7 +162,10 @@ export const VerifyAccount = () => {
                         locale,
                     },
                 });
-                const dest = sanitizeReturnTo(pending.returnTo) || '/dashboard';
+                const needsOnboarding = res.data?.user?.onboardingCompleted === false;
+                const dest = needsOnboarding
+                    ? '/dashboard'
+                    : sanitizeReturnTo(pending.returnTo) || '/dashboard';
                 navigate(dest, { replace: true });
                 return;
             }

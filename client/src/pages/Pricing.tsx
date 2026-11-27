@@ -13,7 +13,13 @@ export const Pricing = () => {
 
     if (isAuthenticated && user) {
         const hasActivePlan = Boolean(user.tier && user.tier !== 'FREE');
-        return <Navigate to={hasActivePlan ? '/dashboard?plans=1' : '/dashboard'} replace />;
+        const needsOnboarding = user.onboardingCompleted === false;
+        return (
+            <Navigate
+                to={hasActivePlan && !needsOnboarding ? '/dashboard?plans=1' : '/dashboard'}
+                replace
+            />
+        );
     }
 
     return (

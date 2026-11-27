@@ -256,7 +256,7 @@ export class AuthController {
                 avatarUrl: hasActivePlan ? user.avatarUrl : null,
                 whatsapp: hasActivePlan ? maskPhoneNumber(user.whatsapp) : null,
                 twoFactorEnabled: Boolean(user.twoFactorEnabled),
-                onboardingCompleted: hasActivePlan ? Boolean(user.onboardingCompleted) : true,
+                onboardingCompleted: Boolean(user.onboardingCompleted),
                 dailyLossLimit: hasActivePlan ? user.dailyLossLimit : null,
                 is_connected: hasActivePlan ? isConnected : false,
                 tier: planTier,

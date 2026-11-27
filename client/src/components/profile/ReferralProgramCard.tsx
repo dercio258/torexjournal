@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Check, Copy, Crown, Gift, Share2, Sparkles, TrendingUp, Users } from 'lucide-react';
+import { Award, Check, Copy, Gift, Share2, Sparkles, TrendingUp, Users } from 'lucide-react';
 import api from '../../api';
 import { useLocale } from '../../context/LocaleContext';
-import { openWorkspacePlansModal } from '../../lib/planGate';
-import { UpgradeBadge } from '../subscription/UpgradeBadge';
 
 interface ReferralItem {
     id: string;
@@ -105,10 +103,8 @@ export const ReferralProgramCard: React.FC = () => {
     const aiBonusDays = data?.rules.invite1DurationDays ?? 30;
     const milestoneUsd = data?.rules.invite3PlanCreditUsd ?? 10;
     const verifiedCount = data?.counts.paid ?? data?.counts.verified ?? 0;
-    const isAffiliateApproved = Boolean(data?.affiliateApproved ?? data?.hasPaidSubscription);
     const remainderTowardNext10 = verifiedCount > 0 && verifiedCount % target3 === 0 ? target3 : verifiedCount % target3;
     const milestoneProgressPct = Math.min(100, Math.round((remainderTowardNext10 / target3) * 100));
-    const pendingCreditsUsd = Number(data?.pendingCreditsUsd || 0);
     const aiBonusActive = Number(data?.aiDailyBonusCredits || 0) > 0;
 
     return (
@@ -124,6 +120,9 @@ export const ReferralProgramCard: React.FC = () => {
                     <div>
                         <h3 className="text-sm font-bold text-fg flex items-center gap-2 flex-wrap">
                             <span>{isEn ? 'Torex Affiliate & AI Credits' : 'Programa de Afiliados & Créditos IA'}</span>
+                            <span className="inline-flex items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                                {isEn ? 'Free' : 'Gratuito'}
+                            </span>
                             {aiBonusActive && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 border border-accent/30 px-2 py-0.5 text-[10px] font-bold text-accent-fg">
                                     <Sparkles size={11} />
@@ -139,13 +138,13 @@ export const ReferralProgramCard: React.FC = () => {
                         </h3>
                         <p className="text-xs text-fg-muted mt-0.5 leading-relaxed">
                             {isEn
-                                ? `Invite 1 friend who registers and pays any plan: unlock +${aiBonusDaily} extra daily AI credits for ${aiBonusDays} days. Invite ${target3} paid friends: earn $${milestoneUsd} USD to activate next plans (both you and your invited friends must hold a paid plan).`
-                                : `Convide 1 amigo que se registe e pague qualquer plano: desbloqueie +${aiBonusDaily} créditos IA diários extras durante 1 mês (${aiBonusDays} dias). Convide ${target3} pagantes: ganhe $${milestoneUsd} USD para ativar os próximos planos.`}
+                                ? `Free for all users. Invite 1 friend who registers and pays any plan: unlock +${aiBonusDaily} extra daily AI credits for ${aiBonusDays} days. Invite ${target3} paid friends: earn $${milestoneUsd} USD to activate plans.`
+                                : `Gratuito para todos os utilizadores. Convide 1 amigo que se registe e pague qualquer plano: desbloqueie +${aiBonusDaily} créditos IA diários extras durante 1 mês (${aiBonusDays} dias). Convide ${target3} pagantes: ganhe $${milestoneUsd} USD para ativar os próximos planos.`}
                         </p>
                     </div>
                 </div>
 
-                {data && isAffiliateApproved && (
+                {data && data.shareUrl && (
                     <button
                         type="button"
                         onClick={handleNativeShare}
@@ -167,65 +166,8 @@ export const ReferralProgramCard: React.FC = () => {
                 <p className="text-xs text-fg-subtle">
                     {isEn ? 'Unable to load affiliate status right now.' : 'Não foi possível carregar os dados de afiliados.'}
                 </p>
-            ) : !isAffiliateApproved ? (
-                <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-4 space-y-3">
-                    <div className="flex items-start gap-2.5 text-xs text-amber-200">
-                        <Crown size={15} className="shrink-0 mt-0.5 text-amber-400" />
-                        <div className="space-y-1 flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <strong className="font-bold text-amber-300">
-                                    {isEn
-                                        ? 'Affiliate Program Requires a Paid Subscription'
-                                        : 'Afiliação Disponível Apenas Após Plano Pago'}
-                                </strong>
-                                <UpgradeBadge
-                                    variant="inline"
-                                    asButton
-                                    label="Upgrade"
-                                    sourceFeature="profile_affiliate_requires_paid"
-                                />
-                            </div>
-                            <p className="text-[11px] text-fg-muted leading-relaxed">
-                                {isEn
-                                    ? 'Outside the trial welcome step, affiliate links and commission credits are approved strictly once you subscribe to any paid plan and your invited friends register and pay any plan.'
-                                    : 'Nesta secção a afiliação só é aprovada quando você possui qualquer plano pago ativo, e os indicados só contabilizam após se registarem e efetuarem o pagamento de um plano.'}
-                            </p>
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => openWorkspacePlansModal('profile_affiliate_requires_paid')}
-                        className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-accent hover:bg-accent-hover text-accent-on text-xs font-bold cursor-pointer transition-colors"
-                    >
-                        <span>{isEn ? 'Subscribe to Unlock Affiliate' : 'Assinar Plano para Liberar Afiliação'}</span>
-                    </button>
-                </div>
             ) : (
                 <>
-                    {pendingCreditsUsd > 0 && !data.hasPaidSubscription && (
-                        <div className="flex items-start justify-between gap-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-300">
-                            <div className="space-y-0.5 min-w-0">
-                                <strong className="block font-semibold">
-                                    {isEn
-                                        ? `$${pendingCreditsUsd.toFixed(2)} USD in anti-fraud guarantee hold`
-                                        : `$${pendingCreditsUsd.toFixed(2)} USD retidos em garantia anti-fraude`}
-                                </strong>
-                                <span className="text-[11px] opacity-90 block">
-                                    {isEn
-                                        ? 'Activate any paid subscription to immediately unlock this balance and redeem future plans.'
-                                        : 'Ative qualquer assinatura paga para liberar imediatamente este saldo para os seus próximos planos.'}
-                                </span>
-                            </div>
-                            <UpgradeBadge
-                                variant="inline"
-                                asButton
-                                label="Upgrade"
-                                sourceFeature="profile_affiliate_unlock_credits"
-                                className="shrink-0 mt-0.5"
-                            />
-                        </div>
-                    )}
-
                     {/* Share Link + Code */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
                         <div className="md:col-span-8 flex items-center gap-2 rounded-lg bg-canvas-subtle border border-line-subtle px-3 py-2">
@@ -272,11 +214,6 @@ export const ReferralProgramCard: React.FC = () => {
                             <div className="text-base font-bold font-mono tabular-nums text-emerald-400 mt-1">
                                 ${data.creditsUsd.toFixed(2)}
                             </div>
-                            {pendingCreditsUsd > 0 && (
-                                <span className="text-[10px] text-amber-400 font-mono block">
-                                    +${pendingCreditsUsd.toFixed(2)} {isEn ? 'locked' : 'retido'}
-                                </span>
-                            )}
                         </div>
 
                         <div className="rounded-lg bg-canvas-subtle border border-line-subtle p-3">

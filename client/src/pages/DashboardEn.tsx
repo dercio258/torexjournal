@@ -34,7 +34,7 @@ import { TrialCelebrationModal } from '../components/subscription/TrialCelebrati
 import { DashboardSkeleton } from '../components/ui/Skeleton';
 import { DashboardAppInstallCard } from '../components/pwa/DashboardAppInstallCard';
 import { PlanRenewalBannerCard } from '../components/subscription/PlanRenewalBannerCard';
-import { BasicPlanSimpleUpgradeCard } from '../components/subscription/BasicPlanSimpleUpgradeCard';
+import { InviteFriendBanner } from '../components/dashboard/InviteFriendBanner';
 import api from '../api';
 
 /**
@@ -226,7 +226,7 @@ export const DashboardEn = () => {
                 />
             )}
 
-            <BasicPlanSimpleUpgradeCard locale="en" />
+            <InviteFriendBanner locale="en" />
 
             {isConsolidated ? (
                 <ConsolidatedDashboardView stats={currentStats} locale="en" />

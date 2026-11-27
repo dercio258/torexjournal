@@ -288,6 +288,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             localStorage.removeItem('torex_selected_account_id');
             localStorage.removeItem('torex_accounts_cache');
             writeCachedUser(null);
+            setUser(null);
         }
 
         if (nextSubject) {

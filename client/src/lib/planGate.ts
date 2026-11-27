@@ -115,3 +115,24 @@ export function resolvePricingModalCloseAction(params: {
     }
     return 'NAVIGATE_FALLBACK';
 }
+
+export type AuthenticatedShellView = 'loading' | 'onboarding' | 'pricing' | 'workspace';
+
+export function resolveAuthenticatedShellView(params: {
+    isLoading: boolean;
+    hasUser: boolean;
+    subChecked: boolean;
+    isUnlocked: boolean;
+    onboardingCompleted?: boolean;
+}): AuthenticatedShellView {
+    if (params.isLoading || !params.hasUser || !params.subChecked) {
+        return 'loading';
+    }
+    if (!params.isUnlocked) {
+        if (params.onboardingCompleted === false) {
+            return 'onboarding';
+        }
+        return 'pricing';
+    }
+    return 'workspace';
+}

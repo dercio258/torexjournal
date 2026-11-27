@@ -8,6 +8,8 @@ import { MainLayout } from './MainLayout';
 import { RouteSkeletonResolver } from '../components/ui/Skeleton';
 import { MockDashboardBackdrop } from '../components/subscription/MockDashboardBackdrop';
 import { WorkspacePricingModal } from '../components/subscription/WorkspacePricingModal';
+import { OnboardingSurvey } from '../components/onboarding/OnboardingSurvey';
+import { resolveAuthenticatedShellView } from '../lib/planGate';
 
 interface LiveSubCheck {
     checked: boolean;
@@ -92,7 +94,15 @@ export const AuthenticatedAppShell: React.FC = () => {
         }
     }, [isLoading, user, subCheck.checked, isUnlocked, location.pathname, location.search, navigate]);
 
-    if (isLoading || !user || !subCheck.checked) {
+    const shellView = resolveAuthenticatedShellView({
+        isLoading,
+        hasUser: Boolean(user),
+        subChecked: subCheck.checked,
+        isUnlocked,
+        onboardingCompleted: user?.onboardingCompleted,
+    });
+
+    if (shellView === 'loading') {
         return (
             <div className="h-screen w-screen bg-canvas p-6">
                 <RouteSkeletonResolver />
@@ -100,7 +110,20 @@ export const AuthenticatedAppShell: React.FC = () => {
         );
     }
 
-    if (!isUnlocked) {
+    if (shellView === 'onboarding') {
+        return (
+            <div className="relative h-screen w-screen overflow-hidden bg-canvas">
+                <MockDashboardBackdrop />
+                <OnboardingSurvey
+                    onComplete={() => {
+                        void refreshProfile();
+                    }}
+                />
+            </div>
+        );
+    }
+
+    if (shellView === 'pricing') {
         return (
             <div className="relative h-screen w-screen overflow-hidden bg-canvas">
                 <MockDashboardBackdrop />

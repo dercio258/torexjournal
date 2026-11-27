@@ -587,13 +587,13 @@ describe('Phase 3: Segregated Secrets, @username Privacy, 2-Step Register & Smar
         });
         expect(users.get('u-ref').referralCreditsUsd).toBe(0);
 
-        // Outside trial pricing context, unpaid referrer cannot access affiliate share links
-        const strictSummary = await referralService.getMySummary('u-ref');
-        expect(strictSummary.affiliateApproved).toBe(false);
-        expect(strictSummary.shareUrl).toBe('');
-        expect(strictSummary.referralCode).toBe('');
+        // Affiliate program is always free for all users (no paid plan gate required)
+        const freeSummary = await referralService.getMySummary('u-ref');
+        expect(freeSummary.affiliateApproved).toBe(true);
+        expect(freeSummary.shareUrl).toContain('AMB1234');
+        expect(freeSummary.referralCode).toBe('AMB1234');
+        expect(freeSummary.rules.requiresPaidPlanApproval).toBe(false);
 
-        // Inside trial pricing context (?context=trial), referrer can share link to unlock trial
         const trialSummary = await referralService.getMySummary('u-ref', 'trial');
         expect(trialSummary.affiliateApproved).toBe(true);
         expect(trialSummary.shareUrl).toContain('AMB1234');

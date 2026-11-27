@@ -14,13 +14,12 @@ import {
     PanelLeftClose,
     PanelLeftOpen,
     Sparkles,
+    Crown,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLocale } from '../context/LocaleContext';
 import { cn } from '../lib/cn';
 import { isBasicPlanTier, openWorkspacePlansModal } from '../lib/planGate';
-import { BasicPlanSimpleUpgradeCard } from './subscription/BasicPlanSimpleUpgradeCard';
-import { UpgradeBadge } from './subscription/UpgradeBadge';
 
 const DevelopmentModal = ({
     featureName,
@@ -207,11 +206,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             {!collapsed && <span className="truncate">{label}</span>}
                         </div>
                         {requiresPremium && isBasic && (
-                            collapsed ? (
-                                <UpgradeBadge
-                                    variant="mini"
-                                    tierLabel="PRO"
-                                    onClick={(e) => {
+                            <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    openWorkspacePlansModal(
+                                        to.startsWith('/calendar')
+                                            ? 'sidebar_economic_calendar'
+                                            : 'sidebar_backtesting',
+                                    );
+                                    if (onClose) onClose();
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
                                         e.preventDefault();
                                         e.stopPropagation();
                                         openWorkspacePlansModal(
@@ -220,27 +229,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                 : 'sidebar_backtesting',
                                         );
                                         if (onClose) onClose();
-                                    }}
-                                    className="ml-0.5"
-                                />
-                            ) : (
-                                <UpgradeBadge
-                                    variant="pill"
-                                    label="Upgrade"
-                                    tierLabel="PRO"
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        openWorkspacePlansModal(
-                                            to.startsWith('/calendar')
-                                                ? 'sidebar_economic_calendar'
-                                                : 'sidebar_backtesting',
-                                        );
-                                        if (onClose) onClose();
-                                    }}
-                                    className="ml-1"
-                                />
-                            )
+                                    }
+                                }}
+                                title={isEn ? 'Upgrade plan' : 'Atualizar plano'}
+                                aria-label={isEn ? 'Upgrade plan' : 'Atualizar plano'}
+                                className={cn(
+                                    'inline-flex items-center justify-center text-amber-400/90 hover:text-amber-300 transition-colors shrink-0 cursor-pointer',
+                                    collapsed ? 'absolute top-1 right-1' : 'ml-1',
+                                )}
+                            >
+                                <Crown size={collapsed ? 10 : 13} />
+                            </span>
                         )}
                     </>
                 )}
@@ -310,12 +309,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <NavItem key={link.to} {...link} />
                     ))}
                 </nav>
-
-                {!collapsed && isBasic && (
-                    <div className="px-2.5 pb-2.5 shrink-0">
-                        <BasicPlanSimpleUpgradeCard compact />
-                    </div>
-                )}
 
                 {/* Rodapé discreto para expandir/recolher rapidamente */}
                 {onToggleCollapse && (

@@ -322,15 +322,16 @@ export class ReferralService implements OnModuleInit {
         });
         const totalPaidAfter = priorPaidCount + 1;
 
-        const paidReferrer = await this.hasActivePaidSubscription(referrer.id);
         const hitsMilestone3 = totalPaidAfter % PLAN_CREDIT_MILESTONE_TARGET === 0;
         const milestoneRewardUsd =
             hitsMilestone3 && recentPaidCount < DAILY_REWARD_CAP
                 ? this.getPaidCreditUsd()
                 : 0;
 
-        const creditedDirectUsd = paidReferrer ? milestoneRewardUsd : 0;
-        const pendingAddedUsd = paidReferrer ? 0 : milestoneRewardUsd;
+        // Programa de afiliados 100% gratuito para qualquer utilizador:
+        // créditos ganhos por amigos pagantes entram diretamente disponíveis (sem exigir plano pago do afiliado).
+        const creditedDirectUsd = milestoneRewardUsd;
+        const pendingAddedUsd = 0;
         const unlocksBoostNow =
             !referrer.referralTierBoost &&
             (totalPaidAfter >= TIER_BOOST_PAID_TARGET || totalPaidAfter >= PLAN_CREDIT_MILESTONE_TARGET);
@@ -362,7 +363,7 @@ export class ReferralService implements OnModuleInit {
         );
 
         let unlockedPendingUsd = 0;
-        if (paidReferrer && nextPending > 0) {
+        if (nextPending > 0) {
             const res = await this.unlockPendingCreditsOnPaidPlan(referrer.id);
             unlockedPendingUsd = res.unlockedUsd;
         }
@@ -381,7 +382,7 @@ export class ReferralService implements OnModuleInit {
         };
     }
 
-    async getMySummary(userId: string, context?: string) {
+    async getMySummary(userId: string, _context?: string) {
         const [user, hasPaidSubscription] = await Promise.all([
             this.userRepo.findOne({
                 where: { id: userId },
@@ -397,9 +398,19 @@ export class ReferralService implements OnModuleInit {
             this.hasActivePaidSubscription(userId),
         ]);
 
-        const isTrialContext = String(context || '').trim().toLowerCase() === 'trial';
-        const affiliateApproved = isTrialContext || hasPaidSubscription;
-        const referralCode = affiliateApproved ? await this.ensureReferralCode(userId) : '';
+        // Programa de afiliados aberto e gratuito para todos os utilizadores (sem paywall de upgrade)
+        const affiliateApproved = true;
+        const referralCode = await this.ensureReferralCode(userId);
+
+        let availableCreditsUsd = Number(user?.referralCreditsUsd || 0);
+        let pendingCreditsUsd = Number(user?.referralPendingCreditsUsd || 0);
+        if (pendingCreditsUsd > 0) {
+            const unlocked = await this.unlockPendingCreditsOnPaidPlan(userId);
+            if (unlocked.unlockedUsd > 0) {
+                availableCreditsUsd = Number((availableCreditsUsd + unlocked.unlockedUsd).toFixed(2));
+                pendingCreditsUsd = 0;
+            }
+        }
 
         const rows = await this.referralRepo.find({
             where: { referrerUserId: userId },
@@ -428,17 +439,16 @@ export class ReferralService implements OnModuleInit {
         );
 
         const frontendBase = resolveFrontendUrl();
-        const shareUrl =
-            affiliateApproved && referralCode
-                ? `${frontendBase}/register?ref=${encodeURIComponent(referralCode)}`
-                : '';
+        const shareUrl = referralCode
+            ? `${frontendBase}/register?ref=${encodeURIComponent(referralCode)}`
+            : '';
 
         return {
             affiliateApproved,
             referralCode,
             shareUrl,
-            creditsUsd: Number(user?.referralCreditsUsd || 0),
-            pendingCreditsUsd: Number(user?.referralPendingCreditsUsd || 0),
+            creditsUsd: availableCreditsUsd,
+            pendingCreditsUsd,
             hasPaidSubscription,
             aiDailyBonusCredits: aiBonusActive ? INVITE_AI_DAILY_BONUS : 0,
             aiBonusExpiresAt: aiBonusExpiresAt ? aiBonusExpiresAt.toISOString() : null,
@@ -447,8 +457,8 @@ export class ReferralService implements OnModuleInit {
                 invite1AiDailyBonus: INVITE_AI_DAILY_BONUS,
                 invite1DurationDays: INVITE_AI_BONUS_DAYS,
                 invite3PlanCreditUsd: PLAN_CREDIT_MILESTONE_USD,
-                requiresPaidPlanForFull10Usd: true,
-                requiresPaidPlanApproval: true,
+                requiresPaidPlanForFull10Usd: false,
+                requiresPaidPlanApproval: false,
                 perVerifiedUsd: this.getVerifyCreditUsd(),
                 perPaidUsd: this.getPaidCreditUsd(),
                 tierBoostVerifiedTarget: PLAN_CREDIT_MILESTONE_TARGET,

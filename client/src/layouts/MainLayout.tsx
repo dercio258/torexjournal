@@ -90,7 +90,7 @@ export const MainLayout = () => {
         <DashboardFilterProvider>
             <div className="flex h-screen overflow-hidden bg-canvas font-sans text-fg transition-colors duration-200 selection:bg-accent/20">
                 <WorkspacePricingModal
-                    isOpen={isPlansModalOpen}
+                    isOpen={isPlansModalOpen && !showOnboarding}
                     dismissible={true}
                     hasActivePlan={true}
                     onClose={handleClosePlansModal}

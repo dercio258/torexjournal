@@ -230,7 +230,7 @@ describe('Phase 4 Security, Brokers, Privacy & Affiliate Rules', () => {
             expect(userState['ref-1'].referralAiBonusUntil).toBeNull();
         });
 
-        it('unlocks +50 daily AI bonus and holds $10 in pending on 3rd paid invite when referrer has no paid plan, then unlocks on paid activation', async () => {
+        it('unlocks +50 daily AI bonus and credits $10 directly on 3rd paid invite even when referrer is on free plan, and auto-unlocks legacy pending credits', async () => {
             const paidRows: any[] = [
                 { id: 'r-p-1', status: 'PAID' },
                 { id: 'r-p-2', status: 'PAID' },
@@ -252,6 +252,7 @@ describe('Phase 4 Security, Brokers, Privacy & Affiliate Rules', () => {
                     if (args?.where?.referredUserId === 'new-3') return paidRows[2];
                     return null;
                 }),
+                find: jest.fn().mockResolvedValue([]),
                 count: jest.fn().mockResolvedValue(2),
                 save: jest.fn().mockImplementation(async (obj: any) => obj),
             };
@@ -272,21 +273,23 @@ describe('Phase 4 Security, Brokers, Privacy & Affiliate Rules', () => {
             const conv = await service.processPaidConversion('new-3');
 
             expect(conv.awarded).toBe(true);
-            expect(conv.creditedUsd).toBe(0);
-            expect(conv.pendingCreditsAddedUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
-            expect(userState['ref-1'].referralCreditsUsd).toBe(0);
-            expect(userState['ref-1'].referralPendingCreditsUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
+            expect(conv.creditedUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
+            expect(conv.pendingCreditsAddedUsd).toBe(0);
+            expect(userState['ref-1'].referralCreditsUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
+            expect(userState['ref-1'].referralPendingCreditsUsd).toBe(0);
             expect(new Date(userState['ref-1'].referralAiBonusUntil).getTime()).toBeGreaterThanOrEqual(
                 before + (INVITE_AI_BONUS_DAYS - 1) * 86_400_000,
             );
 
-            const unlock = await service.unlockPendingCreditsOnPaidPlan('ref-1');
-            expect(unlock.unlockedUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
-            expect(userState['ref-1'].referralCreditsUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
-            expect(userState['ref-1'].referralPendingCreditsUsd).toBe(0);
+            // Legacy pending credits held under older rules auto-unlock when opening /referrals/me
+            userState['ref-1'].referralPendingCreditsUsd = 5;
+            const summary = await service.getMySummary('ref-1');
+            expect(summary.affiliateApproved).toBe(true);
+            expect(summary.creditsUsd).toBe(PLAN_CREDIT_MILESTONE_USD + 5);
+            expect(summary.pendingCreditsUsd).toBe(0);
         });
 
-        it('credits $10 immediately on 3rd paid referral when referrer already holds a paid plan and gates getMySummary outside trial context', async () => {
+        it('keeps affiliate program free for all users (no upgrade paywall) and credits $10 immediately on 3rd paid referral', async () => {
             const regRow = { id: 'r-reg-3', referrerUserId: 'ref-1', referredUserId: 'new-3', status: 'REGISTERED' };
             const userState: Record<string, any> = {
                 'ref-1': {
@@ -326,25 +329,25 @@ describe('Phase 4 Security, Brokers, Privacy & Affiliate Rules', () => {
 
             const service = new ReferralService(referralRepo, userRepo);
 
-            // Unpaid user in non-trial context -> affiliate NOT approved & link hidden
+            // Affiliate program is free for all users (unpaid & trial & paid) — no upgrade paywall
             const unpaidSummary = await service.getMySummary('ref-1');
-            expect(unpaidSummary.affiliateApproved).toBe(false);
-            expect(unpaidSummary.shareUrl).toBe('');
+            expect(unpaidSummary.affiliateApproved).toBe(true);
+            expect(unpaidSummary.shareUrl).toContain('ref=TRXAFF1');
+            expect(unpaidSummary.rules.requiresPaidPlanApproval).toBe(false);
 
-            // Unpaid user in trial pricing context -> approved to complete share gate
             const trialContextSummary = await service.getMySummary('ref-1', 'trial');
             expect(trialContextSummary.affiliateApproved).toBe(true);
             expect(trialContextSummary.shareUrl).toContain('ref=TRXAFF1');
 
-            // Once paid -> affiliate approved & $10 granted immediately on 3rd paid conversion
-            hasPaid = true;
-            const paidSummary = await service.getMySummary('ref-1');
-            expect(paidSummary.affiliateApproved).toBe(true);
-
+            // Free referrer also receives $10 directly on 3rd paid friend conversion (no hold behind paid plan)
             const conv = await service.processPaidConversion('new-3');
             expect(conv.creditedUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
             expect(conv.pendingCreditsAddedUsd).toBe(0);
             expect(userState['ref-1'].referralCreditsUsd).toBe(PLAN_CREDIT_MILESTONE_USD);
+
+            hasPaid = true;
+            const paidSummary = await service.getMySummary('ref-1');
+            expect(paidSummary.affiliateApproved).toBe(true);
         });
     });
 
@@ -553,40 +556,22 @@ describe('Phase 4 Security, Brokers, Privacy & Affiliate Rules', () => {
             expect(premRes.trialDays).toBe(7);
         });
 
-        it('activateTrial enforces 30s affiliate share cooldown when verifyShareGate=true', async () => {
+        it('activateTrial activates smoothly without blocking on 30s affiliate share cooldown', async () => {
             const { service } = createSubscriptionTrialHarness({
                 hasUsedTrial: false,
                 subscriptionCount: 0,
             });
 
-            // Rejects without prior share intent
-            await expect(
-                service.activateTrial('u-trial-1', 'PRO', { verifyShareGate: true }),
-            ).rejects.toThrow(BadRequestException);
+            // Optional share intent works immediately with 0 cooldown required
+            const intent = await service.recordTrialShareIntent('u-trial-1', 'PRO', 'whatsapp');
+            expect(intent.unlockAfterSeconds).toBe(0);
 
-            const nowSpy = jest.spyOn(Date, 'now');
-            try {
-                const startMs = 1_700_000_000_000;
-                nowSpy.mockReturnValue(startMs);
-                await service.recordTrialShareIntent('u-trial-1', 'PRO', 'whatsapp');
-
-                // Rejects when less than 28s have elapsed
-                nowSpy.mockReturnValue(startMs + 10_000);
-                await expect(
-                    service.activateTrial('u-trial-1', 'PRO', { verifyShareGate: true }),
-                ).rejects.toThrow(BadRequestException);
-
-                // Succeeds after 30s cooldown passes
-                nowSpy.mockReturnValue(startMs + 31_000);
-                const activated = await service.activateTrial('u-trial-1', 'PRO', {
-                    verifyShareGate: true,
-                });
-                expect(activated.success).toBe(true);
-                expect(activated.tier).toBe('PRO');
-                expect(activated.trialDays).toBe(14);
-            } finally {
-                nowSpy.mockRestore();
-            }
+            const activated = await service.activateTrial('u-trial-1', 'PRO', {
+                verifyShareGate: true,
+            });
+            expect(activated.success).toBe(true);
+            expect(activated.tier).toBe('PRO');
+            expect(activated.trialDays).toBe(14);
         });
 
         it('PlanGuard denies PlanTier.FREE with SUBSCRIPTION_REQUIRED ForbiddenException', async () => {
