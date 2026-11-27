@@ -27,6 +27,8 @@ WM_SETTEXT = 0x000C
 BM_CLICK = 0x00F5
 LVM_GETITEMCOUNT = 0x1004
 BN_CLICKED = 0
+SW_SHOWNOACTIVATE = 4
+SW_SHOW = 5
 
 CMD_OPEN_ACCOUNT = 32919
 CTRL_SEARCH_EDIT = 10814
@@ -287,6 +289,23 @@ def _promote_servers_dat(src_servers_dat: Path, master_dst: Optional[Path] = Non
             logger.debug(f"[AUTO-DISCOVERY] Não foi possível promover servers.dat para {dst}: {e}")
 
 
+def _read_recent_mt5_log_lines(mt5_data_dir: Path, max_lines: int = 8) -> List[str]:
+    """Lê as últimas linhas do log mais recente do terminal MT5 (UTF-16-LE) para diagnóstico de timeout."""
+    try:
+        logs_dir = mt5_data_dir / "logs"
+        if not logs_dir.is_dir():
+            return []
+        log_files = sorted(logs_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not log_files:
+            return []
+        raw = log_files[0].read_bytes()
+        text = raw.decode("utf-16-le", errors="ignore") if b"\x00" in raw[:200] else raw.decode("utf-8", errors="ignore")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        return lines[-max_lines:]
+    except Exception:
+        return []
+
+
 def auto_discover_brokers_in_mt5(
     terminal_exe: str,
     queries: List[str],
@@ -295,6 +314,8 @@ def auto_discover_brokers_in_mt5(
     main_mt5_exe: Optional[str] = None,
     per_query_timeout_sec: float = 6.5,
     stop_on_first_growth: bool = True,
+    boot_timeout_sec: float = 120.0,
+    kill_other_terminals: bool = False,
 ) -> Dict[str, Any]:
     """
     Automatiza o diálogo nativo `File -> Open an Account` (`WM_COMMAND 32919`) no Windows para baixar
@@ -327,9 +348,24 @@ def auto_discover_brokers_in_mt5(
         return result
 
     srv_dat = _resolve_servers_dat_path(exe_path, portable=portable)
+    mt5_data_dir = srv_dat.parent.parent
     result["servers_dat_path"] = str(srv_dat)
     bytes_before = srv_dat.stat().st_size if srv_dat.is_file() else 0
     result["bytes_before"] = bytes_before
+    result["bytes_after"] = bytes_before
+
+    # Garante desde já que master_servers.dat reflita pelo menos o cache já existente
+    if bytes_before > 0:
+        _promote_servers_dat(srv_dat, master_dst=master_servers_dst, main_mt5_exe=main_mt5_exe)
+
+    # Remove pasta liveupdate pendente que pode congelar a inicialização da GUI do MT5
+    try:
+        lu_dir = mt5_data_dir / "liveupdate"
+        if lu_dir.is_dir():
+            shutil.rmtree(lu_dir, ignore_errors=True)
+            logger.info(f"[AUTO-DISCOVERY] Pasta liveupdate removida antes do boot: {lu_dir}")
+    except Exception:
+        pass
 
     import ctypes
     from ctypes import wintypes
@@ -337,20 +373,37 @@ def auto_discover_brokers_in_mt5(
     user32 = ctypes.windll.user32
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
-    def _find_windows(target_pid: int) -> List[Tuple[int, str, str]]:
-        wins: List[Tuple[int, str, str]] = []
+    norm_exe = os.path.normcase(os.path.abspath(str(exe_path)))
+
+    def _collect_matching_pids(root_pid: int) -> set:
+        pids = {root_pid}
+        for p in psutil.process_iter(["pid", "name", "exe"]):
+            try:
+                if "terminal64" in (p.info.get("name") or "").lower():
+                    p_exe = p.info.get("exe") or ""
+                    if p_exe and os.path.normcase(os.path.abspath(p_exe)) == norm_exe:
+                        pids.add(p.info["pid"])
+            except Exception:
+                pass
+        return pids
+
+    def _find_windows(target_pids: set) -> List[Tuple[int, bool, str, str]]:
+        wins: List[Tuple[int, bool, str, str]] = []
 
         def _cb(hwnd, _):
             try:
-                if user32.IsWindowVisible(hwnd):
-                    pid = wintypes.DWORD()
-                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                    if pid.value == target_pid:
-                        cbuf = ctypes.create_unicode_buffer(128)
-                        tbuf = ctypes.create_unicode_buffer(256)
-                        user32.GetClassNameW(hwnd, cbuf, 128)
-                        user32.GetWindowTextW(hwnd, tbuf, 256)
-                        wins.append((hwnd, cbuf.value or "", tbuf.value or ""))
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value in target_pids:
+                    vis = bool(user32.IsWindowVisible(hwnd))
+                    cbuf = ctypes.create_unicode_buffer(128)
+                    tbuf = ctypes.create_unicode_buffer(256)
+                    user32.GetClassNameW(hwnd, cbuf, 128)
+                    user32.GetWindowTextW(hwnd, tbuf, 256)
+                    cls = cbuf.value or ""
+                    title = tbuf.value or ""
+                    if vis or "MetaTrader" in cls or cls == "#32770":
+                        wins.append((hwnd, vis, cls, title))
             except Exception:
                 pass
             return True
@@ -373,22 +426,42 @@ def auto_discover_brokers_in_mt5(
         user32.EnumChildWindows(parent_hwnd, WNDENUMPROC(_cb), 0)
         return found[0]
 
-    # Encerra qualquer instância prévia deste executável para garantir controle limpo da janela e flush final do servers.dat
-    norm_exe = os.path.normcase(os.path.abspath(str(exe_path)))
+    # Encerra qualquer instância prévia deste executável (e, em VPS <= 4GB ou quando solicitado,
+    # outros terminal64.exe concorrentes para liberar RAM/CPU e evitar conflito na porta MCP 22346)
+    try:
+        vm = psutil.virtual_memory()
+        total_ram_mb = round(vm.total / (1024 * 1024), 1)
+    except Exception:
+        total_ram_mb = 8192.0
+    should_reclaim_others = kill_other_terminals or total_ram_mb <= 4096.0
+
+    killed_pids: List[int] = []
     for p in psutil.process_iter(["pid", "name", "exe"]):
         try:
             if "terminal64" in (p.info.get("name") or "").lower():
                 p_exe = p.info.get("exe") or ""
-                if p_exe and os.path.normcase(os.path.abspath(p_exe)) == norm_exe:
+                p_norm = os.path.normcase(os.path.abspath(p_exe)) if p_exe else ""
+                is_same = bool(p_norm and p_norm == norm_exe)
+                is_isolated_other = should_reclaim_others and (
+                    kill_other_terminals or ("instances" in p_norm and "acc_" in p_norm)
+                )
+                if is_same or is_isolated_other:
                     p.kill()
+                    killed_pids.append(p.info["pid"])
         except Exception:
             pass
+    if killed_pids:
+        logger.info(
+            f"[AUTO-DISCOVERY] Encerrados {len(killed_pids)} processo(s) terminal64.exe concorrente(s) "
+            f"(PIDs={killed_pids}) antes da descoberta."
+        )
     time.sleep(1.5)
 
     cmd = [str(exe_path), "/portable"] if portable else [str(exe_path)]
     logger.info(
         f"[AUTO-DISCOVERY] Iniciando registro automático de corretora no MT5 "
-        f"(consultas={clean_queries} | servers.dat atual={round(bytes_before / 1024, 1)} KB)..."
+        f"(consultas={len(clean_queries)}: {clean_queries[:6]}{'...' if len(clean_queries) > 6 else ''} | "
+        f"servers.dat atual={round(bytes_before / 1024, 1)} KB | timeout boot={int(boot_timeout_sec)}s)..."
     )
 
     proc = subprocess.Popen(
@@ -399,40 +472,110 @@ def auto_discover_brokers_in_mt5(
     )
 
     main_hwnd: Optional[int] = None
+    hidden_main_hwnd: Optional[int] = None
+    hidden_main_since: Optional[float] = None
     dlg_hwnd: Optional[int] = None
     try:
-        # 1. Aguarda janela principal do MT5 aparecer (até 45s em VPS fria/lenta)
-        boot_deadline = time.time() + 45.0
+        # 1. Aguarda janela principal do MT5 aparecer (até boot_timeout_sec; no 1º boot portátil o MT5 extrai ~453 arquivos MQL5)
+        boot_start = time.time()
+        boot_deadline = boot_start + max(30.0, float(boot_timeout_sec))
+        last_progress_log = boot_start
+        last_wins_snapshot: List[Tuple[int, bool, str, str]] = []
+
         while time.time() < boot_deadline:
-            if proc.poll() is not None:
-                result["error"] = f"terminal64.exe encerrou prematuramente (code={proc.returncode})."
-                return result
-            wins = _find_windows(proc.pid)
+            target_pids = _collect_matching_pids(proc.pid)
+            if proc.poll() is not None and len(target_pids) <= 1:
+                # Verifica rapidamente se não houve relaunch em outro PID
+                recheck_pids = {pid for pid in target_pids if pid != proc.pid}
+                if not recheck_pids:
+                    result["error"] = f"terminal64.exe encerrou prematuramente (code={proc.returncode})."
+                    return result
+
+            wins = _find_windows(target_pids)
+            last_wins_snapshot = wins
             other_modal = False
-            for hw, cls, _title in wins:
+            for hw, vis, cls, _title in wins:
                 if "MetaTrader" in cls:
-                    main_hwnd = hw
-                elif cls == "#32770":
+                    if vis:
+                        main_hwnd = hw
+                    else:
+                        hidden_main_hwnd = hw
+                        if hidden_main_since is None:
+                            hidden_main_since = time.time()
+                elif vis and cls == "#32770":
                     if _find_child_by_id(hw, CTRL_SEARCH_EDIT):
                         dlg_hwnd = hw
                     else:
                         other_modal = True
                         user32.PostMessageW(hw, WM_CLOSE, 0, 0)
+
+            # Se a janela principal existe oculta há mais de 12s, tenta despertá-la suavemente sem roubar foco
+            if not main_hwnd and hidden_main_hwnd and hidden_main_since and (time.time() - hidden_main_since) >= 12.0:
+                try:
+                    user32.ShowWindow(hidden_main_hwnd, SW_SHOWNOACTIVATE)
+                except Exception:
+                    pass
+
             if main_hwnd and (dlg_hwnd or not other_modal):
                 break
+            if dlg_hwnd and (main_hwnd or hidden_main_hwnd):
+                main_hwnd = main_hwnd or hidden_main_hwnd
+                break
+
+            now = time.time()
+            if now - last_progress_log >= 10.0:
+                last_progress_log = now
+                elapsed = int(now - boot_start)
+                try:
+                    ram_free_mb = round(psutil.virtual_memory().available / (1024 * 1024), 1)
+                except Exception:
+                    ram_free_mb = -1.0
+                mql5_dir = mt5_data_dir / "MQL5"
+                mql5_count = sum(1 for _ in mql5_dir.rglob("*") if _.is_file()) if mql5_dir.is_dir() else 0
+                win_summary = [(vis, cls, title[:35]) for _, vis, cls, title in wins[:4]]
+                logger.info(
+                    f"[AUTO-DISCOVERY] Aguardando MT5 inicializar... ({elapsed}s/{int(boot_timeout_sec)}s | "
+                    f"PIDs={sorted(target_pids)} | RAM livre={ram_free_mb} MB | MQL5={mql5_count} arq | janelas={win_summary})"
+                )
+
             time.sleep(0.5)
 
-        if not main_hwnd:
-            result["error"] = "Janela principal do MT5 não ficou visível a tempo para auto-descoberta."
+        if not main_hwnd and hidden_main_hwnd:
+            logger.warning(
+                "[AUTO-DISCOVERY] Janela principal do MT5 permaneceu oculta; forçando SW_SHOW para tentar abrir diálogo..."
+            )
+            try:
+                user32.ShowWindow(hidden_main_hwnd, SW_SHOW)
+                time.sleep(1.0)
+            except Exception:
+                pass
+            main_hwnd = hidden_main_hwnd
+
+        if not main_hwnd and not dlg_hwnd:
+            recent_logs = _read_recent_mt5_log_lines(mt5_data_dir, max_lines=6)
+            try:
+                ram_free_mb = round(psutil.virtual_memory().available / (1024 * 1024), 1)
+            except Exception:
+                ram_free_mb = -1.0
+            logger.warning(
+                f"[AUTO-DISCOVERY] Diagnóstico de timeout de janela MT5: RAM livre={ram_free_mb} MB | "
+                f"janelas={[(vis, cls, title[:40]) for _, vis, cls, title in last_wins_snapshot[:6]]} | "
+                f"últimos logs MT5={recent_logs}"
+            )
+            result["error"] = (
+                f"Janela principal do MT5 não ficou visível em {int(boot_timeout_sec)}s para auto-descoberta "
+                f"(RAM livre: {ram_free_mb} MB)."
+            )
             return result
 
         # 2. Abre diálogo 'File -> Open an Account' (WM_COMMAND 32919) se ainda não estiver aberto
-        if not dlg_hwnd:
+        if not dlg_hwnd and main_hwnd:
             user32.PostMessageW(main_hwnd, WM_COMMAND, CMD_OPEN_ACCOUNT, 0)
-            dlg_deadline = time.time() + 10.0
+            dlg_deadline = time.time() + 15.0
             while time.time() < dlg_deadline:
-                for hw, cls, _title in _find_windows(proc.pid):
-                    if cls == "#32770" and _find_child_by_id(hw, CTRL_SEARCH_EDIT):
+                target_pids = _collect_matching_pids(proc.pid)
+                for hw, vis, cls, _title in _find_windows(target_pids):
+                    if vis and cls == "#32770" and _find_child_by_id(hw, CTRL_SEARCH_EDIT):
                         dlg_hwnd = hw
                         break
                 if dlg_hwnd:
@@ -443,8 +586,11 @@ def auto_discover_brokers_in_mt5(
             result["error"] = "Não foi possível abrir o diálogo 'Open an Account' (WM_COMMAND 32919)."
             return result
 
+        # Pequena folga para o MT5 concluir a inicialização da rede/controles do diálogo
+        time.sleep(1.5)
+
         # 3. Executa as buscas no diretório oficial MetaQuotes
-        for query in clean_queries:
+        for idx, query in enumerate(clean_queries):
             edit_hw = _find_child_by_id(dlg_hwnd, CTRL_SEARCH_EDIT)
             find_hw = _find_child_by_id(dlg_hwnd, CTRL_FIND_BTN)
             list_hw = _find_child_by_id(dlg_hwnd, CTRL_LISTVIEW)
@@ -463,9 +609,11 @@ def auto_discover_brokers_in_mt5(
             else:
                 user32.SendMessageW(find_hw, BM_CLICK, 0, 0)
 
+            # A primeira consulta pode levar mais tempo devido ao handshake TLS frio com o diretório MetaQuotes
+            eff_timeout = max(float(per_query_timeout_sec), 10.0) if idx == 0 else float(per_query_timeout_sec)
             q_start = time.time()
             matched = False
-            while time.time() - q_start < per_query_timeout_sec:
+            while time.time() - q_start < eff_timeout:
                 cur_cnt = int(user32.SendMessageW(list_hw, LVM_GETITEMCOUNT, 0, 0) or 0)
                 cur_sz = srv_dat.stat().st_size if srv_dat.is_file() else 0
                 if cur_cnt > before_cnt or cur_sz > before_sz:
@@ -478,7 +626,7 @@ def auto_discover_brokers_in_mt5(
             cur_cnt_final = int(user32.SendMessageW(list_hw, LVM_GETITEMCOUNT, 0, 0) or 0)
             cur_sz_final = srv_dat.stat().st_size if srv_dat.is_file() else 0
             logger.info(
-                f"[AUTO-DISCOVERY] Consulta '{query}' ({time.time() - q_start:.1f}s): "
+                f"[AUTO-DISCOVERY] [{idx + 1}/{len(clean_queries)}] Consulta '{query}' ({time.time() - q_start:.1f}s): "
                 f"itens={before_cnt}->{cur_cnt_final} | servers.dat={round(before_sz / 1024, 1)}->{round(cur_sz_final / 1024, 1)} KB"
             )
             if matched:
@@ -488,10 +636,11 @@ def auto_discover_brokers_in_mt5(
 
         # 4. Fecha o diálogo e encerra o MT5 de forma limpa (WM_CLOSE) para forçar flush do servers.dat em disco!
         user32.PostMessageW(dlg_hwnd, WM_CLOSE, 0, 0)
-        time.sleep(0.5)
-        user32.PostMessageW(main_hwnd, WM_CLOSE, 0, 0)
+        time.sleep(1.0)
+        if main_hwnd:
+            user32.PostMessageW(main_hwnd, WM_CLOSE, 0, 0)
         try:
-            proc.wait(timeout=12)
+            proc.wait(timeout=20)
         except Exception:
             try:
                 proc.kill()
@@ -499,7 +648,7 @@ def auto_discover_brokers_in_mt5(
                 pass
         time.sleep(1.0)
 
-        bytes_after = srv_dat.stat().st_size if srv_dat.is_file() else 0
+        bytes_after = srv_dat.stat().st_size if srv_dat.is_file() else bytes_before
         result["bytes_after"] = bytes_after
         result["discovered"] = bool(bytes_after > bytes_before or len(result["matched_queries"]) > 0)
 
@@ -520,6 +669,16 @@ def auto_discover_brokers_in_mt5(
         if proc.poll() is None:
             try:
                 proc.kill()
+            except Exception:
+                pass
+        for pid in list(_collect_matching_pids(proc.pid)):
+            try:
+                psutil.Process(pid).kill()
+            except Exception:
+                pass
+        if srv_dat.is_file():
+            try:
+                result["bytes_after"] = srv_dat.stat().st_size
             except Exception:
                 pass
 
