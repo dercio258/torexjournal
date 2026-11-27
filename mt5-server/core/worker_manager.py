@@ -53,7 +53,9 @@ class WorkerManager:
         self._consecutive_connect_failures: dict[int, int] = {}
         # Garante que na primeira sincronização após iniciar o worker seja feita reconciliação completa (last_ticket=0)
         self._initial_full_synced: set[int] = set()
-        # Contas estacionadas intencionalmente (ex.: HIBERNATION-COLD) para não gerar falso alerta no Watchdog
+        # Contas que já tiveram seu terminal iniciado ao menos uma vez nesta sessão do worker
+        self._started_accounts: set[int] = set()
+        # Contas estacionadas intencionalmente (ex.: HIBERNATION-COLD ou RAM-RECLAIM sob pressão real de memória)
         self._parked_accounts: set[int] = set()
         # Controle de cooldown de extração OHLCV pós-sync para evitar re-extração redundante em reconciliações sem novos trades
         self._account_last_ohlcv_ts: dict[int, float] = {}
@@ -62,6 +64,24 @@ class WorkerManager:
         for aid, acc in list(self.account_manager.accounts.items()):
             if acc.account_uuid:
                 self.process_manager.register_account_uuid(aid, acc.account_uuid)
+
+    def _sync_parked_from_reclaimed_terminals(self) -> None:
+        """Marca como estacionadas as contas cujo terminal foi encerrado por RAM-RECLAIM sob pressão real de memória."""
+        import os
+
+        consume = getattr(self.sync_engine, "consume_reclaimed_exe_paths", None)
+        if not callable(consume):
+            return
+        reclaimed_paths = consume()
+        if not reclaimed_paths:
+            return
+        reclaimed_set = {os.path.normcase(os.path.abspath(p)) for p in reclaimed_paths if p}
+        for aid in self.account_manager.get_active_account_ids():
+            acc_uuid = self._resolve_account_uuid(aid)
+            inst_dir = self.process_manager.get_account_instance_dir(aid, account_uuid=acc_uuid, create=False)
+            exe_norm = os.path.normcase(os.path.abspath(str((inst_dir / "terminal64.exe").resolve())))
+            if exe_norm in reclaimed_set:
+                self._parked_accounts.add(aid)
 
     def _resolve_account_uuid(self, account_id: int, task: Optional[Task] = None) -> Optional[str]:
         existing_acc = self.account_manager.get_account(account_id)
@@ -335,8 +355,11 @@ class WorkerManager:
             path=isolated_path,
             progress_callback=_report_progress,
         )
+        self._sync_parked_from_reclaimed_terminals()
 
         if connected:
+            self._started_accounts.add(task.accountId)
+            self._parked_accounts.discard(task.accountId)
             self.account_manager.add_or_update_account(
                 account_id=task.accountId,
                 login=task.login,
@@ -395,6 +418,7 @@ class WorkerManager:
     def _handle_stop_account(self, task: Task):
         acc_uuid = self._resolve_account_uuid(task.accountId, task)
         self.process_manager.stop_terminal(task.accountId, account_uuid=acc_uuid)
+        self._started_accounts.discard(task.accountId)
         self._parked_accounts.discard(task.accountId)
         self.account_manager.remove_account(task.accountId)
         self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Conta e terminal encerrados.")
@@ -679,11 +703,13 @@ class WorkerManager:
             return
 
         uuid_map = self._build_account_uuid_map(active_ids)
-        low_ram_mode = self.sync_engine.is_low_ram_single_terminal_mode()
+        self._sync_parked_from_reclaimed_terminals()
+        single_terminal_mode = self.sync_engine.is_low_ram_single_terminal_mode()
 
-        # Em VPS enxuta (<= 4 GB RAM), RAM-RECLAIM mantém apenas 1 terminal aberto por vez;
-        # portanto o Watchdog só deve fiscalizar o terminal atualmente ativo (evitando falsos alertas em contas estacionadas).
-        if low_ram_mode:
+        # No modo multi-terminal (padrão), todos os terminais já iniciados permanecem abertos em paralelo
+        # e são monitorados pelo Watchdog (exceto contas estacionadas intencionalmente por HIBERNATION/RAM-RECLAIM).
+        # No modo SINGLE_TERMINAL_MODE=true, apenas o terminal atualmente ativo é fiscalizado.
+        if single_terminal_mode:
             curr_acc = self.sync_engine.connected_account
             expected_running = (
                 [curr_acc]
@@ -691,7 +717,11 @@ class WorkerManager:
                 else []
             )
         else:
-            expected_running = [aid for aid in active_ids if aid not in self._parked_accounts]
+            expected_running = [
+                aid
+                for aid in active_ids
+                if aid in self._started_accounts and aid not in self._parked_accounts
+            ]
 
         # Watchdog: verifica terminais caídos inesperadamente antes da rodada
         dead_accounts = set(
@@ -714,7 +744,7 @@ class WorkerManager:
         # Verifica se há pelo menos uma conta ativa com saldo/posições para manter Sticky Session nela
         has_funded_active = any(not self._account_idle_map.get(aid, False) for aid in active_ids if aid in self._account_idle_map)
 
-        # Prioriza sincronizar primeiro a conta JÁ conectada no terminal atual (custo ~0s, sem kill/reboot)
+        # Prioriza sincronizar primeiro a conta JÁ conectada no terminal atual (custo ~0s)
         ordered_ids = list(active_ids)
         curr_connected = self.sync_engine.connected_account
         if curr_connected in ordered_ids:
@@ -733,7 +763,7 @@ class WorkerManager:
             is_currently_connected = (self.sync_engine.connected_account == account_id)
 
             # Se a conta está com saldo $0.00 e 0 posições e existe outra conta ativa operando,
-            # aplica cooldown de 30 minutos (1800s) para NÃO deslogar a conta ativa do terminal MT5!
+            # aplica cooldown de 30 minutos (1800s) para não gastar RAM/CPU com contas ociosas.
             if failures >= 5:
                 min_cooldown = 1800.0
             elif failures == 4:
@@ -744,11 +774,11 @@ class WorkerManager:
                 min_cooldown = 180.0
             elif is_idle and has_funded_active:
                 min_cooldown = 1800.0
-            elif low_ram_mode and len(active_ids) > 1:
-                # Em VPS <=4GB: conta já aberta atualiza rápido (45s sem reboot); troca fria de conta a cada 180s
+            elif single_terminal_mode and len(active_ids) > 1:
                 min_cooldown = 45.0 if is_currently_connected else 180.0
             elif len(active_ids) > 1:
-                min_cooldown = 90.0
+                # Com múltiplos terminais abertos em paralelo, alternar IPC leva ~1s sem reiniciar MT5
+                min_cooldown = 30.0
             else:
                 min_cooldown = max(float(settings.sync_interval_seconds), 15.0)
 
@@ -756,10 +786,9 @@ class WorkerManager:
             if account_id not in dead_accounts and (now - last_acc_sync < min_cooldown):
                 continue
 
-            # Em modo single-terminal (VPS <=4GB), após o sync inicial de boot, limita a 1 troca fria por ciclo
-            # para evitar rajadas kill->boot->kill->boot consecutivas que saturam CPU em 90%+.
+            # Apenas no modo SINGLE_TERMINAL_MODE=true limita a 1 troca fria por ciclo após o boot
             if (
-                low_ram_mode
+                single_terminal_mode
                 and not is_currently_connected
                 and last_acc_sync > 0.0
                 and cold_switches_this_cycle >= 1
@@ -769,7 +798,7 @@ class WorkerManager:
 
             prev_connected = self.sync_engine.connected_account
             self._sync_single_account(account_id)
-            if low_ram_mode and prev_connected is not None and prev_connected != account_id:
+            if single_terminal_mode and prev_connected is not None and prev_connected != account_id:
                 cold_switches_this_cycle += 1
 
     def _sync_single_account(self, account_id: int, force_full: bool = False) -> Optional[Dict[str, Any]]:
@@ -796,6 +825,7 @@ class WorkerManager:
                 account_uuid=acc.account_uuid,
             )
             if not self.sync_engine.ensure_connected(account_id, acc.login, normalized_server, acc.password, isolated_path):
+                self._sync_parked_from_reclaimed_terminals()
                 err_detail = getattr(self.sync_engine, "last_connect_error", None) or "Falha de conexão IPC/Login no MT5"
                 is_auth_err = getattr(self.sync_engine, "last_error_code", None) == -6
                 failures = self._consecutive_connect_failures.get(account_id, 0) + 1
@@ -832,6 +862,8 @@ class WorkerManager:
                 return None
 
             # Resetar contador de falhas transitórias assim que a conexão IPC é confirmada
+            self._sync_parked_from_reclaimed_terminals()
+            self._started_accounts.add(account_id)
             self._consecutive_connect_failures[account_id] = 0
 
             summary: Dict[str, Any] = {
@@ -1030,6 +1062,7 @@ class WorkerManager:
                 self.process_manager.stop_terminal(aid, account_uuid=acc_uuid)
             except Exception:
                 pass
+            self._started_accounts.discard(aid)
             self._parked_accounts.discard(aid)
             if self.sync_engine.connected_account == aid:
                 self.sync_engine.connected_account = None

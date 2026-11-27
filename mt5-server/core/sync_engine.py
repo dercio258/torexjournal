@@ -61,7 +61,14 @@ class SyncEngine:
         self.last_error_code: Optional[int] = None
         self._broker_discovery_attempted_at: Dict[str, float] = {}
         self._broker_tz_cache: Dict[str, Dict[str, Any]] = {}
+        self._last_reclaimed_exe_paths: List[str] = []
         self._load_broker_tz_cache()
+
+    def consume_reclaimed_exe_paths(self) -> List[str]:
+        """Retorna e limpa a lista de executáveis terminal64.exe encerrados recentemente por RAM-RECLAIM."""
+        paths = list(self._last_reclaimed_exe_paths)
+        self._last_reclaimed_exe_paths.clear()
+        return paths
 
     def _get_tz_cache_file(self) -> Path:
         try:
@@ -278,47 +285,56 @@ class SyncEngine:
     @staticmethod
     def is_low_ram_single_terminal_mode() -> bool:
         """
-        Retorna True em VPS enxuta (<= 4 GB RAM), onde apenas 1 terminal64.exe permanece
-        aberto por vez (time-slicing via RAM-RECLAIM) para evitar erro 10048 na porta 22346 e OOM.
+        Retorna True apenas quando o modo single-terminal estiver explicitamente habilitado
+        via SINGLE_TERMINAL_MODE=true. Por padrão (False), múltiplos terminais MT5 permanecem
+        abertos em paralelo enquanto houver RAM livre suficiente (>= RAM_RECLAIM_MIN_FREE_MB).
         """
         try:
-            total_mb = psutil.virtual_memory().total / (1024 * 1024)
-            return total_mb > 0 and total_mb <= 4096.0
+            from config.settings import settings
+            return bool(getattr(settings, "single_terminal_mode", False))
         except Exception:
             return False
 
-    @staticmethod
     def _reclaim_memory_from_other_terminals(
+        self,
         keep_path: Optional[str] = None,
-        min_free_mb: float = 350.0,
-        max_mem_pct: float = 82.0,
+        min_free_mb: Optional[float] = None,
+        max_mem_pct: Optional[float] = None,
         force: bool = False,
     ) -> int:
         """
-        Em VPS com pouca RAM (ex.: 2 GB) ou após timeout persistente de IPC (-10005 / porta 22346),
-        encerra outras instâncias concorrentes de terminal64.exe antes de inicializar a conta alvo
-        e aguarda a liberação real dos processos/porta TCP pelo Windows.
+        Encerra terminais MT5 concorrentes SOMENTE quando:
+        - `force=True` (recuperação de emergência após falha persistente de IPC -10005), OU
+        - `SINGLE_TERMINAL_MODE=true` no .env, OU
+        - a RAM livre da VPS estiver realmente baixa (< RAM_RECLAIM_MIN_FREE_MB ou >= RAM_RECLAIM_MAX_MEMORY_PERCENT).
+
+        Quando houver RAM disponível (ex.: 500-700 MB livres), mantém os múltiplos terminais
+        isolados abertos em paralelo para alternância instantânea (<1s) sem reinicializações!
         """
         import os
+        from config.settings import settings
+
+        eff_min_free = float(
+            min_free_mb if min_free_mb is not None else getattr(settings, "ram_reclaim_min_free_mb", 220.0)
+        )
+        eff_max_pct = float(
+            max_mem_pct if max_mem_pct is not None else getattr(settings, "ram_reclaim_max_memory_percent", 88.0)
+        )
+        single_mode = bool(getattr(settings, "single_terminal_mode", False))
+
         avail_mb = 0.0
-        total_mb = 0.0
         try:
             mem = psutil.virtual_memory()
             avail_mb = mem.available / (1024 * 1024)
-            total_mb = mem.total / (1024 * 1024)
-            # Em VPS enxuta (<= 4 GB RAM) com MT5 build 6296+/6328 (bind fixo 127.0.0.1:22346),
-            # sempre encerra terminais isolados concorrentes ao trocar de conta para evitar erro 10048 e thrashing.
-            low_ram_vps = total_mb > 0 and total_mb <= 4096.0
-            if not force and not low_ram_vps and avail_mb >= min_free_mb and mem.percent < max_mem_pct:
+            if not force and not single_mode and avail_mb >= eff_min_free and mem.percent < eff_max_pct:
                 return 0
         except Exception:
-            if not force:
+            if not force and not single_mode:
                 return 0
 
         norm_keep = os.path.normcase(os.path.abspath(keep_path)) if keep_path else None
-        reclaimed = 0
-        killed_procs = []
-        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+        candidates = []
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'create_time']):
             try:
                 name = (proc.info.get('name') or '').lower()
                 if 'terminal64' not in name:
@@ -328,13 +344,42 @@ class SyncEngine:
                 if norm_keep and norm_exe and norm_exe == norm_keep:
                     continue
                 if 'instances' in norm_exe or norm_keep:
-                    logger.warning(
-                        f"[RAM-RECLAIM] Encerrando terminal MT5 concorrente (PID: {proc.info['pid']}, Path: {exe_path}) "
-                        f"para liberar RAM antes de inicializar a conta alvo (RAM livre: {round(avail_mb, 1)} MB)..."
-                    )
-                    proc.kill()
-                    killed_procs.append(proc)
-                    reclaimed += 1
+                    candidates.append((float(proc.info.get('create_time') or 0.0), proc, exe_path, norm_exe))
+            except Exception:
+                pass
+
+        # Encerra primeiro os terminais mais antigos (LRU aproximado)
+        candidates.sort(key=lambda item: item[0])
+
+        reclaimed = 0
+        killed_procs = []
+        for _ctime, proc, exe_path, norm_exe in candidates:
+            try:
+                logger.warning(
+                    f"[RAM-RECLAIM] Encerrando terminal MT5 concorrente (PID: {proc.info['pid']}, Path: {exe_path}) "
+                    f"para liberar RAM antes de inicializar a conta alvo (RAM livre: {round(avail_mb, 1)} MB)..."
+                )
+                proc.kill()
+                killed_procs.append(proc)
+                if norm_exe:
+                    self._last_reclaimed_exe_paths.append(norm_exe)
+                reclaimed += 1
+
+                # Em modo normal (pressão real de RAM, não force/single_mode), fecha apenas 1 terminal
+                # por vez e reavalia a RAM livre para preservar os demais terminais abertos!
+                if not force and not single_mode:
+                    try:
+                        psutil.wait_procs([proc], timeout=5.0)
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+                    try:
+                        mem_now = psutil.virtual_memory()
+                        avail_mb = mem_now.available / (1024 * 1024)
+                        if avail_mb >= eff_min_free and mem_now.percent < eff_max_pct:
+                            return reclaimed
+                    except Exception:
+                        return reclaimed
             except Exception:
                 pass
 

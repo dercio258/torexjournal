@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     # Resource Thresholds & Anti-Loop
     enable_resource_guard: bool = Field(default=False, alias="ENABLE_RESOURCE_GUARD")
+    single_terminal_mode: bool = Field(default=False, alias="SINGLE_TERMINAL_MODE")
+    ram_reclaim_min_free_mb: float = Field(default=220.0, alias="RAM_RECLAIM_MIN_FREE_MB")
+    ram_reclaim_max_memory_percent: float = Field(default=88.0, alias="RAM_RECLAIM_MAX_MEMORY_PERCENT")
     max_memory_percent: float = Field(default=95.0, alias="MAX_MEMORY_PERCENT")
     max_cpu_percent: float = Field(default=99.0, alias="MAX_CPU_PERCENT")
     min_available_memory_mb: float = Field(default=150.0, alias="MIN_AVAILABLE_MEMORY_MB")

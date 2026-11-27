@@ -175,6 +175,11 @@ class MT5ProcessManager:
         base_exe = Path(self.terminal_path).resolve()
         base_dir = base_exe.parent
 
+        # Se a instância isolada desta conta já está em execução, retorna imediatamente sem sobrescrever
+        # common.ini/startup.ini/servers.dat em uso nem gerar I/O desnecessário.
+        if isolated_exe.exists() and self.is_running(account_id, account_uuid=account_uuid):
+            return str(isolated_exe)
+
         try:
             # Se existia hardlink antigo (nlink > 1) ou executável base foi atualizado (build novo), sincroniza cópia independente
             need_copy_exe = not isolated_exe.exists()
@@ -216,9 +221,10 @@ class MT5ProcessManager:
                     if not should_copy_srv:
                         try:
                             dst_stat = dst_srv.stat()
-                            # Nunca sobrescreve um servers.dat maior por um menor; atualiza se a fonte for maior ou mais recente com mesmo tamanho
+                            # Nunca sobrescreve um servers.dat maior por um menor; atualiza se a fonte for maior
+                            # ou significativamente mais recente (>2s evita cópias repetidas por jitter de mtime no NTFS)
                             if best_stat.st_size > dst_stat.st_size or (
-                                best_stat.st_size == dst_stat.st_size and best_stat.st_mtime > dst_stat.st_mtime
+                                best_stat.st_size == dst_stat.st_size and (best_stat.st_mtime - dst_stat.st_mtime) > 2.0
                             ):
                                 should_copy_srv = True
                         except Exception:
@@ -337,6 +343,7 @@ class MT5ProcessManager:
             "CertInstall=0",
             "ProxyEnable=0",
             "KeepPrivate=1",
+            "MCPServer=0",
             "[Experts]",
             "Enabled=1",
             "AllowLiveTrading=0",

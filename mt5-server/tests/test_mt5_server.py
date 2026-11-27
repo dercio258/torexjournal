@@ -858,25 +858,83 @@ class TestProductionLogBugFixes(unittest.TestCase):
             finally:
                 settings.data_dir = orig_data_dir
 
-    def test_reclaim_memory_waits_for_killed_terminals(self):
-        fake_proc = MagicMock()
-        fake_proc.info = {
+    def test_reclaim_memory_preserves_multiple_terminals_when_ram_healthy_and_reclaims_one_by_one_under_pressure(self):
+        engine = SyncEngine()
+        proc_old = MagicMock()
+        proc_old.info = {
             "pid": 6480,
             "name": "terminal64.exe",
             "exe": r"C:\mt5\instances\acc_222707555\terminal64.exe",
+            "create_time": 100.0,
         }
-        low_mem = SimpleNamespace(total=2048 * 1024 * 1024, available=670 * 1024 * 1024, percent=67.3)
-        with patch("core.sync_engine.psutil.virtual_memory", return_value=low_mem), \
-             patch("core.sync_engine.psutil.process_iter", return_value=[fake_proc]), \
+        proc_new = MagicMock()
+        proc_new.info = {
+            "pid": 7777,
+            "name": "terminal64.exe",
+            "exe": r"C:\mt5\instances\acc_999999\terminal64.exe",
+            "create_time": 200.0,
+        }
+
+        # 1) VPS 2 GB com 630 MB livres (68% usada) -> NÃO deve encerrar outros terminais!
+        # Ambos os MT5 devem permanecer abertos em paralelo.
+        healthy_2gb_mem = SimpleNamespace(total=2048 * 1024 * 1024, available=630 * 1024 * 1024, percent=68.0)
+        with patch("core.sync_engine.psutil.virtual_memory", return_value=healthy_2gb_mem), \
+             patch("core.sync_engine.psutil.process_iter", return_value=[proc_old, proc_new]):
+            reclaimed = engine._reclaim_memory_from_other_terminals(
+                keep_path=r"C:\mt5\instances\acc_1be1066d\terminal64.exe"
+            )
+        self.assertEqual(reclaimed, 0)
+        proc_old.kill.assert_not_called()
+        proc_new.kill.assert_not_called()
+
+        # 2) Sob pressão REAL de RAM (150 MB livres, 92% usada) -> encerra apenas 1 terminal (o mais antigo),
+        # aguarda encerramento via wait_procs e para assim que a RAM normalizar (400 MB livres, 80%).
+        critical_mem = SimpleNamespace(total=2048 * 1024 * 1024, available=150 * 1024 * 1024, percent=92.6)
+        recovered_mem = SimpleNamespace(total=2048 * 1024 * 1024, available=400 * 1024 * 1024, percent=80.5)
+        with patch("core.sync_engine.psutil.virtual_memory", side_effect=[critical_mem, recovered_mem]), \
+             patch("core.sync_engine.psutil.process_iter", return_value=[proc_new, proc_old]), \
              patch("core.sync_engine.psutil.wait_procs") as mock_wait, \
              patch("core.sync_engine.time.sleep") as mock_sleep:
-            reclaimed = SyncEngine._reclaim_memory_from_other_terminals(
+            reclaimed = engine._reclaim_memory_from_other_terminals(
                 keep_path=r"C:\mt5\instances\acc_1be1066d\terminal64.exe"
             )
         self.assertEqual(reclaimed, 1)
-        fake_proc.kill.assert_called_once()
-        mock_wait.assert_called_once_with([fake_proc], timeout=5.0)
+        proc_old.kill.assert_called_once()
+        proc_new.kill.assert_not_called()
+        mock_wait.assert_called_once_with([proc_old], timeout=5.0)
         mock_sleep.assert_called_once_with(1.0)
+        reclaimed_paths = engine.consume_reclaimed_exe_paths()
+        self.assertEqual(len(reclaimed_paths), 1)
+        self.assertIn("acc_222707555", reclaimed_paths[0].lower())
+
+    def test_process_manager_does_not_overwrite_ini_while_terminal_is_running(self):
+        from core.process_manager import MT5ProcessManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            base_exe = tmp_path / "terminal64.exe"
+            base_exe.write_bytes(b"MZ")
+            pm = MT5ProcessManager()
+            pm.terminal_path = str(base_exe)
+            pm.instances_dir = tmp_path / "instances"
+
+            inst_dir = pm.get_account_instance_dir(222707555)
+            iso_exe = inst_dir / "terminal64.exe"
+            iso_exe.write_bytes(b"MZ")
+            cfg_dir = inst_dir / "config"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            common_ini = cfg_dir / "common.ini"
+            common_ini.write_text("KEEP_LIVE_SESSION", encoding="utf-8")
+
+            with patch.object(pm, "is_running", return_value=True):
+                returned_exe = pm.get_or_prepare_isolated_terminal_exe(
+                    account_id=222707555,
+                    login="222707555",
+                    server="Exness-MT5Real30",
+                    password="Secret",
+                )
+            self.assertEqual(Path(returned_exe).resolve(), iso_exe.resolve())
+            self.assertEqual(common_ini.read_text(encoding="utf-8"), "KEEP_LIVE_SESSION")
 
 
 if __name__ == "__main__":
