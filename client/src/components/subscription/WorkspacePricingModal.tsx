@@ -21,11 +21,17 @@ import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { buildTaggedUrl, mergeSessionUtmsIntoSearch } from '../../lib/attribution';
 import {
+    calculatePlanCyclePricing,
     FALLBACK_WORKSPACE_PLANS,
+    getCycleDisplayLabel,
+    getCycleMonths,
     getDefaultCreditsForTier,
     getDefaultFeaturesForTier,
+    getMaxDiscountForCycle,
     getPlanSubtitleForTier,
     normalizeWorkspacePlansCatalog,
+    WORKSPACE_BILLING_CYCLES,
+    WorkspaceBillingCycle,
     WorkspacePlanConfig,
 } from '../../lib/pricingPlans';
 import { TRIAL_DAYS_BY_TIER_CLIENT } from '../../lib/planGate';
@@ -58,7 +64,7 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
     const { locale, setLocale } = useLocale();
     const isEn = locale === 'en';
 
-    const [billingCycle, setBillingCycle] = useState<'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'BIENNIAL'>('YEARLY');
+    const [billingCycle, setBillingCycle] = useState<WorkspaceBillingCycle>('YEARLY');
     const [plans, setPlans] = useState<WorkspacePlanConfig[]>(() =>
         normalizeWorkspacePlansCatalog(FALLBACK_WORKSPACE_PLANS, isEn),
     );
@@ -179,47 +185,21 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
 
     if (!isOpen) return null;
 
-    const getCycleMonths = (cycle: 'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'BIENNIAL') => {
-        if (cycle === 'BIENNIAL') return 24;
-        if (cycle === 'YEARLY') return 12;
-        if (cycle === 'QUARTERLY') return 3;
-        return 1;
-    };
+    const getPlanPricing = (
+        plan: WorkspacePlanConfig,
+        cycle: WorkspaceBillingCycle = billingCycle,
+    ) => calculatePlanCyclePricing(plan, cycle);
 
     const getDiscountPercent = (
         plan: WorkspacePlanConfig,
-        cycle: 'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'BIENNIAL' = billingCycle,
-    ) => {
-        const tierUpper = String(plan.tier || '').toUpperCase();
-        if (cycle === 'MONTHLY') {
-            return Number(plan.monthlyDiscountPercent ?? 20);
-        }
-        if (cycle === 'QUARTERLY') {
-            return Number(
-                plan.quarterlyDiscountPercent ??
-                    (tierUpper === 'PREMIUM' ? 19 : tierUpper === 'PRO' ? 9 : 5),
-            );
-        }
-        if (cycle === 'BIENNIAL') {
-            return Number(
-                plan.biennialDiscountPercent ??
-                    (tierUpper === 'PREMIUM' ? 51 : tierUpper === 'PRO' ? 44 : 29),
-            );
-        }
-        return Number(
-            plan.annualDiscountPercent ??
-                (tierUpper === 'PREMIUM' ? 49 : tierUpper === 'PRO' ? 35 : 25),
-        );
-    };
+        cycle: WorkspaceBillingCycle = billingCycle,
+    ) => getPlanPricing(plan, cycle).discountPercent;
 
-    const getPrice = (plan: WorkspacePlanConfig) => {
-        const discountPct = getDiscountPercent(plan, billingCycle);
-        return Number((plan.monthlyPrice * (1 - discountPct / 100)).toFixed(2));
-    };
+    const getPrice = (plan: WorkspacePlanConfig) =>
+        getPlanPricing(plan, billingCycle).effectiveMonthlyUsd;
 
-    const getCycleTotalUsd = (plan: WorkspacePlanConfig) => {
-        return Number((getPrice(plan) * getCycleMonths(billingCycle)).toFixed(2));
-    };
+    const getCycleTotalUsd = (plan: WorkspacePlanConfig) =>
+        getPlanPricing(plan, billingCycle).totalUsd;
 
     const handleSelectPlan = async (plan: WorkspacePlanConfig) => {
         const tierKey = String(plan.tier || 'basic').toLowerCase();
@@ -262,7 +242,10 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
             metadata: { tier: plan.tier, billingCycle },
         });
 
-        const checkoutSearch = mergeSessionUtmsIntoSearch('');
+        const baseParams = new URLSearchParams();
+        baseParams.set('tier', tierUpper);
+        baseParams.set('cycle', billingCycle);
+        const checkoutSearch = mergeSessionUtmsIntoSearch(`?${baseParams.toString()}`);
         if (dismissible && onClose) onClose();
         navigate(`/checkout${checkoutSearch}`, {
             state: {
@@ -458,22 +441,25 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
         };
     };
 
+    const activeCycleDiscountMeta = getMaxDiscountForCycle(plans, billingCycle);
     const promoBannerText =
-        billingCycle === 'MONTHLY'
-            ? isEn
-                ? 'Special Offer · 20% off monthly plans'
-                : 'Oferta Especial · 20% de desconto no mensal'
-            : billingCycle === 'QUARTERLY'
-              ? isEn
-                  ? 'Special Offer · Up to 19% off quarterly'
-                  : 'Oferta Especial · Até 19% no trimestral'
-              : billingCycle === 'BIENNIAL'
+        activeCycleDiscountMeta.max > 0
+            ? billingCycle === 'MONTHLY'
                 ? isEn
-                    ? 'Special Offer · Up to 51% off biennial'
-                    : 'Oferta Especial · Até 51% no bianual'
-                : isEn
-                  ? 'Special Offer · Up to 49% off annual plans'
-                  : 'Oferta Especial · Até 49% de desconto no anual';
+                    ? `Special Offer · ${activeCycleDiscountMeta.uniform ? '' : 'Up to '}${activeCycleDiscountMeta.max}% off monthly plans`
+                    : `Oferta Especial · ${activeCycleDiscountMeta.uniform ? '' : 'Até '}${activeCycleDiscountMeta.max}% de desconto no mensal`
+                : billingCycle === 'QUARTERLY'
+                  ? isEn
+                      ? `Special Offer · ${activeCycleDiscountMeta.uniform ? '' : 'Up to '}${activeCycleDiscountMeta.max}% off quarterly plans`
+                      : `Oferta Especial · ${activeCycleDiscountMeta.uniform ? '' : 'Até '}${activeCycleDiscountMeta.max}% no trimestral`
+                  : billingCycle === 'BIENNIAL'
+                    ? isEn
+                        ? `Special Offer · ${activeCycleDiscountMeta.uniform ? '' : 'Up to '}${activeCycleDiscountMeta.max}% off biennial plans`
+                        : `Oferta Especial · ${activeCycleDiscountMeta.uniform ? '' : 'Até '}${activeCycleDiscountMeta.max}% no bianual`
+                    : isEn
+                      ? `Special Offer · ${activeCycleDiscountMeta.uniform ? '' : 'Up to '}${activeCycleDiscountMeta.max}% off annual plans`
+                      : `Oferta Especial · ${activeCycleDiscountMeta.uniform ? '' : 'Até '}${activeCycleDiscountMeta.max}% de desconto no anual`
+            : null;
 
     return (
         <div
@@ -557,7 +543,7 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                     {isEn ? 'Plan Expired · Renew to Unlock' : 'Plano Expirado · Renove para Desbloquear'}
                                 </span>
                             )}
-                            {!trialGatePlan && promoBannerVisible && (
+                            {!trialGatePlan && promoBannerVisible && promoBannerText && (
                                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-amber-700 shadow-xs max-w-full">
                                     <Sparkles className="w-3 h-3 shrink-0 text-amber-500" />
                                     <span className="truncate">{promoBannerText}</span>
@@ -595,54 +581,38 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                         {/* Borderless Billing Cycle Selector */}
                         {!trialGatePlan && (
                             <div className="grid grid-cols-2 sm:inline-flex items-center gap-1 w-full sm:w-auto bg-slate-200/75 rounded-2xl sm:rounded-full p-1">
-                                {(
-                                    [
-                                        {
-                                            id: 'MONTHLY',
-                                            labelPt: 'Mensal',
-                                            labelEn: 'Monthly',
-                                            badge: '-20%',
-                                        },
-                                        {
-                                            id: 'QUARTERLY',
-                                            labelPt: 'Trimestral',
-                                            labelEn: 'Quarterly',
-                                            badge: isEn ? 'up to -19%' : 'até -19%',
-                                        },
-                                        {
-                                            id: 'YEARLY',
-                                            labelPt: 'Anual',
-                                            labelEn: 'Annual',
-                                            badge: isEn ? 'up to -49%' : 'até -49%',
-                                        },
-                                        {
-                                            id: 'BIENNIAL',
-                                            labelPt: 'Bianual (2A)',
-                                            labelEn: 'Biennial (2Y)',
-                                            badge: isEn ? 'up to -51%' : 'até -51%',
-                                        },
-                                    ] as const
-                                ).map((opt) => {
-                                    const active = billingCycle === opt.id;
+                                {WORKSPACE_BILLING_CYCLES.map((cycleId) => {
+                                    const active = billingCycle === cycleId;
+                                    const discMeta = getMaxDiscountForCycle(plans, cycleId);
+                                    const badgeText =
+                                        discMeta.max > 0
+                                            ? discMeta.uniform
+                                                ? `-${discMeta.max}%`
+                                                : isEn
+                                                  ? `up to -${discMeta.max}%`
+                                                  : `até -${discMeta.max}%`
+                                            : null;
                                     return (
                                         <button
-                                            key={opt.id}
+                                            key={cycleId}
                                             type="button"
-                                            onClick={() => setBillingCycle(opt.id)}
+                                            onClick={() => setBillingCycle(cycleId)}
                                             className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl sm:rounded-full text-[11px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                                 active
                                                     ? 'bg-white text-slate-900 shadow-sm'
                                                     : 'text-slate-600 hover:text-slate-900'
                                             }`}
                                         >
-                                            <span>{isEn ? opt.labelEn : opt.labelPt}</span>
-                                            <span
-                                                className={`text-[10px] font-extrabold ${
-                                                    active ? 'text-emerald-600' : 'text-emerald-600/85'
-                                                }`}
-                                            >
-                                                {opt.badge}
-                                            </span>
+                                            <span>{getCycleDisplayLabel(cycleId, isEn, true)}</span>
+                                            {badgeText && (
+                                                <span
+                                                    className={`text-[10px] font-extrabold ${
+                                                        active ? 'text-emerald-600' : 'text-emerald-600/85'
+                                                    }`}
+                                                >
+                                                    {badgeText}
+                                                </span>
+                                            )}
                                         </button>
                                     );
                                 })}
@@ -683,14 +653,22 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                         <p className="text-slate-700 leading-snug">
                                             {isEn ? (
                                                 <>
-                                                    Today you pay <strong>$0.00</strong>. After{' '}
+                                                    Today you pay{' '}
+                                                    <span className="line-through text-slate-400 font-mono mr-1">
+                                                        ${recurringUsd}
+                                                    </span>
+                                                    <strong className="text-emerald-700">$0.00</strong>. After{' '}
                                                     <strong>{renewalDateStr}</strong>,{' '}
                                                     <strong>${recurringUsd}/mo</strong> will be charged to
                                                     continue using the plan.
                                                 </>
                                             ) : (
                                                 <>
-                                                    Hoje o acesso é gratuito (<strong>$0.00</strong>). Após o dia{' '}
+                                                    Hoje o acesso é gratuito (
+                                                    <span className="line-through text-slate-400 font-mono mr-1">
+                                                        ${recurringUsd}
+                                                    </span>
+                                                    <strong className="text-emerald-700">$0.00</strong>). Após o dia{' '}
                                                     <strong>{renewalDateStr}</strong>, será cobrado{' '}
                                                     <strong>${recurringUsd}/mês</strong> para continuar a usar o
                                                     plano.
@@ -899,18 +877,31 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                                 </div>
 
                                                 <div className="flex items-baseline justify-center gap-1.5">
-                                                    {!showTrialFreeBadge &&
+                                                    {showTrialFreeBadge ? (
+                                                        <span className="text-sm sm:text-base font-bold text-slate-400 line-through font-mono tabular-nums">
+                                                            ${getPrice(plan).toFixed(2)}
+                                                        </span>
+                                                    ) : (
                                                         getDiscountPercent(plan) > 0 &&
                                                         plan.monthlyPrice > getPrice(plan) && (
-                                                            <span className="text-xs font-semibold text-slate-400 line-through font-mono">
+                                                            <span className="text-xs font-semibold text-slate-400 line-through font-mono tabular-nums">
                                                                 ${plan.monthlyPrice.toFixed(2)}
                                                             </span>
-                                                        )}
+                                                        )
+                                                    )}
                                                     <div className="flex items-baseline gap-0.5">
-                                                        <span className="text-sm sm:text-base font-bold text-slate-400 align-top mt-0.5">
+                                                        <span
+                                                            className={`text-sm sm:text-base font-bold align-top mt-0.5 ${
+                                                                showTrialFreeBadge ? 'text-emerald-600' : 'text-slate-400'
+                                                            }`}
+                                                        >
                                                             $
                                                         </span>
-                                                        <span className="text-2xl sm:text-[30px] leading-none font-extrabold text-slate-900 font-mono tabular-nums">
+                                                        <span
+                                                            className={`text-2xl sm:text-[30px] leading-none font-extrabold font-mono tabular-nums ${
+                                                                showTrialFreeBadge ? 'text-emerald-600' : 'text-slate-900'
+                                                            }`}
+                                                        >
                                                             {showTrialFreeBadge
                                                                 ? '0.00'
                                                                 : getPrice(plan).toFixed(2)}
@@ -927,21 +918,31 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                                     </div>
                                                 </div>
 
-                                                {!showTrialFreeBadge && (getDiscountPercent(plan) > 0 || getCycleMonths(billingCycle) > 1) && (
+                                                {showTrialFreeBadge ? (
                                                     <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
-                                                        {getDiscountPercent(plan) > 0 && (
-                                                            <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-[10px] font-bold text-rose-600 leading-none">
-                                                                {isEn
-                                                                    ? `Save ${getDiscountPercent(plan)}%`
-                                                                    : `Economize ${getDiscountPercent(plan)}%`}
-                                                            </span>
-                                                        )}
-                                                        {getCycleMonths(billingCycle) > 1 && (
-                                                            <span className="text-[10.5px] text-slate-500 font-mono font-medium">
-                                                                {`$${getCycleTotalUsd(plan).toFixed(2)}/${getCycleMonths(billingCycle)}m`}
-                                                            </span>
-                                                        )}
+                                                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 leading-none">
+                                                            {isEn
+                                                                ? `Free Trial · ${tierTrialDays} days ($0 today)`
+                                                                : `Teste Grátis · ${tierTrialDays} dias ($0 hoje)`}
+                                                        </span>
                                                     </div>
+                                                ) : (
+                                                    (getDiscountPercent(plan) > 0 || getCycleMonths(billingCycle) > 1) && (
+                                                        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
+                                                            {getDiscountPercent(plan) > 0 && (
+                                                                <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-[10px] font-bold text-rose-600 leading-none">
+                                                                    {isEn
+                                                                        ? `Save ${getDiscountPercent(plan)}%`
+                                                                        : `Economize ${getDiscountPercent(plan)}%`}
+                                                                </span>
+                                                            )}
+                                                            {getCycleMonths(billingCycle) > 1 && (
+                                                                <span className="text-[10.5px] text-slate-500 font-mono font-medium">
+                                                                    {`$${getCycleTotalUsd(plan).toFixed(2)}/${getCycleMonths(billingCycle)}m`}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )
                                                 )}
 
                                                 {isTierWithTrialChoice && (

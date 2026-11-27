@@ -286,4 +286,132 @@ describe('Subscription plans catalog, Basic credits & 3-account cap', () => {
         expect(active.plan?.annualDiscountPercent).toBe(25);
         expect(service.getAmountUsd(active.plan as any, 'YEARLY' as any)).toBe(26.88);
     });
+
+    it('heals inverted legacy discounts (20% monthly > quarterly) and preserves valid Admin custom prices on subsequent boots', async () => {
+        const storedPlans: any[] = [
+            {
+                id: 'basic-1',
+                tier: 'BASIC',
+                monthlyPrice: 2.99,
+                compareAtPrice: 2.99,
+                usdToMznRate: 74,
+                monthlyDiscountPercent: 20,
+                quarterlyDiscountPercent: 5,
+                annualDiscountPercent: 25,
+                biennialDiscountPercent: 29,
+                quarterlyPriceMzn: 630,
+                annualPriceMzn: 1989,
+                biennialPriceMzn: 3765,
+                maxTradingAccounts: 3,
+                monthlyBacktestsLimit: 0,
+                aiDailyCredits: 100,
+                isActive: true,
+                description: 'Para quem está começando no trading',
+                features: ['3 Contas de Trading ativas'],
+                createdAt: new Date('2026-01-01T00:00:00Z'),
+            },
+            {
+                id: 'pro-1',
+                tier: 'PRO',
+                monthlyPrice: 24.99, // Custom admin price
+                compareAtPrice: 24.99,
+                usdToMznRate: 74,
+                monthlyDiscountPercent: 0,
+                quarterlyDiscountPercent: 12,
+                annualDiscountPercent: 30,
+                biennialDiscountPercent: 40,
+                quarterlyPriceMzn: 4880,
+                annualPriceMzn: 15532,
+                biennialPriceMzn: 26629,
+                maxTradingAccounts: -1,
+                monthlyBacktestsLimit: 10,
+                aiDailyCredits: 1500,
+                isActive: true,
+                description: 'Plano Pro customizado',
+                features: ['AI Coach'],
+                createdAt: new Date('2026-01-01T00:00:00Z'),
+            },
+            {
+                id: 'premium-1',
+                tier: 'PREMIUM',
+                monthlyPrice: 39.99,
+                compareAtPrice: 39.99,
+                usdToMznRate: 74,
+                monthlyDiscountPercent: 20,
+                quarterlyDiscountPercent: 19,
+                annualDiscountPercent: 49,
+                biennialDiscountPercent: 51,
+                quarterlyPriceMzn: 7190,
+                annualPriceMzn: 18106,
+                biennialPriceMzn: 34791,
+                maxTradingAccounts: -1,
+                monthlyBacktestsLimit: 100,
+                aiDailyCredits: 4000,
+                isActive: true,
+                description: 'Performance máxima',
+                features: ['AI Coach'],
+                createdAt: new Date('2026-01-01T00:00:00Z'),
+            },
+        ];
+
+        const planConfigRepo: any = {
+            find: jest.fn().mockImplementation(async (opts?: any) => {
+                if (opts?.where?.isActive === true) return storedPlans.filter((p) => p.isActive);
+                return [...storedPlans];
+            }),
+            save: jest.fn().mockImplementation(async (entity: any) => {
+                const idx = storedPlans.findIndex((p) => p.id === entity.id);
+                if (idx >= 0) {
+                    storedPlans[idx] = { ...storedPlans[idx], ...entity };
+                    return storedPlans[idx];
+                }
+                storedPlans.push(entity);
+                return entity;
+            }),
+        };
+
+        const service = new SubscriptionService(
+            { get: jest.fn((_k: string, d?: any) => d) } as any,
+            {} as any,
+            {} as any,
+            { enqueue: jest.fn() } as any,
+            planConfigRepo,
+            { find: jest.fn() } as any,
+            { findOne: jest.fn() } as any,
+            { get: jest.fn(), set: jest.fn(), del: jest.fn() } as any,
+            { add: jest.fn(), getJobs: jest.fn() } as any,
+        );
+
+        await service.seedDefaultPlans();
+        const activePlans = await service.getActivePlans();
+        const [basic, pro, premium] = activePlans;
+
+        // BASIC & PREMIUM had inverted discounts (20% > 5%/19%) -> healed to strictly monotonic defaults
+        expect(basic.monthlyDiscountPercent).toBe(0);
+        expect(basic.quarterlyDiscountPercent).toBe(10);
+        expect(basic.annualDiscountPercent).toBe(25);
+        expect(basic.biennialDiscountPercent).toBe(30);
+
+        expect(premium.monthlyDiscountPercent).toBe(0);
+        expect(premium.quarterlyDiscountPercent).toBe(20);
+        expect(premium.annualDiscountPercent).toBe(49);
+        expect(premium.biennialDiscountPercent).toBe(55);
+
+        // PRO already had valid Admin custom price & non-inverted discounts -> preserved untouched!
+        expect(pro.monthlyPrice).toBe(24.99);
+        expect(pro.quarterlyDiscountPercent).toBe(12);
+        expect(pro.annualDiscountPercent).toBe(30);
+        expect(pro.biennialDiscountPercent).toBe(40);
+
+        // Effective per-month USD decreases monotonically across all 4 cycles for every tier
+        for (const plan of activePlans) {
+            const m1 = service.getAmountUsd(plan as any, 'MONTHLY' as any);
+            const m3 = service.getAmountUsd(plan as any, 'QUARTERLY' as any) / 3;
+            const m12 = service.getAmountUsd(plan as any, 'YEARLY' as any) / 12;
+            const m24 = service.getAmountUsd(plan as any, 'BIENNIAL' as any) / 24;
+            expect(m1).toBeGreaterThan(m3);
+            expect(m3).toBeGreaterThan(m12);
+            expect(m12).toBeGreaterThan(m24);
+        }
+    });
 });

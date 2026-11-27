@@ -106,7 +106,7 @@ export const PlanModal = ({
             const targetTier = planTier === 'PREMIUM' ? 'PREMIUM' : planTier === 'PRO' ? 'PRO' : 'BASIC';
             const plan = catalog.find((p) => p.tier === targetTier) || catalog[0];
 
-            navigate('/checkout', {
+            navigate(`/checkout?tier=${encodeURIComponent(plan.tier)}&cycle=MONTHLY`, {
                 state: {
                     plan,
                     billingCycle: 'MONTHLY',

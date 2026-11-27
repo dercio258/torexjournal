@@ -13,11 +13,18 @@ export class PaymentsController {
         const history = await this.subscriptionService.getUserSubscriptionHistory(userId);
         
         return history.map(sub => {
-            const monthlyPrice = sub.planConfig ? Number(sub.planConfig.monthlyPrice) : 0;
-            // Calculate total paid depending on cycle (including a default 20% discount if yearly)
-            const amount = sub.cycle === 'YEARLY'
-                ? (monthlyPrice * 12 * (1 - (sub.planConfig?.annualDiscountPercent || 20) / 100))
-                : monthlyPrice;
+            const amount =
+                sub.paymentMethod === 'TRIAL' || !sub.planConfig
+                    ? 0
+                    : this.subscriptionService.getAmountUsd(sub.planConfig, sub.cycle);
+            const cycleLabel =
+                sub.cycle === 'BIENNIAL'
+                    ? 'Bianual'
+                    : sub.cycle === 'YEARLY'
+                      ? 'Anual'
+                      : sub.cycle === 'QUARTERLY'
+                        ? 'Trimestral'
+                        : 'Mensal';
 
             // Map database subscription status to user-friendly Portuguese statuses
             let status = 'pendente';
@@ -49,7 +56,7 @@ export class PaymentsController {
                 id: sub.paymentReference || sub.id,
                 dataHora: sub.createdAt,
                 status: status,
-                produto: `Assinatura Plano ${sub.planConfig?.tier || 'FREE'} (${sub.cycle === 'YEARLY' ? 'Anual' : 'Mensal'})`,
+                produto: `Assinatura Plano ${sub.planConfig?.tier || 'FREE'} (${cycleLabel})`,
                 amount: Number(amount.toFixed(2)),
                 method: method,
                 expiresAt: sub.currentPeriodEnd,

@@ -11,6 +11,33 @@ import {
     AdminStatCard,
 } from './components/AdminPrimitives';
 import api from '../../api';
+import { calculatePlanCyclePricing } from '../../lib/pricingPlans';
+
+const EMPTY_PLAN_FORM = {
+    tier: '',
+    description: '',
+    features: '',
+    monthlyPrice: '',
+    annualMonthlyPrice: '',
+    compareAtPrice: '',
+    promoDiscountPercent: '25',
+    monthlyDiscountPercent: '0',
+    quarterlyDiscountPercent: '10',
+    annualDiscountPercent: '25',
+    biennialDiscountPercent: '30',
+    usdToMznRate: '74',
+    monthlyPriceMzn: '',
+    maxTradingAccounts: '3',
+    monthlyBacktestsLimit: '0',
+    trialDays: '0',
+    aiDailyCredits: '100',
+};
+
+function parseSafeInt(raw: unknown, fallback: number): number {
+    if (raw === '' || raw === null || raw === undefined) return fallback;
+    const parsed = parseInt(String(raw), 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 export const AdminPlans = () => {
     const [plans, setPlans] = useState<any[]>([]);
@@ -72,25 +99,7 @@ export const AdminPlans = () => {
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [newPlan, setNewPlan] = useState<any>({
-        tier: '',
-        description: '',
-        features: '', // comma separated string for input
-        monthlyPrice: '',
-        annualMonthlyPrice: '',
-        compareAtPrice: '',
-        promoDiscountPercent: '25',
-        monthlyDiscountPercent: '20',
-        quarterlyDiscountPercent: '5',
-        annualDiscountPercent: '25',
-        biennialDiscountPercent: '29',
-        usdToMznRate: '74',
-        monthlyPriceMzn: '',
-        maxTradingAccounts: '3',
-        monthlyBacktestsLimit: '0',
-        trialDays: '0',
-        aiDailyCredits: '100'
-    });
+    const [newPlan, setNewPlan] = useState<any>({ ...EMPTY_PLAN_FORM });
     const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
 
@@ -170,18 +179,18 @@ export const AdminPlans = () => {
                 monthlyPrice: parseFloat(newPlan.monthlyPrice),
                 annualMonthlyPrice: newPlan.annualMonthlyPrice ? parseFloat(newPlan.annualMonthlyPrice) : null,
                 compareAtPrice: newPlan.compareAtPrice ? parseFloat(newPlan.compareAtPrice) : null,
-                promoDiscountPercent: parseInt(newPlan.promoDiscountPercent) || 0,
-                monthlyDiscountPercent: parseInt(newPlan.monthlyDiscountPercent) || 20,
-                quarterlyDiscountPercent: parseInt(newPlan.quarterlyDiscountPercent) || 0,
-                annualDiscountPercent: parseInt(newPlan.annualDiscountPercent) || 25,
-                biennialDiscountPercent: parseInt(newPlan.biennialDiscountPercent) || 29,
+                promoDiscountPercent: Math.max(0, Math.min(90, parseSafeInt(newPlan.promoDiscountPercent, 0))),
+                monthlyDiscountPercent: Math.max(0, Math.min(90, parseSafeInt(newPlan.monthlyDiscountPercent, 0))),
+                quarterlyDiscountPercent: Math.max(0, Math.min(90, parseSafeInt(newPlan.quarterlyDiscountPercent, 0))),
+                annualDiscountPercent: Math.max(0, Math.min(90, parseSafeInt(newPlan.annualDiscountPercent, 0))),
+                biennialDiscountPercent: Math.max(0, Math.min(90, parseSafeInt(newPlan.biennialDiscountPercent, 0))),
                 usdToMznRate: parseFloat(newPlan.usdToMznRate) || 74,
                 monthlyPriceMzn: newPlan.monthlyPriceMzn ? parseFloat(newPlan.monthlyPriceMzn) : null,
-                maxTradingAccounts: parseInt(newPlan.maxTradingAccounts) || 1,
-                monthlyBacktestsLimit: parseInt(newPlan.monthlyBacktestsLimit) || 0,
-                trialEnabled: parseInt(newPlan.trialDays) > 0,
-                trialDays: parseInt(newPlan.trialDays) || 0,
-                aiDailyCredits: Math.max(0, parseInt(newPlan.aiDailyCredits) || 0),
+                maxTradingAccounts: parseSafeInt(newPlan.maxTradingAccounts, 1),
+                monthlyBacktestsLimit: Math.max(0, parseSafeInt(newPlan.monthlyBacktestsLimit, 0)),
+                trialEnabled: parseSafeInt(newPlan.trialDays, 0) > 0,
+                trialDays: Math.max(0, parseSafeInt(newPlan.trialDays, 0)),
+                aiDailyCredits: Math.max(0, parseSafeInt(newPlan.aiDailyCredits, 0)),
                 isActive: true
             };
 
@@ -195,25 +204,7 @@ export const AdminPlans = () => {
 
             setIsModalOpen(false);
             setEditingPlanId(null);
-            setNewPlan({
-                tier: '',
-                description: '',
-                features: '',
-                monthlyPrice: '',
-                annualMonthlyPrice: '',
-                compareAtPrice: '',
-                promoDiscountPercent: '25',
-                monthlyDiscountPercent: '20',
-                quarterlyDiscountPercent: '5',
-                annualDiscountPercent: '25',
-                biennialDiscountPercent: '29',
-                usdToMznRate: '74',
-                monthlyPriceMzn: '',
-                maxTradingAccounts: '1',
-                monthlyBacktestsLimit: '0',
-                trialDays: '0',
-                aiDailyCredits: '0',
-            });
+            setNewPlan({ ...EMPTY_PLAN_FORM });
             fetchPlans();
         } catch (error: any) {
             console.error(error);
@@ -238,10 +229,10 @@ export const AdminPlans = () => {
             annualMonthlyPrice: plan.annualMonthlyPrice?.toString() || '',
             compareAtPrice: plan.compareAtPrice?.toString() || '',
             promoDiscountPercent: (plan.promoDiscountPercent ?? 25).toString(),
-            monthlyDiscountPercent: (plan.monthlyDiscountPercent ?? 20).toString(),
-            quarterlyDiscountPercent: (plan.quarterlyDiscountPercent ?? 5).toString(),
+            monthlyDiscountPercent: (plan.monthlyDiscountPercent ?? 0).toString(),
+            quarterlyDiscountPercent: (plan.quarterlyDiscountPercent ?? 10).toString(),
             annualDiscountPercent: (plan.annualDiscountPercent ?? 25).toString(),
-            biennialDiscountPercent: (plan.biennialDiscountPercent ?? 29).toString(),
+            biennialDiscountPercent: (plan.biennialDiscountPercent ?? 30).toString(),
             usdToMznRate: (plan.usdToMznRate ?? 74).toString(),
             monthlyPriceMzn: plan.monthlyPriceMzn?.toString() || '',
             maxTradingAccounts: (plan.maxTradingAccounts ?? (plan.tier === 'BASIC' ? 3 : -1)).toString(),
@@ -269,7 +260,7 @@ export const AdminPlans = () => {
                         size="sm"
                         onClick={() => {
                             setEditingPlanId(null);
-                            setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
+                            setNewPlan({ ...EMPTY_PLAN_FORM });
                             setIsModalOpen(true);
                         }}
                         icon={<Plus className="h-3.5 w-3.5" />}
@@ -406,37 +397,61 @@ export const AdminPlans = () => {
                                 </ul>
                             )}
 
-                            <div className="flex justify-between text-sm pt-2 border-t border-line">
-                                <span className="text-fg-muted">Preço Base / Mensal (BF)</span>
-                                <span className="text-fg font-medium">
-                                    $ {plan.monthlyPrice} → $ {(Number(plan.monthlyPrice) * (1 - Number(plan.monthlyDiscountPercent ?? 20) / 100)).toFixed(2)} USD (-{plan.monthlyDiscountPercent ?? 20}%)
-                                </span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-fg-muted">Descontos (Trim / Anual / Bi)</span>
-                                <span className="text-accent-fg font-medium">
-                                    -{plan.quarterlyDiscountPercent ?? 5}% / -{plan.annualDiscountPercent ?? 25}% / -{plan.biennialDiscountPercent ?? 29}%
-                                </span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-fg-muted">Câmbio DB (MZN)</span>
-                                <span className="text-fg font-mono text-xs">
-                                    1 USD = {plan.usdToMznRate ?? 74} MZN ({plan.monthlyPriceMzn ?? Math.round(Number(plan.monthlyPrice) * (1 - Number(plan.monthlyDiscountPercent ?? 20) / 100) * 74)} MZN/mês)
-                                </span>
-                            </div>
+                            {(() => {
+                                const monthly = calculatePlanCyclePricing(plan, 'MONTHLY');
+                                const quarterly = calculatePlanCyclePricing(plan, 'QUARTERLY');
+                                const yearly = calculatePlanCyclePricing(plan, 'YEARLY');
+                                const biennial = calculatePlanCyclePricing(plan, 'BIENNIAL');
+                                const fxRate = Number(plan.usdToMznRate || 74);
+                                return (
+                                    <>
+                                        <div className="flex justify-between text-sm pt-2 border-t border-line">
+                                            <span className="text-fg-muted">Mensal</span>
+                                            <span className="text-fg font-mono font-medium">
+                                                ${monthly.effectiveMonthlyUsd.toFixed(2)} USD
+                                                {monthly.discountPercent > 0 ? ` (-${monthly.discountPercent}%)` : ''}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-fg-muted">Trimestral (3m)</span>
+                                            <span className="text-fg font-mono text-xs">
+                                                ${quarterly.effectiveMonthlyUsd.toFixed(2)}/m · ${quarterly.totalUsd.toFixed(2)} (-{quarterly.discountPercent}%)
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-fg-muted">Anual (12m)</span>
+                                            <span className="text-accent-fg font-mono text-xs font-medium">
+                                                ${yearly.effectiveMonthlyUsd.toFixed(2)}/m · ${yearly.totalUsd.toFixed(2)} (-{yearly.discountPercent}%)
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-fg-muted">Bianual (24m)</span>
+                                            <span className="text-accent-fg font-mono text-xs font-medium">
+                                                ${biennial.effectiveMonthlyUsd.toFixed(2)}/m · ${biennial.totalUsd.toFixed(2)} (-{biennial.discountPercent}%)
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-fg-muted">Câmbio DB (MZN)</span>
+                                            <span className="text-fg font-mono text-xs">
+                                                1 USD = {fxRate} MZN ({Math.round(monthly.totalUsd * fxRate)} MZN/mês)
+                                            </span>
+                                        </div>
+                                    </>
+                                );
+                            })()}
                             <div className="flex justify-between text-sm">
                                 <span className="text-fg-muted">Dias de Teste</span>
                                 <span className="text-fg font-medium">{plan.trialDays} dias</span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-fg-muted">Créditos IA / Dia</span>
+                                <span className="text-fg-muted">Créditos IA / Mês</span>
                                 <span className="text-accent-fg font-bold">
                                     {(
                                         plan.aiDailyCredits ??
                                         (plan.tier === 'PREMIUM'
-                                            ? 20000
+                                            ? 4000
                                             : plan.tier === 'PRO'
-                                              ? 2000
+                                              ? 1500
                                               : 100)
                                     ).toLocaleString('pt-BR')}
                                 </span>
@@ -647,7 +662,7 @@ export const AdminPlans = () => {
                 onClose={() => {
                     setIsModalOpen(false);
                     setEditingPlanId(null);
-                    setNewPlan({ tier: '', description: '', features: '', monthlyPrice: '', annualDiscountPercent: '20', trialDays: '0', aiDailyCredits: '100' });
+                    setNewPlan({ ...EMPTY_PLAN_FORM });
                 }}
                 title={editingPlanId ? "Editar Plano" : "Novo Plano de Assinatura"}
             >
@@ -743,9 +758,11 @@ export const AdminPlans = () => {
                     </div>
                     <div className="grid grid-cols-4 gap-2">
                         <div>
-                            <label className="block text-xs font-medium text-fg-muted mb-1">BF Mensal (%)</label>
+                            <label className="block text-xs font-medium text-fg-muted mb-1">Desc. Mensal (%)</label>
                             <input
                                 type="number"
+                                min={0}
+                                max={90}
                                 value={newPlan.monthlyDiscountPercent}
                                 onChange={(e) => setNewPlan({ ...newPlan, monthlyDiscountPercent: e.target.value })}
                                 className="w-full bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-fg focus:outline-none focus:border-indigo-500"

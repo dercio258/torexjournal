@@ -187,7 +187,14 @@ export const Payments = () => {
 
     const getValidityProgress = (expiryDate: string, cycle?: string) => {
         const daysRemaining = calculateDaysRemaining(expiryDate);
-        const totalDays = cycle === 'YEARLY' ? 365 : 30;
+        const totalDays =
+            cycle === 'BIENNIAL'
+                ? 730
+                : cycle === 'YEARLY'
+                  ? 365
+                  : cycle === 'QUARTERLY'
+                    ? 90
+                    : 30;
         const percent = (daysRemaining / totalDays) * 100;
         return Math.min(100, Math.max(0, percent));
     };
@@ -340,9 +347,13 @@ export const Payments = () => {
                                     <div className="flex justify-between">
                                         <span className="text-fg-subtle">{isEn ? 'Interval:' : 'Período:'}</span>
                                         <span className="text-fg">
-                                            {activeSub.cycle === 'YEARLY'
-                                                ? (isEn ? 'Annual' : 'Anual')
-                                                : (isEn ? 'Monthly' : 'Mensal')}
+                                            {activeSub.cycle === 'BIENNIAL'
+                                                ? (isEn ? 'Biennial (24m)' : 'Bianual (24m)')
+                                                : activeSub.cycle === 'YEARLY'
+                                                  ? (isEn ? 'Annual' : 'Anual')
+                                                  : activeSub.cycle === 'QUARTERLY'
+                                                    ? (isEn ? 'Quarterly (3m)' : 'Trimestral (3m)')
+                                                    : (isEn ? 'Monthly' : 'Mensal')}
                                         </span>
                                     </div>
                                     <div className="flex justify-between">

@@ -85,10 +85,10 @@ export const CANONICAL_WORKSPACE_PLAN_DEFAULTS: Record<TrialPlanTier, CanonicalW
         monthlyPrice: 2.99,
         compareAtPrice: 2.99,
         promoDiscountPercent: 25,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 5,
+        monthlyDiscountPercent: 0,
+        quarterlyDiscountPercent: 10,
         annualDiscountPercent: 25,
-        biennialDiscountPercent: 29,
+        biennialDiscountPercent: 30,
         usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
         maxTradingAccounts: 3,
         monthlyBacktestsLimit: 0,
@@ -110,10 +110,10 @@ export const CANONICAL_WORKSPACE_PLAN_DEFAULTS: Record<TrialPlanTier, CanonicalW
         monthlyPrice: 19.99,
         compareAtPrice: 19.99,
         promoDiscountPercent: 35,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 9,
+        monthlyDiscountPercent: 0,
+        quarterlyDiscountPercent: 15,
         annualDiscountPercent: 35,
-        biennialDiscountPercent: 44,
+        biennialDiscountPercent: 45,
         usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
         maxTradingAccounts: -1,
         monthlyBacktestsLimit: 10,
@@ -134,10 +134,10 @@ export const CANONICAL_WORKSPACE_PLAN_DEFAULTS: Record<TrialPlanTier, CanonicalW
         monthlyPrice: 39.99,
         compareAtPrice: 39.99,
         promoDiscountPercent: 49,
-        monthlyDiscountPercent: 20,
-        quarterlyDiscountPercent: 19,
+        monthlyDiscountPercent: 0,
+        quarterlyDiscountPercent: 20,
         annualDiscountPercent: 49,
-        biennialDiscountPercent: 51,
+        biennialDiscountPercent: 55,
         usdToMznRate: DEFAULT_USD_TO_MZN_RATE,
         maxTradingAccounts: -1,
         monthlyBacktestsLimit: 100,
@@ -268,9 +268,9 @@ export class SubscriptionService implements OnModuleInit {
                     ADD COLUMN IF NOT EXISTS "annualPriceMzn" decimal(10,2),
                     ADD COLUMN IF NOT EXISTS "biennialPriceMzn" decimal(10,2),
                     ADD COLUMN IF NOT EXISTS "usdToMznRate" decimal(10,2) DEFAULT 74,
-                    ADD COLUMN IF NOT EXISTS "monthlyDiscountPercent" integer DEFAULT 20,
-                    ADD COLUMN IF NOT EXISTS "quarterlyDiscountPercent" integer DEFAULT 5,
-                    ADD COLUMN IF NOT EXISTS "biennialDiscountPercent" integer DEFAULT 29,
+                    ADD COLUMN IF NOT EXISTS "monthlyDiscountPercent" integer DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS "quarterlyDiscountPercent" integer DEFAULT 10,
+                    ADD COLUMN IF NOT EXISTS "biennialDiscountPercent" integer DEFAULT 30,
                     ADD COLUMN IF NOT EXISTS "maxTradingAccounts" integer DEFAULT 1,
                     ADD COLUMN IF NOT EXISTS "monthlyBacktestsLimit" integer DEFAULT 0
             `);
@@ -495,20 +495,28 @@ export class SubscriptionService implements OnModuleInit {
                     exists.isActive = true;
                     updated = true;
                 }
-                const featuresDiffer =
-                    JSON.stringify(exists.features || []) !== JSON.stringify(cfg.features);
-                const needsMigration =
-                    String(exists.tier || '').trim().toUpperCase() !== tier ||
-                    Number(exists.usdToMznRate || 0) !== cfg.usdToMznRate ||
-                    Number(exists.monthlyPrice) !== cfg.monthlyPrice ||
-                    Number(exists.quarterlyDiscountPercent ?? -1) !== cfg.quarterlyDiscountPercent ||
-                    Number(exists.annualDiscountPercent ?? -1) !== cfg.annualDiscountPercent ||
-                    Number(exists.biennialDiscountPercent ?? -1) !== cfg.biennialDiscountPercent ||
-                    Number(exists.maxTradingAccounts ?? 0) !== cfg.maxTradingAccounts ||
-                    Number(exists.monthlyBacktestsLimit ?? -1) !== cfg.monthlyBacktestsLimit ||
-                    Number(exists.aiDailyCredits ?? -1) !== cfg.aiDailyCredits ||
-                    exists.description !== cfg.description ||
-                    featuresDiffer ||
+                const featuresText = (exists.features || []).join(' ');
+                const hasLegacyFeatureCopy =
+                    featuresText.includes('visualizar e baixar') ||
+                    featuresText.includes('exceto Trade Replay') ||
+                    featuresText.includes('Automated Backtesting');
+
+                const currentMonthlyDisc = Number(exists.monthlyDiscountPercent ?? 0);
+                const currentQuarterlyDisc = Number(exists.quarterlyDiscountPercent ?? 0);
+                const currentAnnualDisc = Number(exists.annualDiscountPercent ?? 0);
+                const currentBiennialDisc = Number(exists.biennialDiscountPercent ?? 0);
+                const hasInvertedDiscounts =
+                    currentMonthlyDisc > currentQuarterlyDisc ||
+                    currentQuarterlyDisc > currentAnnualDisc ||
+                    currentAnnualDisc > currentBiennialDisc;
+
+                const isLegacyBrokenBasic =
+                    tier === 'BASIC' &&
+                    (Number(exists.monthlyPrice || 0) >= 8 ||
+                        Number(exists.maxTradingAccounts ?? 0) < 3 ||
+                        Number(exists.aiDailyCredits ?? 0) <= 0);
+
+                const missingCycleSnapshots =
                     exists.quarterlyPriceMzn === null ||
                     exists.quarterlyPriceMzn === undefined ||
                     exists.annualPriceMzn === null ||
@@ -516,29 +524,54 @@ export class SubscriptionService implements OnModuleInit {
                     exists.biennialPriceMzn === null ||
                     exists.biennialPriceMzn === undefined;
 
-                if (needsMigration) {
+                if (String(exists.tier || '').trim().toUpperCase() !== tier) {
                     exists.tier = tier;
-                    exists.description = cfg.description;
-                    exists.features = cfg.features;
+                    updated = true;
+                }
+
+                if (isLegacyBrokenBasic || Number(exists.monthlyPrice || 0) <= 0) {
                     exists.monthlyPrice = cfg.monthlyPrice;
-                    exists.annualMonthlyPrice = snap.annualMonthlyPrice;
                     exists.compareAtPrice = cfg.compareAtPrice;
-                    exists.promoDiscountPercent = cfg.promoDiscountPercent;
-                    exists.monthlyPriceMzn = snap.monthlyPriceMzn;
-                    exists.quarterlyPriceMzn = snap.quarterlyPriceMzn;
-                    exists.annualPriceMzn = snap.annualPriceMzn;
-                    exists.biennialPriceMzn = snap.biennialPriceMzn;
-                    exists.usdToMznRate = cfg.usdToMznRate;
-                    exists.monthlyDiscountPercent = cfg.monthlyDiscountPercent;
-                    exists.quarterlyDiscountPercent = cfg.quarterlyDiscountPercent;
-                    exists.annualDiscountPercent = cfg.annualDiscountPercent;
-                    exists.biennialDiscountPercent = cfg.biennialDiscountPercent;
                     exists.maxTradingAccounts = cfg.maxTradingAccounts;
                     exists.monthlyBacktestsLimit = cfg.monthlyBacktestsLimit;
                     exists.aiDailyCredits = cfg.aiDailyCredits;
                     updated = true;
                 }
-                if (updated) {
+
+                if (hasLegacyFeatureCopy || !Array.isArray(exists.features) || exists.features.length === 0) {
+                    exists.description = cfg.description;
+                    exists.features = cfg.features;
+                    updated = true;
+                }
+
+                if (hasInvertedDiscounts) {
+                    exists.monthlyDiscountPercent = cfg.monthlyDiscountPercent;
+                    exists.quarterlyDiscountPercent = cfg.quarterlyDiscountPercent;
+                    exists.annualDiscountPercent = cfg.annualDiscountPercent;
+                    exists.biennialDiscountPercent = cfg.biennialDiscountPercent;
+                    exists.promoDiscountPercent = cfg.promoDiscountPercent;
+                    updated = true;
+                }
+
+                if (Number(exists.usdToMznRate || 0) <= 0) {
+                    exists.usdToMznRate = cfg.usdToMznRate;
+                    updated = true;
+                }
+
+                if (updated || missingCycleSnapshots) {
+                    const effectiveSnap = this.computeCyclePricingSnapshot({
+                        baseMonthlyUsd: Number(exists.monthlyPrice || cfg.monthlyPrice),
+                        monthlyDiscountPercent: Number(exists.monthlyDiscountPercent ?? cfg.monthlyDiscountPercent),
+                        quarterlyDiscountPercent: Number(exists.quarterlyDiscountPercent ?? cfg.quarterlyDiscountPercent),
+                        annualDiscountPercent: Number(exists.annualDiscountPercent ?? cfg.annualDiscountPercent),
+                        biennialDiscountPercent: Number(exists.biennialDiscountPercent ?? cfg.biennialDiscountPercent),
+                        usdToMznRate: Number(exists.usdToMznRate || cfg.usdToMznRate),
+                    });
+                    exists.annualMonthlyPrice = effectiveSnap.annualMonthlyPrice;
+                    exists.monthlyPriceMzn = effectiveSnap.monthlyPriceMzn;
+                    exists.quarterlyPriceMzn = effectiveSnap.quarterlyPriceMzn;
+                    exists.annualPriceMzn = effectiveSnap.annualPriceMzn;
+                    exists.biennialPriceMzn = effectiveSnap.biennialPriceMzn;
                     await this.planConfigRepo.save(exists);
                 }
             }
@@ -622,8 +655,42 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     async createPlanConfig(data: Partial<SubscriptionPlanConfig>) {
+        const baseMonthly = Number(data.monthlyPrice || 0);
+        const rate = Number(data.usdToMznRate || DEFAULT_USD_TO_MZN_RATE);
+        const monthlyDisc = Math.max(0, Math.min(90, Number(data.monthlyDiscountPercent ?? 0)));
+        const quarterlyDisc = Math.max(0, Math.min(90, Number(data.quarterlyDiscountPercent ?? 10)));
+        const annualDisc = Math.max(0, Math.min(90, Number(data.annualDiscountPercent ?? 25)));
+        const biennialDisc = Math.max(0, Math.min(90, Number(data.biennialDiscountPercent ?? 30)));
+        const snap = this.computeCyclePricingSnapshot({
+            baseMonthlyUsd: baseMonthly,
+            monthlyDiscountPercent: monthlyDisc,
+            quarterlyDiscountPercent: quarterlyDisc,
+            annualDiscountPercent: annualDisc,
+            biennialDiscountPercent: biennialDisc,
+            usdToMznRate: rate,
+        });
         const newPlan = this.planConfigRepo.create({
             ...data,
+            monthlyDiscountPercent: monthlyDisc,
+            quarterlyDiscountPercent: quarterlyDisc,
+            annualDiscountPercent: annualDisc,
+            biennialDiscountPercent: biennialDisc,
+            usdToMznRate: rate,
+            annualMonthlyPrice:
+                data.annualMonthlyPrice !== undefined &&
+                data.annualMonthlyPrice !== null &&
+                Number(data.annualMonthlyPrice) > 0
+                    ? Number(data.annualMonthlyPrice)
+                    : snap.annualMonthlyPrice,
+            monthlyPriceMzn:
+                data.monthlyPriceMzn !== undefined &&
+                data.monthlyPriceMzn !== null &&
+                Number(data.monthlyPriceMzn) > 0
+                    ? Number(data.monthlyPriceMzn)
+                    : snap.monthlyPriceMzn,
+            quarterlyPriceMzn: snap.quarterlyPriceMzn,
+            annualPriceMzn: snap.annualPriceMzn,
+            biennialPriceMzn: snap.biennialPriceMzn,
             isActive: true, // Default active
         });
         return this.planConfigRepo.save(newPlan);
@@ -1430,9 +1497,11 @@ export class SubscriptionService implements OnModuleInit {
     }
 
     private mapPlanForClient(p: SubscriptionPlanConfig) {
+        const normalizedTier = normalizeWorkspacePlanTier(p.tier);
+        const defaults = normalizedTier ? CANONICAL_WORKSPACE_PLAN_DEFAULTS[normalizedTier] : null;
         return {
             id: p.id,
-            tier: p.tier,
+            tier: normalizedTier || p.tier,
             description: p.description,
             features: p.features,
             monthlyPrice: Number(p.monthlyPrice),
@@ -1444,14 +1513,14 @@ export class SubscriptionService implements OnModuleInit {
                 p.compareAtPrice !== null && p.compareAtPrice !== undefined
                     ? Number(p.compareAtPrice)
                     : null,
-            promoDiscountPercent: Number(p.promoDiscountPercent ?? 0),
-            monthlyDiscountPercent: Number(p.monthlyDiscountPercent ?? 20),
-            quarterlyDiscountPercent: Number(p.quarterlyDiscountPercent ?? 5),
-            annualDiscountPercent: Number(p.annualDiscountPercent ?? 25),
-            biennialDiscountPercent: Number(p.biennialDiscountPercent ?? 29),
-            maxTradingAccounts: Number(p.maxTradingAccounts ?? (p.tier === 'BASIC' ? 3 : -1)),
-            monthlyBacktestsLimit: Number(p.monthlyBacktestsLimit ?? 0),
-            aiDailyCredits: Number(p.aiDailyCredits ?? (p.tier === 'BASIC' ? 100 : 0)),
+            promoDiscountPercent: Number(p.promoDiscountPercent ?? defaults?.promoDiscountPercent ?? 0),
+            monthlyDiscountPercent: Number(p.monthlyDiscountPercent ?? defaults?.monthlyDiscountPercent ?? 0),
+            quarterlyDiscountPercent: Number(p.quarterlyDiscountPercent ?? defaults?.quarterlyDiscountPercent ?? 10),
+            annualDiscountPercent: Number(p.annualDiscountPercent ?? defaults?.annualDiscountPercent ?? 25),
+            biennialDiscountPercent: Number(p.biennialDiscountPercent ?? defaults?.biennialDiscountPercent ?? 30),
+            maxTradingAccounts: Number(p.maxTradingAccounts ?? defaults?.maxTradingAccounts ?? (p.tier === 'BASIC' ? 3 : -1)),
+            monthlyBacktestsLimit: Number(p.monthlyBacktestsLimit ?? defaults?.monthlyBacktestsLimit ?? 0),
+            aiDailyCredits: Number(p.aiDailyCredits ?? defaults?.aiDailyCredits ?? (p.tier === 'BASIC' ? 100 : 0)),
             trialEnabled: Boolean(p.trialEnabled),
             trialDays: Number(p.trialDays ?? 0),
         };
@@ -4333,22 +4402,45 @@ export class SubscriptionService implements OnModuleInit {
             const merged = { ...existing, ...data };
             const baseMonthly = Number(merged.monthlyPrice || existing.monthlyPrice || 0);
             const rate = Number(merged.usdToMznRate || existing.usdToMznRate || DEFAULT_USD_TO_MZN_RATE);
+            const monthlyDisc = Math.max(0, Math.min(90, Number(merged.monthlyDiscountPercent ?? 0)));
+            const quarterlyDisc = Math.max(0, Math.min(90, Number(merged.quarterlyDiscountPercent ?? 0)));
+            const annualDisc = Math.max(0, Math.min(90, Number(merged.annualDiscountPercent ?? 0)));
+            const biennialDisc = Math.max(0, Math.min(90, Number(merged.biennialDiscountPercent ?? 0)));
             const snap = this.computeCyclePricingSnapshot({
                 baseMonthlyUsd: baseMonthly,
-                monthlyDiscountPercent: Number(merged.monthlyDiscountPercent ?? 20),
-                quarterlyDiscountPercent: Number(merged.quarterlyDiscountPercent ?? 0),
-                annualDiscountPercent: Number(merged.annualDiscountPercent ?? 0),
-                biennialDiscountPercent: Number(merged.biennialDiscountPercent ?? 0),
+                monthlyDiscountPercent: monthlyDisc,
+                quarterlyDiscountPercent: quarterlyDisc,
+                annualDiscountPercent: annualDisc,
+                biennialDiscountPercent: biennialDisc,
                 usdToMznRate: rate,
             });
+            const explicitAnnualMonthly =
+                data.annualMonthlyPrice !== undefined &&
+                data.annualMonthlyPrice !== null &&
+                Number(data.annualMonthlyPrice) > 0 &&
+                Number(data.annualMonthlyPrice) !== Number(existing.annualMonthlyPrice || 0)
+                    ? Number(data.annualMonthlyPrice)
+                    : null;
+            const explicitMonthlyMzn =
+                data.monthlyPriceMzn !== undefined &&
+                data.monthlyPriceMzn !== null &&
+                Number(data.monthlyPriceMzn) > 0 &&
+                Number(data.monthlyPriceMzn) !== Number(existing.monthlyPriceMzn || 0)
+                    ? Number(data.monthlyPriceMzn)
+                    : null;
+
             data = {
                 ...data,
                 usdToMznRate: rate,
-                annualMonthlyPrice: data.annualMonthlyPrice ?? snap.annualMonthlyPrice,
-                monthlyPriceMzn: data.monthlyPriceMzn ?? snap.monthlyPriceMzn,
-                quarterlyPriceMzn: data.quarterlyPriceMzn ?? snap.quarterlyPriceMzn,
-                annualPriceMzn: data.annualPriceMzn ?? snap.annualPriceMzn,
-                biennialPriceMzn: data.biennialPriceMzn ?? snap.biennialPriceMzn,
+                monthlyDiscountPercent: monthlyDisc,
+                quarterlyDiscountPercent: quarterlyDisc,
+                annualDiscountPercent: annualDisc,
+                biennialDiscountPercent: biennialDisc,
+                annualMonthlyPrice: explicitAnnualMonthly ?? snap.annualMonthlyPrice,
+                monthlyPriceMzn: explicitMonthlyMzn ?? snap.monthlyPriceMzn,
+                quarterlyPriceMzn: snap.quarterlyPriceMzn,
+                annualPriceMzn: snap.annualPriceMzn,
+                biennialPriceMzn: snap.biennialPriceMzn,
             };
         }
         await this.planConfigRepo.update(id, data);

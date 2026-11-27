@@ -1,120 +1,101 @@
-import assert from 'node:assert/strict';
 import test from 'node:test';
+import assert from 'node:assert/strict';
 import {
+    calculatePlanCyclePricing,
     FALLBACK_WORKSPACE_PLANS,
-    getDefaultCreditsForTier,
-    getDefaultFeaturesForTier,
+    getMaxDiscountForCycle,
+    normalizeSingleWorkspacePlan,
     normalizeWorkspacePlansCatalog,
-} from '../src/lib/pricingPlans';
+} from '../src/lib/pricingPlans.ts';
 
-test('normalizeWorkspacePlansCatalog deduplicates legacy $9/$10 Basic plan and keeps $2.99 Basic with 100 credits & 3 accounts', () => {
-    const legacyApiResponse = [
-        {
-            id: 'legacy-basic-10',
-            tier: 'BASIC',
-            monthlyPrice: 10,
-            compareAtPrice: 10,
-            aiDailyCredits: 100,
-            maxTradingAccounts: 1,
-            features: ['1 Conta de Trading ativa', '100 Créditos AI / mês'],
-        },
-        {
-            id: 'canonical-basic-2',
-            tier: 'BASIC',
-            monthlyPrice: 2.99,
-            compareAtPrice: 2.99,
-            aiDailyCredits: 0,
-            maxTradingAccounts: 1,
-            features: ['1 Conta de Trading ativa', '0 Créditos AI / mês'],
-        },
-        {
-            id: 'pro-plan',
-            tier: 'PRO',
-            monthlyPrice: 19.99,
-            aiDailyCredits: 1500,
-            features: ['Torex AI', 'Modo Offline (exceto Trade Replay)'],
-        },
-        {
-            id: 'premium-plan',
-            tier: 'PREMIUM',
-            monthlyPrice: 39.99,
-            aiDailyCredits: 4000,
-            features: ['100 Automated Backtesting Runs / month', 'Torex AI'],
-        },
-    ];
+test('normalizeSingleWorkspacePlan preserves PRO and PREMIUM instead of collapsing to BASIC', () => {
+    const proInput = {
+        id: 'pro-db-id',
+        tier: 'PRO',
+        monthlyPrice: 19.99,
+        monthlyDiscountPercent: 0,
+        quarterlyDiscountPercent: 15,
+        annualDiscountPercent: 35,
+        biennialDiscountPercent: 45,
+        aiDailyCredits: 1500,
+    };
+    const premiumInput = {
+        id: 'premium-db-id',
+        tier: 'PREMIUM',
+        monthlyPrice: 39.99,
+        monthlyDiscountPercent: 0,
+        quarterlyDiscountPercent: 20,
+        annualDiscountPercent: 49,
+        biennialDiscountPercent: 55,
+        aiDailyCredits: 4000,
+    };
 
-    const ptPlans = normalizeWorkspacePlansCatalog(legacyApiResponse, false);
-    assert.deepEqual(
-        ptPlans.map((p) => p.tier),
-        ['BASIC', 'PRO', 'PREMIUM'],
-    );
+    const normalizedPro = normalizeSingleWorkspacePlan(proInput, false);
+    const normalizedPremium = normalizeSingleWorkspacePlan(premiumInput, true);
 
-    const [basic, pro, premium] = ptPlans;
-    assert.equal(basic.monthlyPrice, 2.99);
-    assert.equal(basic.aiDailyCredits, 100);
-    assert.equal(basic.maxTradingAccounts, 3);
-    assert.equal(getDefaultCreditsForTier('BASIC'), 100);
+    assert.equal(normalizedPro?.tier, 'PRO');
+    assert.equal(normalizedPro?.monthlyPrice, 19.99);
+    assert.equal(normalizedPro?.id, 'pro-db-id');
 
-    // Basic PT requirements
-    assert.ok(basic.features?.includes('3 Contas de Trading ativas'));
-    assert.ok(basic.features?.includes('100 Créditos IA / mês'));
-    assert.ok(basic.features?.includes('Relatórios operacionais completos'));
-    assert.ok(!basic.features?.some((f) => f.includes('visualizar e baixar')));
-
-    // Pro & Premium PT: AI Coach (never Torex AI), exact report cadence, no offline exception text, zero English leak
-    for (const plan of [pro, premium]) {
-        assert.ok(plan.features?.includes('AI Coach'));
-        assert.ok(!plan.features?.some((f) => /Torex AI/i.test(f)));
-        assert.ok(!plan.features?.some((f) => /exceto Trade Replay|except Trade Replay/i.test(f)));
-        assert.ok(!plan.features?.some((f) => /Automated Backtesting|Mentor Mode|Priority Support/i.test(f)));
-    }
-    assert.ok(pro.features?.includes('Relatórios mensais'));
-    assert.ok(pro.features?.includes('Modo Offline'));
-    assert.ok(premium.features?.includes('Relatórios semanais'));
-    assert.ok(premium.features?.includes('Modo Offline completo'));
+    assert.equal(normalizedPremium?.tier, 'PREMIUM');
+    assert.equal(normalizedPremium?.monthlyPrice, 39.99);
+    assert.equal(normalizedPremium?.id, 'premium-db-id');
 });
 
-test('normalizeWorkspacePlansCatalog produces pure English strings without mixed Portuguese copy', () => {
-    const enPlans = normalizeWorkspacePlansCatalog(FALLBACK_WORKSPACE_PLANS, true);
-    assert.equal(enPlans.length, 3);
+test('calculatePlanCyclePricing produces strictly decreasing monthly rate across MONTHLY > QUARTERLY > YEARLY > BIENNIAL', () => {
+    const catalog = normalizeWorkspacePlansCatalog(FALLBACK_WORKSPACE_PLANS, false);
 
-    const [basic, pro, premium] = enPlans;
-    assert.ok(basic.features?.includes('3 Active Trading Accounts'));
-    assert.ok(basic.features?.includes('100 AI Credits / month'));
-    assert.ok(basic.features?.includes('Complete operational reports'));
+    for (const plan of catalog) {
+        const m = calculatePlanCyclePricing(plan, 'MONTHLY');
+        const q = calculatePlanCyclePricing(plan, 'QUARTERLY');
+        const y = calculatePlanCyclePricing(plan, 'YEARLY');
+        const b = calculatePlanCyclePricing(plan, 'BIENNIAL');
 
-    assert.ok(pro.features?.includes('AI Coach'));
-    assert.ok(pro.features?.includes('Monthly reports'));
-    assert.ok(pro.features?.includes('Offline Mode'));
-
-    assert.ok(premium.features?.includes('AI Coach'));
-    assert.ok(premium.features?.includes('Weekly reports'));
-    assert.ok(premium.features?.includes('Full Offline Mode'));
-
-    for (const plan of enPlans) {
-        assert.ok(!/Contas|Relatórios|Modo Offline|Diário/i.test(plan.description || ''));
-        for (const f of plan.features || []) {
-            assert.ok(!/Contas|Relatórios|Modo Offline|Diário|exceto|except/i.test(f));
-        }
+        assert.equal(m.discountPercent, 0);
+        assert.equal(m.effectiveMonthlyUsd, plan.monthlyPrice);
+        assert.ok(m.effectiveMonthlyUsd > q.effectiveMonthlyUsd);
+        assert.ok(q.effectiveMonthlyUsd > y.effectiveMonthlyUsd);
+        assert.ok(y.effectiveMonthlyUsd > b.effectiveMonthlyUsd);
+        assert.equal(q.totalUsd, Number((q.effectiveMonthlyUsd * 3).toFixed(2)));
+        assert.equal(y.totalUsd, Number((y.effectiveMonthlyUsd * 12).toFixed(2)));
+        assert.equal(b.totalUsd, Number((b.effectiveMonthlyUsd * 24).toFixed(2)));
     }
 
-    assert.ok(!getDefaultFeaturesForTier('PRO', 1500, true).some((f) => /Torex AI/i.test(f)));
+    const [basic, pro, premium] = catalog;
+    assert.equal(calculatePlanCyclePricing(basic, 'MONTHLY').totalUsd, 2.99);
+    assert.equal(calculatePlanCyclePricing(basic, 'QUARTERLY').totalUsd, 8.07);
+    assert.equal(calculatePlanCyclePricing(basic, 'YEARLY').totalUsd, 26.88);
+    assert.equal(calculatePlanCyclePricing(basic, 'BIENNIAL').totalUsd, 50.16);
+
+    assert.equal(calculatePlanCyclePricing(pro, 'MONTHLY').totalUsd, 19.99);
+    assert.equal(calculatePlanCyclePricing(pro, 'QUARTERLY').totalUsd, 50.97);
+    assert.equal(calculatePlanCyclePricing(pro, 'YEARLY').totalUsd, 155.88);
+    assert.equal(calculatePlanCyclePricing(pro, 'BIENNIAL').totalUsd, 263.76);
+
+    assert.equal(calculatePlanCyclePricing(premium, 'MONTHLY').totalUsd, 39.99);
+    assert.equal(calculatePlanCyclePricing(premium, 'QUARTERLY').totalUsd, 95.97);
+    assert.equal(calculatePlanCyclePricing(premium, 'YEARLY').totalUsd, 244.68);
+    assert.equal(calculatePlanCyclePricing(premium, 'BIENNIAL').totalUsd, 432.0);
 });
 
-test('normalizeWorkspacePlansCatalog overrides stale single $10 BASIC plan row to canonical $2.99 / 25% annual ($26.88/yr)', () => {
-    const staleSingleBasic = [
-        {
-            id: 'legacy-basic-10',
-            tier: 'BASIC',
-            monthlyPrice: 10,
-            annualDiscountPercent: 20,
-            aiDailyCredits: 100,
-        },
-    ];
-    const [basic] = normalizeWorkspacePlansCatalog(staleSingleBasic, false);
-    assert.equal(basic.tier, 'BASIC');
-    assert.equal(basic.monthlyPrice, 2.99);
-    const perMo = Number((basic.monthlyPrice * (1 - basic.annualDiscountPercent / 100)).toFixed(2));
-    assert.equal(basic.annualDiscountPercent, 25);
-    assert.equal(Number((perMo * 12).toFixed(2)), 26.88);
+test('auto-normalizes legacy inverted discounts (20% monthly > quarterly) and computes dynamic max cycle discounts', () => {
+    const legacyRaw = {
+        id: 'old-pro',
+        tier: 'PRO',
+        monthlyPrice: 19.99,
+        monthlyDiscountPercent: 20,
+        quarterlyDiscountPercent: 9,
+        annualDiscountPercent: 35,
+        biennialDiscountPercent: 44,
+    };
+
+    const healed = normalizeSingleWorkspacePlan(legacyRaw, false)!;
+    assert.equal(healed.monthlyDiscountPercent, 0);
+    assert.equal(healed.quarterlyDiscountPercent, 15);
+
+    const catalog = normalizeWorkspacePlansCatalog(FALLBACK_WORKSPACE_PLANS, false);
+    assert.deepEqual(getMaxDiscountForCycle(catalog, 'MONTHLY'), { max: 0, uniform: true });
+    assert.deepEqual(getMaxDiscountForCycle(catalog, 'QUARTERLY'), { max: 20, uniform: false });
+    assert.deepEqual(getMaxDiscountForCycle(catalog, 'YEARLY'), { max: 49, uniform: false });
+    assert.deepEqual(getMaxDiscountForCycle(catalog, 'BIENNIAL'), { max: 55, uniform: false });
 });

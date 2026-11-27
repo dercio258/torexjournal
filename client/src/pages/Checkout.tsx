@@ -41,7 +41,14 @@ import {
     resolveLocationOption,
 } from '../components/subscription/CheckoutFlow';
 import { trackButtonClick } from '../lib/tracking';
-import { normalizeWorkspacePlansCatalog } from '../lib/pricingPlans';
+import {
+    calculatePlanCyclePricing,
+    normalizeBillingCycle,
+    normalizeSingleWorkspacePlan,
+    normalizeWorkspacePlansCatalog,
+    normalizeWorkspaceTierClient,
+    WorkspaceBillingCycle,
+} from '../lib/pricingPlans';
 import { useAdaptivePaymentPolling } from '../hooks/useAdaptivePaymentPolling';
 import {
     buildCheckoutFailureUrl,
@@ -53,8 +60,7 @@ const MANUAL_COUNTRY_KEY = 'torex_checkout_country_manual';
 
 function normalizeCheckoutPlan(rawPlan: any, isEn: boolean): any {
     if (!rawPlan?.tier) return rawPlan;
-    const normalized = normalizeWorkspacePlansCatalog([rawPlan], isEn);
-    return normalized[0] || rawPlan;
+    return normalizeSingleWorkspacePlan(rawPlan, isEn) || rawPlan;
 }
 
 const getCheckoutSelectionKey = (userId?: string) =>
@@ -83,6 +89,7 @@ function readStoredSelection(userId?: string, isEn = false): StoredCheckoutSelec
         return {
             ...parsed,
             plan: normalizeCheckoutPlan(parsed.plan, isEn),
+            billingCycle: normalizeBillingCycle(parsed.billingCycle),
         };
     } catch {
         return null;
@@ -175,20 +182,32 @@ export const Checkout = () => {
         (callbackFailure.isFailed ? '' : searchParams.get('reference') || '');
 
     const statePlan = location.state?.plan || null;
-    const stateCycle = location.state?.billingCycle || null;
+    const stateCycle = location.state?.billingCycle
+        ? normalizeBillingCycle(location.state.billingCycle)
+        : null;
+    const explicitUrlTier = normalizeWorkspaceTierClient(urlTier);
+    const explicitUrlCycle = urlCycle ? normalizeBillingCycle(urlCycle) : null;
 
-    const [plan, setPlan] = useState<any>(() =>
-        statePlan
-            ? normalizeCheckoutPlan(statePlan, isEn)
-            : readStoredSelection(user?.id, isEn)?.plan || null,
-    );
-    const [billingCycle, setBillingCycle] = useState<string>(
-        () => stateCycle || readStoredSelection(user?.id, isEn)?.billingCycle || '',
-    );
+    const [plan, setPlan] = useState<any>(() => {
+        if (statePlan) return normalizeCheckoutPlan(statePlan, isEn);
+        const stored = readStoredSelection(user?.id, isEn);
+        if (explicitUrlTier) {
+            if (stored?.plan && normalizeWorkspaceTierClient(stored.plan.tier) === explicitUrlTier) {
+                return stored.plan;
+            }
+            return normalizeSingleWorkspacePlan({ tier: explicitUrlTier }, isEn);
+        }
+        return stored?.plan || null;
+    });
+    const [billingCycle, setBillingCycle] = useState<string>(() => {
+        if (stateCycle) return stateCycle;
+        if (explicitUrlCycle) return explicitUrlCycle;
+        return readStoredSelection(user?.id, isEn)?.billingCycle || (explicitUrlTier ? 'YEARLY' : '');
+    });
     const [hydratingCheckout, setHydratingCheckout] = useState<boolean>(
         () =>
-            !statePlan ||
-            !stateCycle ||
+            (!statePlan && !explicitUrlTier) ||
+            (!stateCycle && !explicitUrlCycle) ||
             Boolean(urlCryptoRef) ||
             Boolean(urlPixRef) ||
             Boolean(urlTier) ||
@@ -408,10 +427,10 @@ export const Checkout = () => {
         let mounted = true;
 
         const storedSel = readStoredSelection(user.id, isEn);
-        const hasInitialPlan = Boolean(statePlan || storedSel?.plan || plan);
-        if (!statePlan && storedSel?.plan && !plan) {
+        const hasInitialPlan = Boolean(statePlan || explicitUrlTier || storedSel?.plan || plan);
+        if (!statePlan && !explicitUrlTier && storedSel?.plan && !plan) {
             setPlan(storedSel.plan);
-            setBillingCycle(storedSel.billingCycle);
+            setBillingCycle(normalizeBillingCycle(storedSel.billingCycle));
         }
 
         const cryptoQuery = urlCryptoRef
@@ -425,10 +444,11 @@ export const Checkout = () => {
             !hasInitialPlan &&
             (Boolean(urlTier) || Boolean(urlCallbackRef) || callbackFailure.isFailed);
 
+        // Always fetch live catalog from /payment/plans so checkout never displays stale cached prices/discounts
         Promise.allSettled([
             api.get(cryptoQuery),
             api.get(pixQuery),
-            needsPlanFallback ? api.get('/subscription/plans') : Promise.resolve(null),
+            api.get('/payment/plans').catch(() => api.get('/subscription/plans')),
             needsPlanFallback && urlCallbackRef && !urlTier
                 ? api.post(`/subscription/check-status/${encodeURIComponent(urlCallbackRef)}`, {
                       force: false,
@@ -438,32 +458,39 @@ export const Checkout = () => {
             .then(async ([cryptoRes, pixRes, plansRes, refRes]) => {
                 if (!mounted) return;
 
-                if (needsPlanFallback && plansRes.status === 'fulfilled' && plansRes.value?.data) {
+                if (plansRes.status === 'fulfilled' && plansRes.value?.data) {
                     const catalog = normalizeWorkspacePlansCatalog(
                         Array.isArray(plansRes.value.data) ? plansRes.value.data : [],
                         isEn,
                     );
                     const refData =
                         refRes.status === 'fulfilled' ? refRes.value?.data : null;
-                    const desiredTier = String(
-                        urlTier || refData?.tier || 'BASIC',
-                    )
-                        .trim()
-                        .toUpperCase();
-                    const desiredCycle = String(
-                        urlCycle || refData?.cycle || 'MONTHLY',
-                    )
-                        .trim()
-                        .toUpperCase();
-                    const matchedPlan =
-                        catalog.find(
-                            (p: any) => String(p.tier || '').toUpperCase() === desiredTier,
-                        ) || catalog[0];
-                    if (matchedPlan) {
-                        const normalized = normalizeCheckoutPlan(matchedPlan, isEn);
-                        setPlan(normalized);
-                        setBillingCycle(desiredCycle || 'MONTHLY');
-                        saveStoredSelection(user.id, normalized, desiredCycle || 'MONTHLY');
+                    const desiredTier =
+                        normalizeWorkspaceTierClient(
+                            statePlan?.tier ||
+                                urlTier ||
+                                refData?.tier ||
+                                storedSel?.plan?.tier ||
+                                plan?.tier,
+                        ) || (needsPlanFallback ? 'BASIC' : null);
+
+                    if (desiredTier) {
+                        const matchedPlan =
+                            catalog.find((p) => p.tier === desiredTier) ||
+                            (needsPlanFallback ? catalog[0] : null);
+                        if (matchedPlan) {
+                            const resolvedCycle = normalizeBillingCycle(
+                                stateCycle ||
+                                    explicitUrlCycle ||
+                                    refData?.cycle ||
+                                    storedSel?.billingCycle ||
+                                    billingCycle,
+                                'YEARLY',
+                            );
+                            setPlan(matchedPlan);
+                            setBillingCycle(resolvedCycle);
+                            saveStoredSelection(user.id, matchedPlan, resolvedCycle);
+                        }
                     }
                 }
 
@@ -888,34 +915,28 @@ export const Checkout = () => {
         return <Navigate to="/dashboard?plans=1" replace />;
     }
 
-    const getCycleMonths = () => {
-        if (billingCycle === 'BIENNIAL') return 24;
-        if (billingCycle === 'YEARLY') return 12;
-        if (billingCycle === 'QUARTERLY') return 3;
-        return 1;
-    };
-
-    const getCycleDiscountPercent = () => {
-        if (billingCycle === 'BIENNIAL') return Number(plan.biennialDiscountPercent ?? 29);
-        if (billingCycle === 'YEARLY') return Number(plan.annualDiscountPercent ?? 25);
-        if (billingCycle === 'QUARTERLY') return Number(plan.quarterlyDiscountPercent ?? 5);
-        return Number(plan.monthlyDiscountPercent ?? 20);
-    };
-
-    const getBillTotalUSD = () => {
-        const months = getCycleMonths();
-        const discount = getCycleDiscountPercent();
-        const perMonthUsd = Number(
-            (Number(plan.monthlyPrice || 0) * (1 - discount / 100)).toFixed(2),
-        );
-        return Number((perMonthUsd * months).toFixed(2));
-    };
-
-    const baseTotalUSD = getBillTotalUSD();
+    const normalizedCycle = normalizeBillingCycle(billingCycle, 'YEARLY');
+    const cyclePricing = calculatePlanCyclePricing(plan, normalizedCycle);
+    const baseTotalUSD = cyclePricing.totalUsd;
     const appliedCreditUSD = useReferralCredits
         ? Number(Math.min(referralCreditsUsd, baseTotalUSD).toFixed(2))
         : 0;
     const payableTotalUSD = Number(Math.max(0, baseTotalUSD - appliedCreditUSD).toFixed(2));
+
+    const handleChangeBillingCycle = (nextCycle: WorkspaceBillingCycle) => {
+        if (nextCycle === normalizedCycle) return;
+        setBillingCycle(nextCycle);
+        setMethodError(null);
+        setCryptoError(null);
+        setPixError(null);
+        if (plan) {
+            saveStoredSelection(user?.id, plan, nextCycle);
+        }
+        const nextParams = new URLSearchParams(searchParams);
+        if (plan?.tier) nextParams.set('tier', String(plan.tier).toUpperCase());
+        nextParams.set('cycle', nextCycle);
+        setSearchParams(nextParams, { replace: true });
+    };
 
     const summaryMatchesActiveCrypto =
         paymentMethod === 'crypto' &&
@@ -1360,11 +1381,12 @@ export const Checkout = () => {
                     <div className="lg:col-span-4">
                         <PlanSummary
                             plan={plan}
-                            billingCycle={billingCycle}
+                            billingCycle={normalizedCycle}
                             total={summaryTotalUSD}
                             baseTotal={baseTotalUSD}
                             appliedCredit={summaryCreditUSD}
                             isEn={isEn}
+                            onChangeBillingCycle={handleChangeBillingCycle}
                         />
                     </div>
 

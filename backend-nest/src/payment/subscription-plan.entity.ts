@@ -51,16 +51,16 @@ export class SubscriptionPlanConfig {
     @Column('decimal', { precision: 10, scale: 2, default: 74 })
     usdToMznRate: number;
 
-    @Column('int', { default: 20 })
+    @Column('int', { default: 0 })
     monthlyDiscountPercent: number;
 
-    @Column('int', { default: 5 })
+    @Column('int', { default: 10 })
     quarterlyDiscountPercent: number;
 
-    @Column('int', { default: 0 })
+    @Column('int', { default: 25 })
     annualDiscountPercent: number;
 
-    @Column('int', { default: 29 })
+    @Column('int', { default: 30 })
     biennialDiscountPercent: number;
 
     @Column('int', { default: 1 })

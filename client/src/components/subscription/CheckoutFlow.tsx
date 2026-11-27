@@ -30,6 +30,13 @@ import {
     getLocalizedCountryName,
 } from '../../constants/countries';
 import { motion } from 'framer-motion';
+import {
+    calculatePlanCyclePricing,
+    getCycleDisplayLabel,
+    normalizeBillingCycle,
+    WORKSPACE_BILLING_CYCLES,
+    WorkspaceBillingCycle,
+} from '../../lib/pricingPlans';
 
 // --- Shared Types ---
 
@@ -786,6 +793,7 @@ export const PlanSummary = ({
     baseTotal,
     appliedCredit = 0,
     isEn = false,
+    onChangeBillingCycle,
 }: {
     plan: any;
     billingCycle: string;
@@ -793,51 +801,28 @@ export const PlanSummary = ({
     baseTotal?: number;
     appliedCredit?: number;
     isEn?: boolean;
+    onChangeBillingCycle?: (cycle: WorkspaceBillingCycle) => void;
 }) => {
     const [showMobileFeatures, setShowMobileFeatures] = useState(false);
 
-    const months =
-        billingCycle === 'BIENNIAL'
-            ? 24
-            : billingCycle === 'YEARLY'
-              ? 12
-              : billingCycle === 'QUARTERLY'
-                ? 3
-                : 1;
-    const discountPercent =
-        billingCycle === 'BIENNIAL'
-            ? Number(plan.biennialDiscountPercent ?? 29)
-            : billingCycle === 'YEARLY'
-              ? Number(plan.annualDiscountPercent ?? 25)
-              : billingCycle === 'QUARTERLY'
-                ? Number(plan.quarterlyDiscountPercent ?? 5)
-                : Number(plan.monthlyDiscountPercent ?? 20);
-    const subtotal = Number((Number(plan.monthlyPrice || 0) * months).toFixed(2));
-    const effectiveBaseTotal = typeof baseTotal === 'number' ? baseTotal : total;
+    const normalizedCycle = normalizeBillingCycle(billingCycle);
+    const pricing = calculatePlanCyclePricing(plan, normalizedCycle);
+    const months = pricing.months;
+    const discountPercent = pricing.discountPercent;
+    const subtotal = pricing.subtotalUsd;
+    const effectiveBaseTotal = typeof baseTotal === 'number' ? baseTotal : pricing.totalUsd;
     const discount = Math.max(0, Number((subtotal - effectiveBaseTotal).toFixed(2)));
-    const cycleLabel = isEn
-        ? billingCycle === 'BIENNIAL'
-            ? 'Biennial (24m)'
-            : billingCycle === 'YEARLY'
-              ? 'Annual Billing'
-              : billingCycle === 'QUARTERLY'
-                ? 'Quarterly (3m)'
-                : 'Monthly · Black Friday'
-        : billingCycle === 'BIENNIAL'
-          ? 'Cobrança Bianual (24 meses)'
-          : billingCycle === 'YEARLY'
-            ? 'Cobrança Anual'
-            : billingCycle === 'QUARTERLY'
-              ? 'Cobrança Trimestral (3 meses)'
-              : 'Mensal · Black Friday';
+    const cycleLabel = getCycleDisplayLabel(normalizedCycle, isEn);
     const discountTitle =
-        billingCycle === 'MONTHLY'
-            ? `Black Friday (-${discountPercent}%)`
-            : billingCycle === 'QUARTERLY'
+        normalizedCycle === 'MONTHLY'
+            ? isEn
+                ? `Monthly Discount (-${discountPercent}%)`
+                : `Desconto Mensal (-${discountPercent}%)`
+            : normalizedCycle === 'QUARTERLY'
               ? isEn
                   ? `Quarterly Discount (-${discountPercent}%)`
                   : `Desconto Trimestral (-${discountPercent}%)`
-              : billingCycle === 'BIENNIAL'
+              : normalizedCycle === 'BIENNIAL'
                 ? isEn
                     ? `Biennial Discount (-${discountPercent}%)`
                     : `Desconto Bianual (-${discountPercent}%)`
@@ -866,16 +851,61 @@ export const PlanSummary = ({
                         </span>
                     </div>
                 </div>
+                {onChangeBillingCycle && (
+                    <div className="grid grid-cols-2 gap-1.5 mt-3">
+                        {WORKSPACE_BILLING_CYCLES.map((cycleOption) => {
+                            const optPricing = calculatePlanCyclePricing(plan, cycleOption);
+                            const active = cycleOption === normalizedCycle;
+                            return (
+                                <button
+                                    key={cycleOption}
+                                    type="button"
+                                    onClick={() => onChangeBillingCycle(cycleOption)}
+                                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer flex items-center justify-between gap-1 ${
+                                        active
+                                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
+                                            : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                                    }`}
+                                >
+                                    <span className="truncate">
+                                        {getCycleDisplayLabel(cycleOption, isEn, true)}
+                                    </span>
+                                    {optPricing.discountPercent > 0 && (
+                                        <span
+                                            className={`text-[10px] font-extrabold shrink-0 ${
+                                                active ? 'text-emerald-200' : 'text-emerald-600'
+                                            }`}
+                                        >
+                                            -{optPricing.discountPercent}%
+                                        </span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {/* Price Breakdown (Strictly USD) */}
             <div className="space-y-2 py-0.5 text-sm">
                 <div className="flex justify-between text-slate-600">
-                    <span>{isEn ? 'Base Price' : 'Preço Base'}</span>
+                    <span>
+                        {isEn
+                            ? `Base Price (${months} ${months === 1 ? 'month' : 'months'})`
+                            : `Preço Base (${months} ${months === 1 ? 'mês' : 'meses'})`}
+                    </span>
                     <span className="font-mono text-slate-800 font-semibold">
                         $ {subtotal.toFixed(2)} USD
                     </span>
                 </div>
+                {months > 1 && (
+                    <div className="flex justify-between text-xs text-slate-500">
+                        <span>{isEn ? 'Effective Monthly Rate' : 'Equivalente Mensal'}</span>
+                        <span className="font-mono font-semibold text-slate-700">
+                            $ {pricing.effectiveMonthlyUsd.toFixed(2)} USD/{isEn ? 'mo' : 'mês'}
+                        </span>
+                    </div>
+                )}
                 {discount > 0 && discountPercent > 0 && (
                     <div className="flex justify-between text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-2 rounded-xl border border-emerald-200 text-xs sm:text-sm">
                         <span>{discountTitle}</span>
