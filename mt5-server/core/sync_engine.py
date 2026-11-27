@@ -276,6 +276,18 @@ class SyncEngine:
             logger.debug(f"Limpeza preventiva de liveupdate ignorada: {e}")
 
     @staticmethod
+    def is_low_ram_single_terminal_mode() -> bool:
+        """
+        Retorna True em VPS enxuta (<= 4 GB RAM), onde apenas 1 terminal64.exe permanece
+        aberto por vez (time-slicing via RAM-RECLAIM) para evitar erro 10048 na porta 22346 e OOM.
+        """
+        try:
+            total_mb = psutil.virtual_memory().total / (1024 * 1024)
+            return total_mb > 0 and total_mb <= 4096.0
+        except Exception:
+            return False
+
+    @staticmethod
     def _reclaim_memory_from_other_terminals(
         keep_path: Optional[str] = None,
         min_free_mb: float = 350.0,
@@ -284,7 +296,8 @@ class SyncEngine:
     ) -> int:
         """
         Em VPS com pouca RAM (ex.: 2 GB) ou após timeout persistente de IPC (-10005 / porta 22346),
-        encerra outras instâncias concorrentes de terminal64.exe antes de inicializar a conta alvo.
+        encerra outras instâncias concorrentes de terminal64.exe antes de inicializar a conta alvo
+        e aguarda a liberação real dos processos/porta TCP pelo Windows.
         """
         import os
         avail_mb = 0.0
@@ -304,6 +317,7 @@ class SyncEngine:
 
         norm_keep = os.path.normcase(os.path.abspath(keep_path)) if keep_path else None
         reclaimed = 0
+        killed_procs = []
         for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
                 name = (proc.info.get('name') or '').lower()
@@ -319,9 +333,17 @@ class SyncEngine:
                         f"para liberar RAM antes de inicializar a conta alvo (RAM livre: {round(avail_mb, 1)} MB)..."
                     )
                     proc.kill()
+                    killed_procs.append(proc)
                     reclaimed += 1
             except Exception:
                 pass
+
+        if killed_procs:
+            try:
+                psutil.wait_procs(killed_procs, timeout=5.0)
+            except Exception:
+                pass
+            time.sleep(1.0)
         return reclaimed
 
     @staticmethod
@@ -906,6 +928,8 @@ class SyncEngine:
                         mt5.shutdown()
                     except Exception:
                         pass
+                    self.connected_account = None
+                    self.active_terminal_path = None
                     self._reclaim_memory_from_other_terminals(keep_path=term_path)
                     init_ok = self._run_with_dialog_watchdog(
                         lambda: _init_with_or_without_creds(45000),
@@ -1817,6 +1841,85 @@ class SyncEngine:
                     trades=[]
                 )
 
+    @staticmethod
+    def _resolve_mt5_symbol(requested_symbol: str, broker_symbols: Optional[List[str]] = None) -> Optional[str]:
+        """
+        Resolve o nome exato (case-sensitive) de um símbolo no terminal MT5 conectado.
+        Corrige divergências de caixa e sufixos de corretora (ex.: 'EURUSDM' -> 'EURUSDm',
+        'NAS100.X' -> 'NAS100.x', 'XAUUSD' -> 'XAUUSDm' ou 'XAUUSD.x').
+        """
+        import re
+
+        clean = (requested_symbol or "").strip()
+        if not clean:
+            return None
+
+        # 1. Caminho rápido: tenta match literal direto no MT5
+        try:
+            if mt5.symbol_select(clean, True):
+                return clean
+        except Exception:
+            pass
+
+        # 2. Busca no catálogo de símbolos da corretora
+        catalog = broker_symbols
+        if catalog is None:
+            try:
+                raw_syms = mt5.symbols_get() or []
+                catalog = [str(getattr(s, "name", "") or "") for s in raw_syms if getattr(s, "name", None)]
+            except Exception:
+                catalog = []
+
+        if not catalog:
+            return clean
+
+        lower_target = clean.lower()
+        # 2a. Match exato case-insensitive ('EURUSDM' -> 'EURUSDm', 'NAS100.X' -> 'NAS100.x')
+        for sym in catalog:
+            if sym.lower() == lower_target:
+                try:
+                    mt5.symbol_select(sym, True)
+                except Exception:
+                    pass
+                return sym
+
+        # 2b. Match normalizado sem pontuação ('NAS100X' <-> 'NAS100.x')
+        norm_target = re.sub(r"[^a-z0-9]", "", lower_target)
+        if norm_target:
+            for sym in catalog:
+                if re.sub(r"[^a-z0-9]", "", sym.lower()) == norm_target:
+                    try:
+                        mt5.symbol_select(sym, True)
+                    except Exception:
+                        pass
+                    return sym
+
+            # 2c. Match por prefixo com sufixo curto de corretora ('XAUUSD' -> 'XAUUSDm', 'XAUUSD.x', 'XAUUSD.raw')
+            # ou removendo sufixo único ao final ('EURUSDM' -> 'EURUSD')
+            base_candidates = [norm_target]
+            if len(norm_target) >= 7 and norm_target[-1] in ("m", "c", "x", "p", "r", "e"):
+                base_candidates.append(norm_target[:-1])
+
+            best_match = None
+            for base in base_candidates:
+                matches = []
+                for sym in catalog:
+                    sym_norm = re.sub(r"[^a-z0-9]", "", sym.lower())
+                    if sym_norm == base or (sym_norm.startswith(base) and 0 < len(sym_norm) - len(base) <= 4):
+                        matches.append(sym)
+                if matches:
+                    matches.sort(key=lambda s: (len(s), s))
+                    best_match = matches[0]
+                    break
+            if best_match:
+                try:
+                    mt5.symbol_select(best_match, True)
+                except Exception:
+                    pass
+                return best_match
+
+        return None
+
     def fetch_candle_batches(
         self,
         symbols: List[str],
@@ -1855,15 +1958,40 @@ class SyncEngine:
             to_srv_ts = (to_ts_ms / 1000.0 + curr_offset_sec) if (to_ts_ms and to_ts_ms > 0) else now_srv_ts
             to_dt = datetime.datetime.fromtimestamp(to_srv_ts, tz=datetime.timezone.utc)
 
+            broker_symbols_cache: Optional[List[str]] = None
             batches: List[Dict[str, Any]] = []
+            seen_resolved = set()
             for raw_sym in (symbols or [])[:8]:
-                clean_sym = (raw_sym or "").strip()
-                if not clean_sym:
+                req_sym = (raw_sym or "").strip()
+                if not req_sym:
                     continue
+
+                # Resolve símbolo case-sensitive no broker (lazily carrega mt5.symbols_get() apenas se necessário)
+                clean_sym = None
                 try:
-                    mt5.symbol_select(clean_sym, True)
+                    if mt5.symbol_select(req_sym, True):
+                        clean_sym = req_sym
                 except Exception:
                     pass
+                if clean_sym is None:
+                    if broker_symbols_cache is None:
+                        try:
+                            raw_syms = mt5.symbols_get() or []
+                            broker_symbols_cache = [
+                                str(getattr(s, "name", "") or "") for s in raw_syms if getattr(s, "name", None)
+                            ]
+                        except Exception:
+                            broker_symbols_cache = []
+                    clean_sym = self._resolve_mt5_symbol(req_sym, broker_symbols=broker_symbols_cache)
+                    if clean_sym and clean_sym != req_sym:
+                        logger.info(f"[OHLCV-BATCH] Símbolo resolvido no broker '{active_srv}': '{req_sym}' -> '{clean_sym}'")
+
+                if not clean_sym:
+                    logger.warning(f"[OHLCV-BATCH] Símbolo '{req_sym}' não encontrado no servidor '{active_srv}'. Ignorando.")
+                    continue
+                if clean_sym in seen_resolved:
+                    continue
+                seen_resolved.add(clean_sym)
 
                 for tf_str in (timeframes or ["15m"]):
                     mt5_tf = tf_map.get(tf_str, getattr(mt5, "TIMEFRAME_M15", 15))

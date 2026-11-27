@@ -1185,7 +1185,7 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
                     accountInfo.server || account.broker || '',
                     undefined,
                     accountInfo.accountId,
-                    { priority: 2 }
+                    { priority: 2, accountUuid: account.id }
                 );
                 this.logger.log(`[AUTO-RECONCILE] Enfileirado FORCE_FULL_SYNC automático para recuperar todo o histórico da conta ${cleanLogin}.`);
             }
@@ -1664,21 +1664,25 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             this.accountTelemetry.set(cleanLogin, existingTel);
         }
 
-        // Automatically pull historical 500-candle OHLCV batches for all synced trade symbols to support Backtesting & Replay
-        this.prefetchCandleBatchesForSyncedTrades(
-            cleanLogin,
-            server || account.broker || '',
-            accountIdNum,
-            normalizedTrades,
-        ).catch((err) => {
-            this.logger.debug(`Background OHLCV batch prefetch after trade sync: ${err.message}`);
-        });
+        // Automatically pull historical 500-candle OHLCV batches ONLY when new trades were persisted
+        // (avoids spawning redundant FETCH_MARKET_BATCHES terminal switches on startup reconciliation when savedCount === 0).
+        if (savedCount > 0) {
+            this.prefetchCandleBatchesForSyncedTrades(
+                cleanLogin,
+                server || account.broker || '',
+                accountIdNum,
+                normalizedTrades,
+                account.id,
+            ).catch((err) => {
+                this.logger.debug(`Background OHLCV batch prefetch after trade sync: ${err.message}`);
+            });
+        }
 
         return { success: true, saved: savedCount, lastTicket: lastDealTicket };
     }
 
     /**
-     * Automatically pulls 500-candle historical OHLCV batches whenever trades are synchronized,
+     * Automatically pulls 500-candle historical OHLCV batches whenever new trades are synchronized,
      * both from the MT5 terminal (via FETCH_MARKET_BATCHES task) and into the Redis batch cache.
      */
     private async prefetchCandleBatchesForSyncedTrades(
@@ -1686,16 +1690,22 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         server: string,
         accountIdNum: number,
         trades: Array<{ symbol: string; openTime?: Date | null; closeTime?: Date | null }>,
+        accountUuid?: string,
     ) {
         if (!trades || trades.length === 0) return;
 
-        const uniqueSymbols = Array.from(
-            new Set(
-                trades
-                    .map((t) => (t.symbol || '').trim().toUpperCase())
-                    .filter((s) => s && s !== 'UNKNOWN'),
-            ),
-        ).slice(0, 6);
+        // Preserva o casing exato do símbolo da corretora no MT5 (ex.: 'EURUSDm', 'NAS100.x'),
+        // pois mt5.symbol_select / copy_rates são case-sensitive; deduplica ignorando caixa.
+        const seenUpper = new Set<string>();
+        const uniqueSymbols: string[] = [];
+        for (const t of trades) {
+            const exactSym = (t.symbol || '').trim();
+            const upperKey = exactSym.toUpperCase();
+            if (!exactSym || upperKey === 'UNKNOWN' || seenUpper.has(upperKey)) continue;
+            seenUpper.add(upperKey);
+            uniqueSymbols.push(exactSym);
+            if (uniqueSymbols.length >= 6) break;
+        }
 
         if (uniqueSymbols.length === 0) return;
 
@@ -1724,6 +1734,7 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
                 accountIdNum,
                 {
                     priority: 4,
+                    accountUuid,
                     symbols: uniqueSymbols,
                     timeframes: ['15m', '5m', '1h'],
                     fromTs: minTs,

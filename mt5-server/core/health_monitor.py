@@ -69,13 +69,16 @@ class HealthMonitor:
     SUSTAINED_CPU_MIN_SECONDS = 15.0
     SUSTAINED_MEM_MIN_STREAK = 2
     COOLDOWN_EARLY_RECOVERY_GRACE_SEC = 5.0
+    MAX_WATCHDOG_ATTEMPTS = 3
 
     def __init__(self, process_manager: MT5ProcessManager):
         self.process_manager = process_manager
         # Histórico de recuperações por conta: account_id -> list of timestamps
         self.recovery_history: Dict[int, List[float]] = {}
-        # Cooldown ativo por conta: account_id -> timestamp de expiração do cooldown
+        # Cooldown ativo por conta (recurso/extração): account_id -> timestamp de expiração
         self.cooldowns: Dict[int, float] = {}
+        # Cooldown exclusivo de alertas do Watchdog (evita spam 4/3, 5/3 mesmo com ENABLE_RESOURCE_GUARD=false)
+        self.watchdog_cooldowns: Dict[int, float] = {}
         
         # Anti-Loop global de recursos para sincronização e extração
         self.sync_cooldown_until: float = 0
@@ -326,12 +329,19 @@ class HealthMonitor:
                 f"Conta suspensa por 300 segundos. Memória atual: {m['memory_used_mb']} MB / {m['memory_total_mb']} MB ({m['memory_percent']}%)."
             )
 
-    def collect_telemetry(self, monitored_accounts: List[int]) -> WorkerHeartbeat:
+    def collect_telemetry(
+        self,
+        monitored_accounts: List[int],
+        account_uuid_map: Optional[Dict[int, Optional[str]]] = None,
+    ) -> WorkerHeartbeat:
         """Coleta telemetria completa com memória em MB e porcentagem"""
         metrics = self.get_resource_metrics()
+        uuid_map = account_uuid_map or {}
 
         active_terminals_count = sum(
-            1 for acc_id in monitored_accounts if self.process_manager.is_running(acc_id)
+            1
+            for acc_id in monitored_accounts
+            if self.process_manager.is_running(acc_id, account_uuid=uuid_map.get(acc_id))
         )
 
         return WorkerHeartbeat(
@@ -347,10 +357,22 @@ class HealthMonitor:
             timestamp=datetime.now(timezone.utc),
         )
 
-    def check_and_recover_dead_terminals(self, monitored_accounts: List[int]) -> List[int]:
-        """Identifica instâncias inativas aplicando Circuit Breaker e Anti-Loop"""
+    def check_and_recover_dead_terminals(
+        self,
+        monitored_accounts: List[int],
+        account_uuid_map: Optional[Dict[int, Optional[str]]] = None,
+        expected_running_accounts: Optional[List[int]] = None,
+        parked_accounts: Optional[set] = None,
+    ) -> List[int]:
+        """
+        Identifica instâncias que deveriam estar ativas mas caíram inesperadamente,
+        aplicando Circuit Breaker e Anti-Loop. Contas estacionadas intencionalmente
+        (RAM-RECLAIM em VPS <=4GB ou HIBERNATION-COLD) são ignoradas sem gerar falso alerta.
+        """
         metrics = self.get_resource_metrics()
         now = time.time()
+        uuid_map = account_uuid_map or {}
+        parked_set = set(parked_accounts or ())
 
         # 1. CIRCUIT BREAKER DE RECURSOS: Não reinicia terminais se a VPS estiver sem RAM ou CPU (apenas se ativado)
         if settings.enable_resource_guard and metrics["is_critical"]:
@@ -362,35 +384,63 @@ class HealthMonitor:
             )
             return []
 
+        if expected_running_accounts is not None:
+            expected_set = set(expected_running_accounts)
+            for acc_id in monitored_accounts:
+                if acc_id not in expected_set:
+                    self.recovery_history.pop(acc_id, None)
+                    self.watchdog_cooldowns.pop(acc_id, None)
+            accounts_to_check = [acc_id for acc_id in monitored_accounts if acc_id in expected_set]
+        else:
+            accounts_to_check = list(monitored_accounts)
+
         dead_accounts = []
-        for acc_id in monitored_accounts:
+        for acc_id in accounts_to_check:
+            if acc_id in parked_set:
+                self.recovery_history.pop(acc_id, None)
+                self.watchdog_cooldowns.pop(acc_id, None)
+                continue
+
             # 2. ANTI-LOOP COOLDOWN: Checa se a conta está em quarentena por falhas repetidas
-            cooldown_until = self.cooldowns.get(acc_id, 0)
+            cooldown_until = max(self.cooldowns.get(acc_id, 0), self.watchdog_cooldowns.get(acc_id, 0))
             if now < cooldown_until:
                 remaining_sec = int(cooldown_until - now)
                 logger.debug(f"[Anti-Loop] Conta {acc_id} em cooldown de recuperação ({remaining_sec}s restantes).")
                 continue
 
-            if not self.process_manager.is_running(acc_id):
-                # Registra tentativa e checa limite de 3 falhas nos últimos 300 segundos
-                history = self.recovery_history.setdefault(acc_id, [])
-                history = [t for t in history if now - t < 300]
-                history.append(now)
-                self.recovery_history[acc_id] = history
+            acc_uuid = uuid_map.get(acc_id)
+            if self.process_manager.is_running(acc_id, account_uuid=acc_uuid):
+                self.recovery_history.pop(acc_id, None)
+                self.watchdog_cooldowns.pop(acc_id, None)
+                continue
 
-                if settings.enable_resource_guard and len(history) >= 3:
-                    # Ativa cooldown de 5 minutos (300 segundos) para quebrar o loop infinito
+            # Registra tentativa e limita estritamente a MAX_WATCHDOG_ATTEMPTS (3) em 300 segundos
+            history = self.recovery_history.setdefault(acc_id, [])
+            history = [t for t in history if now - t < 300]
+            history.append(now)
+            self.recovery_history[acc_id] = history
+
+            if len(history) >= self.MAX_WATCHDOG_ATTEMPTS:
+                self.watchdog_cooldowns[acc_id] = now + 300
+                if settings.enable_resource_guard:
                     self.cooldowns[acc_id] = now + 300
                     logger.critical(
-                        f"[ANTI-LOOP ATIVADO] Conta {acc_id} falhou 3 vezes consecutivas em 5 minutos! "
+                        f"[ANTI-LOOP ATIVADO] Conta {acc_id} falhou {self.MAX_WATCHDOG_ATTEMPTS} vezes consecutivas em 5 minutos! "
                         f"Terminal suspenso por 300s. Memória atual: {metrics['memory_used_mb']} MB / {metrics['memory_total_mb']} MB ({metrics['memory_percent']}%)."
                     )
-                    continue
+                else:
+                    logger.warning(
+                        f"[WATCHDOG-BACKOFF] Conta {acc_id} atingiu {self.MAX_WATCHDOG_ATTEMPTS}/{self.MAX_WATCHDOG_ATTEMPTS} "
+                        f"alertas de terminal inativo em 5 min. Alertas silenciados por 300s "
+                        f"(Memória: {metrics['memory_percent']}%, CPU: {metrics['cpu_percent']}%)."
+                    )
+                continue
 
-                logger.warning(
-                    f"Watchdog detectou terminal inativo para conta {acc_id} "
-                    f"(Tentativa {len(history)}/3). Memória: {metrics['memory_percent']}%, CPU: {metrics['cpu_percent']}%"
-                )
-                dead_accounts.append(acc_id)
+            logger.warning(
+                f"Watchdog detectou terminal inativo para conta {acc_id} "
+                f"(Tentativa {len(history)}/{self.MAX_WATCHDOG_ATTEMPTS}). "
+                f"Memória: {metrics['memory_percent']}%, CPU: {metrics['cpu_percent']}%"
+            )
+            dead_accounts.append(acc_id)
 
         return dead_accounts

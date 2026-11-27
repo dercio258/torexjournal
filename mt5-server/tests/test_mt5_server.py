@@ -689,5 +689,195 @@ class TestIpcTimeoutRecovery(unittest.TestCase):
         self.assertEqual(mock_mt5.initialize.call_args_list[-1].kwargs.get("server"), "GoatFunded-Server2")
 
 
+class TestProductionLogBugFixes(unittest.TestCase):
+    """Testes de regressão para Watchdog 4/3, UUID split, símbolos case-sensitive e thrashing em VPS <=4GB."""
+
+    def test_watchdog_caps_attempts_at_3_even_when_resource_guard_disabled_and_ignores_parked_peers(self):
+        from core.health_monitor import HealthMonitor
+
+        orig_guard = settings.enable_resource_guard
+        settings.enable_resource_guard = False
+        try:
+            pm = MagicMock()
+            pm.is_running.return_value = False
+            hm = HealthMonitor(pm)
+
+            # 1) Em modo single-terminal (VPS <=4GB), apenas a conta ativa é fiscalizada;
+            # conta estacionada por RAM-RECLAIM (222707555) não dispara falso crash.
+            dead = hm.check_and_recover_dead_terminals(
+                monitored_accounts=[222707555, 444586125],
+                account_uuid_map={222707555: None, 444586125: "1be1066d-954b-4a45-94ce-cb60eeb8ca3d"},
+                expected_running_accounts=[444586125],
+            )
+            self.assertEqual(dead, [444586125])
+            pm.is_running.assert_called_with(444586125, account_uuid="1be1066d-954b-4a45-94ce-cb60eeb8ca3d")
+
+            # 2) Mesmo com ENABLE_RESOURCE_GUARD=false, Watchdog limita a 3 tentativas e entra em backoff
+            # (jamais emite Tentativa 4/3, 5/3 ou eventos infinitos).
+            dead_2 = hm.check_and_recover_dead_terminals([444586125], expected_running_accounts=[444586125])
+            dead_3 = hm.check_and_recover_dead_terminals([444586125], expected_running_accounts=[444586125])
+            dead_4 = hm.check_and_recover_dead_terminals([444586125], expected_running_accounts=[444586125])
+            self.assertEqual(dead_2, [444586125])
+            self.assertEqual(dead_3, [])
+            self.assertEqual(dead_4, [])
+            self.assertLessEqual(len(hm.recovery_history.get(444586125, [])), 3)
+        finally:
+            settings.enable_resource_guard = orig_guard
+
+    def test_process_manager_resolves_registered_uuid_without_creating_ghost_dir_and_stops_external_pid(self):
+        from core.process_manager import MT5ProcessManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pm = MT5ProcessManager()
+            pm.instances_dir = Path(tmp) / "instances"
+            pm.instances_dir.mkdir(parents=True, exist_ok=True)
+            pm.register_account_uuid(444586125, "1be1066d-954b-4a45-94ce-cb60eeb8ca3d")
+
+            expected_exe = str((pm.instances_dir / "acc_1be1066d-954b-4a45-94ce-cb60eeb8ca3d" / "terminal64.exe").resolve())
+            fake_proc = MagicMock()
+            fake_proc.info = {
+                "pid": 4100,
+                "name": "terminal64.exe",
+                "exe": expected_exe,
+                "status": "running",
+            }
+            with patch("core.process_manager.psutil.process_iter", return_value=[fake_proc]):
+                self.assertTrue(pm.is_running(444586125))
+            # Não deve ter criado pasta fantasma acc_444586125 nem acc_1be1066d durante is_running
+            self.assertFalse((pm.instances_dir / "acc_444586125").exists())
+            self.assertEqual(pm.pids.get(444586125), 4100)
+
+            # stop_terminal descobre PID mesmo quando self.pids ainda está vazio (terminal iniciado por mt5.initialize)
+            pm.pids.clear()
+            mock_ps_proc = MagicMock()
+            with patch("core.process_manager.psutil.process_iter", return_value=[fake_proc]), \
+                 patch("core.process_manager.psutil.Process", return_value=mock_ps_proc):
+                self.assertTrue(pm.stop_terminal(444586125))
+            mock_ps_proc.terminate.assert_called_once()
+
+    def test_fetch_candle_batches_resolves_case_sensitive_broker_symbols(self):
+        engine = SyncEngine()
+        mock_mt5 = MagicMock()
+        mock_mt5.account_info.return_value = SimpleNamespace(login=222707555, server="Exness-MT5Real30")
+        mock_mt5.symbols_get.return_value = [
+            SimpleNamespace(name="EURUSDm", visible=True),
+            SimpleNamespace(name="BTCUSDm", visible=True),
+            SimpleNamespace(name="NAS100.x", visible=True),
+            SimpleNamespace(name="XAUUSDm", visible=True),
+        ]
+
+        # Somente nomes exatos do broker retornam True em symbol_select e velas em copy_rates_from
+        valid_exact = {"EURUSDm", "BTCUSDm", "NAS100.x", "XAUUSDm"}
+        mock_mt5.symbol_select.side_effect = lambda sym, enable=True: sym in valid_exact
+        sample_bar = [{"time": 1764200000, "open": 1.1, "high": 1.2, "low": 1.0, "close": 1.15, "tick_volume": 42}]
+        mock_mt5.copy_rates_range.side_effect = lambda sym, tf, f, t: sample_bar if sym in valid_exact else None
+        mock_mt5.copy_rates_from.side_effect = lambda sym, tf, t, n: sample_bar if sym in valid_exact else None
+        mock_mt5.copy_rates_from_pos.side_effect = lambda sym, tf, p, n: sample_bar if sym in valid_exact else None
+
+        with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
+             patch.object(sync_engine_mod, "mt5", mock_mt5, create=True), \
+             patch.object(engine, "_detect_broker_tz_profile", return_value={"server": "Exness-MT5Real30", "offsetSec": 0, "mode": "UTC"}):
+            batches = engine.fetch_candle_batches(
+                symbols=["EURUSDM", "NAS100.X", "XAUUSD"],
+                timeframes=["15m"],
+                chunk_size=500,
+            )
+
+        extracted_syms = [b["symbol"] for b in batches]
+        self.assertEqual(extracted_syms, ["EURUSDm", "NAS100.x", "XAUUSDm"])
+
+    def test_worker_manager_reuses_connected_account_for_calendar_and_passes_uuid_on_market_batches(self):
+        from core.worker_manager import WorkerManager
+        from models.schemas import Task, TaskType
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig_data_dir = settings.data_dir
+            settings.data_dir = tmp
+            try:
+                mgr = WorkerManager()
+                mgr.is_running = True
+                mgr.account_manager.add_or_update_account(
+                    account_id=222707555,
+                    login="222707555",
+                    server="Exness-MT5Real30",
+                    password="Secret1",
+                )
+                mgr.account_manager.add_or_update_account(
+                    account_id=444586125,
+                    login="444586125",
+                    server="GoatFunded-Server2",
+                    password="Secret2",
+                    account_uuid="1be1066d-954b-4a45-94ce-cb60eeb8ca3d",
+                )
+
+                # Simula conta 444586125 já conectada no terminal atual
+                mgr.sync_engine.connected_account = 444586125
+                mgr.process_manager.get_or_prepare_isolated_terminal_exe = MagicMock(
+                    return_value="C:\\fake\\acc_1be1066d\\terminal64.exe"
+                )
+                mgr.sync_engine.ensure_connected = MagicMock(return_value=True)
+                mgr.sync_engine.fetch_economic_calendar_events = MagicMock(return_value=[])
+                mgr.sync_engine.fetch_candle_batches = MagicMock(return_value=[])
+                mgr.api_client.ack_task = MagicMock(return_value=True)
+
+                # 1) Ciclo de 10min do calendário DEVE reutilizar conta 444586125 (sem trocar para 222707555!)
+                mgr._run_periodic_calendar_sync_10m()
+                mgr.sync_engine.ensure_connected.assert_called_once()
+                self.assertEqual(mgr.sync_engine.ensure_connected.call_args.kwargs["account_id"], 444586125)
+
+                # 2) FETCH_MARKET_BATCHES sem accountUuid no payload DEVE herdar account_uuid salvo no pool!
+                task = Task(
+                    id="task-batch-1",
+                    type=TaskType.FETCH_MARKET_BATCHES,
+                    priority=4,
+                    accountId=444586125,
+                    login="444586125",
+                    server="GoatFunded-Server2",
+                    options={"symbols": ["NAS100.x"], "timeframes": ["15m"]},
+                )
+                mgr.process_manager.get_or_prepare_isolated_terminal_exe.reset_mock()
+                mgr._handle_fetch_market_batches(task)
+                self.assertEqual(
+                    mgr.process_manager.get_or_prepare_isolated_terminal_exe.call_args.kwargs["account_uuid"],
+                    "1be1066d-954b-4a45-94ce-cb60eeb8ca3d",
+                )
+
+                # 3) Em modo low-RAM single-terminal, Watchdog NÃO emite TERMINAL_CRASH_DETECTED para conta estacionada
+                # e sincroniza primeiro a conta já conectada sem kill/reboot desnecessário.
+                mgr.sync_engine.connected_account = 444586125
+                mgr.api_client.send_event = MagicMock(return_value=True)
+                mgr._account_last_sync_ts[222707555] = 1000.0
+                mgr._account_last_sync_ts[444586125] = 1000.0
+                mgr.process_manager.is_running = MagicMock(side_effect=lambda aid, account_uuid=None: aid == 444586125)
+                synced_order = []
+                mgr._sync_single_account = MagicMock(side_effect=lambda aid, **kw: synced_order.append(aid) or {})
+                with patch.object(mgr.sync_engine, "is_low_ram_single_terminal_mode", return_value=True):
+                    mgr._run_watchdog_and_sync_cycle()
+                mgr.api_client.send_event.assert_not_called()
+                self.assertEqual(synced_order, [444586125, 222707555])
+            finally:
+                settings.data_dir = orig_data_dir
+
+    def test_reclaim_memory_waits_for_killed_terminals(self):
+        fake_proc = MagicMock()
+        fake_proc.info = {
+            "pid": 6480,
+            "name": "terminal64.exe",
+            "exe": r"C:\mt5\instances\acc_222707555\terminal64.exe",
+        }
+        low_mem = SimpleNamespace(total=2048 * 1024 * 1024, available=670 * 1024 * 1024, percent=67.3)
+        with patch("core.sync_engine.psutil.virtual_memory", return_value=low_mem), \
+             patch("core.sync_engine.psutil.process_iter", return_value=[fake_proc]), \
+             patch("core.sync_engine.psutil.wait_procs") as mock_wait, \
+             patch("core.sync_engine.time.sleep") as mock_sleep:
+            reclaimed = SyncEngine._reclaim_memory_from_other_terminals(
+                keep_path=r"C:\mt5\instances\acc_1be1066d\terminal64.exe"
+            )
+        self.assertEqual(reclaimed, 1)
+        fake_proc.kill.assert_called_once()
+        mock_wait.assert_called_once_with([fake_proc], timeout=5.0)
+        mock_sleep.assert_called_once_with(1.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

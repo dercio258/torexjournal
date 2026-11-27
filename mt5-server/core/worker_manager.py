@@ -53,6 +53,34 @@ class WorkerManager:
         self._consecutive_connect_failures: dict[int, int] = {}
         # Garante que na primeira sincronização após iniciar o worker seja feita reconciliação completa (last_ticket=0)
         self._initial_full_synced: set[int] = set()
+        # Contas estacionadas intencionalmente (ex.: HIBERNATION-COLD) para não gerar falso alerta no Watchdog
+        self._parked_accounts: set[int] = set()
+        # Controle de cooldown de extração OHLCV pós-sync para evitar re-extração redundante em reconciliações sem novos trades
+        self._account_last_ohlcv_ts: dict[int, float] = {}
+
+        # Registra todos os account_uuid persistidos no ProcessManager desde o boot (evita divergência acc_<id> vs acc_<uuid>)
+        for aid, acc in list(self.account_manager.accounts.items()):
+            if acc.account_uuid:
+                self.process_manager.register_account_uuid(aid, acc.account_uuid)
+
+    def _resolve_account_uuid(self, account_id: int, task: Optional[Task] = None) -> Optional[str]:
+        existing_acc = self.account_manager.get_account(account_id)
+        return (
+            (task.accountUuid if task else None)
+            or ((task.options or {}).get("accountUuid") if task else None)
+            or (existing_acc.account_uuid if existing_acc else None)
+        )
+
+    def _build_account_uuid_map(self, account_ids: list[int]) -> Dict[int, Optional[str]]:
+        uuid_map: Dict[int, Optional[str]] = {}
+        for aid in account_ids:
+            acc = self.account_manager.get_account(aid)
+            if acc and acc.account_uuid:
+                uuid_map[aid] = acc.account_uuid
+                self.process_manager.register_account_uuid(aid, acc.account_uuid)
+            else:
+                uuid_map[aid] = None
+        return uuid_map
 
     def _ensure_registered(self) -> bool:
         if self.is_registered:
@@ -365,7 +393,9 @@ class WorkerManager:
             ))
 
     def _handle_stop_account(self, task: Task):
-        self.process_manager.stop_terminal(task.accountId)
+        acc_uuid = self._resolve_account_uuid(task.accountId, task)
+        self.process_manager.stop_terminal(task.accountId, account_uuid=acc_uuid)
+        self._parked_accounts.discard(task.accountId)
         self.account_manager.remove_account(task.accountId)
         self.api_client.ack_task(task.id, TaskStatus.SUCCESS, "Conta e terminal encerrados.")
         self.api_client.send_event(WorkerEvent(
@@ -391,7 +421,8 @@ class WorkerManager:
             self.api_client.ack_task(task.id, TaskStatus.FAILED, "Conta não encontrada no pool.")
             return
 
-        self.process_manager.stop_terminal(task.accountId)
+        self.process_manager.stop_terminal(task.accountId, account_uuid=acc.account_uuid)
+        self._parked_accounts.discard(task.accountId)
         time.sleep(2)
         isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
             acc.account_id,
@@ -421,6 +452,7 @@ class WorkerManager:
         """
         existing_acc = self.account_manager.get_account(task.accountId)
         password = existing_acc.password if existing_acc else None
+        acc_uuid = self._resolve_account_uuid(task.accountId, task)
         normalized_server = self.sync_engine._normalize_broker_server(task.server)
 
         if task.credentialToken:
@@ -432,13 +464,16 @@ class WorkerManager:
                     login=task.login,
                     server=normalized_server,
                     password=password,
+                    account_uuid=acc_uuid,
                 )
 
+        self._parked_accounts.discard(task.accountId)
         isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
             task.accountId,
             login=task.login,
             server=normalized_server,
             password=password,
+            account_uuid=acc_uuid,
         )
         connected = self.sync_engine.ensure_connected(
             account_id=task.accountId,
@@ -510,6 +545,7 @@ class WorkerManager:
         """
         existing_acc = self.account_manager.get_account(task.accountId)
         password = existing_acc.password if existing_acc else None
+        acc_uuid = self._resolve_account_uuid(task.accountId, task)
         normalized_server = self.sync_engine._normalize_broker_server(task.server)
 
         if task.credentialToken:
@@ -521,6 +557,7 @@ class WorkerManager:
                     login=task.login,
                     server=normalized_server,
                     password=password,
+                    account_uuid=acc_uuid,
                 )
 
         logger.info(
@@ -528,11 +565,13 @@ class WorkerManager:
         )
 
         if task.login and str(task.login).strip().isdigit():
+            self._parked_accounts.discard(task.accountId)
             isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
                 task.accountId,
                 login=task.login,
                 server=normalized_server,
                 password=password,
+                account_uuid=acc_uuid,
             )
             connected = self.sync_engine.ensure_connected(
                 account_id=task.accountId,
@@ -567,16 +606,22 @@ class WorkerManager:
         )
 
     def _run_periodic_calendar_sync_10m(self):
-        """Consulta novas notícias do Calendário Econômico no MT5 a cada 10 minutos usando a conta Demo/ativa."""
+        """Consulta novas notícias do Calendário Econômico no MT5 a cada 10 minutos reutilizando o terminal já aberto."""
         try:
             active_ids = self.account_manager.get_active_account_ids()
             target_login = "DEMO_FEED"
             target_server = "MetaQuotes-Demo"
             if active_ids:
-                # Escolhe a primeira conta com login numérico válido e menos falhas consecutivas de IPC
+                # Prefere a conta JÁ conectada no MT5 para evitar matar/reiniciar o terminal à toa em VPS <=4GB!
+                prioritized_ids = list(active_ids)
+                curr_conn = self.sync_engine.connected_account
+                if curr_conn in prioritized_ids:
+                    prioritized_ids.remove(curr_conn)
+                    prioritized_ids.insert(0, curr_conn)
+
                 healthy_candidates = [
                     self.account_manager.get_account(aid)
-                    for aid in active_ids
+                    for aid in prioritized_ids
                     if self._consecutive_connect_failures.get(aid, 0) < 3
                 ]
                 acc = next((a for a in healthy_candidates if a and str(a.login).strip().isdigit()), None)
@@ -633,8 +678,30 @@ class WorkerManager:
         if not active_ids:
             return
 
-        # Watchdog: verifica terminais caídos antes da rodada
-        dead_accounts = set(self.health_monitor.check_and_recover_dead_terminals(active_ids))
+        uuid_map = self._build_account_uuid_map(active_ids)
+        low_ram_mode = self.sync_engine.is_low_ram_single_terminal_mode()
+
+        # Em VPS enxuta (<= 4 GB RAM), RAM-RECLAIM mantém apenas 1 terminal aberto por vez;
+        # portanto o Watchdog só deve fiscalizar o terminal atualmente ativo (evitando falsos alertas em contas estacionadas).
+        if low_ram_mode:
+            curr_acc = self.sync_engine.connected_account
+            expected_running = (
+                [curr_acc]
+                if curr_acc is not None and curr_acc in active_ids and curr_acc not in self._parked_accounts
+                else []
+            )
+        else:
+            expected_running = [aid for aid in active_ids if aid not in self._parked_accounts]
+
+        # Watchdog: verifica terminais caídos inesperadamente antes da rodada
+        dead_accounts = set(
+            self.health_monitor.check_and_recover_dead_terminals(
+                active_ids,
+                account_uuid_map=uuid_map,
+                expected_running_accounts=expected_running,
+                parked_accounts=self._parked_accounts,
+            )
+        )
         for acc_id in dead_accounts:
             self.api_client.send_event(WorkerEvent(
                 workerId=settings.worker_id,
@@ -647,15 +714,26 @@ class WorkerManager:
         # Verifica se há pelo menos uma conta ativa com saldo/posições para manter Sticky Session nela
         has_funded_active = any(not self._account_idle_map.get(aid, False) for aid in active_ids if aid in self._account_idle_map)
 
-        for account_id in active_ids:
+        # Prioriza sincronizar primeiro a conta JÁ conectada no terminal atual (custo ~0s, sem kill/reboot)
+        ordered_ids = list(active_ids)
+        curr_connected = self.sync_engine.connected_account
+        if curr_connected in ordered_ids:
+            ordered_ids.remove(curr_connected)
+            ordered_ids.insert(0, curr_connected)
+
+        cold_switches_this_cycle = 0
+
+        for account_id in ordered_ids:
             if not self.is_running:
                 break
             now = time.time()
             last_acc_sync = self._account_last_sync_ts.get(account_id, 0.0)
             is_idle = self._account_idle_map.get(account_id, False)
             failures = self._consecutive_connect_failures.get(account_id, 0)
-            # Se a conta está com saldo $0.00 e 0 posições (ex: 408953138) e existe outra conta ativa operando (ex: 6371945),
-            # aplica cooldown de 30 minutos (1800s) para NÃO deslogar a conta ativa do terminal único MT5 (porta 22346)!
+            is_currently_connected = (self.sync_engine.connected_account == account_id)
+
+            # Se a conta está com saldo $0.00 e 0 posições e existe outra conta ativa operando,
+            # aplica cooldown de 30 minutos (1800s) para NÃO deslogar a conta ativa do terminal MT5!
             if failures >= 5:
                 min_cooldown = 1800.0
             elif failures == 4:
@@ -666,15 +744,33 @@ class WorkerManager:
                 min_cooldown = 180.0
             elif is_idle and has_funded_active:
                 min_cooldown = 1800.0
+            elif low_ram_mode and len(active_ids) > 1:
+                # Em VPS <=4GB: conta já aberta atualiza rápido (45s sem reboot); troca fria de conta a cada 180s
+                min_cooldown = 45.0 if is_currently_connected else 180.0
             elif len(active_ids) > 1:
                 min_cooldown = 90.0
             else:
                 min_cooldown = max(float(settings.sync_interval_seconds), 15.0)
 
-            if now - last_acc_sync < min_cooldown:
+            # Se o Watchdog detectou queda real do terminal esperado, recupera imediatamente sem esperar cooldown
+            if account_id not in dead_accounts and (now - last_acc_sync < min_cooldown):
                 continue
 
+            # Em modo single-terminal (VPS <=4GB), após o sync inicial de boot, limita a 1 troca fria por ciclo
+            # para evitar rajadas kill->boot->kill->boot consecutivas que saturam CPU em 90%+.
+            if (
+                low_ram_mode
+                and not is_currently_connected
+                and last_acc_sync > 0.0
+                and cold_switches_this_cycle >= 1
+                and account_id not in dead_accounts
+            ):
+                continue
+
+            prev_connected = self.sync_engine.connected_account
             self._sync_single_account(account_id)
+            if low_ram_mode and prev_connected is not None and prev_connected != account_id:
+                cold_switches_this_cycle += 1
 
     def _sync_single_account(self, account_id: int, force_full: bool = False) -> Optional[Dict[str, Any]]:
         acc = self.account_manager.get_account(account_id)
@@ -689,6 +785,7 @@ class WorkerManager:
             return None
 
         try:
+            self._parked_accounts.discard(account_id)
             self._account_last_sync_ts[account_id] = time.time()
             normalized_server = self.sync_engine._normalize_broker_server(acc.server)
             isolated_path = self.process_manager.get_or_prepare_isolated_terminal_exe(
@@ -837,14 +934,23 @@ class WorkerManager:
                         tz_sync_version=2,
                     )
                     # 5. Extrai automaticamente lotes históricos de 500 velas (OHLCV) para os ativos operados nos trades sincronizados
+                    # Evita re-extração redundante em reconciliações sem novos trades se já extraiu nos últimos 30 min.
                     try:
+                        saved_cnt = getattr(self.api_client, "last_saved_trades_count", None)
+                        last_ohlcv_ts = self._account_last_ohlcv_ts.get(account_id, 0.0)
+                        should_extract_ohlcv = (
+                            saved_cnt is None
+                            or saved_cnt > 0
+                            or (time.time() - last_ohlcv_ts) >= 1800.0
+                        )
                         traded_syms = sorted(list({t.symbol for t in deals_payload.trades if t.symbol}))[:6]
-                        if traded_syms:
+                        if traded_syms and should_extract_ohlcv:
                             candle_batches = self.sync_engine.fetch_candle_batches(
                                 symbols=traded_syms,
                                 timeframes=["15m", "5m", "1h"],
                                 chunk_size=500,
                             )
+                            self._account_last_ohlcv_ts[account_id] = time.time()
                             if candle_batches:
                                 self.api_client.sync_candles({
                                     "accountId": account_id,
@@ -884,7 +990,10 @@ class WorkerManager:
                         logger.info(
                             f"[HIBERNATION-COLD] Pausando terminal ocioso da conta {acc.login} ($0 saldo / 0 posições) para economizar RAM."
                         )
-                        self.process_manager.stop_terminal(account_id)
+                        self._parked_accounts.add(account_id)
+                        self.process_manager.stop_terminal(account_id, account_uuid=acc.account_uuid)
+                        if self.sync_engine.connected_account == account_id:
+                            self.sync_engine.connected_account = None
                 except Exception:
                     pass
 
@@ -917,12 +1026,17 @@ class WorkerManager:
             ]
         for aid in matching_ids:
             try:
-                self.process_manager.stop_terminal(aid)
+                acc_uuid = self._resolve_account_uuid(aid)
+                self.process_manager.stop_terminal(aid, account_uuid=acc_uuid)
             except Exception:
                 pass
+            self._parked_accounts.discard(aid)
+            if self.sync_engine.connected_account == aid:
+                self.sync_engine.connected_account = None
             self.account_manager.remove_account(aid)
             self._account_idle_map.pop(aid, None)
             self._account_last_sync_ts.pop(aid, None)
+            self._account_last_ohlcv_ts.pop(aid, None)
             logger.warning(f"[EVICTION] Conta {clean_target} (ID: {aid}) desacoplada deste worker com segurança.")
 
     # -------------------------------------------------------------
@@ -931,7 +1045,8 @@ class WorkerManager:
     def _send_heartbeat(self):
         try:
             monitored = self.account_manager.get_active_account_ids()
-            heartbeat_data = self.health_monitor.collect_telemetry(monitored)
+            uuid_map = self._build_account_uuid_map(monitored)
+            heartbeat_data = self.health_monitor.collect_telemetry(monitored, account_uuid_map=uuid_map)
             resp = self.api_client.heartbeat(heartbeat_data)
             if isinstance(resp, dict):
                 for evict_login in (resp.get("evictLogins") or []):

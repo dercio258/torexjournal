@@ -17,6 +17,13 @@ class MT5ProcessManager:
         self.instances_dir = Path(settings.instances_dir).resolve()
         self.processes: Dict[int, subprocess.Popen] = {}
         self.pids: Dict[int, int] = {}
+        self.account_uuids: Dict[int, str] = {}
+
+    def register_account_uuid(self, account_id: int, account_uuid: Optional[str]) -> None:
+        """Registra o UUID canônico da conta para evitar divergência entre acc_<uuid> e acc_<id>."""
+        clean_uuid = (account_uuid or "").strip()
+        if clean_uuid:
+            self.account_uuids[int(account_id)] = clean_uuid
 
     @staticmethod
     def _sanitize_ini_value(value: Optional[str]) -> str:
@@ -129,12 +136,22 @@ class MT5ProcessManager:
         scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
         return scored[0][3]
 
-    def get_account_instance_dir(self, account_id: int, account_uuid: Optional[str] = None) -> Path:
+    def get_account_instance_dir(
+        self,
+        account_id: int,
+        account_uuid: Optional[str] = None,
+        create: bool = True,
+    ) -> Path:
         raw_scope = (account_uuid or "").strip() if account_uuid else ""
+        if raw_scope:
+            self.account_uuids[int(account_id)] = raw_scope
+        else:
+            raw_scope = self.account_uuids.get(int(account_id), "")
         safe_scope = "".join(c for c in raw_scope if c.isalnum() or c in ("-", "_"))[:48] if raw_scope else ""
         dir_name = f"acc_{safe_scope}" if safe_scope else f"acc_{account_id}"
         instance_dir = (self.instances_dir / dir_name).resolve()
-        instance_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            instance_dir.mkdir(parents=True, exist_ok=True)
         return instance_dir
 
     def get_or_prepare_isolated_terminal_exe(
@@ -402,7 +419,7 @@ class MT5ProcessManager:
         """Verifica se o processo terminal64.exe específico da conta está ativo."""
         target_exe = None
         if account_id is not None:
-            inst_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid)
+            inst_dir = self.get_account_instance_dir(account_id, account_uuid=account_uuid, create=False)
             target_exe = os.path.normcase(
                 os.path.abspath(str((inst_dir / "terminal64.exe").resolve()))
             )
@@ -422,11 +439,17 @@ class MT5ProcessManager:
                         return True
             except Exception:
                 pass
+        if account_id is not None:
+            self.pids.pop(account_id, None)
         return False
 
-    def stop_terminal(self, account_id: int, timeout: int = 5) -> bool:
-        """Encerra a instância do terminal da conta de forma limpa"""
+    def stop_terminal(self, account_id: int, timeout: int = 5, account_uuid: Optional[str] = None) -> bool:
+        """Encerra a instância do terminal da conta de forma limpa (inclusive processos abertos via mt5.initialize)."""
         pid = self.pids.get(account_id)
+        if not pid:
+            # Descobre PID de terminais iniciados diretamente por mt5.initialize(path=...)
+            if self.is_running(account_id, account_uuid=account_uuid):
+                pid = self.pids.get(account_id)
         if not pid:
             return True
 
@@ -440,6 +463,7 @@ class MT5ProcessManager:
             logger.warning(f"Timeout ao encerrar PID {pid}. Forçando kill...")
             try:
                 p.kill()
+                p.wait(timeout=3)
             except Exception:
                 pass
         except psutil.NoSuchProcess:

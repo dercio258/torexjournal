@@ -180,12 +180,14 @@ class BackendApiClient:
     def sync_trades(self, payload: SyncTradesPayload) -> bool:
         """Envia histórico incremental de negociações (Deals)"""
         self.last_error_reason = None
+        self.last_saved_trades_count = None
         res = self._post("/sync/trades", payload.model_dump(mode="json"))
         if res and res.status_code == 200:
             try:
                 data = res.json()
                 if data.get("success"):
-                    saved_count = data.get("saved", len(payload.trades))
+                    saved_count = int(data.get("saved", len(payload.trades)) or 0)
+                    self.last_saved_trades_count = saved_count
                     logger.success(f"{saved_count} trades da conta {payload.login or payload.accountId} persistidos com sucesso no backend!")
                     return True
                 else:
