@@ -936,6 +936,52 @@ class TestProductionLogBugFixes(unittest.TestCase):
             self.assertEqual(Path(returned_exe).resolve(), iso_exe.resolve())
             self.assertEqual(common_ini.read_text(encoding="utf-8"), "KEEP_LIVE_SESSION")
 
+    def test_silent_migration_start_account_skips_user_events_and_forces_full_sync(self):
+        from core.worker_manager import WorkerManager
+        from models.schemas import Task, TaskType, CredentialResponse
+
+        with tempfile.TemporaryDirectory() as tmp:
+            orig_data_dir = settings.data_dir
+            settings.data_dir = tmp
+            try:
+                mgr = WorkerManager()
+                mgr.is_running = True
+                mgr.api_client.exchange_credential = MagicMock(
+                    return_value=CredentialResponse(
+                        login="444586125", server="GoatFunded-Server2", password="SecretPass"
+                    )
+                )
+                mgr.api_client.ack_task = MagicMock(return_value=True)
+                mgr.api_client.send_event = MagicMock(return_value=True)
+                mgr.process_manager.get_or_prepare_isolated_terminal_exe = MagicMock(
+                    return_value="C:\\fake\\acc_uuid\\terminal64.exe"
+                )
+                mgr.sync_engine.ensure_connected = MagicMock(return_value=True)
+                mgr._sync_single_account = MagicMock(return_value={"balance": 4870.64, "syncedTradesCount": 2})
+
+                task = Task(
+                    id="task-mig-1",
+                    type=TaskType.START_ACCOUNT,
+                    priority=1,
+                    accountId=444586125,
+                    accountUuid="1be1066d-954b-4a45-94ce-cb60eeb8ca3d",
+                    login="444586125",
+                    server="GoatFunded-Server2",
+                    credentialToken="tok_123",
+                    options={"silentMigration": True, "migrationId": "mig-1"},
+                )
+                mgr._handle_start_account(task)
+
+                # Não deve enviar eventos visíveis ao cliente (ACCOUNT_CONNECTING / ACCOUNT_CONNECTED)
+                mgr.api_client.send_event.assert_not_called()
+                # Deve forçar reconciliação completa (force_full=True) no novo servidor para migrar todos os dados
+                mgr._sync_single_account.assert_called_once_with(444586125, force_full=True)
+                # Deve confirmar SUCCESS via ack_task para o backend atualizar o Log de Migrações do Admin
+                last_ack_status = mgr.api_client.ack_task.call_args_list[-1].args[1]
+                self.assertEqual(str(last_ack_status.value), "SUCCESS")
+            finally:
+                settings.data_dir = orig_data_dir
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

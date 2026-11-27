@@ -62,6 +62,7 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         const mt5WorkerService: any = {
             getWorkerStatus: jest.fn(() => workersState),
             deriveNumericAccountId: jest.fn((login: string) => Number(login) || 1),
+            normalizeBrokerServer: jest.fn((srv: string) => String(srv || '').trim()),
             createAccountTask: jest.fn((...args: any[]) => {
                 dispatchedTasks.push(args);
                 return { id: `task-${dispatchedTasks.length}` };
@@ -79,6 +80,10 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
 
         const userRepo: any = {
             findOne: jest.fn(async () => ({ id: 'u1', preferredLocale: options?.locale || 'pt' })),
+            find: jest.fn(async () => [
+                { id: 'u1', name: 'Trader Alpha', username: 'alpha' },
+                { id: 'secret-user-99', name: 'Charlote Trader', username: 'charlote' },
+            ]),
         };
 
         const balancer = new Mt5ClusterBalancerService(
@@ -263,6 +268,7 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
 
         const row = overview.accounts[0];
         expect(row.accountMask).toBe('MT5 ••••4321');
+        expect(row.accountName).toBe('Charlote Trader');
         expect(row.telemetryId).toHaveLength(8);
         expect(row.assignedWorkerId).toBe('vps-win-1');
         expect(row.leaseEpoch).toBe(3);
@@ -273,6 +279,7 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         const w1 = overview.workers.find((w: any) => w.workerId === 'vps-win-1');
         expect(w1?.accountTags).toHaveLength(1);
         expect(w1?.accountTags[0].accountMask).toBe('MT5 ••••4321');
+        expect(w1?.accountTags[0].accountName).toBe('Charlote Trader');
 
         const serialized = JSON.stringify(overview);
         expect(serialized).not.toContain('secret-user-99');
@@ -280,5 +287,191 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         expect(serialized).not.toContain('15432');
         expect(serialized).not.toContain('15600');
         expect(serialized).not.toContain('MetaQuotes-Demo');
+    });
+
+    it('reconnects an MT5 account by telemetryId, decrypts v3 AAD password, clears quarantine, and dispatches START_ACCOUNT', async () => {
+        const { CryptoUtil } = await import('../../common/utils/crypto.util');
+        const { getMt5CredentialKeyring } = await import('../../common/security/security.config');
+
+        const encryptedPass = CryptoUtil.encrypt(
+            'MyBrokerSecret#99',
+            getMt5CredentialKeyring(),
+            { aad: 'mt5:u1:222707555' },
+        );
+
+        const { balancer, accounts, dispatchedTasks } = createBalancerHarness({
+            workers: [
+                { workerId: 'win-worker-01', capacity: 10, isOnline: true, cpuPercent: 25, memoryPercent: 60 },
+            ],
+            accounts: [
+                {
+                    id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+                    userId: 'u1',
+                    name: 'Conta Exness Real',
+                    mt5Id: '222707555',
+                    broker: 'Exness-MT5Real30',
+                    isConnected: false,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'QUARANTINED',
+                    mt5EncryptedPass: encryptedPass,
+                    inactivityWarnedAt: new Date(),
+                    inactivityDisconnectAt: new Date(),
+                },
+            ],
+        });
+
+        const overview = await balancer.getClusterOverview();
+        const telemetryId = overview.accounts[0].telemetryId;
+        expect(overview.accounts[0].accountName).toBe('Trader Alpha · Conta Exness Real');
+
+        const res = await balancer.reconnectAccountByTelemetryId(telemetryId);
+        expect(res.success).toBe(true);
+        expect(res.telemetryId).toBe(telemetryId);
+        expect(res.accountMask).toBe('MT5 ••••7555');
+        expect(res.workerId).toBe('win-worker-01');
+        expect(res.usedStoredCredentials).toBe(true);
+
+        expect(accounts[0].mt5SyncTier).toBe('HOT');
+        expect(accounts[0].inactivityDisconnectAt).toBeNull();
+        expect(dispatchedTasks).toHaveLength(1);
+        expect(dispatchedTasks[0][0]).toBe('START_ACCOUNT');
+        expect(dispatchedTasks[0][1]).toBe('222707555');
+        expect(dispatchedTasks[0][2]).toBe('Exness-MT5Real30');
+        expect(dispatchedTasks[0][3]).toBe('MyBrokerSecret#99');
+        expect(dispatchedTasks[0][5].adminTriggeredReconnect).toBe(true);
+        expect(dispatchedTasks[0][5].priority).toBe(1);
+    });
+
+    it('silently fails over accounts from a DOWN worker to a healthy online worker and records Admin-only migration logs', async () => {
+        const { CryptoUtil } = await import('../../common/utils/crypto.util');
+        const { getMt5CredentialKeyring } = await import('../../common/security/security.config');
+
+        const now = Date.now();
+        const encryptedPass = CryptoUtil.encrypt(
+            'AutoFailoverPass!2026',
+            getMt5CredentialKeyring(),
+            { aad: 'mt5:u1:444586125' },
+        );
+
+        const { balancer, accounts, dispatchedTasks } = createBalancerHarness({
+            workers: [
+                {
+                    workerId: 'win-worker-01',
+                    capacity: 10,
+                    isOnline: false,
+                    lastHeartbeat: new Date(now - 120_000), // Offline há 2 min (> 90s)
+                },
+                {
+                    workerId: 'win-worker-02',
+                    capacity: 10,
+                    isOnline: true,
+                    cpuPercent: 20,
+                    memoryPercent: 45,
+                    lastHeartbeat: new Date(now - 5_000),
+                },
+            ],
+            accounts: [
+                {
+                    id: '1be1066d-954b-4a45-94ce-cb60eeb8ca3d',
+                    userId: 'u1',
+                    name: 'GoatFunded Phase 1',
+                    mt5Id: '444586125',
+                    broker: 'GoatFunded-Server2',
+                    isConnected: true,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 2,
+                    mt5SyncTier: 'HOT',
+                    mt5EncryptedPass: encryptedPass,
+                },
+            ],
+        });
+
+        const res = await balancer.evaluateDeadWorkerFailover(now);
+        expect(res.migrated).toBe(1);
+
+        // Conta foi movida para win-worker-02 mantendo isConnected=true e incrementando epoch
+        expect(accounts[0].assignedWorkerId).toBe('win-worker-02');
+        expect(accounts[0].isConnected).toBe(true);
+        expect(accounts[0].mt5LeaseEpoch).toBe(3);
+
+        // Tarefa START_ACCOUNT enviada com silentMigration=true + senha descriptografada
+        expect(dispatchedTasks).toHaveLength(1);
+        expect(dispatchedTasks[0][0]).toBe('START_ACCOUNT');
+        expect(dispatchedTasks[0][1]).toBe('444586125');
+        expect(dispatchedTasks[0][3]).toBe('AutoFailoverPass!2026');
+        expect(dispatchedTasks[0][5].targetWorkerId).toBe('win-worker-02');
+        expect(dispatchedTasks[0][5].silentMigration).toBe(true);
+        expect(dispatchedTasks[0][5].migrationId).toBeTruthy();
+
+        // Eviction enfileirada para o servidor antigo caso volte online
+        expect(balancer.consumeEvictionsForWorker('win-worker-01')).toEqual(['444586125']);
+
+        // Log exclusivo do Admin presente no overview e atualizado ao completar
+        const overview1 = await balancer.getClusterOverview();
+        expect(overview1.migrationLogs).toHaveLength(1);
+        expect(overview1.migrationLogs[0].trigger).toBe('AUTO_FAILOVER');
+        expect(overview1.migrationLogs[0].fromWorkerId).toBe('win-worker-01');
+        expect(overview1.migrationLogs[0].toWorkerId).toBe('win-worker-02');
+        expect(overview1.migrationLogs[0].status).toBe('IN_PROGRESS');
+
+        await balancer.recordMigrationTaskOutcome(
+            overview1.migrationLogs[0].id,
+            'COMPLETED',
+            'Login e reconciliação concluídos em win-worker-02.',
+        );
+        const overview2 = await balancer.getClusterOverview();
+        expect(overview2.migrationLogs[0].status).toBe('COMPLETED');
+        expect(overview2.migrationLogs[0].completedAt).toBeTruthy();
+    });
+
+    it('allows Admin 1-click manual server migration keeping user connection intact', async () => {
+        const { CryptoUtil } = await import('../../common/utils/crypto.util');
+        const { getMt5CredentialKeyring } = await import('../../common/security/security.config');
+
+        const encryptedPass = CryptoUtil.encrypt(
+            'ManualSwitchPass#1',
+            getMt5CredentialKeyring(),
+            { aad: 'mt5:u1:222707555' },
+        );
+
+        const { balancer, accounts, dispatchedTasks } = createBalancerHarness({
+            workers: [
+                { workerId: 'win-worker-01', capacity: 10, isOnline: true, cpuPercent: 40, memoryPercent: 60 },
+                { workerId: 'win-worker-02', capacity: 10, isOnline: true, cpuPercent: 15, memoryPercent: 35 },
+            ],
+            accounts: [
+                {
+                    id: '22222222-3333-4444-5555-666666666666',
+                    userId: 'u1',
+                    name: 'Exness Real',
+                    mt5Id: '222707555',
+                    broker: 'Exness-MT5Real30',
+                    isConnected: true,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'HOT',
+                    mt5EncryptedPass: encryptedPass,
+                },
+            ],
+        });
+
+        const overview = await balancer.getClusterOverview();
+        const telemetryId = overview.accounts[0].telemetryId;
+
+        const migrateRes = await balancer.migrateAccountByTelemetryId(telemetryId, 'win-worker-02');
+        expect(migrateRes.success).toBe(true);
+        expect(migrateRes.fromWorkerId).toBe('win-worker-01');
+        expect(migrateRes.toWorkerId).toBe('win-worker-02');
+        expect(accounts[0].assignedWorkerId).toBe('win-worker-02');
+        expect(accounts[0].isConnected).toBe(true);
+        expect(dispatchedTasks[0][5].silentMigration).toBe(true);
+
+        const after = await balancer.getClusterOverview();
+        expect(after.migrationLogs[0].trigger).toBe('MANUAL_ADMIN');
+        expect(after.migrationLogs[0].toWorkerId).toBe('win-worker-02');
     });
 });

@@ -826,4 +826,63 @@ export class AdminController {
         }
         return this.mt5ClusterBalancer.rebalanceCluster();
     }
+
+    @UseGuards(AdminAuthGuard)
+    @Post('mt5-cluster/accounts/:telemetryId/reconnect')
+    async reconnectMt5Account(
+        @Param('telemetryId') telemetryId: string,
+        @Req() req: any,
+    ) {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        const res = await this.mt5ClusterBalancer.reconnectAccountByTelemetryId(
+            String(telemetryId || '').trim(),
+        );
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'MT5_ACCOUNT_RECONNECT',
+            targetType: 'mt5_account',
+            targetId: res.telemetryId,
+            ip: extractTrustedClientIp(req),
+            details: {
+                accountMask: res.accountMask,
+                workerId: res.workerId,
+                taskId: res.taskId,
+            },
+        });
+        return res;
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Post('mt5-cluster/accounts/:telemetryId/migrate')
+    async migrateMt5Account(
+        @Param('telemetryId') telemetryId: string,
+        @Body() body: { targetWorkerId?: string },
+        @Req() req: any,
+    ) {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        const res = await this.mt5ClusterBalancer.migrateAccountByTelemetryId(
+            String(telemetryId || '').trim(),
+            body?.targetWorkerId ? String(body.targetWorkerId).trim() : undefined,
+        );
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'MT5_ACCOUNT_MIGRATE',
+            targetType: 'mt5_account',
+            targetId: res.telemetryId,
+            ip: extractTrustedClientIp(req),
+            details: {
+                accountMask: res.accountMask,
+                fromWorkerId: res.fromWorkerId,
+                toWorkerId: res.toWorkerId,
+                leaseEpoch: res.leaseEpoch,
+                taskId: res.taskId,
+                migrationId: res.migrationId,
+            },
+        });
+        return res;
+    }
 }

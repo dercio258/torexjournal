@@ -283,6 +283,7 @@ class WorkerManager:
         existing_acc = self.account_manager.get_account(task.accountId)
         password = existing_acc.password if existing_acc else None
         acc_uuid = task.accountUuid or (task.options or {}).get("accountUuid") or (existing_acc.account_uuid if existing_acc else None)
+        is_silent_migration = bool((task.options or {}).get("silentMigration"))
         normalized_server = self.sync_engine._normalize_broker_server(task.server)
         if task.credentialToken:
             self.api_client.ack_task(
@@ -319,15 +320,16 @@ class WorkerManager:
             f"Inicializando MT5 e autenticando conta {task.login} no servidor {normalized_server}...",
             details={"step": "AUTHENTICATING_MT5", "login": task.login, "server": normalized_server}
         )
-        self.api_client.send_event(WorkerEvent(
-            workerId=settings.worker_id,
-            accountId=task.accountId,
-            login=task.login,
-            server=normalized_server,
-            eventType="ACCOUNT_CONNECTING",
-            severity="INFO",
-            message=f"Autenticando conta {task.login} no servidor {normalized_server}..."
-        ))
+        if not is_silent_migration:
+            self.api_client.send_event(WorkerEvent(
+                workerId=settings.worker_id,
+                accountId=task.accountId,
+                login=task.login,
+                server=normalized_server,
+                eventType="ACCOUNT_CONNECTING",
+                severity="INFO",
+                message=f"Autenticando conta {task.login} no servidor {normalized_server}..."
+            ))
 
         def _report_progress(step_msg: str):
             try:
@@ -373,7 +375,8 @@ class WorkerManager:
                 f"Conta {task.login} autenticada! Sincronizando saldo, posições e histórico de operações...",
                 details={"step": "SYNCING_DATA", "login": task.login, "server": normalized_server}
             )
-            sync_summary = self._sync_single_account(task.accountId) or {}
+            # Em migração de servidor, força reconciliação completa para recuperar todos os deals/posições no novo nó
+            sync_summary = self._sync_single_account(task.accountId, force_full=is_silent_migration) or {}
             bal_str = f"${sync_summary.get('balance', 0.0):.2f}" if "balance" in sync_summary else ""
             trades_cnt = sync_summary.get("syncedTradesCount", 0)
             success_msg = (
@@ -381,16 +384,17 @@ class WorkerManager:
                 f"{f'Saldo: {bal_str} | ' if bal_str else ''}{trades_cnt} novos negócios importados."
             )
             self.api_client.ack_task(task.id, TaskStatus.SUCCESS, success_msg, details=sync_summary)
-            self.api_client.send_event(WorkerEvent(
-                workerId=settings.worker_id,
-                accountId=task.accountId,
-                login=task.login,
-                server=normalized_server,
-                eventType="ACCOUNT_CONNECTED",
-                severity="INFO",
-                message=success_msg,
-                metadata=sync_summary
-            ))
+            if not is_silent_migration:
+                self.api_client.send_event(WorkerEvent(
+                    workerId=settings.worker_id,
+                    accountId=task.accountId,
+                    login=task.login,
+                    server=normalized_server,
+                    eventType="ACCOUNT_CONNECTED",
+                    severity="INFO",
+                    message=success_msg,
+                    metadata=sync_summary
+                ))
         else:
             err_detail = getattr(self.sync_engine, "last_connect_error", None) or (
                 "Não foi possível conectar o terminal MT5 e autenticar a conta. Verifique login, senha e servidor."
@@ -404,16 +408,17 @@ class WorkerManager:
                 err_detail,
                 details={"step": "FAILED", "error": err_detail, "login": task.login, "server": normalized_server}
             )
-            self.api_client.send_event(WorkerEvent(
-                workerId=settings.worker_id,
-                accountId=task.accountId,
-                login=task.login,
-                server=normalized_server,
-                eventType="ACCOUNT_LOGIN_FAILED",
-                severity="ERROR",
-                message=err_detail,
-                metadata={"error": err_detail}
-            ))
+            if not is_silent_migration:
+                self.api_client.send_event(WorkerEvent(
+                    workerId=settings.worker_id,
+                    accountId=task.accountId,
+                    login=task.login,
+                    server=normalized_server,
+                    eventType="ACCOUNT_LOGIN_FAILED",
+                    severity="ERROR",
+                    message=err_detail,
+                    metadata={"error": err_detail}
+                ))
 
     def _handle_stop_account(self, task: Task):
         acc_uuid = self._resolve_account_uuid(task.accountId, task)

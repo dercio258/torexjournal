@@ -756,7 +756,9 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             }
         }
 
-        if (type === WorkerTaskType.START_ACCOUNT && cleanLogin) {
+        const isSilentMigration = Boolean(options?.silentMigration);
+
+        if (type === WorkerTaskType.START_ACCOUNT && cleanLogin && !isSilentMigration) {
             const existingTel = this.accountTelemetry.get(cleanLogin);
             this.accountTelemetry.set(cleanLogin, {
                 ...(existingTel || { login: cleanLogin, server: cleanServer, connected: false }),
@@ -767,23 +769,25 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             });
         }
 
-        // Record audit event for connection/sync request
-        this.recentEvents.unshift({
-            id: randomUUID(),
-            workerId: targetWorkerId || 'BACKEND-API',
-            accountId: numericAccId,
-            login: cleanLogin,
-            server: cleanServer,
-            eventType: type === WorkerTaskType.START_ACCOUNT ? 'CONNECTION_REQUESTED' : `TASK_${type}_REQUESTED`,
-            severity: 'INFO',
-            message: initialMsg,
-            metadata: { taskId, type, priority: task.priority },
-            timestamp: new Date().toISOString(),
-        });
-        if (this.recentEvents.length > 100) this.recentEvents.length = 100;
+        // Record audit event for connection/sync request (suppressed from user-visible events during silent server migration)
+        if (!isSilentMigration) {
+            this.recentEvents.unshift({
+                id: randomUUID(),
+                workerId: targetWorkerId || 'BACKEND-API',
+                accountId: numericAccId,
+                login: cleanLogin,
+                server: cleanServer,
+                eventType: type === WorkerTaskType.START_ACCOUNT ? 'CONNECTION_REQUESTED' : `TASK_${type}_REQUESTED`,
+                severity: 'INFO',
+                message: initialMsg,
+                metadata: { taskId, type, priority: task.priority },
+                timestamp: new Date().toISOString(),
+            });
+            if (this.recentEvents.length > 100) this.recentEvents.length = 100;
+        }
 
         this.auditLogger.log(
-            `[AUDIT] Solicitação ${type} criada para conta MT5 ${cleanLogin}@${cleanServer} (TaskID: ${taskId}, Target: ${targetWorkerId || 'ANY'}, Prioridade: P${task.priority})`
+            `[AUDIT] Solicitação ${type}${isSilentMigration ? ' [SILENT-MIGRATION]' : ''} criada para conta MT5 ${cleanLogin}@${cleanServer} (TaskID: ${taskId}, Target: ${targetWorkerId || 'ANY'}, Prioridade: P${task.priority})`
         );
         return task;
     }
@@ -844,13 +848,30 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         return this.pendingTasks.get(taskId) || null;
     }
 
-    getLatestTaskForLogin(login: string): WorkerTask | null {
+    getLatestTaskForLogin(login: string, includeSilentMigrations = false): WorkerTask | null {
         const cleanLogin = (login || '').toString().trim();
         if (!cleanLogin) return null;
-        const matching = Array.from(this.pendingTasks.values()).filter(t => t.login === cleanLogin);
+        const matching = Array.from(this.pendingTasks.values()).filter(
+            (t) => t.login === cleanLogin && (includeSilentMigrations || !t.options?.silentMigration),
+        );
         if (matching.length === 0) return null;
         matching.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return matching[0];
+    }
+
+    private hasActiveSilentMigration(login: string): boolean {
+        const cleanLogin = (login || '').toString().trim();
+        if (!cleanLogin) return false;
+        for (const t of this.pendingTasks.values()) {
+            if (
+                t.login === cleanLogin &&
+                t.options?.silentMigration &&
+                (t.status === WorkerTaskStatus.RECEIVED || t.status === WorkerTaskStatus.IN_PROGRESS)
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     ackTask(taskId: string, status: WorkerTaskStatus, message?: string, details?: Record<string, any>) {
@@ -873,6 +894,9 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             `[AUDIT] Tarefa [${taskId}] (${task.type} - ${task.login}@${task.server}) -> Status: ${status} | Msg: ${message || 'N/A'} | Details: ${JSON.stringify(task.details || {})}`
         );
 
+        const isSilentMigration = Boolean(task.options?.silentMigration);
+        const migrationId = task.options?.migrationId ? String(task.options.migrationId) : null;
+
         // Update live telemetry state for real numeric MT5 logins only (never SYNC_CALENDAR or synthetic keys)
         const isNumericLogin = Boolean(task.login && /^\d+$/.test(task.login.trim()));
         if (task.login && isNumericLogin && task.type !== WorkerTaskType.SYNC_CALENDAR) {
@@ -880,13 +904,16 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             const existingTel = this.accountTelemetry.get(cleanLogin) || {
                 login: cleanLogin,
                 server: task.server,
-                connected: false,
-                connectionState: 'CONNECTING' as const,
+                connected: isSilentMigration,
+                connectionState: (isSilentMigration ? 'CONNECTED' : 'CONNECTING') as AccountLiveTelemetry['connectionState'],
             };
 
             if (status === WorkerTaskStatus.IN_PROGRESS) {
-                existingTel.connectionState = task.type === WorkerTaskType.START_ACCOUNT ? 'CONNECTING' : 'SYNCING';
-                existingTel.statusMessage = message || existingTel.statusMessage;
+                // Em migração silenciosa de servidor, mantém o estado CONNECTED para o cliente sem exibir "Conectando"
+                if (!isSilentMigration) {
+                    existingTel.connectionState = task.type === WorkerTaskType.START_ACCOUNT ? 'CONNECTING' : 'SYNCING';
+                    existingTel.statusMessage = message || existingTel.statusMessage;
+                }
                 if (details?.step === 'SYNCING_DATA' && task.options?.userId) {
                     this.loginToUserMap.set(cleanLogin, {
                         userId: task.options.userId,
@@ -909,7 +936,9 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
                     }
                     existingTel.connected = true;
                     existingTel.connectionState = 'CONNECTED';
-                    existingTel.statusMessage = message || 'Conectado e sincronizado.';
+                    if (!isSilentMigration) {
+                        existingTel.statusMessage = message || 'Conectado e sincronizado.';
+                    }
                     existingTel.lastError = null;
                     existingTel.lastSyncAt = new Date().toISOString();
                     if (task.details?.syncedTradesCount !== undefined) {
@@ -917,14 +946,26 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
                     }
                 }
             } else if (status === WorkerTaskStatus.FAILED) {
-                if (task.type === WorkerTaskType.START_ACCOUNT) {
-                    existingTel.connected = false;
-                    existingTel.connectionState = 'AUTH_FAILED';
+                if (!isSilentMigration) {
+                    if (task.type === WorkerTaskType.START_ACCOUNT) {
+                        existingTel.connected = false;
+                        existingTel.connectionState = 'AUTH_FAILED';
+                    }
+                    existingTel.lastError = message || 'Falha na execução da tarefa no MT5.';
+                    existingTel.statusMessage = message;
                 }
-                existingTel.lastError = message || 'Falha na execução da tarefa no MT5.';
-                existingTel.statusMessage = message;
             }
             this.accountTelemetry.set(cleanLogin, existingTel);
+        }
+
+        if (isSilentMigration && migrationId && (status === WorkerTaskStatus.SUCCESS || status === WorkerTaskStatus.FAILED)) {
+            this.clusterBalancer
+                ?.recordMigrationTaskOutcome(
+                    migrationId,
+                    status === WorkerTaskStatus.SUCCESS ? 'COMPLETED' : 'FAILED',
+                    message || (status === WorkerTaskStatus.SUCCESS ? 'Login e sincronização concluídos no novo servidor.' : 'Falha ao migrar conta no servidor de destino.'),
+                )
+                .catch(() => {});
         }
 
         // Persist database audit log (ImportLog) and update AccountEntity on completion
@@ -943,6 +984,18 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
 
     private async persistTaskAuditLog(task: WorkerTask, status: WorkerTaskStatus, message?: string) {
         if (task.options?.isSharedDemoFeed) return;
+        // Migrações silenciosas entre servidores NÃO criam logs visíveis para o cliente nem derrubam o status isConnected
+        if (task.options?.silentMigration) {
+            if (status === WorkerTaskStatus.SUCCESS) {
+                const acc = await this.findAccountByLoginOrId(task.login, task.accountId);
+                if (acc) {
+                    acc.isConnected = true;
+                    acc.lastSeen = new Date();
+                    await this.accountRepo.save(acc);
+                }
+            }
+            return;
+        }
         const acc = await this.findAccountByLoginOrId(task.login, task.accountId);
         if (!acc) return;
 
@@ -2153,6 +2206,20 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         timestamp?: string;
     }) {
         const cleanLogin = (event.login || event.accountId || '').toString().trim();
+        const isSilentEvent =
+            Boolean(cleanLogin && this.hasActiveSilentMigration(cleanLogin)) &&
+            (event.eventType === 'ACCOUNT_CONNECTING' ||
+                event.eventType === 'ACCOUNT_CONNECTED' ||
+                event.eventType === 'ACCOUNT_LOGIN_FAILED' ||
+                event.eventType === 'ACCOUNT_DISCONNECTED');
+
+        if (isSilentEvent) {
+            this.auditLogger.log(
+                `[SILENT-MIGRATION-EVENT] Worker [${event.workerId}] (${event.eventType} - ${cleanLogin}): ${event.message}`,
+            );
+            return { success: true };
+        }
+
         const record: WorkerEventRecord = {
             id: randomUUID(),
             workerId: event.workerId,
@@ -2515,9 +2582,20 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
                   .slice(0, 180)
             : null;
 
+        const rawHolder = String(tel?.accountHolderName || '').trim();
+        const sanitizedHolder = rawHolder
+            ? rawHolder
+                  .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '')
+                  .replace(/\b\d{5,12}\b/g, '')
+                  .replace(/\s{2,}/g, ' ')
+                  .trim()
+                  .slice(0, 80) || null
+            : null;
+
         return {
             connectionState,
             connected: tel ? Boolean(tel.connected) : Boolean(fallbackConnected),
+            accountHolderName: sanitizedHolder,
             lastSyncAt: tel?.lastSyncAt || null,
             pingMs: typeof tel?.pingMs === 'number' ? tel.pingMs : null,
             terminalBuild: typeof tel?.terminalBuild === 'number' ? tel.terminalBuild : null,

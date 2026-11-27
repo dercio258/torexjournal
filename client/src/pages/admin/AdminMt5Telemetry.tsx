@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Activity,
     AlertTriangle,
+    ArrowRight,
+    ArrowRightLeft,
     CheckCircle2,
     Clock,
     Cpu,
@@ -31,6 +33,7 @@ type ConnectionState = 'CONNECTED' | 'SYNCING' | 'CONNECTING' | 'DISCONNECTED' |
 interface WorkerAccountTag {
     telemetryId: string;
     accountMask: string;
+    accountName?: string | null;
     connectionState: ConnectionState;
     syncTier: string;
     leaseEpoch: number;
@@ -76,6 +79,7 @@ interface WorkerCorrelationItem {
 interface AnonymizedMt5Account {
     telemetryId: string;
     accountMask: string;
+    accountName?: string | null;
     connectionState: ConnectionState;
     syncTier: string;
     assignedWorkerId: string | null;
@@ -88,6 +92,23 @@ interface AnonymizedMt5Account {
     inactivityWarnedAt: string | null;
     inactivityDisconnectAt: string | null;
     feedback: string | null;
+}
+
+interface Mt5ServerMigrationLog {
+    id: string;
+    telemetryId: string;
+    accountMask: string;
+    accountName: string | null;
+    fromWorkerId: string | null;
+    toWorkerId: string;
+    trigger: 'AUTO_FAILOVER' | 'MANUAL_ADMIN' | 'WORKER_DRAIN' | 'CLUSTER_REBALANCE';
+    reason: string;
+    status: 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
+    leaseEpoch: number;
+    taskId: string | null;
+    details: string | null;
+    createdAt: string;
+    completedAt: string | null;
 }
 
 interface Mt5ClusterOverviewResponse {
@@ -111,7 +132,27 @@ interface Mt5ClusterOverviewResponse {
         workerCorrelation: WorkerCorrelationItem[];
     };
     accounts: AnonymizedMt5Account[];
+    migrationLogs?: Mt5ServerMigrationLog[];
 }
+
+const MIGRATION_TRIGGER_META: Record<
+    Mt5ServerMigrationLog['trigger'],
+    { label: string; tone: 'warning' | 'accent' | 'info' | 'neutral' }
+> = {
+    AUTO_FAILOVER: { label: 'Failover Automático', tone: 'warning' },
+    MANUAL_ADMIN: { label: 'Migração Manual', tone: 'accent' },
+    WORKER_DRAIN: { label: 'Drain de Servidor', tone: 'neutral' },
+    CLUSTER_REBALANCE: { label: 'Rebalanceamento', tone: 'info' },
+};
+
+const MIGRATION_STATUS_META: Record<
+    Mt5ServerMigrationLog['status'],
+    { label: string; tone: 'info' | 'success' | 'danger' }
+> = {
+    IN_PROGRESS: { label: 'Em andamento', tone: 'info' },
+    COMPLETED: { label: 'Concluída', tone: 'success' },
+    FAILED: { label: 'Falhou', tone: 'danger' },
+};
 
 const STATE_META: Record<
     ConnectionState,
@@ -150,6 +191,9 @@ export const AdminMt5Telemetry = () => {
     const [refreshing, setRefreshing] = useState(false);
     const [rebalancing, setRebalancing] = useState(false);
     const [drainingId, setDrainingId] = useState<string | null>(null);
+    const [reconnectingId, setReconnectingId] = useState<string | null>(null);
+    const [migratingId, setMigratingId] = useState<string | null>(null);
+    const [selectedTargetWorker, setSelectedTargetWorker] = useState<Record<string, string>>({});
     const [banner, setBanner] = useState<{
         tone: 'success' | 'warning' | 'danger' | 'info';
         message: string;
@@ -231,6 +275,86 @@ export const AdminMt5Telemetry = () => {
         }
     };
 
+    const handleReconnectAccount = async (acc: AnonymizedMt5Account) => {
+        setReconnectingId(acc.telemetryId);
+        try {
+            const res = await api.post<{ message?: string; workerId?: string }>(
+                `/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/reconnect`,
+            );
+            const label = acc.accountName ? `${acc.accountName} (${acc.accountMask})` : acc.accountMask;
+            setBanner({
+                tone: 'success',
+                message:
+                    res.data?.message ||
+                    `Reconexão solicitada para ${label} no worker ${res.data?.workerId || 'AUTO'}.`,
+            });
+            await fetchTelemetry(true);
+        } catch (err: any) {
+            setBanner({
+                tone: 'danger',
+                message:
+                    err?.response?.data?.message ||
+                    `Não foi possível solicitar a reconexão da conta ${acc.accountName || acc.accountMask}.`,
+            });
+        } finally {
+            setReconnectingId(null);
+        }
+    };
+
+    const onlineHealthyWorkers = useMemo(() => {
+        return (data?.workers || []).filter((w) => w.isOnline && !w.isDraining);
+    }, [data?.workers]);
+
+    const workerOnlineMap = useMemo(() => {
+        const map = new Map<string, boolean>();
+        for (const w of data?.workers || []) {
+            map.set(w.workerId, Boolean(w.isOnline));
+        }
+        return map;
+    }, [data?.workers]);
+
+    const handleMigrateAccount = async (acc: AnonymizedMt5Account, explicitTarget?: string) => {
+        const candidateTargets = onlineHealthyWorkers.filter(
+            (w) => w.workerId !== acc.assignedWorkerId,
+        );
+        const targetWorkerId =
+            explicitTarget ||
+            selectedTargetWorker[acc.telemetryId] ||
+            candidateTargets[0]?.workerId;
+
+        if (!targetWorkerId) {
+            setBanner({
+                tone: 'warning',
+                message: 'Nenhum outro servidor online saudável disponível para receber esta conta.',
+            });
+            return;
+        }
+
+        setMigratingId(acc.telemetryId);
+        try {
+            const res = await api.post<{ message?: string; toWorkerId?: string }>(
+                `/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/migrate`,
+                { targetWorkerId },
+            );
+            setBanner({
+                tone: 'success',
+                message:
+                    res.data?.message ||
+                    `Migração silenciosa iniciada para ${acc.accountName || acc.accountMask} → ${res.data?.toWorkerId || targetWorkerId}.`,
+            });
+            await fetchTelemetry(true);
+        } catch (err: any) {
+            setBanner({
+                tone: 'danger',
+                message:
+                    err?.response?.data?.message ||
+                    `Não foi possível migrar a conta ${acc.accountName || acc.accountMask}.`,
+            });
+        } finally {
+            setMigratingId(null);
+        }
+    };
+
     const filteredAccounts = useMemo(() => {
         const list = data?.accounts || [];
         return list.filter((acc) => {
@@ -299,8 +423,8 @@ export const AdminMt5Telemetry = () => {
 
             <AdminBanner
                 tone="info"
-                title="Telemetria 100% Anonimizada (Zero Vazamento de Dados)"
-                message="Esta visualização exibe exclusivamente métricas técnicas e diagnósticos sanitizados. Nenhum nome, e-mail, login completo, senha, saldo, equity ou identificador pessoal é exposto."
+                title="Telemetria Protegida (Zero Exposição de Credenciais e Saldos)"
+                message="Esta visualização exibe métricas técnicas, nome de identificação da conta e ação direta de reconexão. Nenhuma senha, e-mail, login completo, saldo ou equity é exposto."
             />
 
             {banner && (
@@ -578,6 +702,76 @@ export const AdminMt5Telemetry = () => {
                 )}
             </AdminSectionCard>
 
+            {/* Log Exclusivo do Admin: Migrações & Failover entre Servidores */}
+            <AdminSectionCard
+                title="Log de Migrações & Failover entre Servidores (Somente Admin)"
+                subtitle="Trocas automáticas quando um servidor cai e migrações manuais — 100% invisível para os clientes mantendo a conexão ativa"
+                icon={<ArrowRightLeft className="h-4 w-4" />}
+            >
+                {!data?.migrationLogs?.length ? (
+                    <div className="flex items-center gap-2 text-xs text-fg-muted">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        Nenhuma migração ou failover entre servidores registrado ainda.
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {data.migrationLogs.slice(0, 20).map((log) => {
+                            const trig =
+                                MIGRATION_TRIGGER_META[log.trigger] ||
+                                MIGRATION_TRIGGER_META.AUTO_FAILOVER;
+                            const stat =
+                                MIGRATION_STATUS_META[log.status] ||
+                                MIGRATION_STATUS_META.IN_PROGRESS;
+                            return (
+                                <div
+                                    key={log.id}
+                                    className="flex flex-col gap-1.5 rounded-xl border border-line bg-surface-2/30 px-3.5 py-2.5 lg:flex-row lg:items-center lg:justify-between"
+                                >
+                                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                        <span className="font-semibold text-xs text-fg shrink-0">
+                                            {log.accountName || log.accountMask}
+                                        </span>
+                                        <span className="font-mono text-[11px] text-fg-muted shrink-0">
+                                            {log.accountMask} · #{log.telemetryId}
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-0.5 font-mono text-[11px] text-fg shrink-0">
+                                            <span className="text-fg-muted">
+                                                {log.fromWorkerId || 'sem-servidor'}
+                                            </span>
+                                            <ArrowRight className="h-3 w-3 text-accent-fg" />
+                                            <span className="font-semibold text-fg">
+                                                {log.toWorkerId}
+                                            </span>
+                                            <span className="text-[10px] text-fg-subtle">
+                                                (e{log.leaseEpoch})
+                                            </span>
+                                        </span>
+                                        <AdminBadge tone={trig.tone}>{trig.label}</AdminBadge>
+                                        <AdminBadge tone={stat.tone} dot>
+                                            {stat.label}
+                                        </AdminBadge>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-3 text-[11px] text-fg-muted lg:justify-end min-w-0">
+                                        <span
+                                            className="truncate max-w-md"
+                                            title={log.details || log.reason}
+                                        >
+                                            {log.details || log.reason}
+                                        </span>
+                                        <span
+                                            className="font-mono text-fg-subtle shrink-0"
+                                            title={new Date(log.createdAt).toLocaleString()}
+                                        >
+                                            {formatRelativeTime(log.createdAt)}
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </AdminSectionCard>
+
             {/* Feedback & Diagnósticos Recentes */}
             <AdminSectionCard
                 title="Feedback de Telemetria & Incidentes"
@@ -684,9 +878,41 @@ export const AdminMt5Telemetry = () => {
                                     const tierTone = TIER_TONE[acc.syncTier] || 'neutral';
                                     return (
                                         <tr key={acc.telemetryId} className="hover:bg-surface-2/30 transition-colors">
-                                            <td className="px-4 py-3 font-mono whitespace-nowrap">
-                                                <div className="font-semibold text-fg">{acc.accountMask}</div>
-                                                <div className="text-[10px] text-fg-subtle">#{acc.telemetryId}</div>
+                                            <td className="px-4 py-3 whitespace-nowrap">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div
+                                                            className="font-semibold text-fg truncate max-w-[200px]"
+                                                            title={acc.accountName || acc.accountMask}
+                                                        >
+                                                            {acc.accountName || 'Sem nome'}
+                                                        </div>
+                                                        <div className="font-mono text-[11px] text-fg-muted">
+                                                            {acc.accountMask}{' '}
+                                                            <span className="text-[10px] text-fg-subtle">
+                                                                · #{acc.telemetryId}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={reconnectingId === acc.telemetryId}
+                                                        onClick={() => handleReconnectAccount(acc)}
+                                                        className="h-7 px-2.5 text-[11px] gap-1 shrink-0"
+                                                        title={`Reconectar ${acc.accountName || acc.accountMask}`}
+                                                    >
+                                                        <RefreshCw
+                                                            className={cn(
+                                                                'h-3 w-3',
+                                                                reconnectingId === acc.telemetryId && 'animate-spin',
+                                                            )}
+                                                        />
+                                                        {reconnectingId === acc.telemetryId
+                                                            ? 'Reconectando...'
+                                                            : 'Reconectar'}
+                                                    </Button>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3 whitespace-nowrap">
                                                 <AdminBadge tone={meta.tone} dot>
@@ -696,8 +922,93 @@ export const AdminMt5Telemetry = () => {
                                             <td className="px-4 py-3 whitespace-nowrap">
                                                 <AdminBadge tone={tierTone}>{acc.syncTier}</AdminBadge>
                                             </td>
-                                            <td className="px-4 py-3 font-mono text-fg-muted whitespace-nowrap">
-                                                {acc.assignedWorkerId || '—'}
+                                            <td className="px-4 py-3 whitespace-nowrap">
+                                                {(() => {
+                                                    const assignedOnline = acc.assignedWorkerId
+                                                        ? workerOnlineMap.get(acc.assignedWorkerId) !== false
+                                                        : false;
+                                                    const candidateTargets = onlineHealthyWorkers.filter(
+                                                        (w) => w.workerId !== acc.assignedWorkerId,
+                                                    );
+                                                    const chosenTarget =
+                                                        selectedTargetWorker[acc.telemetryId] &&
+                                                        candidateTargets.some(
+                                                            (w) => w.workerId === selectedTargetWorker[acc.telemetryId],
+                                                        )
+                                                            ? selectedTargetWorker[acc.telemetryId]
+                                                            : candidateTargets[0]?.workerId || '';
+                                                    return (
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-1.5 font-mono text-fg-muted">
+                                                                {acc.assignedWorkerId && (
+                                                                    <span
+                                                                        className={cn(
+                                                                            'h-1.5 w-1.5 rounded-full shrink-0',
+                                                                            assignedOnline
+                                                                                ? 'bg-emerald-500'
+                                                                                : 'bg-rose-500',
+                                                                        )}
+                                                                        title={
+                                                                            assignedOnline
+                                                                                ? 'Servidor online'
+                                                                                : 'Servidor offline'
+                                                                        }
+                                                                    />
+                                                                )}
+                                                                <span>{acc.assignedWorkerId || '—'}</span>
+                                                            </div>
+                                                            {candidateTargets.length > 0 && (
+                                                                <div className="flex items-center gap-1">
+                                                                    {candidateTargets.length > 1 && (
+                                                                        <select
+                                                                            aria-label={`Selecionar servidor destino para ${acc.accountName || acc.accountMask}`}
+                                                                            value={chosenTarget}
+                                                                            onChange={(e) =>
+                                                                                setSelectedTargetWorker((prev) => ({
+                                                                                    ...prev,
+                                                                                    [acc.telemetryId]: e.target.value,
+                                                                                }))
+                                                                            }
+                                                                            className="h-7 rounded-md border border-line bg-surface px-1.5 font-mono text-[11px] text-fg"
+                                                                        >
+                                                                            {candidateTargets.map((w) => (
+                                                                                <option
+                                                                                    key={w.workerId}
+                                                                                    value={w.workerId}
+                                                                                >
+                                                                                    {w.workerId}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
+                                                                    )}
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        disabled={migratingId === acc.telemetryId}
+                                                                        onClick={() =>
+                                                                            handleMigrateAccount(acc, chosenTarget)
+                                                                        }
+                                                                        className="h-7 px-2 text-[11px] gap-1 shrink-0"
+                                                                        title={`Migrar silenciosamente para ${chosenTarget} mantendo a conexão ativa`}
+                                                                    >
+                                                                        <ArrowRightLeft
+                                                                            className={cn(
+                                                                                'h-3 w-3',
+                                                                                migratingId === acc.telemetryId &&
+                                                                                    'animate-pulse',
+                                                                            )}
+                                                                        />
+                                                                        {migratingId === acc.telemetryId
+                                                                            ? 'Migrando...'
+                                                                            : candidateTargets.length === 1
+                                                                              ? `→ ${chosenTarget}`
+                                                                              : 'Migrar'}
+                                                                    </Button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="px-4 py-3 font-mono text-fg-muted whitespace-nowrap">
                                                 e{acc.leaseEpoch}
