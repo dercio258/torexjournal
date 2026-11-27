@@ -522,3 +522,4 @@ def auto_discover_brokers_in_mt5(
                 proc.kill()
             except Exception:
                 pass
+
