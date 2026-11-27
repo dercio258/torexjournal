@@ -80,6 +80,8 @@ interface AnonymizedMt5Account {
     telemetryId: string;
     accountMask: string;
     accountName?: string | null;
+    broker?: string | null;
+    hasStoredCredentials?: boolean;
     connectionState: ConnectionState;
     syncTier: string;
     assignedWorkerId: string | null;
@@ -92,6 +94,20 @@ interface AnonymizedMt5Account {
     inactivityWarnedAt: string | null;
     inactivityDisconnectAt: string | null;
     feedback: string | null;
+    lastTaskId?: string | null;
+    lastTaskStatus?: 'QUEUED' | 'IN_PROGRESS' | 'SUCCESS' | 'FAILED' | null;
+    lastTaskMessage?: string | null;
+    lastTaskError?: string | null;
+    lastTaskUpdatedAt?: string | null;
+}
+
+interface ActiveAccountActionState {
+    action: 'RECONNECT' | 'MIGRATE';
+    taskId: string;
+    workerId: string;
+    status: 'QUEUED' | 'IN_PROGRESS' | 'SUCCESS' | 'FAILED' | 'TIMEOUT';
+    detail: string;
+    startedAt: number;
 }
 
 interface Mt5ServerMigrationLog {
@@ -185,15 +201,47 @@ function formatRelativeTime(iso: string | null): string {
     return `${Math.floor(hr / 24)}d atrás`;
 }
 
+function formatAdminApiError(err: any, fallback: string, routeHint?: string): string {
+    const status = err?.response?.status;
+    const rawMsg = err?.response?.data?.message;
+    const errorRef = err?.response?.data?.errorRef;
+    const textMsg = Array.isArray(rawMsg)
+        ? rawMsg.join(' ')
+        : typeof rawMsg === 'string'
+          ? rawMsg.trim()
+          : '';
+
+    if (status === 404 && routeHint) {
+        return `Rota ${routeHint} não encontrada no backend em execução (HTTP 404${errorRef ? ` · ${errorRef}` : ''}). Recompile (npm run build) e reinicie o backend-nest na VPS.`;
+    }
+    if (textMsg) {
+        const suffix =
+            errorRef && !textMsg.includes(errorRef)
+                ? ` (HTTP ${status || 'ERR'} · ${errorRef})`
+                : status && !textMsg.includes(`HTTP ${status}`)
+                  ? ` (HTTP ${status})`
+                  : '';
+        return `${textMsg}${suffix}`;
+    }
+    if (err?.message) {
+        return `${fallback} (${err.message})`;
+    }
+    return fallback;
+}
+
 export const AdminMt5Telemetry = () => {
     const [data, setData] = useState<Mt5ClusterOverviewResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [rebalancing, setRebalancing] = useState(false);
     const [drainingId, setDrainingId] = useState<string | null>(null);
+    const [migratingWorkerId, setMigratingWorkerId] = useState<string | null>(null);
     const [reconnectingId, setReconnectingId] = useState<string | null>(null);
     const [migratingId, setMigratingId] = useState<string | null>(null);
     const [selectedTargetWorker, setSelectedTargetWorker] = useState<Record<string, string>>({});
+    const [activeTaskByTelemetry, setActiveTaskByTelemetry] = useState<
+        Record<string, ActiveAccountActionState>
+    >({});
     const [banner, setBanner] = useState<{
         tone: 'success' | 'warning' | 'danger' | 'info';
         message: string;
@@ -255,47 +303,245 @@ export const AdminMt5Telemetry = () => {
         const nextDrain = !worker.isDraining;
         setDrainingId(worker.workerId);
         try {
-            await api.post(`/admin/mt5-cluster/workers/${encodeURIComponent(worker.workerId)}/drain`, {
+            const res = await api.post<{
+                migrated?: number;
+                failed?: number;
+                details?: string[];
+                message?: string;
+            }>(`/admin/mt5-cluster/workers/${encodeURIComponent(worker.workerId)}/drain`, {
                 drain: nextDrain,
             });
             setBanner({
-                tone: 'info',
-                message: nextDrain
-                    ? `Worker ${worker.workerId} colocado em modo Drain (não receberá novas contas).`
-                    : `Worker ${worker.workerId} reativado no balanceador.`,
+                tone: (res.data?.failed || 0) > 0 ? 'warning' : 'info',
+                message:
+                    res.data?.message ||
+                    (nextDrain
+                        ? `Worker ${worker.workerId} colocado em modo Drain (${res.data?.migrated ?? 0} conta(s) migrada(s)).`
+                        : `Worker ${worker.workerId} reativado no balanceador.`),
             });
             await fetchTelemetry(true);
         } catch (err: any) {
             setBanner({
                 tone: 'danger',
-                message: err?.response?.data?.message || `Falha ao atualizar estado do worker ${worker.workerId}.`,
+                message: formatAdminApiError(
+                    err,
+                    `Falha ao atualizar estado do worker ${worker.workerId}.`,
+                    `POST /admin/mt5-cluster/workers/${worker.workerId}/drain`,
+                ),
             });
         } finally {
             setDrainingId(null);
         }
     };
 
-    const handleReconnectAccount = async (acc: AnonymizedMt5Account) => {
-        setReconnectingId(acc.telemetryId);
+    const handleMigrateWorker = async (worker: ClusterWorkerNode) => {
+        setMigratingWorkerId(worker.workerId);
         try {
-            const res = await api.post<{ message?: string; workerId?: string }>(
-                `/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/reconnect`,
-            );
-            const label = acc.accountName ? `${acc.accountName} (${acc.accountMask})` : acc.accountMask;
+            const res = await api.post<{
+                migrated?: number;
+                failed?: number;
+                details?: string[];
+                message?: string;
+            }>(`/admin/mt5-cluster/workers/${encodeURIComponent(worker.workerId)}/migrate`, {});
             setBanner({
-                tone: 'success',
+                tone: (res.data?.failed || 0) > 0 ? 'warning' : 'success',
                 message:
                     res.data?.message ||
-                    `Reconexão solicitada para ${label} no worker ${res.data?.workerId || 'AUTO'}.`,
+                    `Migração da VPS ${worker.workerId} iniciada (${res.data?.migrated ?? 0} conta(s)).`,
             });
             await fetchTelemetry(true);
         } catch (err: any) {
             setBanner({
                 tone: 'danger',
-                message:
-                    err?.response?.data?.message ||
-                    `Não foi possível solicitar a reconexão da conta ${acc.accountName || acc.accountMask}.`,
+                message: formatAdminApiError(
+                    err,
+                    `Não foi possível migrar as contas do servidor ${worker.workerId}.`,
+                    `POST /admin/mt5-cluster/workers/${worker.workerId}/migrate`,
+                ),
             });
+        } finally {
+            setMigratingWorkerId(null);
+        }
+    };
+
+    const pollTaskUntilSettled = useCallback(
+        (
+            telemetryId: string,
+            accountLabel: string,
+            taskId: string,
+            action: 'RECONNECT' | 'MIGRATE',
+            workerId: string,
+        ) => {
+            const startedAt = Date.now();
+            const actionLabel = action === 'MIGRATE' ? 'Migração' : 'Reconexão';
+            const intervalId = window.setInterval(async () => {
+                const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+                try {
+                    const statusRes = await api.get<{
+                        taskStatus: 'QUEUED' | 'IN_PROGRESS' | 'SUCCESS' | 'FAILED' | 'UNKNOWN';
+                        connectionState: ConnectionState;
+                        assignedWorkerId: string | null;
+                        workerOnline: boolean;
+                        pingMs: number | null;
+                        message: string | null;
+                        errorMessage: string | null;
+                    }>(
+                        `/admin/mt5-cluster/accounts/${encodeURIComponent(telemetryId)}/tasks/${encodeURIComponent(taskId)}`,
+                    );
+                    const st = statusRes.data;
+                    const resolvedWorker = st.assignedWorkerId || workerId;
+
+                    if (st.taskStatus === 'SUCCESS') {
+                        window.clearInterval(intervalId);
+                        const detail = `Conectada no servidor ${resolvedWorker}${typeof st.pingMs === 'number' ? ` (ping ${st.pingMs}ms)` : ''}${st.message ? ` · ${st.message}` : ''}`;
+                        setActiveTaskByTelemetry((prev) => ({
+                            ...prev,
+                            [telemetryId]: {
+                                action,
+                                taskId,
+                                workerId: resolvedWorker,
+                                status: 'SUCCESS',
+                                detail,
+                                startedAt,
+                            },
+                        }));
+                        setBanner({
+                            tone: 'success',
+                            message: `${actionLabel} concluída para ${accountLabel}: ${detail}`,
+                        });
+                        await fetchTelemetry(true);
+                        return;
+                    }
+
+                    if (st.taskStatus === 'FAILED') {
+                        window.clearInterval(intervalId);
+                        const reason =
+                            st.errorMessage ||
+                            st.message ||
+                            'O worker MT5 reportou falha sem detalhe adicional.';
+                        setActiveTaskByTelemetry((prev) => ({
+                            ...prev,
+                            [telemetryId]: {
+                                action,
+                                taskId,
+                                workerId: resolvedWorker,
+                                status: 'FAILED',
+                                detail: reason,
+                                startedAt,
+                            },
+                        }));
+                        setBanner({
+                            tone: 'danger',
+                            message: `${actionLabel} falhou para ${accountLabel} (${st.connectionState}): ${reason}`,
+                        });
+                        await fetchTelemetry(true);
+                        return;
+                    }
+
+                    if (elapsedSec >= 45) {
+                        window.clearInterval(intervalId);
+                        const timeoutDetail =
+                            st.taskStatus === 'QUEUED'
+                                ? `Worker ${resolvedWorker} não coletou a tarefa em ${elapsedSec}s (${st.workerOnline ? 'worker online, mas fila ocupada' : 'worker offline'}).`
+                                : `Em execução há ${elapsedSec}s no worker ${resolvedWorker} (${st.message || st.connectionState}). Atualize a telemetria para acompanhar.`;
+                        setActiveTaskByTelemetry((prev) => ({
+                            ...prev,
+                            [telemetryId]: {
+                                action,
+                                taskId,
+                                workerId: resolvedWorker,
+                                status: 'TIMEOUT',
+                                detail: timeoutDetail,
+                                startedAt,
+                            },
+                        }));
+                        setBanner({ tone: 'warning', message: `${accountLabel}: ${timeoutDetail}` });
+                        await fetchTelemetry(true);
+                        return;
+                    }
+
+                    const liveDetail =
+                        st.taskStatus === 'IN_PROGRESS'
+                            ? `Worker ${resolvedWorker} executando (${elapsedSec}s): ${st.message || 'autenticando no terminal MT5...'}`
+                            : `Na fila do worker ${resolvedWorker} (${elapsedSec}s · aguardando worker coletar)`;
+                    setActiveTaskByTelemetry((prev) => ({
+                        ...prev,
+                        [telemetryId]: {
+                            action,
+                            taskId,
+                            workerId: resolvedWorker,
+                            status: st.taskStatus === 'IN_PROGRESS' ? 'IN_PROGRESS' : 'QUEUED',
+                            detail: liveDetail,
+                            startedAt,
+                        },
+                    }));
+                } catch (pollErr: any) {
+                    if (pollErr?.response?.status === 404 || elapsedSec >= 45) {
+                        window.clearInterval(intervalId);
+                    }
+                }
+            }, 2500);
+        },
+        [fetchTelemetry],
+    );
+
+    const handleReconnectAccount = async (acc: AnonymizedMt5Account) => {
+        setReconnectingId(acc.telemetryId);
+        const label = acc.accountName ? `${acc.accountName} (${acc.accountMask})` : acc.accountMask;
+        try {
+            const res = await api.post<{
+                message?: string;
+                workerId?: string;
+                taskId?: string;
+                credentialStatus?: string;
+            }>(`/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/reconnect`);
+            const targetWorker = res.data?.workerId || acc.assignedWorkerId || 'AUTO';
+            const msg =
+                res.data?.message ||
+                `Reconexão solicitada para ${label} no worker ${targetWorker}.`;
+            setBanner({
+                tone: res.data?.credentialStatus && res.data.credentialStatus !== 'OK' ? 'warning' : 'info',
+                message: msg,
+            });
+            if (res.data?.taskId) {
+                setActiveTaskByTelemetry((prev) => ({
+                    ...prev,
+                    [acc.telemetryId]: {
+                        action: 'RECONNECT',
+                        taskId: res.data.taskId!,
+                        workerId: targetWorker,
+                        status: 'QUEUED',
+                        detail: `Na fila do worker ${targetWorker} · aguardando coleta...`,
+                        startedAt: Date.now(),
+                    },
+                }));
+                pollTaskUntilSettled(
+                    acc.telemetryId,
+                    label,
+                    res.data.taskId,
+                    'RECONNECT',
+                    targetWorker,
+                );
+            }
+            await fetchTelemetry(true);
+        } catch (err: any) {
+            const concreteError = formatAdminApiError(
+                err,
+                `Não foi possível solicitar a reconexão da conta ${label}.`,
+                `POST /admin/mt5-cluster/accounts/${acc.telemetryId}/reconnect`,
+            );
+            setActiveTaskByTelemetry((prev) => ({
+                ...prev,
+                [acc.telemetryId]: {
+                    action: 'RECONNECT',
+                    taskId: '',
+                    workerId: acc.assignedWorkerId || '—',
+                    status: 'FAILED',
+                    detail: concreteError,
+                    startedAt: Date.now(),
+                },
+            }));
+            setBanner({ tone: 'danger', message: concreteError });
         } finally {
             setReconnectingId(null);
         }
@@ -330,26 +576,62 @@ export const AdminMt5Telemetry = () => {
             return;
         }
 
+        const label = acc.accountName ? `${acc.accountName} (${acc.accountMask})` : acc.accountMask;
         setMigratingId(acc.telemetryId);
         try {
-            const res = await api.post<{ message?: string; toWorkerId?: string }>(
-                `/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/migrate`,
-                { targetWorkerId },
-            );
+            const res = await api.post<{
+                message?: string;
+                toWorkerId?: string;
+                taskId?: string;
+            }>(`/admin/mt5-cluster/accounts/${encodeURIComponent(acc.telemetryId)}/migrate`, {
+                targetWorkerId,
+            });
+            const destWorker = res.data?.toWorkerId || targetWorkerId;
             setBanner({
-                tone: 'success',
+                tone: 'info',
                 message:
                     res.data?.message ||
-                    `Migração silenciosa iniciada para ${acc.accountName || acc.accountMask} → ${res.data?.toWorkerId || targetWorkerId}.`,
+                    `Migração silenciosa iniciada para ${label} → ${destWorker}.`,
             });
+            if (res.data?.taskId) {
+                setActiveTaskByTelemetry((prev) => ({
+                    ...prev,
+                    [acc.telemetryId]: {
+                        action: 'MIGRATE',
+                        taskId: res.data.taskId!,
+                        workerId: destWorker,
+                        status: 'QUEUED',
+                        detail: `Migração na fila do worker ${destWorker} · aguardando login MT5...`,
+                        startedAt: Date.now(),
+                    },
+                }));
+                pollTaskUntilSettled(
+                    acc.telemetryId,
+                    label,
+                    res.data.taskId,
+                    'MIGRATE',
+                    destWorker,
+                );
+            }
             await fetchTelemetry(true);
         } catch (err: any) {
-            setBanner({
-                tone: 'danger',
-                message:
-                    err?.response?.data?.message ||
-                    `Não foi possível migrar a conta ${acc.accountName || acc.accountMask}.`,
-            });
+            const concreteError = formatAdminApiError(
+                err,
+                `Não foi possível migrar a conta ${label}.`,
+                `POST /admin/mt5-cluster/accounts/${acc.telemetryId}/migrate`,
+            );
+            setActiveTaskByTelemetry((prev) => ({
+                ...prev,
+                [acc.telemetryId]: {
+                    action: 'MIGRATE',
+                    taskId: '',
+                    workerId: targetWorkerId,
+                    status: 'FAILED',
+                    detail: concreteError,
+                    startedAt: Date.now(),
+                },
+            }));
+            setBanner({ tone: 'danger', message: concreteError });
         } finally {
             setMigratingId(null);
         }
@@ -589,20 +871,41 @@ export const AdminMt5Telemetry = () => {
                                     )}
                                 </div>
 
-                                <div className="flex items-center justify-between pt-1">
+                                <div className="flex items-center justify-between gap-2 pt-1">
                                     <span className="text-[11px] text-fg-muted">
                                         Terminais ativos: {w.activeTerminals ?? 0}
                                     </span>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={drainingId === w.workerId}
-                                        onClick={() => handleToggleDrain(w)}
-                                        className="h-7 px-2.5 text-xs gap-1"
-                                    >
-                                        <PauseCircle className="h-3.5 w-3.5" />
-                                        {w.isDraining ? 'Reativar' : 'Drain'}
-                                    </Button>
+                                    <div className="flex items-center gap-1.5">
+                                        {w.assignedAccountsCount > 0 &&
+                                            onlineHealthyWorkers.some((o) => o.workerId !== w.workerId) && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    disabled={migratingWorkerId === w.workerId}
+                                                    onClick={() => handleMigrateWorker(w)}
+                                                    className="h-7 px-2.5 text-xs gap-1"
+                                                    title={`Migrar todas as contas de ${w.workerId} para outro servidor online`}
+                                                >
+                                                    <ArrowRightLeft
+                                                        className={cn(
+                                                            'h-3.5 w-3.5',
+                                                            migratingWorkerId === w.workerId && 'animate-pulse',
+                                                        )}
+                                                    />
+                                                    {migratingWorkerId === w.workerId ? 'Migrando...' : 'Migrar VPS'}
+                                                </Button>
+                                            )}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            disabled={drainingId === w.workerId}
+                                            onClick={() => handleToggleDrain(w)}
+                                            className="h-7 px-2.5 text-xs gap-1"
+                                        >
+                                            <PauseCircle className="h-3.5 w-3.5" />
+                                            {w.isDraining ? 'Reativar' : 'Drain'}
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -893,6 +1196,16 @@ export const AdminMt5Telemetry = () => {
                                                                 · #{acc.telemetryId}
                                                             </span>
                                                         </div>
+                                                        {acc.hasStoredCredentials === false && (
+                                                            <div className="mt-0.5">
+                                                                <span
+                                                                    className="inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400"
+                                                                    title="Senha MT5 não armazenada no cofre do backend — migração entre VPS exige reconexão única pelo cliente"
+                                                                >
+                                                                    Sem senha no cofre
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <Button
                                                         variant="outline"
@@ -1026,8 +1339,42 @@ export const AdminMt5Telemetry = () => {
                                                     <span className="text-fg-subtle">Normal</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 max-w-xs truncate text-fg-muted" title={acc.feedback || ''}>
-                                                {acc.feedback || '—'}
+                                            <td className="px-4 py-3 max-w-sm text-fg-muted">
+                                                {(() => {
+                                                    const liveAction = activeTaskByTelemetry[acc.telemetryId];
+                                                    const concreteText =
+                                                        liveAction?.detail ||
+                                                        acc.lastTaskError ||
+                                                        acc.feedback ||
+                                                        acc.lastTaskMessage ||
+                                                        null;
+                                                    const statusTone =
+                                                        liveAction?.status === 'FAILED' ||
+                                                        acc.lastTaskStatus === 'FAILED' ||
+                                                        acc.connectionState === 'AUTH_FAILED'
+                                                            ? 'text-danger-fg'
+                                                            : liveAction?.status === 'SUCCESS'
+                                                              ? 'text-emerald-400'
+                                                              : liveAction?.status === 'TIMEOUT'
+                                                                ? 'text-amber-400'
+                                                                : liveAction?.status === 'QUEUED' ||
+                                                                    liveAction?.status === 'IN_PROGRESS'
+                                                                  ? 'text-sky-400'
+                                                                  : 'text-fg-muted';
+                                                    return concreteText ? (
+                                                        <div
+                                                            className={cn(
+                                                                'text-[11px] leading-snug line-clamp-2 break-words',
+                                                                statusTone,
+                                                            )}
+                                                            title={concreteText}
+                                                        >
+                                                            {concreteText}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-fg-subtle">—</span>
+                                                    );
+                                                })()}
                                             </td>
                                         </tr>
                                     );

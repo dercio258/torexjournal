@@ -2563,6 +2563,67 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         return account;
     }
 
+    private sanitizeAdminDiagnosticText(raw?: string | null, maxLen = 220): string | null {
+        if (!raw) return null;
+        const cleaned = String(raw)
+            .replace(/[A-Za-z]:\\[^\s'"]+|\/(?:home|root|var|tmp|Users)\/[^\s'"]+/g, '[path]')
+            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
+            .replace(/\b\d{5,12}\b/g, '••••')
+            .trim()
+            .slice(0, maxLen);
+        return cleaned || null;
+    }
+
+    private formatTaskSummaryForAdmin(task: WorkerTask) {
+        const mappedStatus: 'QUEUED' | 'IN_PROGRESS' | 'SUCCESS' | 'FAILED' =
+            task.status === WorkerTaskStatus.SUCCESS
+                ? 'SUCCESS'
+                : task.status === WorkerTaskStatus.FAILED
+                  ? 'FAILED'
+                  : task.status === WorkerTaskStatus.IN_PROGRESS
+                    ? 'IN_PROGRESS'
+                    : 'QUEUED';
+        return {
+            taskId: task.id,
+            type: task.type,
+            status: mappedStatus,
+            targetWorkerId: task.targetWorkerId || null,
+            isSilentMigration: Boolean(task.options?.silentMigration),
+            migrationId: task.options?.migrationId ? String(task.options.migrationId) : null,
+            message: this.sanitizeAdminDiagnosticText(task.message),
+            errorMessage: this.sanitizeAdminDiagnosticText(task.errorMessage),
+            createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : new Date().toISOString(),
+            completedAt: task.completedAt ? new Date(task.completedAt).toISOString() : null,
+        };
+    }
+
+    public getTaskSummaryById(taskId: string) {
+        const cleanId = String(taskId || '').trim();
+        if (!cleanId) return null;
+        const task = this.pendingTasks.get(cleanId);
+        if (!task) return null;
+        return {
+            ...this.formatTaskSummaryForAdmin(task),
+            login: task.login,
+        };
+    }
+
+    public getLatestTaskSummaryForLogin(login: string) {
+        const cleanLogin = String(login || '').trim();
+        if (!cleanLogin) return null;
+        let latest: WorkerTask | null = null;
+        for (const task of this.pendingTasks.values()) {
+            if (task.login !== cleanLogin) continue;
+            if (
+                !latest ||
+                new Date(task.createdAt).getTime() >= new Date(latest.createdAt).getTime()
+            ) {
+                latest = task;
+            }
+        }
+        return latest ? this.formatTaskSummaryForAdmin(latest) : null;
+    }
+
     /**
      * Retorna apenas telemetria técnica anonimizada de uma conta MT5 para o painel Admin,
      * sem expor login completo, nome do titular, saldo, equity ou caminhos locais.
@@ -2573,14 +2634,9 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
         const connectionState: AccountLiveTelemetry['connectionState'] =
             tel?.connectionState || (fallbackConnected ? 'CONNECTED' : 'DISCONNECTED');
 
-        const rawFeedback = tel?.lastError || tel?.statusMessage || null;
-        const sanitizedFeedback = rawFeedback
-            ? String(rawFeedback)
-                  .replace(/[A-Za-z]:\\[^\s'"]+|\/(?:home|root|var|tmp|Users)\/[^\s'"]+/g, '[path]')
-                  .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]')
-                  .replace(/\b\d{5,12}\b/g, '••••')
-                  .slice(0, 180)
-            : null;
+        const latestTask = cleanLogin ? this.getLatestTaskSummaryForLogin(cleanLogin) : null;
+        const rawFeedback = tel?.lastError || latestTask?.errorMessage || tel?.statusMessage || latestTask?.message || null;
+        const sanitizedFeedback = this.sanitizeAdminDiagnosticText(rawFeedback, 220);
 
         const rawHolder = String(tel?.accountHolderName || '').trim();
         const sanitizedHolder = rawHolder
@@ -2602,6 +2658,7 @@ export class Mt5WorkerService implements OnModuleInit, OnModuleDestroy {
             openPositionsCount: typeof tel?.openPositionsCount === 'number' ? tel.openPositionsCount : null,
             pendingOrdersCount: typeof tel?.pendingOrdersCount === 'number' ? tel.pendingOrdersCount : null,
             feedback: sanitizedFeedback,
+            latestTask,
         };
     }
 }

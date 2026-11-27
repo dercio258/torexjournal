@@ -474,4 +474,35 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
         expect(after.migrationLogs[0].trigger).toBe('MANUAL_ADMIN');
         expect(after.migrationLogs[0].toWorkerId).toBe('win-worker-02');
     });
+
+    it('rejects reconnect with a concrete message when no workers are online and supports VPS-to-VPS migration diagnostics', async () => {
+        const { balancer } = createBalancerHarness({
+            workers: [{ workerId: 'win-worker-01', capacity: 10, isOnline: false }],
+            accounts: [
+                {
+                    id: '33333333-4444-5555-6666-777777777777',
+                    userId: 'u1',
+                    name: 'Conta Offline',
+                    mt5Id: '555666777',
+                    broker: 'Exness-MT5Real30',
+                    isConnected: false,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'HOT',
+                },
+            ],
+        });
+
+        const overview = await balancer.getClusterOverview();
+        const telemetryId = overview.accounts[0].telemetryId;
+
+        await expect(balancer.reconnectAccountByTelemetryId(telemetryId)).rejects.toThrow(
+            /Nenhum servidor worker MT5 está online/,
+        );
+
+        await expect(balancer.migrateWorkerAccounts('win-worker-01')).rejects.toThrow(
+            /Nenhum outro servidor worker MT5 online saudável/,
+        );
+    });
 });

@@ -819,6 +819,51 @@ export class AdminController {
     }
 
     @UseGuards(AdminAuthGuard)
+    @Post('mt5-cluster/workers/:workerId/migrate')
+    async migrateMt5WorkerAccounts(
+        @Param('workerId') workerId: string,
+        @Body() body: { targetWorkerId?: string },
+        @Req() req: any,
+    ) {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        const res = await this.mt5ClusterBalancer.migrateWorkerAccounts(
+            String(workerId || '').trim(),
+            body?.targetWorkerId ? String(body.targetWorkerId).trim() : undefined,
+        );
+        void this.adminAuditService?.record({
+            adminEmail: req?.admin?.email,
+            action: 'MT5_WORKER_MIGRATE',
+            targetType: 'mt5_worker',
+            targetId: String(workerId || '').trim(),
+            ip: extractTrustedClientIp(req),
+            details: {
+                fromWorkerId: res.fromWorkerId,
+                toWorkerId: res.toWorkerId,
+                migrated: res.migrated,
+                failed: res.failed,
+            },
+        });
+        return res;
+    }
+
+    @UseGuards(AdminAuthGuard)
+    @Get('mt5-cluster/accounts/:telemetryId/tasks/:taskId')
+    async getMt5AccountTaskStatus(
+        @Param('telemetryId') telemetryId: string,
+        @Param('taskId') taskId: string,
+    ) {
+        if (!this.mt5ClusterBalancer) {
+            throw new BadRequestException('MT5 Cluster Balancer unavailable');
+        }
+        return this.mt5ClusterBalancer.getAccountTaskStatus(
+            String(telemetryId || '').trim(),
+            String(taskId || '').trim(),
+        );
+    }
+
+    @UseGuards(AdminAuthGuard)
     @Post('mt5-cluster/rebalance')
     async rebalanceMt5Cluster() {
         if (!this.mt5ClusterBalancer) {

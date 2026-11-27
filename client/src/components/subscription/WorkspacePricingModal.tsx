@@ -10,7 +10,6 @@ import {
     Loader2,
     Share2,
     Sparkles,
-    Timer,
     X,
     Zap,
 } from 'lucide-react';
@@ -86,14 +85,12 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
     const [trialError, setTrialError] = useState<string | null>(null);
     const [localTrialDisabled, setLocalTrialDisabled] = useState(false);
 
-    // Affiliate Share Gate step for Free Trial activation (requires sharing + 30s wait)
+    // Optional invite/share prompt for Free Trial activation (zero wait, button always unlocked)
     const [trialGatePlan, setTrialGatePlan] = useState<WorkspacePlanConfig | null>(null);
     const [referralShareUrl, setReferralShareUrl] = useState<string>(() =>
         typeof window !== 'undefined' ? `${window.location.origin}/register` : 'https://torexjournal.com/register',
     );
     const [hasSharedForTrial, setHasSharedForTrial] = useState(false);
-    const [shareCooldownSeconds, setShareCooldownSeconds] = useState(30);
-    const [isPreparingShare, setIsPreparingShare] = useState(false);
     const [copiedShareLink, setCopiedShareLink] = useState(false);
 
     const effectiveTrialAvailable = canOfferTrial && !localTrialDisabled;
@@ -102,7 +99,6 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
         if (!isOpen) {
             setTrialGatePlan(null);
             setHasSharedForTrial(false);
-            setShareCooldownSeconds(30);
             setCopiedShareLink(false);
         }
     }, [isOpen]);
@@ -123,14 +119,6 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
             active = false;
         };
     }, [trialGatePlan, user]);
-
-    useEffect(() => {
-        if (!trialGatePlan || !hasSharedForTrial || shareCooldownSeconds <= 0) return;
-        const timer = window.setInterval(() => {
-            setShareCooldownSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
-        }, 1000);
-        return () => window.clearInterval(timer);
-    }, [trialGatePlan, hasSharedForTrial, shareCooldownSeconds]);
 
     useEffect(() => {
         const nextMode = effectiveTrialAvailable ? 'TRIAL' : 'PAID';
@@ -230,7 +218,6 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
 
         if (selectedTrial) {
             setHasSharedForTrial(false);
-            setShareCooldownSeconds(30);
             setCopiedShareLink(false);
             setTrialGatePlan(plan);
             return;
@@ -328,31 +315,17 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
             }
         }
 
-        setIsPreparingShare(true);
+        setHasSharedForTrial(true);
         setTrialError(null);
-        try {
-            await api.post('/subscription/prepare-trial-share', {
-                tier: trialGatePlan.tier,
-                channel,
-            });
-            if (!hasSharedForTrial) {
-                setHasSharedForTrial(true);
-                setShareCooldownSeconds(30);
-            }
-        } catch (err: any) {
-            setTrialError(
-                err?.response?.data?.message ||
-                    (isEn
-                        ? 'Unable to verify share right now. Try again.'
-                        : 'Não foi possível validar o compartilhamento agora. Tente novamente.'),
-            );
-        } finally {
-            setIsPreparingShare(false);
-        }
+        // Optional non-blocking analytics record
+        api.post('/subscription/prepare-trial-share', {
+            tier: trialGatePlan.tier,
+            channel,
+        }).catch(() => {});
     };
 
     const handleConfirmTrialActivation = async () => {
-        if (!trialGatePlan || !hasSharedForTrial || shareCooldownSeconds > 0) return;
+        if (!trialGatePlan || activatingTrialTier) return;
         const tierUpper = String(trialGatePlan.tier || 'BASIC').toUpperCase() as
             | 'BASIC'
             | 'PRO'
@@ -562,8 +535,8 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                         <h2 className="text-[20px] sm:text-2xl lg:text-[28px] font-extrabold text-slate-900 tracking-[-0.025em] leading-[1.15] text-balance max-w-2xl mx-auto">
                             {trialGatePlan
                                 ? isEn
-                                    ? 'Share with Friends to Unlock Your Free Trial'
-                                    : 'Compartilhe com Amigos para Liberar seu Teste Grátis'
+                                    ? 'Invite a Trader & Activate Your Free Trial'
+                                    : 'Convide um Amigo e Ative seu Teste Grátis'
                                 : isEn
                                   ? 'Plans built to scale your trading consistency'
                                   : 'Escolha o plano ideal para evoluir sua consistência'}
@@ -571,8 +544,8 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                         <p className="text-xs sm:text-[13.5px] text-slate-500 font-medium leading-relaxed text-balance max-w-xl mx-auto mt-1.5 mb-3">
                             {trialGatePlan
                                 ? isEn
-                                    ? 'Share your affiliate link, wait 30 seconds, and unlock instant free access.'
-                                    : 'Partilhe seu link de afiliado nas redes sociais, aguarde 30 segundos e desbloqueie o acesso gratuito.'
+                                    ? 'Copy or share your invite link with friends to earn affiliate credits, or activate your free trial right away.'
+                                    : 'Copie ou partilhe seu link de convite com amigos para ganhar créditos de afiliado e clique abaixo para ativar seu teste grátis na hora.'
                                 : isEn
                                   ? 'Automated journaling, monthly AI credits, AI Coach, and market backtesting in one clean workspace.'
                                   : 'Diário automatizado, créditos mensais de IA, AI Coach e backtesting avançado num único espaço.'}
@@ -636,11 +609,6 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                             const gateDays = TRIAL_DAYS_BY_TIER_CLIENT[gateTier] ?? 30;
                             const renewalDateStr = formatPostTrialChargeDate(gateDays);
                             const recurringUsd = getPrice(trialGatePlan).toFixed(2);
-                            const progressPct = hasSharedForTrial
-                                ? Math.round(((30 - shareCooldownSeconds) / 30) * 100)
-                                : 0;
-                            const canActivateNow =
-                                hasSharedForTrial && shareCooldownSeconds === 0 && !activatingTrialTier;
 
                             return (
                                 <div className="max-w-2xl mx-auto rounded-2xl bg-white p-4 sm:p-5 space-y-3.5 shadow-[0_14px_40px_-12px_rgba(15,23,42,0.12)]">
@@ -747,33 +715,16 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                         </div>
                                     </div>
 
-                                    <div className="rounded-xl bg-slate-50 p-3 space-y-1.5">
-                                        <div className="flex items-center justify-between text-xs font-semibold gap-2">
-                                            <span className="inline-flex items-center gap-1.5 text-slate-800">
-                                                <Timer size={14} className="text-emerald-600 shrink-0" />
-                                                {!hasSharedForTrial
-                                                    ? isEn
-                                                        ? 'Step 1: Click a share button above to start the 30s unlock timer'
-                                                        : 'Passo 1: Clique em partilhar acima para iniciar a contagem de 30s'
-                                                    : shareCooldownSeconds > 0
-                                                      ? isEn
-                                                          ? `Verifying share... unlocking in ${shareCooldownSeconds}s`
-                                                          : `Validando partilha... liberação em ${shareCooldownSeconds}s`
-                                                      : isEn
-                                                        ? 'Verified! Your free trial button is unlocked.'
-                                                        : 'Partilha confirmada! Botão de teste gratuito liberado.'}
-                                            </span>
-                                            <span className="font-mono text-emerald-600 shrink-0">
-                                                {hasSharedForTrial ? `${shareCooldownSeconds}s` : '30s'}
+                                    {hasSharedForTrial && (
+                                        <div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+                                            <CheckCircle size={14} className="shrink-0" />
+                                            <span>
+                                                {isEn
+                                                    ? 'Thanks for sharing! Click below to activate your free trial immediately.'
+                                                    : 'Obrigado por partilhar! Clique abaixo para ativar seu teste grátis imediatamente.'}
                                             </span>
                                         </div>
-                                        <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                                            <div
-                                                className="h-full bg-emerald-500 transition-all duration-500"
-                                                style={{ width: `${progressPct}%` }}
-                                            />
-                                        </div>
-                                    </div>
+                                    )}
 
                                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
                                         <button
@@ -788,21 +739,13 @@ export const WorkspacePricingModal: React.FC<WorkspacePricingModalProps> = ({
                                         <Button
                                             variant="brand"
                                             className="flex-1 py-2 text-xs sm:text-sm font-bold !border-0 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 !text-white shadow-md shadow-emerald-600/20"
-                                            disabled={!canActivateNow || isPreparingShare}
+                                            disabled={Boolean(activatingTrialTier)}
                                             isLoading={activatingTrialTier === gateTier}
                                             onClick={() => void handleConfirmTrialActivation()}
                                         >
-                                            {canActivateNow
-                                                ? isEn
-                                                    ? `Acquire ${gateDays}-Day Free Trial`
-                                                    : `Adquirir Teste de ${gateDays} Dias Grátis`
-                                                : hasSharedForTrial
-                                                  ? isEn
-                                                      ? `Unlocks in ${shareCooldownSeconds}s`
-                                                      : `Disponível em ${shareCooldownSeconds}s`
-                                                  : isEn
-                                                    ? 'Share Link First to Unlock'
-                                                    : 'Partilhe o Link para Desbloquear'}
+                                            {isEn
+                                                ? `Acquire ${gateDays}-Day Free Trial`
+                                                : `Adquirir Teste de ${gateDays} Dias Grátis`}
                                         </Button>
                                     </div>
                                 </div>

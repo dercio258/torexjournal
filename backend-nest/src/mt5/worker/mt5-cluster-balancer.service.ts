@@ -522,10 +522,15 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         trigger: Mt5MigrationTrigger,
         reason: string,
         options?: { priority?: number; requireStoredPassword?: boolean },
-    ): Promise<{ migrated: boolean; migrationLog: Mt5ServerMigrationLog | null; taskId: string | null }> {
+    ): Promise<{
+        migrated: boolean;
+        migrationLog: Mt5ServerMigrationLog | null;
+        taskId: string | null;
+        failureReason?: 'INVALID_LOGIN' | 'PASSWORD_NOT_STORED' | 'PASSWORD_DECRYPT_FAILED';
+    }> {
         const cleanLogin = String(acc.mt5Id || '').trim();
         if (!/^\d{4,16}$/.test(cleanLogin)) {
-            return { migrated: false, migrationLog: null, taskId: null };
+            return { migrated: false, migrationLog: null, taskId: null, failureReason: 'INVALID_LOGIN' };
         }
 
         const oldWorker = acc.assignedWorkerId || null;
@@ -543,11 +548,20 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             liveTel?.accountHolderName || null,
         );
 
-        const pass = await this.decryptStoredPassword(acc.id);
+        const passCheck = await this.inspectStoredPassword(acc.id);
+        const pass = passCheck.password;
         if (!pass && options?.requireStoredPassword !== false) {
+            const failureCode =
+                passCheck.status === 'DECRYPT_FAILED'
+                    ? 'PASSWORD_DECRYPT_FAILED'
+                    : 'PASSWORD_NOT_STORED';
+            const failureDetails =
+                failureCode === 'PASSWORD_DECRYPT_FAILED'
+                    ? 'Falha ao descriptografar a senha MT5 no cofre do backend (chave de criptografia divergente).'
+                    : 'Senha MT5 não armazenada no cofre do backend para migração entre servidores.';
             const nowMs = Date.now();
             const lastAlert = this.missingPassAlertedAt.get(acc.id) || 0;
-            if (nowMs - lastAlert >= 10 * 60_000) {
+            if (trigger === 'MANUAL_ADMIN' || nowMs - lastAlert >= 10 * 60_000) {
                 this.missingPassAlertedAt.set(acc.id, nowMs);
                 const failEntry: Mt5ServerMigrationLog = {
                     id: randomUUID(),
@@ -561,13 +575,18 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                     status: 'FAILED',
                     leaseEpoch: Number(acc.mt5LeaseEpoch || 1),
                     taskId: null,
-                    details: 'Credencial não armazenada no cofre do backend para migração entre servidores.',
+                    details: failureDetails,
                     createdAt: new Date(nowMs).toISOString(),
                     completedAt: new Date(nowMs).toISOString(),
                 };
                 await this.appendAdminMigrationLog(failEntry);
             }
-            return { migrated: false, migrationLog: null, taskId: null };
+            return {
+                migrated: false,
+                migrationLog: null,
+                taskId: null,
+                failureReason: failureCode,
+            };
         }
 
         const nextEpoch = Number(acc.mt5LeaseEpoch || 1) + 1;
@@ -886,37 +905,177 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
     async setWorkerDrain(workerId: string, drain: boolean) {
         this.setWorkerDrainingFlag(workerId, drain);
         let migrated = 0;
+        let failed = 0;
+        const details: string[] = [];
 
         if (drain) {
-            const workers = this.getWorkerInputsFromService();
-            const accounts = await this.accountRepo.find({
-                where: { assignedWorkerId: workerId, isArchived: false, isConnected: true },
-            });
-            const assignedCounts = await this.computeAssignedCountsByWorker();
+            const batch = await this.migrateWorkerAccountsInternal(
+                workerId,
+                undefined,
+                'WORKER_DRAIN',
+                `Servidor ${workerId} colocado em modo Drain pelo administrador.`,
+                2,
+            );
+            migrated = batch.migrated;
+            failed = batch.failed;
+            details.push(...batch.details);
+        }
 
-            for (const acc of accounts) {
-                if (!acc.mt5Id) continue;
-                const target = this.selectWorkerForAccount(workers, assignedCounts, {
-                    excludeWorkerIds: [workerId],
+        const message = drain
+            ? migrated > 0 || failed > 0
+                ? `Worker ${workerId} em modo Drain: ${migrated} conta(s) migrada(s), ${failed} impedida(s).${details.length > 0 ? ` ${details[0]}` : ''}`
+                : `Worker ${workerId} colocado em modo Drain (nenhuma conta ativa para migrar).`
+            : `Worker ${workerId} reativado no balanceador.`;
+
+        return { success: true, workerId, draining: drain, migrated, failed, details, message };
+    }
+
+    private async migrateWorkerAccountsInternal(
+        fromWorkerId: string,
+        explicitTargetWorkerId: string | undefined,
+        trigger: Mt5MigrationTrigger,
+        reason: string,
+        priority = 1,
+    ) {
+        const cleanFrom = String(fromWorkerId || '').trim();
+        const workers = this.getWorkerInputsFromService();
+        const accounts = await this.accountRepo.find({
+            where: { assignedWorkerId: cleanFrom, isArchived: false, mt5Id: Not(IsNull()) },
+        });
+        const assignedCounts = await this.computeAssignedCountsByWorker();
+        const details: string[] = [];
+        let migrated = 0;
+        let failed = 0;
+        let skippedNoCredentials = 0;
+        let skippedNoTarget = 0;
+
+        for (const acc of accounts) {
+            if (!acc.mt5Id) continue;
+            let target: BalancerWorkerInput | null = null;
+            if (explicitTargetWorkerId) {
+                target =
+                    workers.find(
+                        (w) =>
+                            w.workerId === explicitTargetWorkerId &&
+                            w.isOnline &&
+                            !w.isDraining &&
+                            !this.drainingWorkers.has(w.workerId),
+                    ) || null;
+            } else {
+                target = this.selectWorkerForAccount(workers, assignedCounts, {
+                    excludeWorkerIds: [cleanFrom],
                 });
-                if (!target) break;
+            }
 
-                const result = await this.executeSilentAccountMigration(
-                    acc,
-                    target.workerId,
-                    'WORKER_DRAIN',
-                    `Servidor ${workerId} colocado em modo Drain pelo administrador.`,
-                    { priority: 2, requireStoredPassword: true },
+            if (!target) {
+                skippedNoTarget++;
+                failed++;
+                details.push(
+                    `Sem servidor destino online saudável disponível para ${this.formatAccountMask(acc.mt5Id)}.`,
                 );
-                if (result.migrated) {
-                    assignedCounts[workerId] = Math.max(0, (assignedCounts[workerId] || 1) - 1);
-                    assignedCounts[target.workerId] = (assignedCounts[target.workerId] || 0) + 1;
-                    migrated++;
+                continue;
+            }
+
+            const result = await this.executeSilentAccountMigration(
+                acc,
+                target.workerId,
+                trigger,
+                reason,
+                { priority, requireStoredPassword: true },
+            );
+            if (result.migrated) {
+                assignedCounts[cleanFrom] = Math.max(0, (assignedCounts[cleanFrom] || 1) - 1);
+                assignedCounts[target.workerId] = (assignedCounts[target.workerId] || 0) + 1;
+                migrated++;
+            } else {
+                failed++;
+                if (
+                    result.failureReason === 'PASSWORD_NOT_STORED' ||
+                    result.failureReason === 'PASSWORD_DECRYPT_FAILED'
+                ) {
+                    skippedNoCredentials++;
                 }
+                const mask = this.formatAccountMask(acc.mt5Id);
+                details.push(
+                    result.failureReason === 'PASSWORD_DECRYPT_FAILED'
+                        ? `${mask}: falha ao descriptografar senha MT5 no cofre do backend.`
+                        : result.failureReason === 'PASSWORD_NOT_STORED'
+                          ? `${mask}: senha MT5 não armazenada no cofre do backend.`
+                          : `${mask}: login MT5 inválido.`,
+                );
             }
         }
 
-        return { success: true, workerId, draining: drain, migrated };
+        return {
+            totalAccounts: accounts.length,
+            migrated,
+            failed,
+            skippedNoCredentials,
+            skippedNoTarget,
+            details,
+        };
+    }
+
+    async migrateWorkerAccounts(fromWorkerId: string, targetWorkerId?: string) {
+        const cleanFrom = String(fromWorkerId || '').trim();
+        const cleanTarget = targetWorkerId ? String(targetWorkerId).trim() : undefined;
+        if (!cleanFrom) {
+            throw new BadRequestException('Identificador do servidor de origem é obrigatório.');
+        }
+
+        const workers = this.getWorkerInputsFromService();
+        const healthyOthers = workers.filter(
+            (w) =>
+                w.workerId !== cleanFrom &&
+                w.isOnline &&
+                !w.isDraining &&
+                !this.drainingWorkers.has(w.workerId),
+        );
+        if (healthyOthers.length === 0) {
+            throw new BadRequestException(
+                `Nenhum outro servidor worker MT5 online saudável está disponível para receber as contas de "${cleanFrom}".`,
+            );
+        }
+        if (cleanTarget && !healthyOthers.some((w) => w.workerId === cleanTarget)) {
+            throw new BadRequestException(
+                `Servidor destino "${cleanTarget}" não está online ou está em modo Drain.`,
+            );
+        }
+
+        const summary = await this.migrateWorkerAccountsInternal(
+            cleanFrom,
+            cleanTarget,
+            'MANUAL_ADMIN',
+            `Migração de servidor solicitada pelo administrador (${cleanFrom} → ${cleanTarget || 'auto'}).`,
+            1,
+        );
+
+        if (summary.totalAccounts === 0) {
+            return {
+                success: true,
+                fromWorkerId: cleanFrom,
+                toWorkerId: cleanTarget || healthyOthers[0].workerId,
+                ...summary,
+                message: `O servidor ${cleanFrom} não possui contas MT5 alocadas para migrar.`,
+            };
+        }
+
+        if (summary.migrated === 0 && summary.failed > 0) {
+            throw new BadRequestException(
+                `Nenhuma das ${summary.totalAccounts} conta(s) de ${cleanFrom} pôde ser migrada: ${summary.details.slice(0, 3).join(' | ')}`,
+            );
+        }
+
+        return {
+            success: true,
+            fromWorkerId: cleanFrom,
+            toWorkerId: cleanTarget || 'AUTO',
+            ...summary,
+            message:
+                summary.failed > 0
+                    ? `Migração da VPS ${cleanFrom}: ${summary.migrated} iniciada(s), ${summary.failed} impedida(s). ${summary.details.slice(0, 2).join(' | ')}`
+                    : `Migração silenciosa da VPS ${cleanFrom} iniciada para ${summary.migrated} conta(s) sem desconectar os utilizadores.`,
+        };
     }
 
     async rebalanceCluster() {
@@ -1059,19 +1218,44 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             throw new BadRequestException('Serviço de workers MT5 indisponível.');
         }
 
+        const workers = this.getWorkerInputsFromService();
+        const onlineWorkers = workers.filter((w) => w.isOnline);
+        if (onlineWorkers.length === 0) {
+            throw new BadRequestException(
+                'Nenhum servidor worker MT5 está online no momento. Inicie um worker Windows MT5 antes de solicitar reconexão.',
+            );
+        }
+
         const cleanServer = this.mt5WorkerService.normalizeBrokerServer(
             String(account.broker || '').trim(),
         );
-        const storedPass = await this.decryptStoredPassword(account.id);
-        const assignment = await this.assignWorkerForAccount(account.id);
+        const previousWorker = account.assignedWorkerId || null;
+        const passCheck = await this.inspectStoredPassword(account.id);
+        const storedPass = passCheck.password;
+        const assignment = await this.assignWorkerForAccount(account.id, workers);
+
+        const targetWorker = assignment.workerId || previousWorker;
+        const targetWorkerState = workers.find((w) => w.workerId === targetWorker);
+        if (!targetWorker || !targetWorkerState?.isOnline) {
+            throw new BadRequestException(
+                `O servidor atribuído (${targetWorker || 'nenhum'}) está offline e nenhum worker saudável pôde assumir a conta.`,
+            );
+        }
+
+        const movedToDifferentWorker = Boolean(previousWorker && previousWorker !== targetWorker);
+        if (!storedPass && movedToDifferentWorker) {
+            throw new BadRequestException(
+                passCheck.status === 'DECRYPT_FAILED'
+                    ? `Falha ao descriptografar a senha MT5 no cofre do backend (chave divergente) e o servidor anterior (${previousWorker}) está offline. Peça ao utilizador para reconectar com a senha.`
+                    : `A senha MT5 não está armazenada no cofre do backend e o servidor anterior (${previousWorker}) está offline. Peça ao utilizador para reconectar com a senha uma vez.`,
+            );
+        }
 
         account.inactivityWarnedAt = null;
         account.inactivityDisconnectAt = null;
         account.mt5SyncTier = 'HOT';
-        if (assignment.workerId) {
-            account.assignedWorkerId = assignment.workerId;
-            account.mt5LeaseEpoch = assignment.leaseEpoch;
-        }
+        account.assignedWorkerId = targetWorker;
+        account.mt5LeaseEpoch = assignment.leaseEpoch;
         await this.accountRepo.save(account);
 
         const numId = this.mt5WorkerService.deriveNumericAccountId(cleanLogin);
@@ -1084,7 +1268,7 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             {
                 userId: account.userId,
                 accountUuid: account.id,
-                targetWorkerId: assignment.workerId || account.assignedWorkerId || undefined,
+                targetWorkerId: targetWorker,
                 leaseEpoch: assignment.leaseEpoch,
                 priority: 1,
                 adminTriggeredReconnect: true,
@@ -1092,21 +1276,76 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         );
 
         const accountMask = this.formatAccountMask(cleanLogin);
-        const targetWorker = assignment.workerId || account.assignedWorkerId || 'AUTO';
+        const ownerName = await this.resolveAccountOwnerName(account.userId);
+        const accountName = this.resolveSafeDisplayName(account.name, cleanLogin, ownerName, null);
         this.logger.log(
-            `[ADMIN-RECONNECT] Reconexão solicitada para ${accountMask} (#${cleanTelemetryId}) no worker ${targetWorker} (TaskID: ${task.id}, hasStoredPass=${Boolean(storedPass)}).`,
+            `[ADMIN-RECONNECT] Reconexão solicitada para ${accountMask} (#${cleanTelemetryId}) no worker ${targetWorker} (TaskID: ${task.id}, credStatus=${passCheck.status}).`,
         );
 
         return {
             success: true,
             telemetryId: cleanTelemetryId,
             accountMask,
+            accountName,
+            broker: cleanServer || null,
             workerId: targetWorker,
+            workerOnline: true,
+            previousWorkerId: previousWorker,
             taskId: task.id,
+            taskStatus: 'QUEUED' as const,
+            credentialStatus: passCheck.status,
             usedStoredCredentials: Boolean(storedPass),
             message: storedPass
-                ? `Reconexão enfileirada para ${accountMask} (#${cleanTelemetryId}) no worker ${targetWorker}.`
-                : `Reconexão solicitada para ${accountMask} (#${cleanTelemetryId}) usando o cofre local do worker ${targetWorker}.`,
+                ? `Reconexão enfileirada para ${accountName || accountMask} no servidor ${targetWorker} (senha do cofre carregada · aguardando worker iniciar login MT5).`
+                : passCheck.status === 'DECRYPT_FAILED'
+                  ? `Reconexão enviada ao servidor ${targetWorker} via cofre local do worker (aviso: falha ao descriptografar senha no cofre do backend).`
+                  : `Reconexão enviada ao servidor ${targetWorker} via cofre local do worker (aviso: senha não salva no cofre do backend).`,
+        };
+    }
+
+    async getAccountTaskStatus(telemetryId: string, taskId: string) {
+        const cleanTelemetryId = String(telemetryId || '').trim().toUpperCase();
+        const cleanTaskId = String(taskId || '').trim();
+        if (!/^[0-9A-F]{8}$/.test(cleanTelemetryId) || !cleanTaskId) {
+            throw new BadRequestException('Parâmetros de consulta de tarefa inválidos.');
+        }
+
+        const trackedAccounts = await this.accountRepo.find({
+            where: { isArchived: false, mt5Id: Not(IsNull()) },
+            select: ['id', 'name', 'userId', 'mt5Id', 'broker', 'isConnected', 'assignedWorkerId', 'mt5LeaseEpoch', 'mt5SyncTier'],
+        });
+        const account = trackedAccounts.find(
+            (acc) => this.computeTelemetryId(acc.id) === cleanTelemetryId,
+        );
+        if (!account) {
+            throw new NotFoundException('Conta MT5 não encontrada na telemetria.');
+        }
+
+        const cleanLogin = String(account.mt5Id || '').trim();
+        const taskSummary = this.mt5WorkerService?.getTaskSummaryById?.(cleanTaskId) || null;
+        const liveTel = this.mt5WorkerService?.getAnonymizedAccountTelemetry?.(
+            cleanLogin,
+            Boolean(account.isConnected),
+        );
+        const workers = this.getWorkerInputsFromService();
+        const assignedWorker = workers.find((w) => w.workerId === account.assignedWorkerId);
+
+        const taskStatus =
+            taskSummary?.status ||
+            (liveTel?.connectionState === 'CONNECTED' || account.isConnected ? 'SUCCESS' : 'UNKNOWN');
+
+        return {
+            telemetryId: cleanTelemetryId,
+            taskId: cleanTaskId,
+            taskStatus,
+            connectionState: liveTel?.connectionState || (account.isConnected ? 'CONNECTED' : 'DISCONNECTED'),
+            assignedWorkerId: account.assignedWorkerId || null,
+            workerOnline: Boolean(assignedWorker?.isOnline),
+            pingMs: liveTel?.pingMs ?? null,
+            message: taskSummary?.message || liveTel?.feedback || null,
+            errorMessage: taskSummary?.errorMessage || (liveTel?.connectionState === 'AUTH_FAILED' ? liveTel?.feedback : null),
+            createdAt: taskSummary?.createdAt || null,
+            completedAt: taskSummary?.completedAt || null,
         };
     }
 
@@ -1194,7 +1433,9 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
 
         if (!result.migrated || !result.migrationLog) {
             throw new BadRequestException(
-                'Não foi possível migrar esta conta porque a senha MT5 não está armazenada no cofre criptografado do backend. Peça ao cliente para reconectar uma vez ou use Reconectar no servidor atual.',
+                result.failureReason === 'PASSWORD_DECRYPT_FAILED'
+                    ? 'Falha ao descriptografar a senha MT5 desta conta no cofre do backend (chave de criptografia divergente). Peça ao cliente para reconectar com a senha ou verifique a configuração das chaves de cofre.'
+                    : 'Não foi possível migrar esta conta porque a senha MT5 não está armazenada no cofre criptografado do backend. Peça ao cliente para reconectar uma vez ou use Reconectar no servidor atual.',
             );
         }
 
@@ -1221,6 +1462,7 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                 'name',
                 'userId',
                 'mt5Id',
+                'broker',
                 'isConnected',
                 'lastSeen',
                 'assignedWorkerId',
@@ -1231,6 +1473,18 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                 'inactivityDisconnectAt',
             ],
         });
+
+        const hasStoredPassByAccountId = new Map<string, boolean>();
+        try {
+            const rows: Array<{ id: string; has_pass: boolean }> = await this.accountRepo.manager?.query?.(
+                `SELECT id, (mt5_encrypted_pass IS NOT NULL AND TRIM(mt5_encrypted_pass) <> '') AS has_pass FROM accounts WHERE is_archived = false AND mt5_id IS NOT NULL`,
+            );
+            for (const r of rows || []) {
+                hasStoredPassByAccountId.set(String(r.id), Boolean(r.has_pass));
+            }
+        } catch {
+            // Fallback seguro em mocks de teste
+        }
 
         const ownerNameByUserId = new Map<string, string>();
         if (this.userRepo && typeof this.userRepo.find === 'function') {
@@ -1308,10 +1562,16 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                   ? 'Sincronização em quarentena temporária por falha de ligação.'
                   : null;
 
+            const latestTask = liveTel?.latestTask || null;
+            const hasStoredCredentials = hasStoredPassByAccountId.has(acc.id)
+                ? Boolean(hasStoredPassByAccountId.get(acc.id))
+                : true;
+
             return {
                 telemetryId,
                 accountMask,
                 accountName,
+                hasStoredCredentials,
                 connectionState,
                 syncTier: tier,
                 assignedWorkerId: acc.assignedWorkerId || null,
@@ -1329,7 +1589,16 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                 inactivityDisconnectAt: acc.inactivityDisconnectAt
                     ? new Date(acc.inactivityDisconnectAt).toISOString()
                     : null,
-                feedback: liveTel?.feedback || fallbackFeedback,
+                feedback:
+                    latestTask?.errorMessage ||
+                    liveTel?.feedback ||
+                    latestTask?.message ||
+                    fallbackFeedback,
+                lastTaskId: latestTask?.taskId || null,
+                lastTaskStatus: latestTask?.status || null,
+                lastTaskMessage: latestTask?.message || null,
+                lastTaskError: latestTask?.errorMessage || null,
+                lastTaskUpdatedAt: latestTask?.completedAt || latestTask?.createdAt || null,
             };
         });
 
@@ -1441,7 +1710,9 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         };
     }
 
-    private async decryptStoredPassword(accountId: string): Promise<string | null> {
+    private async inspectStoredPassword(
+        accountId: string,
+    ): Promise<{ password: string | null; status: 'OK' | 'NOT_STORED' | 'DECRYPT_FAILED' }> {
         try {
             const row = await this.accountRepo
                 .createQueryBuilder('acc')
@@ -1449,24 +1720,37 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                 .where('acc.id = :id', { id: accountId })
                 .getOne();
             const enc = row?.mt5EncryptedPass;
-            if (!enc) return null;
-            if (!enc.includes(':')) return enc;
+            if (!enc || !String(enc).trim()) {
+                return { password: null, status: 'NOT_STORED' };
+            }
+            if (!enc.includes(':')) {
+                return { password: enc, status: 'OK' };
+            }
 
             const keyring = getMt5CredentialKeyring(this.configService);
             const cleanLogin = String(row?.mt5Id || '').trim();
             if (row?.userId && cleanLogin) {
                 try {
-                    return CryptoUtil.decrypt(enc, keyring, {
+                    const plain = CryptoUtil.decrypt(enc, keyring, {
                         aad: `mt5:${row.userId}:${cleanLogin}`,
                     });
+                    if (plain) return { password: plain, status: 'OK' };
                 } catch {
                     // Fallback para credenciais legadas gravadas sem binding AAD
                 }
             }
-            return CryptoUtil.decrypt(enc, keyring);
+            const legacyPlain = CryptoUtil.decrypt(enc, keyring);
+            return legacyPlain
+                ? { password: legacyPlain, status: 'OK' }
+                : { password: null, status: 'DECRYPT_FAILED' };
         } catch {
-            return null;
+            return { password: null, status: 'DECRYPT_FAILED' };
         }
+    }
+
+    private async decryptStoredPassword(accountId: string): Promise<string | null> {
+        const res = await this.inspectStoredPassword(accountId);
+        return res.password;
     }
 
     private async resolveUserLocale(userId?: string | null): Promise<'pt' | 'en'> {

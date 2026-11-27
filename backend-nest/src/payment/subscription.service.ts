@@ -3978,7 +3978,7 @@ export class SubscriptionService implements OnModuleInit {
         }
         return {
             recorded: true,
-            unlockAfterSeconds: 30,
+            unlockAfterSeconds: 0,
             startedAt: new Date(now).toISOString(),
         };
     }
@@ -3995,7 +3995,7 @@ export class SubscriptionService implements OnModuleInit {
     async activateTrial(
         userId: string,
         requestedTier: string = 'BASIC',
-        options?: { verifyShareGate?: boolean },
+        _options?: { verifyShareGate?: boolean },
     ): Promise<{
         success: boolean;
         tier: string;
@@ -4005,38 +4005,6 @@ export class SubscriptionService implements OnModuleInit {
         const normalizedTier = String(requestedTier || 'BASIC').trim().toUpperCase() as TrialPlanTier;
         if (!(normalizedTier in TRIAL_DAYS_BY_TIER)) {
             throw new BadRequestException('Plano inválido para avaliação gratuita.');
-        }
-
-        if (options?.verifyShareGate) {
-            let startedAt = this.trialShareIntentMemory.get(userId) ?? null;
-            if (!startedAt) {
-                try {
-                    const cached = await this.cacheManager?.get?.<string>(`trial_share_intent:${userId}`);
-                    if (cached) {
-                        const parsed = JSON.parse(cached);
-                        if (parsed?.startedAt) startedAt = Number(parsed.startedAt);
-                    }
-                } catch {
-                    startedAt = null;
-                }
-            }
-
-            if (!startedAt || !Number.isFinite(startedAt)) {
-                throw new BadRequestException({
-                    code: 'TRIAL_SHARE_REQUIRED',
-                    message: 'Partilhe o seu link de convite com amigos antes de ativar o período gratuito.',
-                });
-            }
-
-            const elapsedMs = Date.now() - startedAt;
-            if (elapsedMs < 28_000) {
-                const remainingSeconds = Math.max(1, Math.ceil((30_000 - elapsedMs) / 1000));
-                throw new BadRequestException({
-                    code: 'TRIAL_SHARE_COOLDOWN',
-                    remainingSeconds,
-                    message: `Aguarde ${remainingSeconds}s após a partilha para liberar o botão do teste gratuito.`,
-                });
-            }
         }
 
         const trialDays = TRIAL_DAYS_BY_TIER[normalizedTier];

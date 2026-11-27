@@ -208,7 +208,7 @@ export class SubscriptionController {
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('activate-basic-trial')
     async activateBasicTrial(@Request() req) {
-        return this.subscriptionService.activateTrial(req.user.id, 'BASIC', { verifyShareGate: true });
+        return this.subscriptionService.activateTrial(req.user.id, 'BASIC', { verifyShareGate: false });
     }
 
     @UseGuards(JwtAuthGuard)
@@ -216,7 +216,7 @@ export class SubscriptionController {
     @Post('activate-trial')
     async activateTrial(@Request() req, @Body() body: { tier?: string }) {
         return this.subscriptionService.activateTrial(req.user.id, body?.tier || 'BASIC', {
-            verifyShareGate: true,
+            verifyShareGate: false,
         });
     }
 
