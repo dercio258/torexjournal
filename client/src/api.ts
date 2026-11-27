@@ -671,9 +671,17 @@ async function persistEntitiesFromResponse(
 }
 
 api.interceptors.request.use(async (config) => {
-    const isAdminRequest = isAdminApiUrl(config.url);
+    const reqUrl = String(config.url || '');
+    const isAdminRequest = isAdminApiUrl(reqUrl);
+    const isAdminPublicAuthRequest =
+        reqUrl.startsWith('/admin/auth/login') ||
+        reqUrl.startsWith('/admin/auth/verify') ||
+        reqUrl.startsWith('/api/admin/auth/login') ||
+        reqUrl.startsWith('/api/admin/auth/verify');
     const token = isAdminRequest
-        ? localStorage.getItem('adminToken')
+        ? isAdminPublicAuthRequest
+            ? null
+            : localStorage.getItem('adminToken')
         : localStorage.getItem('token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -750,7 +758,11 @@ api.interceptors.response.use(
                 reqUrl.startsWith('/auth/verify-2fa') ||
                 reqUrl.startsWith('/auth/resend-2fa') ||
                 reqUrl.startsWith('/auth/forgot-password') ||
-                reqUrl.startsWith('/auth/reset-password');
+                reqUrl.startsWith('/auth/reset-password') ||
+                reqUrl.startsWith('/admin/auth/login') ||
+                reqUrl.startsWith('/admin/auth/verify') ||
+                reqUrl.startsWith('/api/admin/auth/login') ||
+                reqUrl.startsWith('/api/admin/auth/verify');
             if (!isAiChatRequest && !isPublicAuthFlowRequest) {
                 console.error(
                     `API Auth Error (401) on URL:`,
@@ -759,7 +771,10 @@ api.interceptors.response.use(
                 const isAdminRequest = isAdminApiUrl(error.config?.url);
                 if (isAdminRequest) {
                     localStorage.removeItem('adminToken');
-                    if (window.location.pathname !== '/admin') {
+                    if (
+                        window.location.pathname !== '/admin' &&
+                        window.location.pathname !== '/admin/login'
+                    ) {
                         window.location.href = '/admin';
                     }
                 } else {

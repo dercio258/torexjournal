@@ -54,7 +54,19 @@ export class AdminAuthGuard implements CanActivate {
 
         try {
             const payload = await this.jwtService.verifyAsync(token, { secret });
-            const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '')
+            const rawAdminEmail = (
+                this.configService.get<string>('ADMIN_EMAIL') ??
+                process.env.ADMIN_EMAIL ??
+                ''
+            )
+                .replace(/\r/g, '')
+                .trim();
+            const adminEmail = (
+                (rawAdminEmail.startsWith('"') && rawAdminEmail.endsWith('"') && rawAdminEmail.length >= 2) ||
+                (rawAdminEmail.startsWith("'") && rawAdminEmail.endsWith("'") && rawAdminEmail.length >= 2)
+                    ? rawAdminEmail.slice(1, -1)
+                    : rawAdminEmail
+            )
                 .trim()
                 .toLowerCase();
             const tokenEmail = String(payload?.email || '').trim().toLowerCase();

@@ -46,6 +46,7 @@ import { Queue } from 'bull';
 import { JwtService } from '@nestjs/jwt';
 import { AdminAuthGuard } from './admin-auth.guard';
 import { EmailProducerService } from '../email/email-producer.service';
+import { EmailService } from '../email/email.service';
 import { TelemetryService } from '../common/observability/telemetry.service';
 import { Throttle } from '@nestjs/throttler';
 import { RedisSecurityService } from '../common/security/redis-security.service';
@@ -84,38 +85,76 @@ export class AdminController {
         @Optional() private aiFeedbackSignalsService?: AiFeedbackSignalsService,
         @Optional() private adminAuditService?: AdminAuditService,
         @Optional() private turnstileService?: TurnstileService,
+        @Optional() private emailService?: EmailService,
     ) {}
+
+    private readNormalizedAdminEnv(): { adminEmail: string; adminPass: string } {
+        const rawEmail = this.configService.get<string>('ADMIN_EMAIL') ?? process.env.ADMIN_EMAIL ?? '';
+        const rawPass =
+            this.configService.get<string>('ADMIN_PASS') ??
+            this.configService.get<string>('ADMIN_PASSWORD') ??
+            process.env.ADMIN_PASS ??
+            process.env.ADMIN_PASSWORD ??
+            '';
+        const stripQuotes = (v: string) => {
+            const clean = v.replace(/\r/g, '').trim();
+            if (
+                (clean.startsWith('"') && clean.endsWith('"') && clean.length >= 2) ||
+                (clean.startsWith("'") && clean.endsWith("'") && clean.length >= 2)
+            ) {
+                return clean.slice(1, -1);
+            }
+            return clean;
+        };
+        return {
+            adminEmail: stripQuotes(String(rawEmail)).toLowerCase(),
+            adminPass: stripQuotes(String(rawPass)),
+        };
+    }
 
     // --- Auth ---
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('auth/login')
     async login(@Body() body: AdminLoginDto, @Req() req: any) {
+        const clientIp = extractTrustedClientIp(req);
         if (this.turnstileService) {
             await this.turnstileService.verifyOrThrow(
                 body.turnstileToken,
-                extractTrustedClientIp(req),
+                clientIp,
                 'admin_login',
             );
         }
-        const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '').trim().toLowerCase();
-        const adminPass = this.configService.get<string>('ADMIN_PASS') || '';
+        const { adminEmail, adminPass } = this.readNormalizedAdminEnv();
 
         if (!adminEmail || !adminPass) {
-            this.logger.error('ADMIN_EMAIL or ADMIN_PASS is not configured.');
+            this.logger.error(
+                `ADMIN_EMAIL or ADMIN_PASS is not configured (emailSet=${Boolean(adminEmail)}, passSet=${Boolean(adminPass)}).`,
+            );
             throw new UnauthorizedException('Autenticação administrativa indisponível');
         }
 
-        const attemptKey = `admin_login_fail:${body.email}`;
+        const submittedEmail = String(body.email || '').trim().toLowerCase();
+        const submittedPass = String(body.pass || '').replace(/\r/g, '');
+        const attemptKey = `admin_login_fail:${submittedEmail}`;
         const existingFails = Number((await this.redisSecurity.getValue(attemptKey)) || '0');
         if (existingFails >= 5) {
+            this.logger.warn(
+                `[AdminAuth] Login bloqueado por excesso de tentativas (fails=${existingFails}, ip=${clientIp})`,
+            );
             throw new UnauthorizedException('Muitas tentativas falhadas. Tente novamente dentro de 10 minutos.');
         }
 
-        const emailMatch = timingSafeEqualStr(body.email, adminEmail);
-        const passMatch = timingSafeEqualStr(body.pass, adminPass);
+        const emailMatch = timingSafeEqualStr(submittedEmail, adminEmail);
+        const passMatch =
+            timingSafeEqualStr(submittedPass, adminPass) ||
+            (submittedPass !== submittedPass.trim() &&
+                timingSafeEqualStr(submittedPass.trim(), adminPass));
 
         if (!emailMatch || !passMatch) {
-            await this.redisSecurity.incrementWithWindow(attemptKey, 10 * 60 * 1000);
+            const { count } = await this.redisSecurity.incrementWithWindow(attemptKey, 10 * 60 * 1000);
+            this.logger.warn(
+                `[AdminAuth] Credenciais inválidas (emailMatch=${emailMatch}, passMatch=${passMatch}, submittedPassLen=${submittedPass.length}, envPassLen=${adminPass.length}, fails=${count}/5, ip=${clientIp})`,
+            );
             throw new UnauthorizedException('Credenciais de administrador inválidas');
         }
 
@@ -125,11 +164,22 @@ export class AdminController {
         await this.redisSecurity.setValue(`admin_otp:${adminEmail}`, otp, 300000); // 5 mins
         await this.redisSecurity.deleteKey(`admin_otp_fail:${adminEmail}`);
 
-        await this.emailProducer.enqueue(adminEmail, 'OTP_CODE', {
+        const otpPayload = {
             otp,
             expiresInMinutes: 5,
-            purpose: 'ADMIN_LOGIN',
-        });
+            purpose: 'ADMIN_LOGIN' as const,
+        };
+        const enqueued = await this.emailProducer
+            .enqueue(adminEmail, 'OTP_CODE', otpPayload)
+            .catch(() => false);
+        if (!enqueued && this.emailService) {
+            const sentDirect = await this.emailService
+                .sendTemplatedEmail(adminEmail, 'OTP_CODE', otpPayload, { throwOnError: false })
+                .catch(() => false);
+            if (!sentDirect) {
+                this.logger.error('[AdminAuth] Falha ao enviar OTP administrativo (fila e SMTP direto falharam).');
+            }
+        }
 
         return {
             success: true,
@@ -145,9 +195,11 @@ export class AdminController {
         @Req() req: any,
         @Res({ passthrough: true }) res: FastifyReply,
     ) {
-        const adminEmail = (this.configService.get<string>('ADMIN_EMAIL') || '').trim().toLowerCase();
+        const { adminEmail } = this.readNormalizedAdminEnv();
+        const submittedEmail = String(body.email || '').trim().toLowerCase();
 
-        if (!adminEmail || !timingSafeEqualStr(body.email, adminEmail)) {
+        if (!adminEmail || !timingSafeEqualStr(submittedEmail, adminEmail)) {
+            this.logger.warn(`[AdminAuth] Verify OTP rejeitado: emailMatch=false`);
             throw new UnauthorizedException('E-mail inválido');
         }
 
@@ -159,11 +211,15 @@ export class AdminController {
         }
 
         const storedOtp = await this.redisSecurity.getValue(`admin_otp:${adminEmail}`);
-        if (!storedOtp || !timingSafeEqualStr(storedOtp, body.otp)) {
+        const submittedOtp = String(body.otp || '').trim();
+        if (!storedOtp || !timingSafeEqualStr(storedOtp, submittedOtp)) {
             const { count } = await this.redisSecurity.incrementWithWindow(otpFailKey, 300000);
             if (count >= 5) {
                 await this.redisSecurity.deleteKey(`admin_otp:${adminEmail}`);
             }
+            this.logger.warn(
+                `[AdminAuth] Verify OTP falhou (storedPresent=${Boolean(storedOtp)}, fails=${count}/5)`,
+            );
             throw new UnauthorizedException('Código de verificação inválido ou expirado');
         }
 

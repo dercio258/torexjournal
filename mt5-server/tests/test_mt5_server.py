@@ -625,6 +625,7 @@ class TestIpcTimeoutRecovery(unittest.TestCase):
              patch.object(engine, "_reclaim_memory_from_other_terminals", return_value=0), \
              patch.object(engine, "_clean_pending_liveupdate"), \
              patch.object(engine, "inspect_mt5_ui_state", return_value={"pids": [1234], "main_windows": [], "modals": []}), \
+             patch("core.broker_discovery.auto_discover_brokers_in_mt5", return_value={"discovered": False, "bytes_before": 72884, "bytes_after": 72884}) as mock_disc, \
              patch("core.sync_engine.time.sleep", return_value=None):
             ok = engine.connect_account(
                 account_id=202658742,
@@ -635,11 +636,57 @@ class TestIpcTimeoutRecovery(unittest.TestCase):
             )
 
         self.assertFalse(ok)
-        self.assertIn("servers.dat", engine.last_connect_error or "")
+        mock_disc.assert_called_once()
         self.assertIn("Exness-MT5Trial2", engine.last_connect_error or "")
         self.assertIn("Exness", engine.last_connect_error or "")
         # Probe deve ter consultado MetaQuotes-Demo
         self.assertEqual(mock_mt5.initialize.call_args_list[-1].kwargs.get("server"), "MetaQuotes-Demo")
+
+    def test_auto_discovers_missing_broker_and_connects_automatically_on_retry(self):
+        from core.broker_discovery import build_broker_search_queries
+
+        self.assertIn("Goat Funded", build_broker_search_queries("GoatFunded-Server2"))
+        self.assertIn("Exness", build_broker_search_queries("Exness-MT5Trial2"))
+        self.assertIn("Blue Guardian", build_broker_search_queries("BlueGuardian-Server2"))
+        self.assertIn("New Prop Firm", build_broker_search_queries("NewPropFirm-Live01"))
+
+        engine = SyncEngine()
+        mock_mt5 = MagicMock()
+        # Passo 1, Passo 2, Passo 2b falham (-10005), probe MetaQuotes-Demo retorna -6,
+        # auto-discovery baixa o servidor e o retry do initialize() retorna True!
+        mock_mt5.initialize.side_effect = [False, False, False, False, True]
+        mock_mt5.last_error.side_effect = [
+            (-10005, "IPC timeout"),
+            (-10005, "IPC timeout"),
+            (-6, "Terminal: Authorization failed"),
+        ]
+        mock_mt5.account_info.return_value = SimpleNamespace(
+            login=439300462, server="GoatFunded-Server2", name="Trader GF", balance=50000.0
+        )
+        mock_mt5.terminal_info.return_value = SimpleNamespace(connected=True, ping_last=30000)
+
+        with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
+             patch.object(sync_engine_mod, "mt5", mock_mt5, create=True), \
+             patch.object(engine, "_run_with_dialog_watchdog", side_effect=lambda fn, initial_delay=0.5: fn()), \
+             patch.object(engine, "_dismiss_mt5_dialogs"), \
+             patch.object(engine, "_kill_stuck_terminals"), \
+             patch.object(engine, "_reclaim_memory_from_other_terminals", return_value=0), \
+             patch.object(engine, "_clean_pending_liveupdate"), \
+             patch.object(engine, "inspect_mt5_ui_state", return_value={"pids": [1234], "main_windows": [], "modals": []}), \
+             patch("core.broker_discovery.auto_discover_brokers_in_mt5", return_value={"discovered": True, "bytes_before": 72884, "bytes_after": 655976, "matched_queries": ["Goat Funded"]}) as mock_disc, \
+             patch("core.sync_engine.time.sleep", return_value=None):
+            ok = engine.connect_account(
+                account_id=439300462,
+                login="439300462",
+                server="GoatFunded-Server2",
+                password="SecretPassword",
+                path=r"C:\torex\mt5-server\instances\acc_test\terminal64.exe",
+            )
+
+        self.assertTrue(ok)
+        mock_disc.assert_called_once()
+        self.assertEqual(mock_mt5.initialize.call_count, 5)
+        self.assertEqual(mock_mt5.initialize.call_args_list[-1].kwargs.get("server"), "GoatFunded-Server2")
 
 
 if __name__ == "__main__":

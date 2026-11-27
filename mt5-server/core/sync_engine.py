@@ -59,6 +59,7 @@ class SyncEngine:
         self.active_terminal_path: Optional[str] = None
         self.last_connect_error: Optional[str] = None
         self.last_error_code: Optional[int] = None
+        self._broker_discovery_attempted_at: Dict[str, float] = {}
         self._broker_tz_cache: Dict[str, Dict[str, Any]] = {}
         self._load_broker_tz_cache()
 
@@ -1005,26 +1006,84 @@ class SyncEngine:
                 ):
                     missing_server_confirmed = self._probe_ipc_missing_server(term_path, use_portable)
 
-                if missing_server_confirmed:
-                    broker_hint = server_clean.split("-")[0].strip() or server_clean
-                    srv_kb_str = f" | servers.dat={srv_dat_kb} KB" if srv_dat_kb is not None else ""
-                    self.last_connect_error = (
-                        f"Servidor MT5 '{server_clean}' não está cadastrado no cache servers.dat da VPS "
-                        f"(canal IPC do MT5 está saudável{srv_kb_str}). "
-                        f"Abra o MetaTrader 5 principal na VPS -> File -> Open an Account -> pesquise '{broker_hint}' "
-                        f"para registrar os servidores (ou copie servers.dat para data\\master_servers.dat) e tente novamente."
-                    )
-                    logger.error(f"[MISSING-SERVER-CACHE] {self.last_connect_error}")
-                else:
-                    srv_kb_str = f" | servers.dat: {srv_dat_kb} KB" if srv_dat_kb is not None else ""
-                    self.last_connect_error = (
-                        f"Não foi possível inicializar o processo MT5 na VPS: {err} "
-                        f"(RAM livre: {snap['memory_available_mb']} MB / {snap['memory_total_mb']} MB | "
-                        f"Terminais MT5 abertos: {len(ui_diag.get('pids', []))} | "
-                        f"Modais: {len(ui_diag.get('modals', []))}{srv_kb_str})"
-                    )
-                    logger.error(self.last_connect_error)
-                return False
+                # Auto-healing 100% automático: se confirmamos que o IPC está saudável e só falta o servidor no servers.dat,
+                # abre 'File -> Open an Account' (WM_COMMAND 32919) via Win32, busca a corretora no diretório oficial
+                # MetaQuotes, promove o servers.dat para data/master_servers.dat e reconecta imediatamente!
+                if missing_server_confirmed and term_path and login_clean and pass_clean:
+                    disc_key = server_clean.lower()
+                    last_disc_ts = self._broker_discovery_attempted_at.get(disc_key, 0.0)
+                    if (time.time() - last_disc_ts) >= 600.0:
+                        self._broker_discovery_attempted_at[disc_key] = time.time()
+                        if progress_callback:
+                            progress_callback(
+                                f"Registrando automaticamente servidor '{server_clean}' no diretório MetaQuotes da VPS..."
+                            )
+                        try:
+                            from .broker_discovery import (
+                                auto_discover_brokers_in_mt5,
+                                build_broker_search_queries,
+                            )
+
+                            queries = build_broker_search_queries(server_clean)
+                            master_dst = Path(settings.data_dir).resolve() / "master_servers.dat"
+                            disc_res = auto_discover_brokers_in_mt5(
+                                terminal_exe=term_path,
+                                queries=queries,
+                                portable=use_portable,
+                                master_servers_dst=master_dst,
+                                main_mt5_exe=settings.mt5_default_path,
+                                per_query_timeout_sec=6.5,
+                                stop_on_first_growth=True,
+                            )
+                            if disc_res.get("discovered"):
+                                logger.info(
+                                    f"[AUTO-DISCOVERY] Retentando conexão IPC para {login_clean}@{server_clean} "
+                                    f"após atualização automática do servers.dat..."
+                                )
+                                self._reclaim_memory_from_other_terminals(keep_path=term_path, force=True)
+                                init_ok = self._run_with_dialog_watchdog(
+                                    lambda: _init_with_or_without_creds(45000),
+                                    initial_delay=0.5,
+                                )
+                                if init_ok:
+                                    logger.success(
+                                        f"[AUTO-DISCOVERY] Conexão IPC estabelecida automaticamente após registrar '{server_clean}'!"
+                                    )
+                                else:
+                                    retry_err = mt5.last_error()
+                                    retry_code = retry_err[0] if isinstance(retry_err, (tuple, list)) and len(retry_err) > 0 else None
+                                    if retry_code == -6:
+                                        self.last_error_code = -6
+                                        pwd_diag = self._mask_password_diagnostic(pass_clean)
+                                        self.last_connect_error = (
+                                            f"Servidor '{server_clean}' registrado com sucesso na VPS, porém o MT5 recusou as credenciais (-6) "
+                                            f"para a conta {login_clean} (Senha: {pwd_diag}). Verifique login, senha e servidor."
+                                        )
+                                        logger.error(self.last_connect_error)
+                                        return False
+                        except Exception as disc_err:
+                            logger.warning(f"[AUTO-DISCOVERY] Falha na descoberta automática de '{server_clean}': {disc_err}")
+
+                if not init_ok:
+                    if missing_server_confirmed:
+                        broker_hint = server_clean.split("-")[0].strip() or server_clean
+                        srv_kb_str = f" | servers.dat={srv_dat_kb} KB" if srv_dat_kb is not None else ""
+                        self.last_connect_error = (
+                            f"Servidor MT5 '{server_clean}' não foi localizado automaticamente no diretório MetaQuotes da VPS "
+                            f"(canal IPC do MT5 está saudável{srv_kb_str}). "
+                            f"Confirme o nome exato do servidor da corretora '{broker_hint}' ou execute scripts\\prewarm_brokers.py."
+                        )
+                        logger.error(f"[MISSING-SERVER-CACHE] {self.last_connect_error}")
+                    else:
+                        srv_kb_str = f" | servers.dat: {srv_dat_kb} KB" if srv_dat_kb is not None else ""
+                        self.last_connect_error = (
+                            f"Não foi possível inicializar o processo MT5 na VPS: {err} "
+                            f"(RAM livre: {snap['memory_available_mb']} MB / {snap['memory_total_mb']} MB | "
+                            f"Terminais MT5 abertos: {len(ui_diag.get('pids', []))} | "
+                            f"Modais: {len(ui_diag.get('modals', []))}{srv_kb_str})"
+                        )
+                        logger.error(self.last_connect_error)
+                    return False
 
             self.active_terminal_path = term_path
 

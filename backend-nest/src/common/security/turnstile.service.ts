@@ -68,6 +68,19 @@ export class TurnstileService {
         }
 
         const cleanToken = typeof token === 'string' ? token.trim() : '';
+        const siteKey = this.readEnv('TURNSTILE_SITE_KEY');
+        const explicitEnabled = this.readEnv('TURNSTILE_ENABLED').toLowerCase() === 'true';
+
+        // If TURNSTILE_SECRET_KEY is configured without TURNSTILE_SITE_KEY, getPublicConfig()
+        // tells the frontend `turnstileEnabled: false`, so browsers will not render a widget
+        // or send a token. Avoid locking out login flows due to partial env provisioning.
+        if (!cleanToken && !siteKey && !explicitEnabled) {
+            this.logger.warn(
+                `Turnstile bypassed (action=${expectedAction || 'any'}): TURNSTILE_SECRET_KEY is set without TURNSTILE_SITE_KEY.`,
+            );
+            return { verified: true, bypassed: true };
+        }
+
         if (!cleanToken || cleanToken.length < 10 || cleanToken.length > 4096) {
             throw new BadRequestException(
                 'Verificação de segurança anti-bot obrigatória. Complete o desafio Cloudflare e tente novamente.',
