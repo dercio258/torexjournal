@@ -1,9 +1,10 @@
 import os
+import hashlib
 import shutil
 import time
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 import psutil
 from loguru import logger
 from config.settings import settings
@@ -22,6 +23,111 @@ class MT5ProcessManager:
         if value is None:
             return ""
         return str(value).replace("\r", "").replace("\n", "").replace("\x00", "").strip()
+
+    @staticmethod
+    def _compute_mt5_appdata_hash(install_dir: Path) -> str:
+        """Calcula o hash MD5 exato (UTF-16LE em maiúsculas) usado pelo MT5 em %APPDATA%\\MetaQuotes\\Terminal\\<HASH>."""
+        norm = str(install_dir.resolve()).rstrip("\\/").upper()
+        return hashlib.md5(norm.encode("utf-16-le")).hexdigest().upper()
+
+    def _collect_source_config_dirs(self, base_dir: Path) -> List[Tuple[int, Path]]:
+        """
+        Lista diretórios de configuração MT5 com prioridade determinística:
+        tier 2 = pasta AppData exata da instalação principal (ex.: D0E8209F... para Program Files\\MetaTrader 5),
+        tier 1 = outras pastas AppData\\MetaQuotes\\Terminal\\<HASH>\\config,
+        tier 0 = pasta Config junto ao executável base e instâncias isoladas existentes.
+        """
+        candidates: List[Tuple[int, Path]] = []
+        seen = set()
+
+        def _add(tier: int, cfg_dir: Path):
+            if not cfg_dir.is_dir():
+                return
+            key = os.path.normcase(os.path.abspath(str(cfg_dir)))
+            if key not in seen:
+                seen.add(key)
+                candidates.append((tier, cfg_dir))
+
+        base_hash = self._compute_mt5_appdata_hash(base_dir)
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            mq_dir = Path(appdata) / "MetaQuotes" / "Terminal"
+            if mq_dir.exists():
+                # Primeiro a pasta exata da instalação principal (evita pegar instâncias vazias por ordem alfabética!)
+                main_sub = mq_dir / base_hash
+                for sub_name in ("config", "Config"):
+                    _add(2, main_sub / sub_name)
+
+                for sub in mq_dir.iterdir():
+                    if sub.is_dir() and sub.name.lower() not in ("common", "community", "help"):
+                        tier = 2 if sub.name.upper() == base_hash else 1
+                        for sub_name in ("config", "Config"):
+                            _add(tier, sub / sub_name)
+
+        for sub_name in ("Config", "config"):
+            _add(0, base_dir / sub_name)
+
+        if self.instances_dir.exists():
+            try:
+                for inst in self.instances_dir.iterdir():
+                    if inst.is_dir() and inst.name.lower().startswith("acc_"):
+                        for sub_name in ("config", "Config"):
+                            _add(0, inst / sub_name)
+            except Exception:
+                pass
+
+        return candidates
+
+    def find_best_servers_dat(self, base_dir: Optional[Path] = None, exclude_dir: Optional[Path] = None) -> Optional[Path]:
+        """
+        Seleciona o arquivo servers.dat mais completo (maior tamanho em bytes) entre:
+        1) data/master_servers.dat (ou data/servers.dat) — cache mestre compartilhável entre VPSs
+        2) %APPDATA%\\MetaQuotes\\Terminal\\<HASH_PRINCIPAL>\\config\\servers.dat (instalação principal do MT5)
+        3) Demais pastas AppData, instâncias isoladas e Program Files.
+        Corrige o bug de pegar a primeira pasta alfabética em AppData (que costuma ter apenas MetaQuotes-Demo).
+        """
+        b_dir = base_dir or Path(self.terminal_path).resolve().parent
+        norm_exclude = os.path.normcase(os.path.abspath(str(exclude_dir))) if exclude_dir else None
+
+        scored: List[Tuple[int, int, float, Path]] = []
+        seen_files = set()
+
+        def _consider(tier: int, file_path: Path):
+            try:
+                if not file_path.is_file():
+                    return
+                resolved = file_path.resolve()
+                norm_p = os.path.normcase(os.path.abspath(str(resolved)))
+                if norm_exclude and norm_p.startswith(norm_exclude):
+                    return
+                if norm_p in seen_files:
+                    return
+                st = resolved.stat()
+                if st.st_size <= 0:
+                    return
+                seen_files.add(norm_p)
+                scored.append((st.st_size, tier, st.st_mtime, resolved))
+            except Exception:
+                pass
+
+        # Tier 3: arquivo mestre explícito em data_dir (ex.: copiado da VPS 1 para VPS 2)
+        try:
+            data_root = Path(settings.data_dir).resolve()
+            _consider(3, data_root / "master_servers.dat")
+            _consider(3, data_root / "servers.dat")
+        except Exception:
+            pass
+
+        for tier, cfg_dir in self._collect_source_config_dirs(b_dir):
+            _consider(tier, cfg_dir / "servers.dat")
+
+        if not scored:
+            return None
+
+        # Maior tamanho primeiro (cada corretora adicionada via Open an Account aumenta servers.dat);
+        # em empate de tamanho, vence maior tier (master > principal > outros) e mtime mais recente.
+        scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return scored[0][3]
 
     def get_account_instance_dir(self, account_id: int, account_uuid: Optional[str] = None) -> Path:
         raw_scope = (account_uuid or "").strip() if account_uuid else ""
@@ -74,52 +180,63 @@ class MT5ProcessManager:
                 shutil.copy2(str(base_exe), str(isolated_exe))
                 logger.info(f"[ISOLAMENTO MT5] Executável exclusivo copiado para conta {account_id}: {isolated_exe}")
 
-            # Copia arquivos de suporte essenciais (servers.dat, accounts.dat, cert/bases) para que o modo /portable
-            # reconheça imediatamente todas as corretoras (Deriv-Demo, Exness-MT5Real10, GoatFunded-Server2, etc.)
+            # Copia o melhor servers.dat (maior/mais completo, priorizando master_servers.dat e o MT5 principal)
+            # e arquivos de layout seguros (terminal.ini, charts.ini) — nunca copia accounts.dat ou common.ini!
             isolated_cfg_dir = instance_dir / "config"
             isolated_cfg_dir.mkdir(parents=True, exist_ok=True)
             isolated_cfg_upper = instance_dir / "Config"
             isolated_cfg_upper.mkdir(parents=True, exist_ok=True)
+            cfg_targets = [isolated_cfg_dir]
+            if os.path.normcase(os.path.abspath(str(isolated_cfg_upper))) != os.path.normcase(os.path.abspath(str(isolated_cfg_dir))):
+                cfg_targets.append(isolated_cfg_upper)
 
-            # Localiza a pasta de dados ativa do MT5 em %APPDATA%\MetaQuotes\Terminal\<HASH>
-            appdata = os.environ.get("APPDATA")
-            source_data_dirs = []
-            if appdata:
-                mq_dir = Path(appdata) / "MetaQuotes" / "Terminal"
-                if mq_dir.exists():
-                    for sub in mq_dir.iterdir():
-                        if sub.is_dir() and sub.name.lower() not in ("common", "community", "help"):
-                            if (sub / "config").exists() or (sub / "Config").exists():
-                                source_data_dirs.append(sub)
+            best_servers_dat = self.find_best_servers_dat(base_dir=base_dir, exclude_dir=instance_dir)
+            if best_servers_dat and best_servers_dat.exists():
+                best_stat = best_servers_dat.stat()
+                for cfg_dir_dst in cfg_targets:
+                    dst_srv = cfg_dir_dst / "servers.dat"
+                    should_copy_srv = not dst_srv.exists()
+                    if not should_copy_srv:
+                        try:
+                            dst_stat = dst_srv.stat()
+                            # Nunca sobrescreve um servers.dat maior por um menor; atualiza se a fonte for maior ou mais recente com mesmo tamanho
+                            if best_stat.st_size > dst_stat.st_size or (
+                                best_stat.st_size == dst_stat.st_size and best_stat.st_mtime > dst_stat.st_mtime
+                            ):
+                                should_copy_srv = True
+                        except Exception:
+                            should_copy_srv = True
+                    if should_copy_srv:
+                        try:
+                            shutil.copy2(str(best_servers_dat), str(dst_srv))
+                            logger.info(
+                                f"[SERVERS.DAT] Sincronizado cache de corretoras ({round(best_stat.st_size / 1024, 1)} KB) "
+                                f"de '{best_servers_dat}' -> '{dst_srv}'"
+                            )
+                        except Exception:
+                            pass
 
-            for s_dir in source_data_dirs:
-                src_cfg = s_dir / "config" if (s_dir / "config").exists() else (s_dir / "Config")
-                if src_cfg.exists():
-                    # Copia apenas servidores/layout; nunca copia accounts.dat ou common.ini de outros perfis
-                    for fname in ("servers.dat", "terminal.ini", "charts.ini"):
-                        src_file = src_cfg / fname
-                        if src_file.exists():
-                            dst_lower = isolated_cfg_dir / fname
-                            dst_upper = isolated_cfg_upper / fname
-                            if not dst_lower.exists() or fname == "servers.dat":
+            source_cfg_dirs = self._collect_source_config_dirs(base_dir)
+            source_cfg_dirs.sort(key=lambda item: item[0], reverse=True)
+            for _tier, src_cfg in source_cfg_dirs:
+                if os.path.normcase(os.path.abspath(str(src_cfg))).startswith(
+                    os.path.normcase(os.path.abspath(str(instance_dir)))
+                ):
+                    continue
+                copied_any_layout = False
+                for fname in ("terminal.ini", "charts.ini"):
+                    src_file = src_cfg / fname
+                    if src_file.exists():
+                        for cfg_dir_dst in cfg_targets:
+                            dst_file = cfg_dir_dst / fname
+                            if not dst_file.exists():
                                 try:
-                                    shutil.copy2(str(src_file), str(dst_lower))
+                                    shutil.copy2(str(src_file), str(dst_file))
+                                    copied_any_layout = True
                                 except Exception:
                                     pass
-                            if not dst_upper.exists() or fname == "servers.dat":
-                                try:
-                                    shutil.copy2(str(src_file), str(dst_upper))
-                                except Exception:
-                                    pass
+                if copied_any_layout:
                     break
-
-            # Fallback caso servers.dat esteja na pasta de instalação em Program Files
-            for pf_cfg in (base_dir / "Config" / "servers.dat", base_dir / "config" / "servers.dat"):
-                if pf_cfg.exists():
-                    if not (isolated_cfg_dir / "servers.dat").exists():
-                        shutil.copy2(str(pf_cfg), str(isolated_cfg_dir / "servers.dat"))
-                    if not (isolated_cfg_upper / "servers.dat").exists():
-                        shutil.copy2(str(pf_cfg), str(isolated_cfg_upper / "servers.dat"))
 
             # Implanta EA headless TorexCalendarSync.ex5 em MQL5/Experts/ da instância isolada
             self._deploy_calendar_ea(instance_dir)
@@ -143,9 +260,9 @@ class MT5ProcessManager:
                     "Api=0",
                 ]
                 common_content = "\r\n".join(common_lines) + "\r\n"
-                for cfg_target in (isolated_cfg_dir / "common.ini", isolated_cfg_upper / "common.ini"):
+                for cfg_dir_dst in cfg_targets:
                     try:
-                        with open(cfg_target, "w", encoding="utf-8-sig", newline="\r\n") as f:
+                        with open(cfg_dir_dst / "common.ini", "w", encoding="utf-8-sig", newline="\r\n") as f:
                             f.write(common_content)
                     except Exception:
                         pass

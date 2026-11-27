@@ -287,10 +287,15 @@ class SyncEngine:
         """
         import os
         avail_mb = 0.0
+        total_mb = 0.0
         try:
             mem = psutil.virtual_memory()
             avail_mb = mem.available / (1024 * 1024)
-            if not force and avail_mb >= min_free_mb and mem.percent < max_mem_pct:
+            total_mb = mem.total / (1024 * 1024)
+            # Em VPS enxuta (<= 4 GB RAM) com MT5 build 6296+/6328 (bind fixo 127.0.0.1:22346),
+            # sempre encerra terminais isolados concorrentes ao trocar de conta para evitar erro 10048 e thrashing.
+            low_ram_vps = total_mb > 0 and total_mb <= 4096.0
+            if not force and not low_ram_vps and avail_mb >= min_free_mb and mem.percent < max_mem_pct:
                 return 0
         except Exception:
             if not force:
@@ -685,6 +690,43 @@ class SyncEngine:
                 return False
         return True
 
+    def _probe_ipc_missing_server(self, term_path: str, use_portable: bool) -> bool:
+        """
+        Executa um probe rápido (~3s) contra 'MetaQuotes-Demo' (sempre embutido no servers.dat)
+        para diferenciar travamento real do canal IPC de servidor da corretora ausente no servers.dat.
+        Se o MT5 responder rapidamente com (-6, Authorization failed) ou True, o IPC está 100% funcional.
+        """
+        if not MT5_AVAILABLE:
+            return False
+        try:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            probe_ok = self._run_with_dialog_watchdog(
+                lambda: bool(
+                    mt5.initialize(
+                        path=term_path,
+                        login=1,
+                        password="ipc_probe_invalid",
+                        server="MetaQuotes-Demo",
+                        portable=use_portable,
+                        timeout=12000,
+                    )
+                ),
+                initial_delay=0.5,
+            )
+            probe_err = mt5.last_error()
+            probe_code = probe_err[0] if isinstance(probe_err, (tuple, list)) and len(probe_err) > 0 else None
+            return bool(probe_ok or probe_code == -6)
+        except Exception:
+            return False
+        finally:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+
     def _run_with_dialog_watchdog(self, fn, initial_delay: float = 0.5):
         """
         Executa uma chamada IPC bloqueante (mt5.initialize / mt5.login) monitorando e fechando
@@ -865,7 +907,7 @@ class SyncEngine:
                         pass
                     self._reclaim_memory_from_other_terminals(keep_path=term_path)
                     init_ok = self._run_with_dialog_watchdog(
-                        lambda: _init_with_or_without_creds(35000),
+                        lambda: _init_with_or_without_creds(45000),
                         initial_delay=0.3,
                     )
                 else:
@@ -876,14 +918,14 @@ class SyncEngine:
                         if progress_callback:
                             progress_callback(f"Conectando ao canal IPC do terminal MT5 para conta {login_clean}...")
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: _init_with_or_without_creds(30000),
+                            lambda: _init_with_or_without_creds(35000),
                             initial_delay=0.3,
                         )
             except Exception as e:
                 logger.debug(f"Terminal ativo não respondeu na tentativa rápida: {e}")
 
             # Passo 2: Se a instância isolada da conta não respondeu, libera RAM se necessário, reinicia apenas o processo dela
-            # e tenta novamente com timeout ampliado (60s).
+            # e tenta novamente com timeout ampliado (65s).
             if not init_ok:
                 logger.info(f"Reiniciando processo MT5 isolado da conta {login_clean} via: {term_path}")
                 if progress_callback:
@@ -898,7 +940,7 @@ class SyncEngine:
                 time.sleep(3.0 if reclaimed > 0 else 2.0)
                 try:
                     init_ok = self._run_with_dialog_watchdog(
-                        lambda: _init_with_or_without_creds(60000),
+                        lambda: _init_with_or_without_creds(65000),
                         initial_delay=0.5,
                     )
                 except Exception as e:
@@ -923,7 +965,7 @@ class SyncEngine:
                     time.sleep(2.0)
                     try:
                         init_ok = self._run_with_dialog_watchdog(
-                            lambda: bool(mt5.initialize(path=term_path, portable=use_portable, timeout=60000)),
+                            lambda: bool(mt5.initialize(path=term_path, portable=use_portable, timeout=30000)),
                             initial_delay=0.5,
                         )
                     except Exception as e:
@@ -933,15 +975,55 @@ class SyncEngine:
 
             if not init_ok:
                 err = mt5.last_error()
+                err_code = err[0] if isinstance(err, (tuple, list)) and len(err) > 0 else None
+                self.last_error_code = err_code
                 snap = self.get_resource_snapshot()
                 ui_diag = self.inspect_mt5_ui_state(close_modals=False)
-                self.last_connect_error = (
-                    f"Não foi possível inicializar o processo MT5 na VPS: {err} "
-                    f"(RAM livre: {snap['memory_available_mb']} MB / {snap['memory_total_mb']} MB | "
-                    f"Terminais MT5 abertos: {len(ui_diag.get('pids', []))} | "
-                    f"Modais: {len(ui_diag.get('modals', []))})"
-                )
-                logger.error(self.last_connect_error)
+
+                srv_dat_kb = None
+                if term_path:
+                    try:
+                        inst_parent = Path(term_path).resolve().parent
+                        for cfg_name in ("config", "Config"):
+                            candidate_srv = inst_parent / cfg_name / "servers.dat"
+                            if candidate_srv.is_file():
+                                srv_dat_kb = round(candidate_srv.stat().st_size / 1024, 1)
+                                break
+                    except Exception:
+                        pass
+
+                # Diagnóstico preciso: no MT5, quando o servidor da corretora não está no servers.dat,
+                # mt5.initialize() silencia o erro e retorna (-10005, 'IPC timeout').
+                # Um probe rápido contra MetaQuotes-Demo (sempre presente no servers.dat) retorna (-6) em ~3s,
+                # comprovando que o pipe IPC está saudável e que apenas o servidor alvo precisa ser adicionado.
+                missing_server_confirmed = False
+                if (
+                    err_code == -10005
+                    and term_path
+                    and server_clean
+                    and server_clean.lower() != "metaquotes-demo"
+                ):
+                    missing_server_confirmed = self._probe_ipc_missing_server(term_path, use_portable)
+
+                if missing_server_confirmed:
+                    broker_hint = server_clean.split("-")[0].strip() or server_clean
+                    srv_kb_str = f" | servers.dat={srv_dat_kb} KB" if srv_dat_kb is not None else ""
+                    self.last_connect_error = (
+                        f"Servidor MT5 '{server_clean}' não está cadastrado no cache servers.dat da VPS "
+                        f"(canal IPC do MT5 está saudável{srv_kb_str}). "
+                        f"Abra o MetaTrader 5 principal na VPS -> File -> Open an Account -> pesquise '{broker_hint}' "
+                        f"para registrar os servidores (ou copie servers.dat para data\\master_servers.dat) e tente novamente."
+                    )
+                    logger.error(f"[MISSING-SERVER-CACHE] {self.last_connect_error}")
+                else:
+                    srv_kb_str = f" | servers.dat: {srv_dat_kb} KB" if srv_dat_kb is not None else ""
+                    self.last_connect_error = (
+                        f"Não foi possível inicializar o processo MT5 na VPS: {err} "
+                        f"(RAM livre: {snap['memory_available_mb']} MB / {snap['memory_total_mb']} MB | "
+                        f"Terminais MT5 abertos: {len(ui_diag.get('pids', []))} | "
+                        f"Modais: {len(ui_diag.get('modals', []))}{srv_kb_str})"
+                    )
+                    logger.error(self.last_connect_error)
                 return False
 
             self.active_terminal_path = term_path

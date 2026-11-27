@@ -544,6 +544,103 @@ class TestIpcTimeoutRecovery(unittest.TestCase):
             finally:
                 settings.data_dir = orig_data_dir
 
+    def test_process_manager_selects_richest_servers_dat_instead_of_first_alphabetical_appdata_dir(self):
+        import os
+        from core.process_manager import MT5ProcessManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_appdata = tmp_path / "AppData"
+            fake_install = tmp_path / "Program Files" / "MetaTrader 5"
+            fake_install.mkdir(parents=True, exist_ok=True)
+            fake_exe = fake_install / "terminal64.exe"
+            fake_exe.write_bytes(b"MZ_FAKE_TERMINAL")
+
+            # Pasta alfabeticamente ANTERIOR (ex.: 11111111... criada por instancia antiga) com servers.dat pequeno
+            stale_dir = fake_appdata / "MetaQuotes" / "Terminal" / "11111111111111111111111111111111" / "config"
+            stale_dir.mkdir(parents=True, exist_ok=True)
+            (stale_dir / "servers.dat").write_bytes(b"SMALL_DEFAULT_72KB")
+
+            # Pasta AppData exata da instalacao principal (ex.: D0E8209F...) com servers.dat completo (muito maior)
+            main_hash = MT5ProcessManager._compute_mt5_appdata_hash(fake_install)
+            main_dir = fake_appdata / "MetaQuotes" / "Terminal" / main_hash / "config"
+            main_dir.mkdir(parents=True, exist_ok=True)
+            rich_payload = b"RICH_BROKERS_EXNESS_GOATFUNDED_DERIV_" * 200
+            (main_dir / "servers.dat").write_bytes(rich_payload)
+
+            orig_data_dir = settings.data_dir
+            settings.data_dir = str(tmp_path / "data")
+            Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
+            try:
+                pm = MT5ProcessManager()
+                pm.terminal_path = str(fake_exe)
+                pm.instances_dir = tmp_path / "instances"
+
+                with patch.dict(os.environ, {"APPDATA": str(fake_appdata)}), \
+                     patch.object(pm, "_deploy_calendar_ea"):
+                    pm.get_or_prepare_isolated_terminal_exe(
+                        account_id=202658742,
+                        login="202658742",
+                        server="Exness-MT5Trial2",
+                        password="Secret",
+                        account_uuid="acc-uuid-1",
+                    )
+
+                copied_srv = pm.instances_dir / "acc_acc-uuid-1" / "config" / "servers.dat"
+                self.assertTrue(copied_srv.exists())
+                self.assertEqual(copied_srv.read_bytes(), rich_payload)
+
+                # Se master_servers.dat em data_dir for ainda maior, ele passa a vencer
+                master_payload = rich_payload + (b"EXTRA_PROP_FIRMS_" * 50)
+                (Path(settings.data_dir) / "master_servers.dat").write_bytes(master_payload)
+                with patch.dict(os.environ, {"APPDATA": str(fake_appdata)}), \
+                     patch.object(pm, "_deploy_calendar_ea"):
+                    pm.get_or_prepare_isolated_terminal_exe(
+                        account_id=202658742,
+                        login="202658742",
+                        server="Exness-MT5Trial2",
+                        password="Secret",
+                        account_uuid="acc-uuid-1",
+                    )
+                self.assertEqual(copied_srv.read_bytes(), master_payload)
+            finally:
+                settings.data_dir = orig_data_dir
+
+    def test_detects_missing_broker_server_in_servers_dat_via_metaquotes_demo_probe(self):
+        engine = SyncEngine()
+        mock_mt5 = MagicMock()
+        # Passo 1, Passo 2, Passo 2b falham com -10005; probe MetaQuotes-Demo responde rapidamente com -6
+        mock_mt5.initialize.side_effect = [False, False, False, False]
+        mock_mt5.last_error.side_effect = [
+            (-10005, "IPC timeout"),  # check Passo 2b
+            (-10005, "IPC timeout"),  # final err before probe
+            (-6, "Terminal: Authorization failed"),  # probe MetaQuotes-Demo -> prova IPC saudavel!
+        ]
+
+        with patch.object(sync_engine_mod, "MT5_AVAILABLE", True), \
+             patch.object(sync_engine_mod, "mt5", mock_mt5, create=True), \
+             patch.object(engine, "_run_with_dialog_watchdog", side_effect=lambda fn, initial_delay=0.5: fn()), \
+             patch.object(engine, "_dismiss_mt5_dialogs"), \
+             patch.object(engine, "_kill_stuck_terminals"), \
+             patch.object(engine, "_reclaim_memory_from_other_terminals", return_value=0), \
+             patch.object(engine, "_clean_pending_liveupdate"), \
+             patch.object(engine, "inspect_mt5_ui_state", return_value={"pids": [1234], "main_windows": [], "modals": []}), \
+             patch("core.sync_engine.time.sleep", return_value=None):
+            ok = engine.connect_account(
+                account_id=202658742,
+                login="202658742",
+                server="Exness-MT5Trial2",
+                password="SecretPassword",
+                path=r"C:\torex\mt5-server\instances\acc_test\terminal64.exe",
+            )
+
+        self.assertFalse(ok)
+        self.assertIn("servers.dat", engine.last_connect_error or "")
+        self.assertIn("Exness-MT5Trial2", engine.last_connect_error or "")
+        self.assertIn("Exness", engine.last_connect_error or "")
+        # Probe deve ter consultado MetaQuotes-Demo
+        self.assertEqual(mock_mt5.initialize.call_args_list[-1].kwargs.get("server"), "MetaQuotes-Demo")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
