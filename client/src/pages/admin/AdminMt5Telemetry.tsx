@@ -33,6 +33,7 @@ type ConnectionState = 'CONNECTED' | 'SYNCING' | 'CONNECTING' | 'DISCONNECTED' |
 interface WorkerAccountTag {
     telemetryId: string;
     accountMask: string;
+    ownerName?: string | null;
     accountName?: string | null;
     connectionState: ConnectionState;
     syncTier: string;
@@ -79,6 +80,8 @@ interface WorkerCorrelationItem {
 interface AnonymizedMt5Account {
     telemetryId: string;
     accountMask: string;
+    ownerName?: string | null;
+    accountLabel?: string | null;
     accountName?: string | null;
     broker?: string | null;
     hasStoredCredentials?: boolean;
@@ -249,6 +252,7 @@ export const AdminMt5Telemetry = () => {
 
     const [stateFilter, setStateFilter] = useState<'ALL' | ConnectionState>('ALL');
     const [workerFilter, setWorkerFilter] = useState<string>('ALL');
+    const [searchQuery, setSearchQuery] = useState<string>('');
     const [autoRefresh, setAutoRefresh] = useState(true);
 
     const fetchTelemetry = useCallback(async (silent = false) => {
@@ -639,14 +643,28 @@ export const AdminMt5Telemetry = () => {
 
     const filteredAccounts = useMemo(() => {
         const list = data?.accounts || [];
+        const q = searchQuery.trim().toLowerCase();
         return list.filter((acc) => {
             if (stateFilter !== 'ALL' && acc.connectionState !== stateFilter) return false;
             if (workerFilter !== 'ALL' && (acc.assignedWorkerId || 'UNASSIGNED') !== workerFilter) {
                 return false;
             }
+            if (q) {
+                const haystack = [
+                    acc.ownerName || '',
+                    acc.accountName || '',
+                    acc.accountLabel || '',
+                    acc.accountMask || '',
+                    acc.telemetryId || '',
+                    acc.assignedWorkerId || '',
+                ]
+                    .join(' ')
+                    .toLowerCase();
+                if (!haystack.includes(q)) return false;
+            }
             return true;
         });
-    }, [data?.accounts, stateFilter, workerFilter]);
+    }, [data?.accounts, stateFilter, workerFilter, searchQuery]);
 
     const feedbackLogs = useMemo(() => {
         return (data?.accounts || []).filter((a) => Boolean(a.feedback));
@@ -843,15 +861,16 @@ export const AdminMt5Telemetry = () => {
                                         <div className="flex flex-wrap gap-1.5">
                                             {w.accountTags.map((tag) => {
                                                 const st = STATE_META[tag.connectionState] || STATE_META.DISCONNECTED;
+                                                const tagLabel = tag.ownerName || tag.accountName;
                                                 return (
                                                     <span
                                                         key={tag.telemetryId}
-                                                        title={`#${tag.telemetryId} · ${tag.syncTier} · e${tag.leaseEpoch}`}
-                                                        className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-fg"
+                                                        title={`${tagLabel ? `${tagLabel} · ` : ''}#${tag.telemetryId} · ${tag.syncTier} · e${tag.leaseEpoch}`}
+                                                        className="inline-flex items-center gap-1 rounded-md border border-line bg-surface px-2 py-0.5 text-[10px] text-fg max-w-[220px]"
                                                     >
                                                         <span
                                                             className={cn(
-                                                                'h-1.5 w-1.5 rounded-full',
+                                                                'h-1.5 w-1.5 rounded-full shrink-0',
                                                                 st.tone === 'success'
                                                                     ? 'bg-emerald-500'
                                                                     : st.tone === 'info'
@@ -863,7 +882,14 @@ export const AdminMt5Telemetry = () => {
                                                                           : 'bg-fg-subtle',
                                                             )}
                                                         />
-                                                        {tag.accountMask}
+                                                        {tagLabel && (
+                                                            <span className="font-semibold truncate">
+                                                                {tagLabel}
+                                                            </span>
+                                                        )}
+                                                        <span className="font-mono text-fg-muted shrink-0">
+                                                            {tag.accountMask}
+                                                        </span>
                                                     </span>
                                                 );
                                             })}
@@ -1096,7 +1122,12 @@ export const AdminMt5Telemetry = () => {
                                     className="flex flex-col gap-1.5 rounded-xl border border-line bg-surface-2/30 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                                 >
                                     <div className="flex items-center gap-2.5 min-w-0">
-                                        <span className="font-mono text-xs font-semibold text-fg shrink-0">
+                                        {(item.ownerName || item.accountName) && (
+                                            <span className="text-xs font-semibold text-fg shrink-0 max-w-[180px] truncate">
+                                                {item.ownerName || item.accountName}
+                                            </span>
+                                        )}
+                                        <span className="font-mono text-xs font-semibold text-fg-muted shrink-0">
                                             {item.accountMask}
                                         </span>
                                         <AdminBadge tone={meta.tone}>{meta.label}</AdminBadge>
@@ -1122,6 +1153,14 @@ export const AdminMt5Telemetry = () => {
                 noPadding
                 actions={
                     <div className="flex flex-wrap items-center gap-2">
+                        <input
+                            type="text"
+                            aria-label="Buscar por usuário, conta ou ID"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Buscar usuário ou MT5..."
+                            className="h-8 w-44 rounded-lg border border-line bg-surface px-2.5 text-xs text-fg placeholder:text-fg-subtle focus:outline-none focus:border-line-strong"
+                        />
                         <select
                             aria-label="Filtrar por estado"
                             value={stateFilter}
@@ -1165,7 +1204,7 @@ export const AdminMt5Telemetry = () => {
                         <table className="w-full text-left text-xs">
                             <thead className="border-b border-line bg-surface-2/40 text-[11px] uppercase tracking-wider text-fg-muted">
                                 <tr>
-                                    <th className="px-4 py-3 font-semibold">Conta (Mask / ID)</th>
+                                    <th className="px-4 py-3 font-semibold">Usuário / Conta (Mask / ID)</th>
                                     <th className="px-4 py-3 font-semibold">Estado</th>
                                     <th className="px-4 py-3 font-semibold">Tier</th>
                                     <th className="px-4 py-3 font-semibold">Worker</th>
@@ -1179,17 +1218,32 @@ export const AdminMt5Telemetry = () => {
                                 {filteredAccounts.map((acc) => {
                                     const meta = STATE_META[acc.connectionState] || STATE_META.DISCONNECTED;
                                     const tierTone = TIER_TONE[acc.syncTier] || 'neutral';
+                                    const primaryUserLabel = acc.ownerName || acc.accountName;
+                                    const secondaryAccountLabel =
+                                        acc.accountLabel &&
+                                        acc.accountLabel.toLowerCase() !==
+                                            (primaryUserLabel || '').toLowerCase()
+                                            ? acc.accountLabel
+                                            : null;
                                     return (
                                         <tr key={acc.telemetryId} className="hover:bg-surface-2/30 transition-colors">
                                             <td className="px-4 py-3 whitespace-nowrap">
                                                 <div className="flex items-center justify-between gap-3">
                                                     <div className="min-w-0">
                                                         <div
-                                                            className="font-semibold text-fg truncate max-w-[200px]"
-                                                            title={acc.accountName || acc.accountMask}
+                                                            className="font-semibold text-fg truncate max-w-[220px]"
+                                                            title={primaryUserLabel || acc.accountMask}
                                                         >
-                                                            {acc.accountName || 'Sem nome'}
+                                                            {primaryUserLabel || 'Utilizador não vinculado'}
                                                         </div>
+                                                        {secondaryAccountLabel && (
+                                                            <div
+                                                                className="text-[11px] text-fg-muted truncate max-w-[220px]"
+                                                                title={secondaryAccountLabel}
+                                                            >
+                                                                {secondaryAccountLabel}
+                                                            </div>
+                                                        )}
                                                         <div className="font-mono text-[11px] text-fg-muted">
                                                             {acc.accountMask}{' '}
                                                             <span className="text-[10px] text-fg-subtle">

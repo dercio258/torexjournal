@@ -251,15 +251,15 @@ export const ReportsSkeleton: React.FC = () => (
  * Technical Journal 2-column workspace skeleton.
  */
 export const JournalSkeleton: React.FC = () => (
-    <div className="w-full pb-8 animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading technical journal' : 'Carregando diário técnico'}>
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-            <aside className="lg:col-span-4 xl:col-span-3 space-y-3">
-                <Skeleton className="h-10 w-full rounded-xl" />
-                <div className="flex gap-2">
+    <div className="w-full pb-8 lg:pb-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col animate-fade-in-up" role="status" aria-label={getCurrentLocale() === 'en' ? 'Loading technical journal' : 'Carregando diário técnico'}>
+        <div className="flex flex-col lg:flex-row gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+            <aside className="w-full lg:w-[304px] xl:w-[340px] 2xl:w-[368px] shrink-0 min-w-0 flex flex-col gap-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
+                <Skeleton className="h-10 w-full rounded-xl shrink-0" />
+                <div className="flex gap-2 shrink-0">
                     <Skeleton className="h-9 flex-1 rounded-lg" />
                     <Skeleton className="h-9 w-24 rounded-lg" />
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                     {Array.from({ length: 6 }).map((_, idx) => (
                         <div key={idx} className="bg-surface/80 rounded-xl p-3.5 space-y-2">
                             <div className="flex items-center justify-between">
@@ -273,7 +273,7 @@ export const JournalSkeleton: React.FC = () => (
                 </div>
             </aside>
 
-            <section className="lg:col-span-8 xl:col-span-9 space-y-3">
+            <section className="flex-1 min-w-0 space-y-3 lg:h-full lg:overflow-hidden">
                 <div className="bg-surface/80 rounded-xl p-5 space-y-4 min-h-[480px]">
                     <div className="flex items-center justify-between pb-3">
                         <div className="space-y-1.5">

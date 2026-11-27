@@ -1108,19 +1108,33 @@ export const Journal: React.FC = () => {
         [bottomTableBlock, bottomTableDate, filteredDailyBlocks, selectedAccount, isEn]
     );
 
+    const rightPaneRef = useRef<HTMLElement | null>(null);
+    const selectionScrollKey =
+        activeTab === 'daily'
+            ? `daily:${selectedDate}`
+            : activeTab === 'trade'
+            ? `trade:${selectedTrade?.id || ''}`
+            : `general:${selectedGeneralNote?.id || ''}`;
+
+    useEffect(() => {
+        if (rightPaneRef.current) {
+            rightPaneRef.current.scrollTo({ top: 0, behavior: 'auto' });
+        }
+    }, [selectionScrollKey]);
+
     if (loading) {
         return <JournalSkeleton />;
     }
 
     return (
-        <div className="w-full pb-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        <div className="w-full pb-8 lg:pb-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col">
+            <div className="flex flex-col lg:flex-row gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
                 {/* =========================================================
                     COLUNA ESQUERDA: Abas + "+ New Note" + Blocos Cronológicos
                    ========================================================= */}
-                <aside className="lg:col-span-4 xl:col-span-3 space-y-3">
+                <aside className="w-full lg:w-[304px] xl:w-[340px] 2xl:w-[368px] shrink-0 min-w-0 flex flex-col gap-3 lg:h-full lg:min-h-0 lg:overflow-hidden">
                     {/* Abas Daily Notes | Trade Notes | General */}
-                    <div className="bg-surface border border-line rounded-xl p-1 grid grid-cols-3 gap-1">
+                    <div className="shrink-0 bg-surface border border-line rounded-xl p-1 grid grid-cols-3 gap-1">
                         {(
                             [
                                 { id: 'daily', label: 'Daily Notes' },
@@ -1133,6 +1147,7 @@ export const Journal: React.FC = () => {
                                 <button
                                     key={tab.id}
                                     type="button"
+                                    title={tab.label}
                                     onClick={() => setActiveTab(tab.id)}
                                     className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all cursor-pointer truncate ${
                                         isActive
@@ -1147,7 +1162,7 @@ export const Journal: React.FC = () => {
                     </div>
 
                     {/* Barra de Busca + Botão de Ação Rápida (+ New Note) */}
-                    <div className="flex items-center gap-2">
+                    <div className="shrink-0 flex items-center gap-2 min-w-0">
                         <div className="relative flex-1 min-w-0">
                             <Search className="w-3.5 h-3.5 text-fg-subtle absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <input
@@ -1186,10 +1201,10 @@ export const Journal: React.FC = () => {
 
                     {/* Exportação rápida do Diário completo (espalha notas diárias nos trades sem nota) */}
                     {activeTab !== 'general' && (
-                        <div className="bg-surface border border-line rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2 text-[10px]">
-                            <span className="inline-flex items-center gap-1 text-fg-muted font-medium truncate">
+                        <div className="shrink-0 bg-surface border border-line rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2 text-[10px] min-w-0">
+                            <span className="inline-flex items-center gap-1 text-fg-muted font-medium truncate min-w-0">
                                 <Download className="w-3 h-3 text-accent shrink-0" />
-                                {isEn ? 'Export Journal:' : 'Exportar Diário:'}
+                                <span className="truncate">{isEn ? 'Export Journal:' : 'Exportar Diário:'}</span>
                             </span>
                             <div className="flex items-center gap-1 shrink-0">
                                 {(
@@ -1219,18 +1234,18 @@ export const Journal: React.FC = () => {
 
                     {/* Seletor rápido de data ao clicar "+ New Note" em Daily Notes */}
                     {activeTab === 'daily' && showNewDatePicker && (
-                        <div className="bg-surface border border-line rounded-xl p-2.5 flex items-center gap-2">
+                        <div className="shrink-0 bg-surface border border-line rounded-xl p-2.5 flex items-center gap-2 min-w-0">
                             <CalendarPlus className="w-4 h-4 text-accent shrink-0" />
                             <input
                                 type="date"
                                 value={newNoteDate}
                                 onChange={(e) => setNewNoteDate(e.target.value)}
-                                className="flex-1 bg-canvas-subtle border border-line-subtle rounded-lg px-2 py-1 text-xs text-fg focus:outline-none"
+                                className="flex-1 min-w-0 bg-canvas-subtle border border-line-subtle rounded-lg px-2 py-1 text-xs text-fg focus:outline-none"
                             />
                             <button
                                 type="button"
                                 onClick={handleConfirmNewDateBlock}
-                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-2 hover:bg-surface-3 text-fg border border-line cursor-pointer"
+                                className="shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold bg-surface-2 hover:bg-surface-3 text-fg border border-line cursor-pointer"
                             >
                                 {isEn ? 'Open' : 'Abrir'}
                             </button>
@@ -1239,7 +1254,7 @@ export const Journal: React.FC = () => {
 
                     {/* Subfiltros compactos para Trade Notes ou General */}
                     {activeTab === 'trade' && (
-                        <div className="flex items-center gap-1.5 text-[11px]">
+                        <div className="shrink-0 flex flex-wrap items-center gap-1.5 text-[11px]">
                             <button
                                 type="button"
                                 onClick={() => setTradeListFilter('all')}
@@ -1266,7 +1281,7 @@ export const Journal: React.FC = () => {
                     )}
 
                     {activeTab === 'general' && (
-                        <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                        <div className="shrink-0 flex flex-wrap items-center gap-1 text-[11px]">
                             {(
                                 [
                                     { id: 'ALL', label: isEn ? 'All' : 'Todas' },
@@ -1291,8 +1306,8 @@ export const Journal: React.FC = () => {
                         </div>
                     )}
 
-                    {/* Lista Rolável da Coluna Esquerda */}
-                    <div className="space-y-2.5 max-h-[calc(100vh-215px)] overflow-y-auto pr-0.5">
+                    {/* Lista Rolável Independente da Coluna Esquerda */}
+                    <div className="space-y-2.5 max-h-[420px] lg:max-h-none lg:flex-1 lg:min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1 pb-2">
                         {activeTab === 'daily' &&
                             (filteredDailyBlocks.length === 0 ? (
                                 <div className="bg-surface border border-line rounded-xl p-6 text-center text-xs text-fg-subtle">
@@ -1354,7 +1369,7 @@ export const Journal: React.FC = () => {
                                                 setSelectedTradeId(tr.id);
                                                 setSelectedDate(tr.dateKey);
                                             }}
-                                            className={`w-full text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                                            className={`w-full min-w-0 overflow-hidden text-left rounded-xl p-3 border transition-all cursor-pointer ${
                                                 isSelected
                                                     ? 'bg-surface border-data-1 ring-1 ring-data-1/35'
                                                     : hasShot
@@ -1362,13 +1377,13 @@ export const Journal: React.FC = () => {
                                                     : 'bg-surface hover:bg-surface-2 border-line hover:border-line-strong'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-1.5 min-w-0">
+                                            <div className="flex items-center justify-between gap-2 min-w-0">
+                                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
                                                     <span className="text-xs font-bold text-fg truncate">
                                                         {tr.symbol}
                                                     </span>
                                                     <span
-                                                        className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                                                        className={`shrink-0 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
                                                             tr.side === 'BUY'
                                                                 ? 'bg-accent/15 text-accent'
                                                                 : 'bg-danger/15 text-danger'
@@ -1376,13 +1391,13 @@ export const Journal: React.FC = () => {
                                                     >
                                                         {tr.side}
                                                     </span>
-                                                    <span className="text-[10px] font-mono text-fg-subtle">
+                                                    <span className="text-[10px] font-mono text-fg-subtle truncate min-w-0">
                                                         #{tr.ticket}
                                                     </span>
                                                 </div>
 
                                                 <span
-                                                    className={`text-xs font-mono font-semibold tabular-nums ${
+                                                    className={`shrink-0 whitespace-nowrap text-xs font-mono font-semibold tabular-nums ${
                                                         tr.netPnl >= 0
                                                             ? 'text-accent'
                                                             : 'text-danger'
@@ -1392,11 +1407,11 @@ export const Journal: React.FC = () => {
                                                 </span>
                                             </div>
 
-                                            <div className="mt-1.5 flex items-center justify-between text-[11px] text-fg-subtle">
-                                                <span>
+                                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-fg-subtle min-w-0">
+                                                <span className="shrink-0">
                                                     {formatJournalBlockDate(tr.dateKey)}
                                                 </span>
-                                                <div className="flex items-center gap-1.5">
+                                                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                                                     {tPsychEmojis.length > 0 && (
                                                         <span className="inline-flex items-center gap-0.5 text-[11px]">
                                                             {tPsychEmojis.join('')}
@@ -1418,14 +1433,14 @@ export const Journal: React.FC = () => {
                                                         </span>
                                                     )}
                                                     {snippet && (
-                                                        <FileText className="w-3 h-3 text-data-1" />
+                                                        <FileText className="w-3 h-3 text-data-1 shrink-0" />
                                                     )}
                                                 </div>
                                             </div>
 
                                             {(tr.mfe !== null || tr.mae !== null) && (
-                                                <div className="mt-1.5 flex items-center gap-3 text-[10px] font-mono">
-                                                    <span className="text-fg-muted">
+                                                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-mono">
+                                                    <span className="text-fg-muted whitespace-nowrap">
                                                         MFE:{' '}
                                                         <strong className="text-accent">
                                                             {tr.mfe !== null
@@ -1433,7 +1448,7 @@ export const Journal: React.FC = () => {
                                                                 : '—'}
                                                         </strong>
                                                     </span>
-                                                    <span className="text-fg-muted">
+                                                    <span className="text-fg-muted whitespace-nowrap">
                                                         MAE:{' '}
                                                         <strong className="text-danger">
                                                             {tr.mae !== null
@@ -1445,7 +1460,7 @@ export const Journal: React.FC = () => {
                                             )}
 
                                             {snippet && (
-                                                <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-2">
+                                                <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-2 break-words">
                                                     {snippet}
                                                 </p>
                                             )}
@@ -1518,7 +1533,7 @@ export const Journal: React.FC = () => {
                                             key={gn.id}
                                             type="button"
                                             onClick={() => setSelectedGeneralId(gn.id)}
-                                            className={`w-full text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                                            className={`w-full min-w-0 overflow-hidden text-left rounded-xl p-3 border transition-all cursor-pointer ${
                                                 isSelected
                                                     ? 'bg-surface border-data-1 ring-1 ring-data-1/35'
                                                     : genImgCount > 0
@@ -1526,8 +1541,8 @@ export const Journal: React.FC = () => {
                                                     : 'bg-surface hover:bg-surface-2 border-line hover:border-line-strong'
                                             }`}
                                         >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <span className="text-xs font-semibold text-fg truncate">
+                                            <div className="flex items-center justify-between gap-2 min-w-0">
+                                                <span className="text-xs font-semibold text-fg truncate min-w-0">
                                                     {gn.title}
                                                 </span>
                                                 <div className="flex items-center gap-1.5 shrink-0">
@@ -1546,14 +1561,14 @@ export const Journal: React.FC = () => {
                                                 </div>
                                             </div>
 
-                                            <div className="mt-1.5 flex items-center justify-between gap-2">
+                                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 min-w-0">
                                                 <span
                                                     className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${catMeta.badgeClass}`}
                                                 >
                                                     {isEn ? catMeta.labelEn : catMeta.label}
                                                 </span>
                                                 {gn.updatedAt && (
-                                                    <span className="text-[10px] text-fg-subtle">
+                                                    <span className="text-[10px] text-fg-subtle shrink-0">
                                                         {formatJournalBlockDate(
                                                             gn.updatedAt.slice(0, 10)
                                                         )}
@@ -1562,7 +1577,7 @@ export const Journal: React.FC = () => {
                                             </div>
 
                                             {preview && (
-                                                <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-2">
+                                                <p className="mt-1.5 text-[11px] text-fg-muted line-clamp-2 break-words">
                                                     {preview}
                                                 </p>
                                             )}
@@ -1606,7 +1621,10 @@ export const Journal: React.FC = () => {
                 {/* =========================================================
                     COLUNA DIREITA: Editor Rico Interativo + Tabela do Dia
                    ========================================================= */}
-                <section className="lg:col-span-8 xl:col-span-9 space-y-4 min-w-0">
+                <section
+                    ref={rightPaneRef}
+                    className="flex-1 min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overflow-x-hidden lg:overscroll-contain lg:pr-1 space-y-4 lg:pb-6"
+                >
                     <NoteWorkspaceEditor
                         mode={activeTab}
                         activeKey={editorConfig.activeKey}

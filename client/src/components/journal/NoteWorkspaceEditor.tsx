@@ -670,7 +670,7 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
                     });
                 }
             }}
-            className={`bg-surface border rounded-xl p-4 transition-colors ${
+            className={`min-w-0 bg-surface border rounded-xl p-4 transition-colors ${
                 isDragOver ? 'border-accent ring-1 ring-accent/30' : 'border-line'
             }`}
         >
@@ -1515,7 +1515,7 @@ export const NoteWorkspaceEditor: React.FC<NoteWorkspaceEditorProps> = ({
                     }}
                     onPaste={handlePaste}
                     onKeyDown={handleKeyDown}
-                    className={`min-h-[210px] max-h-[380px] overflow-y-auto rounded-lg px-3 py-2.5 text-sm text-fg leading-relaxed focus:outline-none [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-fg [&_h2]:mt-3 [&_h2]:mb-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1 [&_hr]:border-line-subtle [&_hr]:my-3 [&_img]:mx-auto [&_img]:block [&_img]:max-w-full [&_img]:max-h-[420px] [&_img]:object-contain [&_img]:rounded-xl [&_img]:border [&_img]:border-accent/35 [&_img]:my-3 [&_img]:shadow-lg ${
+                    className={`min-h-[210px] max-h-[380px] overflow-y-auto break-words rounded-lg px-3 py-2.5 text-sm text-fg leading-relaxed focus:outline-none [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-fg [&_h2]:mt-3 [&_h2]:mb-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1 [&_hr]:border-line-subtle [&_hr]:my-3 [&_img]:mx-auto [&_img]:block [&_img]:max-w-full [&_img]:max-h-[420px] [&_img]:object-contain [&_img]:rounded-xl [&_img]:border [&_img]:border-accent/35 [&_img]:my-3 [&_img]:shadow-lg ${
                         isTradeDisabled ? 'opacity-50 cursor-not-allowed' : ''
                     }`}
                 />

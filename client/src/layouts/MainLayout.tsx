@@ -16,6 +16,7 @@ export const MainLayout = () => {
     const navigate = useNavigate();
     const isBacktestPage = location.pathname.includes('/replay/');
     const isTorexAiPage = location.pathname.startsWith('/torex-ai');
+    const isJournalPage = location.pathname.startsWith('/journal');
     const showOnboarding = !isLoading && user && user.onboardingCompleted === false;
     const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -135,9 +136,11 @@ export const MainLayout = () => {
                     )}
 
                     <div
-                        className={`flex-1 scroll-smooth ${
+                        className={`flex-1 min-h-0 scroll-smooth ${
                             isBacktestFullscreen || isBacktestPage || isTorexAiPage
                                 ? 'p-0 overflow-hidden'
+                                : isJournalPage
+                                ? 'p-3 sm:p-4 lg:px-5 lg:py-4 pb-24 md:pb-4 overflow-y-auto lg:overflow-hidden'
                                 : 'p-3 sm:p-4 lg:px-5 lg:py-4 pb-24 md:pb-4 overflow-y-auto'
                         }`}
                     >
@@ -145,6 +148,8 @@ export const MainLayout = () => {
                             className={`w-full mx-auto ${
                                 isBacktestFullscreen || isBacktestPage || isTorexAiPage
                                     ? 'max-w-full h-full'
+                                    : isJournalPage
+                                    ? 'max-w-[1680px] space-y-3 lg:space-y-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col'
                                     : 'max-w-[1680px] space-y-3'
                             }`}
                         >

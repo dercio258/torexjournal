@@ -505,4 +505,92 @@ describe('Mt5ClusterBalancerService (Pair-Stride K=2, Lifecycle & Humanized Noti
             /Nenhum outro servidor worker MT5 online saudável/,
         );
     });
+
+    it('resolves user names reliably via ::text SQL join even when legacy non-UUID userIds exist and derives safe handle without leaking emails', async () => {
+        const validUuidA = 'aaaaaaaa-1111-4222-8333-444444444444';
+        const validUuidB = 'bbbbbbbb-1111-4222-8333-555555555555';
+        const { balancer } = createBalancerHarness({
+            workers: [{ workerId: 'win-worker-01', capacity: 10, isOnline: true }],
+            accounts: [
+                {
+                    id: 'acc-uuid-a',
+                    userId: validUuidA,
+                    name: 'MT5 90014574',
+                    mt5Id: '90014574',
+                    broker: 'Exness-MT5Real',
+                    isConnected: true,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'HOT',
+                },
+                {
+                    id: 'acc-uuid-b',
+                    userId: validUuidB,
+                    name: 'Conta Principal',
+                    mt5Id: '90019999',
+                    broker: 'Exness-MT5Real',
+                    isConnected: true,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'HOT',
+                },
+                {
+                    id: 'acc-legacy-non-uuid',
+                    userId: 'legacy-non-uuid-id',
+                    name: 'Conta Prop Legacy',
+                    mt5Id: '90018888',
+                    broker: 'Exness-MT5Real',
+                    isConnected: false,
+                    isArchived: false,
+                    assignedWorkerId: 'win-worker-01',
+                    mt5LeaseEpoch: 1,
+                    mt5SyncTier: 'COLD',
+                },
+            ],
+        });
+
+        // Simula o PostgreSQL retornando o JOIN u.id::text = TRIM(a.user_id)
+        const repoManager = (balancer as any).accountRepo.manager;
+        repoManager.query.mockImplementation(async (sql: string) => {
+            if (sql.includes('INNER JOIN users u ON u.id::text')) {
+                return [
+                    {
+                        account_id: 'acc-uuid-a',
+                        user_id: validUuidA,
+                        name: null,
+                        username: null,
+                        email: 'dercio.cossa@gmail.com',
+                    },
+                    {
+                        account_id: 'acc-uuid-b',
+                        user_id: validUuidB,
+                        name: 'ana.mendes@outlook.com',
+                        username: null,
+                        email: 'ana.mendes@outlook.com',
+                    },
+                ];
+            }
+            return [];
+        });
+
+        const overview = await balancer.getClusterOverview();
+        const rowA = overview.accounts.find((a) => a.accountMask === 'MT5 ••••4574');
+        const rowB = overview.accounts.find((a) => a.accountMask === 'MT5 ••••9999');
+        const rowLegacy = overview.accounts.find((a) => a.accountMask === 'MT5 ••••8888');
+
+        expect(rowA?.ownerName).toBe('Dercio Cossa');
+        expect(rowA?.accountName).toBe('Dercio Cossa');
+        expect(rowB?.ownerName).toBe('Ana Mendes');
+        expect(rowB?.accountName).toBe('Ana Mendes');
+        expect(rowLegacy?.accountName).toBe('Conta Prop Legacy');
+
+        const serialized = JSON.stringify(overview);
+        expect(serialized).not.toContain('@');
+        expect(serialized).not.toContain('gmail.com');
+        expect(serialized).not.toContain('outlook.com');
+        expect(serialized).not.toContain(validUuidA);
+        expect(serialized).not.toContain('legacy-non-uuid-id');
+    });
 });

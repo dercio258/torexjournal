@@ -496,17 +496,173 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         );
     }
 
+    private formatUserDisplayLabel(user?: {
+        name?: string | null;
+        username?: string | null;
+        email?: string | null;
+    } | null): string | null {
+        if (!user) return null;
+
+        const cleanEmailLocalPart = (raw: string): string => {
+            const local = raw.split('@')[0] || '';
+            const words = local
+                .replace(/[._+-]+/g, ' ')
+                .replace(/\b\d{5,}\b/g, ' ')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+            if (!words) return '';
+            return words
+                .split(' ')
+                .map((w) => (w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : ''))
+                .join(' ')
+                .slice(0, 80);
+        };
+
+        const rawName = String(user.name || '').trim();
+        if (rawName) {
+            const normalizedName = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(rawName)
+                ? cleanEmailLocalPart(rawName)
+                : rawName
+                      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '')
+                      .replace(/\s{2,}/g, ' ')
+                      .trim()
+                      .slice(0, 80);
+            if (normalizedName) return normalizedName;
+        }
+
+        const rawUsername = String(user.username || '')
+            .trim()
+            .replace(/^@+/, '');
+        if (rawUsername && !rawUsername.includes('@')) {
+            return rawUsername.slice(0, 80);
+        }
+
+        const rawEmail = String(user.email || '').trim();
+        if (rawEmail && rawEmail.includes('@')) {
+            const derived = cleanEmailLocalPart(rawEmail);
+            if (derived) return derived;
+        }
+
+        return null;
+    }
+
+    private isStrictUuid(val?: string | null): boolean {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            String(val || '').trim(),
+        );
+    }
+
     private async resolveAccountOwnerName(userId?: string | null): Promise<string | null> {
-        if (!userId || !this.userRepo) return null;
+        const cleanUserId = String(userId || '').trim();
+        if (!cleanUserId) return null;
+
+        // 1. Consulta SQL segura com cast ::text (nunca falha com invalid input syntax for type uuid)
+        try {
+            const rows: Array<{ name?: string | null; username?: string | null; email?: string | null }> =
+                await this.accountRepo.manager?.query?.(
+                    `SELECT name, username, email FROM users WHERE id::text = $1 LIMIT 1`,
+                    [cleanUserId],
+                );
+            if (Array.isArray(rows) && rows.length > 0) {
+                const label = this.formatUserDisplayLabel(rows[0]);
+                if (label) return label;
+            }
+        } catch {
+            // fallback para userRepo (ambiente de teste ou mock sem SQL)
+        }
+
+        if (!this.userRepo) return null;
         try {
             const u = await this.userRepo.findOne({
-                where: { id: userId },
-                select: ['id', 'name', 'username'],
+                where: { id: cleanUserId },
+                select: ['id', 'name', 'username', 'email'],
             });
-            return String(u?.name || u?.username || '').trim() || null;
+            return this.formatUserDisplayLabel(u);
         } catch {
             return null;
         }
+    }
+
+    private async resolveOwnerNamesMap(
+        trackedAccounts: Array<{ id: string; userId?: string | null }>,
+    ): Promise<{ byAccountId: Map<string, string>; byUserId: Map<string, string> }> {
+        const byAccountId = new Map<string, string>();
+        const byUserId = new Map<string, string>();
+
+        // 1. JOIN direto no PostgreSQL com u.id::text = TRIM(a.user_id):
+        //    imune a linhas com user_id legado/não-UUID que antes quebravam WHERE id IN (...) para TODAS as contas!
+        try {
+            const rows: Array<{
+                account_id?: string;
+                user_id?: string;
+                name?: string | null;
+                username?: string | null;
+                email?: string | null;
+            }> = await this.accountRepo.manager?.query?.(
+                `SELECT a.id AS account_id, TRIM(a.user_id) AS user_id, u.name, u.username, u.email
+                 FROM accounts a
+                 INNER JOIN users u ON u.id::text = TRIM(a.user_id)
+                 WHERE a.is_archived = false
+                   AND a.mt5_id IS NOT NULL
+                   AND a.user_id IS NOT NULL
+                   AND TRIM(a.user_id) <> ''`,
+            );
+            for (const r of rows || []) {
+                const label = this.formatUserDisplayLabel(r);
+                if (!label) continue;
+                if (r.account_id) byAccountId.set(String(r.account_id), label);
+                if (r.user_id) byUserId.set(String(r.user_id).trim(), label);
+            }
+        } catch (err: any) {
+            this.logger.warn(
+                `[MT5-TELEMETRY] Fallback na resolução SQL de nomes de usuários: ${err?.message || err}`,
+            );
+        }
+
+        // 2. Fallback seguro via userRepo para contas ainda sem owner resolvido (ex.: mocks de teste ou IDs recém-criados)
+        if (this.userRepo && typeof this.userRepo.find === 'function') {
+            const missingUserIds = Array.from(
+                new Set(
+                    trackedAccounts
+                        .map((a) => String(a.userId || '').trim())
+                        .filter((uid) => Boolean(uid) && !byUserId.has(uid)),
+                ),
+            );
+            if (missingUserIds.length > 0) {
+                const strictUuids = missingUserIds.filter((uid) => this.isStrictUuid(uid));
+                const batchIds = strictUuids.length > 0 ? strictUuids : missingUserIds;
+                try {
+                    const users = await this.userRepo.find({
+                        where: { id: In(batchIds) },
+                        select: ['id', 'name', 'username', 'email'],
+                    });
+                    for (const u of users || []) {
+                        const label = this.formatUserDisplayLabel(u);
+                        if (u?.id && label) {
+                            byUserId.set(String(u.id).trim(), label);
+                        }
+                    }
+                } catch {
+                    // Última camada: consulta individual apenas em UUIDs válidos para nunca derrubar o lote todo
+                    for (const uid of strictUuids) {
+                        try {
+                            const u = await this.userRepo.findOne({
+                                where: { id: uid },
+                                select: ['id', 'name', 'username', 'email'],
+                            });
+                            const label = this.formatUserDisplayLabel(u);
+                            if (u?.id && label) {
+                                byUserId.set(String(u.id).trim(), label);
+                            }
+                        } catch {
+                            // ignora apenas o registro inválido isolado
+                        }
+                    }
+                }
+            }
+        }
+
+        return { byAccountId, byUserId };
     }
 
     /**
@@ -1144,18 +1300,27 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         return last4 ? `MT5 ••••${last4}` : 'MT5 ••••';
     }
 
-    private resolveSafeDisplayName(
+    private resolveSafeDisplayParts(
         rawAccountName: string | null | undefined,
         rawLogin: string,
         ownerName?: string | null,
         holderName?: string | null,
-    ): string | null {
+    ): {
+        ownerName: string | null;
+        accountLabel: string | null;
+        accountName: string | null;
+    } {
         const sanitize = (val?: string | null) => {
             const trimmed = String(val || '').trim();
             if (!trimmed) return '';
             const cleanLogin = String(rawLogin || '').trim();
             const stripped = cleanLogin
-                ? trimmed.split(cleanLogin).join('').replace(/\s{2,}/g, ' ').trim()
+                ? trimmed
+                      .split(cleanLogin)
+                      .join('')
+                      .replace(/\(\s*\)/g, '')
+                      .replace(/\s{2,}/g, ' ')
+                      .trim()
                 : trimmed;
             const noEmail = stripped
                 .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '')
@@ -1170,11 +1335,35 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
         const cleanOwner = sanitize(ownerName);
         const cleanCustomName = sanitize(rawAccountName);
         const cleanHolder = sanitize(holderName);
+        const resolvedOwner = cleanOwner || cleanHolder || null;
+        const resolvedLabel =
+            cleanCustomName &&
+            (!resolvedOwner || resolvedOwner.toLowerCase() !== cleanCustomName.toLowerCase())
+                ? cleanCustomName
+                : null;
 
+        let accountName: string | null = null;
         if (cleanOwner && cleanCustomName && cleanOwner.toLowerCase() !== cleanCustomName.toLowerCase()) {
-            return `${cleanOwner} · ${cleanCustomName}`;
+            accountName = `${cleanOwner} · ${cleanCustomName}`;
+        } else {
+            accountName = cleanOwner || cleanCustomName || cleanHolder || null;
         }
-        return cleanOwner || cleanCustomName || cleanHolder || null;
+
+        return {
+            ownerName: resolvedOwner,
+            accountLabel: resolvedLabel,
+            accountName,
+        };
+    }
+
+    private resolveSafeDisplayName(
+        rawAccountName: string | null | undefined,
+        rawLogin: string,
+        ownerName?: string | null,
+        holderName?: string | null,
+    ): string | null {
+        return this.resolveSafeDisplayParts(rawAccountName, rawLogin, ownerName, holderName)
+            .accountName;
     }
 
     async reconnectAccountByTelemetryId(telemetryId: string) {
@@ -1486,32 +1675,8 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             // Fallback seguro em mocks de teste
         }
 
-        const ownerNameByUserId = new Map<string, string>();
-        if (this.userRepo && typeof this.userRepo.find === 'function') {
-            const userIds = Array.from(
-                new Set(
-                    trackedAccounts
-                        .map((a) => a.userId)
-                        .filter((uid): uid is string => Boolean(uid)),
-                ),
-            );
-            if (userIds.length > 0) {
-                try {
-                    const users = await this.userRepo.find({
-                        where: { id: In(userIds) },
-                        select: ['id', 'name', 'username'],
-                    });
-                    for (const u of users || []) {
-                        const label = String(u.name || u.username || '').trim();
-                        if (u.id && label) {
-                            ownerNameByUserId.set(u.id, label);
-                        }
-                    }
-                } catch {
-                    // fallback seguro caso o repositório de usuários não suporte batch find
-                }
-            }
-        }
+        const { byAccountId: ownerByAccountId, byUserId: ownerNameByUserId } =
+            await this.resolveOwnerNamesMap(trackedAccounts);
 
         const tierSummary = { HOT: 0, WARM: 0, COLD: 0, QUARANTINED: 0, pendingDisconnect: 0 };
         const stateSummary = {
@@ -1535,13 +1700,19 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             const connectionState =
                 liveTel?.connectionState || (acc.isConnected ? 'CONNECTED' : 'DISCONNECTED');
 
-            const ownerName = acc.userId ? ownerNameByUserId.get(acc.userId) || null : null;
-            const accountName = this.resolveSafeDisplayName(
+            const cleanUserId = String(acc.userId || '').trim();
+            const resolvedOwnerRaw =
+                ownerByAccountId.get(String(acc.id)) ||
+                (cleanUserId ? ownerNameByUserId.get(cleanUserId) || null : null);
+            const displayParts = this.resolveSafeDisplayParts(
                 acc.name,
                 rawLogin,
-                ownerName,
+                resolvedOwnerRaw,
                 liveTel?.accountHolderName || null,
             );
+            const accountName = displayParts.accountName;
+            const ownerName = displayParts.ownerName;
+            const accountLabel = displayParts.accountLabel;
 
             if (connectionState in stateSummary) {
                 (stateSummary as any)[connectionState]++;
@@ -1570,6 +1741,8 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
             return {
                 telemetryId,
                 accountMask,
+                ownerName,
+                accountLabel,
                 accountName,
                 hasStoredCredentials,
                 connectionState,
@@ -1641,6 +1814,7 @@ export class Mt5ClusterBalancerService implements OnModuleInit {
                     accountTags: wAccounts.map((a) => ({
                         telemetryId: a.telemetryId,
                         accountMask: a.accountMask,
+                        ownerName: a.ownerName,
                         accountName: a.accountName,
                         connectionState: a.connectionState,
                         syncTier: a.syncTier,
